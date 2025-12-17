@@ -1,0 +1,286 @@
+import asyncio
+from dataclasses import dataclass
+from typing import AsyncIterator, Optional
+
+from google import genai
+from google.genai import types
+
+
+CULTURE_INTERVIEW_PROMPT = """You are an AI interviewer conducting a company culture interview for Matcha Recruit.
+
+You are interviewing: {interviewer_name} ({interviewer_role}) from {company_name}
+
+YOUR GOAL:
+Gather detailed information about the company's culture, values, and work environment to help match candidates who would thrive there.
+
+INTERVIEW APPROACH:
+- Be warm, professional, and conversational
+- Ask open-ended questions that encourage detailed responses
+- Probe deeper on interesting points - ask follow-ups
+- Keep responses concise (2-3 sentences max unless explaining)
+- Don't use bullet points or lists in speech
+
+KEY AREAS TO EXPLORE:
+1. Work Environment & Collaboration
+   - How do teams typically work together?
+   - Remote, hybrid, or in-office expectations?
+   - How are decisions made - collaboratively or top-down?
+
+2. Company Values & What's Celebrated
+   - What behaviors get recognized and rewarded?
+   - What makes someone successful at this company?
+   - Any values that are non-negotiable?
+
+3. Communication Style
+   - Formal or casual communication?
+   - Async-first or lots of meetings?
+   - How is feedback typically given?
+
+4. Growth & Development
+   - How do people grow their careers here?
+   - Learning opportunities and mentorship?
+   - Promotion paths?
+
+5. Work-Life Balance
+   - Expectations around hours and availability?
+   - How flexible is scheduling?
+   - What's the pace like - startup energy or steady?
+
+6. Team Dynamics
+   - What's the typical team size and structure?
+   - How do cross-functional teams interact?
+   - Any unique rituals or traditions?
+
+CONVERSATION FLOW:
+1. Start with a warm greeting and explain you'll be asking about company culture
+2. Begin with easier questions about the work environment
+3. Naturally transition between topics based on their responses
+4. Dig deeper when they mention something interesting
+5. Toward the end, ask if there's anything else they think candidates should know
+6. Thank them and summarize 2-3 key cultural highlights you learned
+
+IMPORTANT:
+- This is a voice conversation - be natural and conversational
+- Don't overwhelm with multiple questions at once
+- Show genuine curiosity about their company
+- If they give short answers, ask follow-up questions
+"""
+
+
+@dataclass
+class GeminiResponse:
+    type: str  # "audio", "transcription", "turn_complete"
+    audio_data: Optional[bytes] = None
+    text: Optional[str] = None
+    is_input_transcription: bool = False
+
+
+class GeminiLiveSession:
+    def __init__(
+        self,
+        model: str,
+        voice: str,
+        api_key: Optional[str] = None,
+        vertex_project: Optional[str] = None,
+        vertex_location: str = "us-central1",
+    ):
+        self.model = model
+        self.voice = voice
+
+        # Initialize client based on auth method
+        if vertex_project:
+            self.client = genai.Client(
+                vertexai=True,
+                project=vertex_project,
+                location=vertex_location,
+            )
+        elif api_key:
+            self.client = genai.Client(api_key=api_key)
+        else:
+            raise ValueError("Either api_key or vertex_project must be provided")
+
+        self.session = None
+        self._session_context = None
+        self._receive_task: Optional[asyncio.Task] = None
+        self._response_queue: asyncio.Queue[GeminiResponse] = asyncio.Queue()
+        self._closed = False
+
+        # Transcription buffering
+        self._input_transcript_buffer = ""
+        self._output_transcript_buffer = ""
+        self.session_transcript: list[tuple[str, str]] = []
+
+    async def connect(
+        self,
+        company_name: str,
+        interviewer_name: str = "HR Representative",
+        interviewer_role: str = "HR",
+    ) -> None:
+        """Connect to Gemini with culture interview prompt."""
+        system_prompt = CULTURE_INTERVIEW_PROMPT.format(
+            company_name=company_name,
+            interviewer_name=interviewer_name,
+            interviewer_role=interviewer_role,
+        )
+
+        config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=self.voice
+                    )
+                )
+            ),
+            system_instruction=types.Content(
+                parts=[types.Part(text=system_prompt)]
+            ),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+        )
+
+        print(f"[Gemini] Connecting for interview with {company_name}")
+
+        self._input_transcript_buffer = ""
+        self._output_transcript_buffer = ""
+        self.session_transcript = []
+
+        self._session_context = self.client.aio.live.connect(
+            model=self.model,
+            config=config,
+        )
+        self.session = await self._session_context.__aenter__()
+        print("[Gemini] Session connected")
+        self._closed = False
+        self._receive_task = asyncio.create_task(self._receive_loop())
+
+    async def _receive_loop(self) -> None:
+        """Receive responses from Gemini."""
+        try:
+            while not self._closed:
+                async for response in self.session.receive():
+                    if self._closed:
+                        return
+
+                    server_content = response.server_content
+                    if not server_content:
+                        continue
+
+                    # Handle audio output
+                    if server_content.model_turn:
+                        for part in server_content.model_turn.parts:
+                            if part.inline_data:
+                                await self._response_queue.put(
+                                    GeminiResponse(
+                                        type="audio",
+                                        audio_data=part.inline_data.data,
+                                    )
+                                )
+
+                    # Handle input transcription (what user said)
+                    if hasattr(server_content, "input_transcription") and server_content.input_transcription:
+                        text = getattr(server_content.input_transcription, "text", None)
+                        if text:
+                            self._input_transcript_buffer = text
+
+                    # Handle output transcription (what model said)
+                    if hasattr(server_content, "output_transcription") and server_content.output_transcription:
+                        text = getattr(server_content.output_transcription, "text", None)
+                        if text:
+                            self._output_transcript_buffer = text
+
+                    # Handle turn complete
+                    if server_content.turn_complete:
+                        if self._input_transcript_buffer:
+                            self.session_transcript.append(("user", self._input_transcript_buffer))
+                            await self._response_queue.put(
+                                GeminiResponse(
+                                    type="transcription",
+                                    text=self._input_transcript_buffer,
+                                    is_input_transcription=True,
+                                )
+                            )
+                            self._input_transcript_buffer = ""
+
+                        if self._output_transcript_buffer:
+                            self.session_transcript.append(("assistant", self._output_transcript_buffer))
+                            await self._response_queue.put(
+                                GeminiResponse(
+                                    type="transcription",
+                                    text=self._output_transcript_buffer,
+                                    is_input_transcription=False,
+                                )
+                            )
+                            self._output_transcript_buffer = ""
+
+                        await self._response_queue.put(GeminiResponse(type="turn_complete"))
+
+                await asyncio.sleep(0.05)
+
+        except Exception as e:
+            if not self._closed:
+                print(f"[Gemini] Receive error: {e}")
+
+    async def send_audio(self, pcm_data: bytes) -> None:
+        """Send audio data to Gemini."""
+        if self.session and not self._closed:
+            try:
+                await self.session.send_realtime_input(
+                    media=types.Blob(
+                        data=pcm_data,
+                        mime_type="audio/pcm;rate=16000",
+                    )
+                )
+            except Exception as e:
+                print(f"[Gemini] Failed to send audio: {e}")
+
+    async def send_text(self, text: str) -> None:
+        """Send a text message to trigger model response."""
+        if self.session and not self._closed:
+            try:
+                await self.session.send_client_content(
+                    turns=types.Content(
+                        role="user",
+                        parts=[types.Part(text=text)]
+                    ),
+                    turn_complete=True,
+                )
+            except Exception as e:
+                print(f"[Gemini] Failed to send text: {e}")
+
+    async def receive_responses(self) -> AsyncIterator[GeminiResponse]:
+        """Yield responses from the queue."""
+        while not self._closed:
+            try:
+                response = await asyncio.wait_for(
+                    self._response_queue.get(),
+                    timeout=0.1,
+                )
+                yield response
+            except asyncio.TimeoutError:
+                continue
+
+    def get_transcript_text(self) -> str:
+        """Get the full transcript as formatted text."""
+        lines = []
+        for role, text in self.session_transcript:
+            speaker = "Interviewer" if role == "assistant" else "HR"
+            lines.append(f"{speaker}: {text}")
+        return "\n\n".join(lines)
+
+    async def close(self) -> None:
+        """Close the session."""
+        self._closed = True
+        if self._receive_task:
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+        if self._session_context:
+            try:
+                await self._session_context.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._session_context = None
+            self.session = None
