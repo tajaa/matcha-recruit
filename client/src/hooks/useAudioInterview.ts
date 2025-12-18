@@ -206,15 +206,25 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
     setIsRecording(false);
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount and page refresh
   useEffect(() => {
+    const handleBeforeUnload = () => {
+      stopRecording();
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       disconnect();
       if (playbackContextRef.current) {
         playbackContextRef.current.close();
       }
     };
-  }, [disconnect]);
+  }, [disconnect, stopRecording]);
 
   return {
     isConnected,
