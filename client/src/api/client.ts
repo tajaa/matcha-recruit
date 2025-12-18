@@ -7,6 +7,14 @@ import type {
   Candidate,
   CandidateDetail,
   MatchResult,
+  Position,
+  PositionCreate,
+  PositionUpdate,
+  PositionMatchResult,
+  BulkImportResult,
+  ExperienceLevel,
+  RemotePolicy,
+  PositionStatus,
 } from '../types';
 
 const API_BASE = 'http://localhost:8000/api';
@@ -111,6 +119,102 @@ export const matching = {
 
   list: (companyId: string) =>
     request<MatchResult[]>(`/companies/${companyId}/matches`),
+};
+
+// Positions
+export interface PositionFilters {
+  status?: PositionStatus;
+  experience_level?: ExperienceLevel;
+  remote_policy?: RemotePolicy;
+  search?: string;
+}
+
+export const positions = {
+  list: (filters?: PositionFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.status) params.append('status', filters.status);
+    if (filters?.experience_level) params.append('experience_level', filters.experience_level);
+    if (filters?.remote_policy) params.append('remote_policy', filters.remote_policy);
+    if (filters?.search) params.append('search', filters.search);
+    const query = params.toString();
+    return request<Position[]>(`/positions${query ? `?${query}` : ''}`);
+  },
+
+  get: (id: string) => request<Position>(`/positions/${id}`),
+
+  create: (data: PositionCreate) =>
+    request<Position>('/positions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (id: string, data: PositionUpdate) =>
+    request<Position>(`/positions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    request<{ status: string }>(`/positions/${id}`, {
+      method: 'DELETE',
+    }),
+
+  listByCompany: (companyId: string, status?: PositionStatus) => {
+    const params = status ? `?status=${status}` : '';
+    return request<Position[]>(`/positions/company/${companyId}${params}`);
+  },
+
+  match: (positionId: string, candidateIds?: string[]) =>
+    request<{ status: string; matches: PositionMatchResult[] }>(
+      `/positions/${positionId}/match`,
+      {
+        method: 'POST',
+        body: JSON.stringify(candidateIds ? { candidate_ids: candidateIds } : {}),
+      }
+    ),
+
+  getMatches: (positionId: string) =>
+    request<PositionMatchResult[]>(`/positions/${positionId}/matches`),
+};
+
+// Bulk Import
+export const bulkImport = {
+  companies: async (file: File): Promise<BulkImportResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE}/bulk/companies`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Import failed' }));
+      throw new Error(error.detail || 'Import failed');
+    }
+
+    return response.json();
+  },
+
+  positions: async (file: File): Promise<BulkImportResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE}/bulk/positions`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Import failed' }));
+      throw new Error(error.detail || 'Import failed');
+    }
+
+    return response.json();
+  },
+
+  downloadTemplate: (type: 'companies' | 'positions') =>
+    `${API_BASE}/bulk/templates/${type}`,
 };
 
 // WebSocket URL helper

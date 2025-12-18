@@ -108,4 +108,64 @@ async def init_db():
             )
         """)
 
+        # Positions table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS positions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL,
+                salary_min INTEGER,
+                salary_max INTEGER,
+                salary_currency VARCHAR(10) DEFAULT 'USD',
+                location VARCHAR(255),
+                employment_type VARCHAR(50),
+                requirements JSONB,
+                responsibilities JSONB,
+                required_skills JSONB,
+                preferred_skills JSONB,
+                experience_level VARCHAR(50),
+                benefits JSONB,
+                department VARCHAR(100),
+                reporting_to VARCHAR(255),
+                remote_policy VARCHAR(50),
+                visa_sponsorship BOOLEAN DEFAULT false,
+                status VARCHAR(50) DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        # Position match results table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS position_match_results (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                position_id UUID REFERENCES positions(id) ON DELETE CASCADE,
+                candidate_id UUID REFERENCES candidates(id) ON DELETE CASCADE,
+                overall_score FLOAT,
+                skills_match_score FLOAT,
+                experience_match_score FLOAT,
+                culture_fit_score FLOAT,
+                match_reasoning TEXT,
+                skills_breakdown JSONB,
+                experience_breakdown JSONB,
+                culture_fit_breakdown JSONB,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(position_id, candidate_id)
+            )
+        """)
+
+        # Create indexes for positions
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_positions_company_id ON positions(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_position_match_results_position_id ON position_match_results(position_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_position_match_results_candidate_id ON position_match_results(candidate_id)
+        """)
+
         print("[DB] Tables initialized")

@@ -2,7 +2,9 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 
 const navItems = [
   { path: '/', label: 'Companies' },
+  { path: '/positions', label: 'Positions' },
   { path: '/candidates', label: 'Candidates' },
+  { path: '/import', label: 'Import' },
 ];
 
 export function Layout() {

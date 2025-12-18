@@ -110,3 +110,128 @@ export interface WSMessage {
   content: string;
   timestamp: number;
 }
+
+// Position types
+export type EmploymentType = 'full-time' | 'part-time' | 'contract' | 'internship' | 'temporary';
+export type ExperienceLevel = 'entry' | 'mid' | 'senior' | 'lead' | 'executive';
+export type RemotePolicy = 'remote' | 'hybrid' | 'onsite';
+export type PositionStatus = 'active' | 'closed' | 'draft';
+
+export interface Position {
+  id: string;
+  company_id: string;
+  company_name: string | null;
+  title: string;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string;
+  location: string | null;
+  employment_type: EmploymentType | null;
+  requirements: string[] | null;
+  responsibilities: string[] | null;
+  required_skills: string[] | null;
+  preferred_skills: string[] | null;
+  experience_level: ExperienceLevel | null;
+  benefits: string[] | null;
+  department: string | null;
+  reporting_to: string | null;
+  remote_policy: RemotePolicy | null;
+  visa_sponsorship: boolean;
+  status: PositionStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PositionCreate {
+  company_id: string;
+  title: string;
+  salary_min?: number;
+  salary_max?: number;
+  salary_currency?: string;
+  location?: string;
+  employment_type?: EmploymentType;
+  requirements?: string[];
+  responsibilities?: string[];
+  required_skills?: string[];
+  preferred_skills?: string[];
+  experience_level?: ExperienceLevel;
+  benefits?: string[];
+  department?: string;
+  reporting_to?: string;
+  remote_policy?: RemotePolicy;
+  visa_sponsorship?: boolean;
+}
+
+export interface PositionUpdate {
+  title?: string;
+  salary_min?: number;
+  salary_max?: number;
+  salary_currency?: string;
+  location?: string;
+  employment_type?: EmploymentType;
+  requirements?: string[];
+  responsibilities?: string[];
+  required_skills?: string[];
+  preferred_skills?: string[];
+  experience_level?: ExperienceLevel;
+  benefits?: string[];
+  department?: string;
+  reporting_to?: string;
+  remote_policy?: RemotePolicy;
+  visa_sponsorship?: boolean;
+  status?: PositionStatus;
+}
+
+// Position Match types
+export interface PositionMatchResult {
+  id: string;
+  position_id: string;
+  candidate_id: string;
+  candidate_name: string | null;
+  overall_score: number;
+  skills_match_score: number;
+  experience_match_score: number;
+  culture_fit_score: number;
+  match_reasoning: string | null;
+  skills_breakdown: SkillsBreakdown | null;
+  experience_breakdown: ExperienceBreakdown | null;
+  culture_fit_breakdown: PositionCultureFitBreakdown | null;
+  created_at: string;
+}
+
+export interface SkillsBreakdown {
+  score: number;
+  matched_required: string[];
+  missing_required: string[];
+  matched_preferred: string[];
+  reasoning: string;
+}
+
+export interface ExperienceBreakdown {
+  score: number;
+  candidate_level: string;
+  required_level: string;
+  years_relevant: string;
+  reasoning: string;
+}
+
+export interface PositionCultureFitBreakdown {
+  score: number;
+  reasoning: string;
+  strengths: string[];
+  concerns: string[];
+}
+
+// Bulk Import types
+export interface BulkImportError {
+  row: number;
+  error: string;
+  data: Record<string, unknown> | null;
+}
+
+export interface BulkImportResult {
+  success_count: number;
+  error_count: number;
+  errors: BulkImportError[];
+  imported_ids: string[];
+}

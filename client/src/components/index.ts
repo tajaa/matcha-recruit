@@ -2,3 +2,8 @@ export { Layout } from './Layout';
 export { Button } from './Button';
 export { Card, CardHeader, CardContent } from './Card';
 export { Modal } from './Modal';
+export { FileUpload } from './FileUpload';
+export { SkillsInput } from './SkillsInput';
+export { PositionCard } from './PositionCard';
+export { PositionForm } from './PositionForm';
+export { PositionMatchCard } from './PositionMatchCard';

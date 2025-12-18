@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Card, CardHeader, CardContent, Modal } from '../components';
-import { companies as companiesApi, interviews as interviewsApi, matching as matchingApi } from '../api/client';
-import type { Company, Interview, MatchResult } from '../types';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { Button, Card, CardHeader, CardContent, Modal, PositionCard, PositionForm } from '../components';
+import { companies as companiesApi, interviews as interviewsApi, matching as matchingApi, positions as positionsApi } from '../api/client';
+import type { Company, Interview, MatchResult, Position } from '../types';
 
 export function CompanyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -10,25 +10,30 @@ export function CompanyDetail() {
   const [company, setCompany] = useState<Company | null>(null);
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [matches, setMatches] = useState<MatchResult[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInterviewModal, setShowInterviewModal] = useState(false);
   const [showTranscriptModal, setShowTranscriptModal] = useState(false);
+  const [showPositionModal, setShowPositionModal] = useState(false);
   const [selectedInterview, setSelectedInterview] = useState<Interview | null>(null);
   const [interviewForm, setInterviewForm] = useState({ interviewer_name: '', interviewer_role: '' });
   const [aggregating, setAggregating] = useState(false);
   const [matching, setMatching] = useState(false);
+  const [creatingPosition, setCreatingPosition] = useState(false);
 
   const fetchData = async () => {
     if (!id) return;
     try {
-      const [companyData, interviewsData, matchesData] = await Promise.all([
+      const [companyData, interviewsData, matchesData, positionsData] = await Promise.all([
         companiesApi.get(id),
         interviewsApi.list(id),
         matchingApi.list(id).catch(() => []),
+        positionsApi.listByCompany(id).catch(() => []),
       ]);
       setCompany(companyData);
       setInterviews(interviewsData);
       setMatches(matchesData);
+      setPositions(positionsData);
     } catch (err) {
       console.error('Failed to fetch data:', err);
     } finally {
@@ -80,6 +85,19 @@ export function CompanyDetail() {
       console.error('Failed to run matching:', err);
     } finally {
       setMatching(false);
+    }
+  };
+
+  const handleCreatePosition = async (data: Parameters<typeof positionsApi.create>[0]) => {
+    setCreatingPosition(true);
+    try {
+      await positionsApi.create(data);
+      setShowPositionModal(false);
+      fetchData();
+    } catch (err) {
+      console.error('Failed to create position:', err);
+    } finally {
+      setCreatingPosition(false);
     }
   };
 
@@ -220,6 +238,34 @@ export function CompanyDetail() {
         </Card>
       </div>
 
+      {/* Positions Section */}
+      <Card>
+        <CardHeader className="flex justify-between items-center border-zinc-800">
+          <h2 className="text-lg font-semibold text-zinc-100">Open Positions</h2>
+          <Button size="sm" onClick={() => setShowPositionModal(true)}>
+            Add Position
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {positions.length === 0 ? (
+            <p className="text-zinc-500 text-center py-8">
+              No positions yet. Add your first position to start matching candidates.
+            </p>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 mt-2">
+              {positions.map((position) => (
+                <PositionCard
+                  key={position.id}
+                  position={position}
+                  showCompany={false}
+                  onClick={() => navigate(`/positions/${position.id}`)}
+                />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Matches Section */}
       {company.culture_profile && (
         <Card>
@@ -347,6 +393,21 @@ export function CompanyDetail() {
             Close
           </Button>
         </div>
+      </Modal>
+
+      {/* Position Modal */}
+      <Modal
+        isOpen={showPositionModal}
+        onClose={() => setShowPositionModal(false)}
+        title="Add New Position"
+      >
+        <PositionForm
+          companies={company ? [company] : []}
+          initialCompanyId={id}
+          onSubmit={handleCreatePosition}
+          onCancel={() => setShowPositionModal(false)}
+          isLoading={creatingPosition}
+        />
       </Modal>
     </div>
   );

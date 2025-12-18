@@ -2,6 +2,24 @@ from .company import Company, CompanyCreate, CompanyResponse
 from .interview import Interview, InterviewCreate, InterviewResponse
 from .candidate import Candidate, CandidateResponse
 from .matching import MatchResult, MatchResultResponse
+from .position import (
+    Position,
+    PositionCreate,
+    PositionUpdate,
+    PositionResponse,
+    PositionMatchResult,
+    PositionMatchResultResponse,
+    EmploymentType,
+    ExperienceLevel,
+    RemotePolicy,
+    PositionStatus,
+)
+from .bulk_import import (
+    BulkImportResult,
+    BulkImportError,
+    CompanyBulkRow,
+    PositionBulkRow,
+)
 
 __all__ = [
     "Company",
@@ -14,4 +32,18 @@ __all__ = [
     "CandidateResponse",
     "MatchResult",
     "MatchResultResponse",
+    "Position",
+    "PositionCreate",
+    "PositionUpdate",
+    "PositionResponse",
+    "PositionMatchResult",
+    "PositionMatchResultResponse",
+    "EmploymentType",
+    "ExperienceLevel",
+    "RemotePolicy",
+    "PositionStatus",
+    "BulkImportResult",
+    "BulkImportError",
+    "CompanyBulkRow",
+    "PositionBulkRow",
 ]
