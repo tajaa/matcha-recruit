@@ -32,11 +32,14 @@ export interface CultureProfile {
 }
 
 // Interview types
+export type InterviewType = 'culture' | 'candidate';
+
 export interface Interview {
   id: string;
   company_id: string;
   interviewer_name: string | null;
   interviewer_role: string | null;
+  interview_type: InterviewType;
   transcript: string | null;
   raw_culture_data: CultureProfile | null;
   status: 'pending' | 'in_progress' | 'completed';
@@ -48,6 +51,7 @@ export interface InterviewCreate {
   company_id: string;
   interviewer_name?: string;
   interviewer_role?: string;
+  interview_type?: InterviewType;
 }
 
 export interface InterviewStart {

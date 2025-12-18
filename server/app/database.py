@@ -59,12 +59,26 @@ async def init_db():
                 company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
                 interviewer_name VARCHAR(255),
                 interviewer_role VARCHAR(255),
+                interview_type VARCHAR(50) DEFAULT 'culture',
                 transcript TEXT,
                 raw_culture_data JSONB,
                 status VARCHAR(50) DEFAULT 'pending',
                 created_at TIMESTAMP DEFAULT NOW(),
                 completed_at TIMESTAMP
             )
+        """)
+
+        # Add interview_type column if not exists (migration for existing tables)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'interviews' AND column_name = 'interview_type'
+                ) THEN
+                    ALTER TABLE interviews ADD COLUMN interview_type VARCHAR(50) DEFAULT 'culture';
+                END IF;
+            END $$;
         """)
 
         # Culture profiles table

@@ -6,3 +6,4 @@ export { Positions } from './Positions';
 export { PositionDetail } from './PositionDetail';
 export { BulkImport } from './BulkImport';
 export { JobSearch } from './JobSearch';
+export { TestBot } from './TestBot';

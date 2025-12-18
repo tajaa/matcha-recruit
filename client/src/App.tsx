@@ -9,6 +9,7 @@ import {
   PositionDetail,
   BulkImport,
   JobSearch,
+  TestBot,
 } from './pages';
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
           <Route path="positions/:id" element={<PositionDetail />} />
           <Route path="import" element={<BulkImport />} />
           <Route path="jobs" element={<JobSearch />} />
+          <Route path="test-bot" element={<TestBot />} />
         </Route>
         <Route path="/interview/:id" element={<Interview />} />
       </Routes>

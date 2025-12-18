@@ -5,6 +5,7 @@ const navItems = [
   { path: '/positions', label: 'Positions' },
   { path: '/candidates', label: 'Candidates' },
   { path: '/jobs', label: 'Job Search' },
+  { path: '/test-bot', label: 'Test Bot' },
   { path: '/import', label: 'Import' },
 ];
 

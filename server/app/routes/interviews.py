@@ -35,13 +35,14 @@ async def create_interview(company_id: UUID, interview: InterviewCreate):
         # Create interview record
         row = await conn.fetchrow(
             """
-            INSERT INTO interviews (company_id, interviewer_name, interviewer_role, status)
-            VALUES ($1, $2, $3, 'pending')
+            INSERT INTO interviews (company_id, interviewer_name, interviewer_role, interview_type, status)
+            VALUES ($1, $2, $3, $4, 'pending')
             RETURNING id
             """,
             company_id,
             interview.interviewer_name,
             interview.interviewer_role,
+            interview.interview_type,
         )
         interview_id = row["id"]
 
@@ -57,7 +58,7 @@ async def get_interview(interview_id: UUID):
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, company_id, interviewer_name, interviewer_role,
+            SELECT id, company_id, interviewer_name, interviewer_role, interview_type,
                    transcript, raw_culture_data, status, created_at, completed_at
             FROM interviews
             WHERE id = $1
@@ -76,6 +77,7 @@ async def get_interview(interview_id: UUID):
             company_id=row["company_id"],
             interviewer_name=row["interviewer_name"],
             interviewer_role=row["interviewer_role"],
+            interview_type=row["interview_type"] or "culture",
             transcript=row["transcript"],
             raw_culture_data=raw_culture_data,
             status=row["status"],
@@ -90,7 +92,7 @@ async def list_company_interviews(company_id: UUID):
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, company_id, interviewer_name, interviewer_role,
+            SELECT id, company_id, interviewer_name, interviewer_role, interview_type,
                    transcript, raw_culture_data, status, created_at, completed_at
             FROM interviews
             WHERE company_id = $1
@@ -108,6 +110,7 @@ async def list_company_interviews(company_id: UUID):
                 company_id=row["company_id"],
                 interviewer_name=row["interviewer_name"],
                 interviewer_role=row["interviewer_role"],
+                interview_type=row["interview_type"] or "culture",
                 transcript=row["transcript"],
                 raw_culture_data=raw_culture_data,
                 status=row["status"],
@@ -186,7 +189,7 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT i.id, i.company_id, i.interviewer_name, i.interviewer_role, c.name as company_name
+            SELECT i.id, i.company_id, i.interviewer_name, i.interviewer_role, i.interview_type, c.name as company_name
             FROM interviews i
             JOIN companies c ON i.company_id = c.id
             WHERE i.id = $1
@@ -200,6 +203,17 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
         company_name = row["company_name"]
         interviewer_name = row["interviewer_name"] or "HR Representative"
         interviewer_role = row["interviewer_role"] or "HR"
+        interview_type = row["interview_type"] or "culture"
+
+        # For candidate interviews, fetch the company's culture profile
+        culture_profile = None
+        if interview_type == "candidate":
+            culture_row = await conn.fetchrow(
+                "SELECT profile_data FROM culture_profiles WHERE company_id = $1",
+                row["company_id"],
+            )
+            if culture_row and culture_row["profile_data"]:
+                culture_profile = json.loads(culture_row["profile_data"]) if isinstance(culture_row["profile_data"], str) else culture_row["profile_data"]
 
         # Update interview status
         await conn.execute(
@@ -223,17 +237,22 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
             vertex_location=settings.vertex_location,
         )
 
-        # Connect with culture interview prompt
+        # Connect with appropriate interview prompt
         await gemini_session.connect(
             company_name=company_name,
             interviewer_name=interviewer_name,
             interviewer_role=interviewer_role,
+            interview_type=interview_type,
+            culture_profile=culture_profile,
         )
 
         await send_message(MessageType.STATUS, "Interview session started")
 
         # Trigger the model to speak first
-        await gemini_session.send_text(f"Please start the interview now. Say hello to {interviewer_name} and begin.")
+        if interview_type == "candidate":
+            await gemini_session.send_text("Please start the interview now. Greet the candidate warmly and begin.")
+        else:
+            await gemini_session.send_text(f"Please start the interview now. Say hello to {interviewer_name} and begin.")
 
         # Start response forwarding task
         import asyncio

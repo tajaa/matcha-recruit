@@ -6,6 +6,10 @@ from google import genai
 from google.genai import types
 
 
+from typing import Literal
+
+InterviewType = Literal["culture", "candidate"]
+
 CULTURE_INTERVIEW_PROMPT = """You are an AI interviewer conducting a company culture interview for Matcha Recruit.
 
 You are interviewing: {interviewer_name} ({interviewer_role}) from {company_name}
@@ -67,6 +71,69 @@ IMPORTANT:
 """
 
 
+CANDIDATE_INTERVIEW_PROMPT = """You are an AI interviewer conducting a candidate assessment interview for Matcha Recruit.
+
+You are interviewing a candidate for a position at {company_name}.
+
+YOUR GOAL:
+Understand this candidate's work style, values, and preferences to assess their potential culture fit with the company.
+
+{culture_context}
+
+INTERVIEW APPROACH:
+- Be warm, friendly, and professional
+- This is a conversation to understand them, not an interrogation
+- Ask open-ended questions that encourage detailed responses
+- Listen actively and ask thoughtful follow-ups
+- Keep your responses conversational (2-3 sentences max)
+- Don't use bullet points or lists in speech
+
+KEY AREAS TO EXPLORE:
+1. Work Style & Environment Preferences
+   - Do they prefer working independently or collaboratively?
+   - Remote, hybrid, or in-office preference?
+   - How do they handle ambiguity vs structure?
+
+2. Communication Style
+   - Async or sync communication preference?
+   - How do they like to receive feedback?
+   - How do they handle disagreements?
+
+3. Career Goals & Motivation
+   - What are they looking for in their next role?
+   - What motivates them at work?
+   - Where do they see themselves growing?
+
+4. Problem-Solving Approach
+   - How do they tackle challenging situations?
+   - Can they give an example of overcoming an obstacle?
+   - How do they prioritize when overwhelmed?
+
+5. Values & Culture Fit
+   - What matters most to them in a workplace?
+   - What kind of team dynamics bring out their best?
+   - Any deal-breakers or red flags for them?
+
+6. Work-Life Balance
+   - How do they manage their energy and time?
+   - What does a sustainable pace look like for them?
+
+CONVERSATION FLOW:
+1. Start with a warm greeting and explain you want to learn about their work preferences
+2. Begin with easier questions about what they're looking for
+3. Transition naturally between topics based on their responses
+4. Dig deeper when they mention something interesting
+5. Toward the end, ask if there's anything else they want to share
+6. Thank them and mention you've learned a lot about their preferences
+
+IMPORTANT:
+- This is a voice conversation - be natural and human
+- Don't overwhelm with multiple questions at once
+- Be genuinely curious about who they are
+- Make them feel comfortable sharing honestly
+"""
+
+
 @dataclass
 class GeminiResponse:
     type: str  # "audio", "transcription", "turn_complete"
@@ -109,19 +176,47 @@ class GeminiLiveSession:
         self._input_transcript_buffer = ""
         self._output_transcript_buffer = ""
         self.session_transcript: list[tuple[str, str]] = []
+        self._interview_type: InterviewType = "culture"
 
     async def connect(
         self,
         company_name: str,
         interviewer_name: str = "HR Representative",
         interviewer_role: str = "HR",
+        interview_type: InterviewType = "culture",
+        culture_profile: Optional[dict] = None,
     ) -> None:
-        """Connect to Gemini with culture interview prompt."""
-        system_prompt = CULTURE_INTERVIEW_PROMPT.format(
-            company_name=company_name,
-            interviewer_name=interviewer_name,
-            interviewer_role=interviewer_role,
-        )
+        """Connect to Gemini with appropriate interview prompt based on type."""
+        if interview_type == "candidate":
+            # Build culture context for candidate interviews
+            culture_context = ""
+            if culture_profile:
+                culture_context = f"""COMPANY CULTURE CONTEXT (use this to understand fit):
+- Collaboration Style: {culture_profile.get('collaboration_style', 'Not specified')}
+- Communication: {culture_profile.get('communication', 'Not specified')}
+- Pace: {culture_profile.get('pace', 'Not specified')}
+- Values: {', '.join(culture_profile.get('values', [])) or 'Not specified'}
+- Work-Life Balance: {culture_profile.get('work_life_balance', 'Not specified')}
+- Remote Policy: {culture_profile.get('remote_policy', 'Not specified')}
+- Team Size: {culture_profile.get('team_size', 'Not specified')}
+- Key Traits for Success: {', '.join(culture_profile.get('key_traits', [])) or 'Not specified'}
+"""
+            else:
+                culture_context = "(No culture profile available yet - focus on general work preferences)"
+
+            system_prompt = CANDIDATE_INTERVIEW_PROMPT.format(
+                company_name=company_name,
+                culture_context=culture_context,
+            )
+        else:
+            # Culture interview (default)
+            system_prompt = CULTURE_INTERVIEW_PROMPT.format(
+                company_name=company_name,
+                interviewer_name=interviewer_name,
+                interviewer_role=interviewer_role,
+            )
+
+        self._interview_type = interview_type
 
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
@@ -264,7 +359,10 @@ class GeminiLiveSession:
         """Get the full transcript as formatted text."""
         lines = []
         for role, text in self.session_transcript:
-            speaker = "Interviewer" if role == "assistant" else "HR"
+            if role == "assistant":
+                speaker = "Interviewer"
+            else:
+                speaker = "Candidate" if self._interview_type == "candidate" else "HR"
             lines.append(f"{speaker}: {text}")
         return "\n\n".join(lines)
 
