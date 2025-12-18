@@ -20,6 +20,14 @@ from .bulk_import import (
     CompanyBulkRow,
     PositionBulkRow,
 )
+from .job_search import (
+    JobSearchRequest,
+    JobSearchResponse,
+    JobListing,
+    JobApplyLink,
+    JobDetectedExtensions,
+    JobHighlightSection,
+)
 
 __all__ = [
     "Company",
@@ -46,4 +54,10 @@ __all__ = [
     "BulkImportError",
     "CompanyBulkRow",
     "PositionBulkRow",
+    "JobSearchRequest",
+    "JobSearchResponse",
+    "JobListing",
+    "JobApplyLink",
+    "JobDetectedExtensions",
+    "JobHighlightSection",
 ]

@@ -23,6 +23,9 @@ class Settings:
     # Server
     port: int
 
+    # External APIs
+    search_api_key: Optional[str]
+
 
 # Global settings instance
 _settings: Optional[Settings] = None
@@ -60,6 +63,7 @@ def load_settings() -> Settings:
         analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-2.5-flash-lite"),
         voice=os.getenv("GEMINI_VOICE", "Kore"),
         port=int(os.getenv("PORT", "8000")),
+        search_api_key=os.getenv("SEARCH_API_KEY"),
     )
     return _settings
 

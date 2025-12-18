@@ -49,6 +49,7 @@ from .routes import (
     matching_router,
     positions_router,
     bulk_import_router,
+    job_search_router,
 )
 
 app.include_router(companies_router, prefix="/api/companies", tags=["companies"])
@@ -57,6 +58,7 @@ app.include_router(candidates_router, prefix="/api/candidates", tags=["candidate
 app.include_router(matching_router, prefix="/api", tags=["matching"])
 app.include_router(positions_router, prefix="/api/positions", tags=["positions"])
 app.include_router(bulk_import_router, prefix="/api/bulk", tags=["bulk-import"])
+app.include_router(job_search_router, prefix="/api/jobs", tags=["job-search"])
 
 
 @app.get("/health")

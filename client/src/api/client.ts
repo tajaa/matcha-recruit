@@ -15,6 +15,8 @@ import type {
   ExperienceLevel,
   RemotePolicy,
   PositionStatus,
+  JobSearchRequest,
+  JobSearchResponse,
 } from '../types';
 
 const API_BASE = 'http://localhost:8000/api';
@@ -215,6 +217,15 @@ export const bulkImport = {
 
   downloadTemplate: (type: 'companies' | 'positions') =>
     `${API_BASE}/bulk/templates/${type}`,
+};
+
+// Job Search (external jobs via SearchAPI)
+export const jobSearch = {
+  search: (params: JobSearchRequest) =>
+    request<JobSearchResponse>('/jobs/search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
 };
 
 // WebSocket URL helper

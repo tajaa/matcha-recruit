@@ -5,3 +5,4 @@ export { Candidates } from './Candidates';
 export { Positions } from './Positions';
 export { PositionDetail } from './PositionDetail';
 export { BulkImport } from './BulkImport';
+export { JobSearch } from './JobSearch';

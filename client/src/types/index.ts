@@ -235,3 +235,56 @@ export interface BulkImportResult {
   errors: BulkImportError[];
   imported_ids: string[];
 }
+
+// Job Search types (external jobs via SearchAPI)
+export type DatePostedFilter = 'today' | '3days' | 'week' | 'month';
+export type JobEmploymentTypeFilter = 'FULLTIME' | 'PARTTIME' | 'CONTRACTOR' | 'INTERN';
+
+export interface JobSearchRequest {
+  query: string;
+  location?: string;
+  next_page_token?: string;
+  date_posted?: DatePostedFilter;
+  employment_type?: JobEmploymentTypeFilter;
+}
+
+export interface JobApplyLink {
+  link: string;
+  source: string;
+}
+
+export interface JobDetectedExtensions {
+  posted_at?: string;
+  schedule_type?: string;
+  salary?: string;
+  work_from_home?: boolean;
+  health_insurance?: boolean;
+  dental_coverage?: boolean;
+  paid_time_off?: boolean;
+}
+
+export interface JobHighlightSection {
+  title: string;
+  items: string[];
+}
+
+export interface JobListing {
+  title: string;
+  company_name: string;
+  location: string;
+  description: string;
+  detected_extensions?: JobDetectedExtensions;
+  extensions?: string[];
+  job_highlights?: JobHighlightSection[];
+  apply_links: JobApplyLink[];
+  thumbnail?: string;
+  job_id?: string;
+  sharing_link?: string;
+}
+
+export interface JobSearchResponse {
+  jobs: JobListing[];
+  next_page_token?: string;
+  query: string;
+  location?: string;
+}
