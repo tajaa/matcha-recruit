@@ -288,3 +288,27 @@ export interface JobSearchResponse {
   query: string;
   location?: string;
 }
+
+// Saved Jobs types
+export interface SavedJobCreate {
+  job_id?: string;
+  title: string;
+  company_name: string;
+  location?: string;
+  description?: string;
+  salary?: string;
+  schedule_type?: string;
+  work_from_home?: boolean;
+  posted_at?: string;
+  apply_link?: string;
+  thumbnail?: string;
+  extensions?: string[];
+  job_highlights?: JobHighlightSection[];
+  apply_links?: JobApplyLink[];
+  notes?: string;
+}
+
+export interface SavedJob extends SavedJobCreate {
+  id: string;
+  created_at: string;
+}

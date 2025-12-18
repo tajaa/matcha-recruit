@@ -1,5 +1,6 @@
 """Schemas for external job search via SearchAPI."""
 
+from datetime import datetime
 from typing import Optional, List, Literal
 from pydantic import BaseModel
 
@@ -57,3 +58,44 @@ class JobSearchResponse(BaseModel):
     next_page_token: Optional[str] = None
     query: str
     location: Optional[str] = None
+
+
+# Saved Jobs models
+class SavedJobCreate(BaseModel):
+    """Request to save a job listing."""
+    job_id: Optional[str] = None
+    title: str
+    company_name: str
+    location: Optional[str] = None
+    description: Optional[str] = None
+    salary: Optional[str] = None
+    schedule_type: Optional[str] = None
+    work_from_home: bool = False
+    posted_at: Optional[str] = None
+    apply_link: Optional[str] = None
+    thumbnail: Optional[str] = None
+    extensions: Optional[List[str]] = None
+    job_highlights: Optional[List[JobHighlightSection]] = None
+    apply_links: Optional[List[JobApplyLink]] = None
+    notes: Optional[str] = None
+
+
+class SavedJob(BaseModel):
+    """Saved job listing stored in database."""
+    id: str
+    job_id: Optional[str] = None
+    title: str
+    company_name: str
+    location: Optional[str] = None
+    description: Optional[str] = None
+    salary: Optional[str] = None
+    schedule_type: Optional[str] = None
+    work_from_home: bool = False
+    posted_at: Optional[str] = None
+    apply_link: Optional[str] = None
+    thumbnail: Optional[str] = None
+    extensions: Optional[List[str]] = None
+    job_highlights: Optional[List[JobHighlightSection]] = None
+    apply_links: Optional[List[JobApplyLink]] = None
+    notes: Optional[str] = None
+    created_at: datetime

@@ -27,6 +27,8 @@ from .job_search import (
     JobApplyLink,
     JobDetectedExtensions,
     JobHighlightSection,
+    SavedJob,
+    SavedJobCreate,
 )
 
 __all__ = [
@@ -60,4 +62,6 @@ __all__ = [
     "JobApplyLink",
     "JobDetectedExtensions",
     "JobHighlightSection",
+    "SavedJob",
+    "SavedJobCreate",
 ]

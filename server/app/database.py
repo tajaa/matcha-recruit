@@ -168,4 +168,47 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_position_match_results_candidate_id ON position_match_results(candidate_id)
         """)
 
+        # Saved jobs table (external jobs from SearchAPI)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS saved_jobs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                job_id VARCHAR(255),
+                title VARCHAR(255) NOT NULL,
+                company_name VARCHAR(255) NOT NULL,
+                location VARCHAR(255),
+                description TEXT,
+                salary VARCHAR(255),
+                schedule_type VARCHAR(100),
+                work_from_home BOOLEAN DEFAULT false,
+                posted_at VARCHAR(100),
+                apply_link TEXT,
+                thumbnail TEXT,
+                extensions JSONB,
+                job_highlights JSONB,
+                apply_links JSONB,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(job_id)
+            )
+        """)
+
+        # Migrate existing saved_jobs table if columns are VARCHAR
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'saved_jobs' AND column_name = 'apply_link'
+                    AND data_type = 'character varying'
+                ) THEN
+                    ALTER TABLE saved_jobs ALTER COLUMN apply_link TYPE TEXT;
+                    ALTER TABLE saved_jobs ALTER COLUMN thumbnail TYPE TEXT;
+                END IF;
+            END $$;
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_jobs_company_name ON saved_jobs(company_name)
+        """)
+
         print("[DB] Tables initialized")

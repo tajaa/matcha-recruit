@@ -17,6 +17,8 @@ import type {
   PositionStatus,
   JobSearchRequest,
   JobSearchResponse,
+  SavedJob,
+  SavedJobCreate,
 } from '../types';
 
 const API_BASE = 'http://localhost:8000/api';
@@ -225,6 +227,24 @@ export const jobSearch = {
     request<JobSearchResponse>('/jobs/search', {
       method: 'POST',
       body: JSON.stringify(params),
+    }),
+
+  // Saved Jobs
+  save: (job: SavedJobCreate) =>
+    request<SavedJob>('/jobs/saved', {
+      method: 'POST',
+      body: JSON.stringify(job),
+    }),
+
+  listSaved: () => request<SavedJob[]>('/jobs/saved'),
+
+  getSavedIds: () => request<string[]>('/jobs/saved/ids'),
+
+  getSaved: (jobId: string) => request<SavedJob>(`/jobs/saved/${jobId}`),
+
+  deleteSaved: (jobId: string) =>
+    request<{ status: string }>(`/jobs/saved/${jobId}`, {
+      method: 'DELETE',
     }),
 };
 

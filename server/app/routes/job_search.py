@@ -1,9 +1,13 @@
 """Job search routes using SearchAPI (Google Jobs)."""
 
+import json
+from typing import List
+
 import httpx
 from fastapi import APIRouter, HTTPException
 
 from ..config import get_settings
+from ..database import get_connection
 from ..models.job_search import (
     JobSearchRequest,
     JobSearchResponse,
@@ -11,6 +15,8 @@ from ..models.job_search import (
     JobApplyLink,
     JobDetectedExtensions,
     JobHighlightSection,
+    SavedJob,
+    SavedJobCreate,
 )
 
 router = APIRouter()
@@ -119,4 +125,135 @@ async def search_jobs(payload: JobSearchRequest):
         next_page_token=next_token,
         query=payload.query,
         location=payload.location,
+    )
+
+
+# Saved Jobs endpoints
+
+@router.post("/saved", response_model=SavedJob)
+async def save_job(payload: SavedJobCreate):
+    """Save a job listing to the database for later reference."""
+    async with get_connection() as conn:
+        # Check if job already saved (by job_id if available)
+        if payload.job_id:
+            existing = await conn.fetchrow(
+                "SELECT id FROM saved_jobs WHERE job_id = $1",
+                payload.job_id
+            )
+            if existing:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Job already saved"
+                )
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO saved_jobs (
+                job_id, title, company_name, location, description,
+                salary, schedule_type, work_from_home, posted_at,
+                apply_link, thumbnail, extensions, job_highlights, apply_links, notes
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            RETURNING *
+            """,
+            payload.job_id,
+            payload.title,
+            payload.company_name,
+            payload.location,
+            payload.description,
+            payload.salary,
+            payload.schedule_type,
+            payload.work_from_home,
+            payload.posted_at,
+            payload.apply_link,
+            payload.thumbnail,
+            json.dumps(payload.extensions) if payload.extensions else None,
+            json.dumps([h.model_dump() for h in payload.job_highlights]) if payload.job_highlights else None,
+            json.dumps([l.model_dump() for l in payload.apply_links]) if payload.apply_links else None,
+            payload.notes,
+        )
+
+        return _row_to_saved_job(row)
+
+
+@router.get("/saved", response_model=List[SavedJob])
+async def list_saved_jobs():
+    """Get all saved job listings."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM saved_jobs ORDER BY created_at DESC"
+        )
+        return [_row_to_saved_job(row) for row in rows]
+
+
+@router.get("/saved/ids", response_model=List[str])
+async def list_saved_job_ids():
+    """Get just the job_ids of all saved jobs (for quick lookup)."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT job_id FROM saved_jobs WHERE job_id IS NOT NULL"
+        )
+        return [row["job_id"] for row in rows]
+
+
+@router.get("/saved/{job_id}", response_model=SavedJob)
+async def get_saved_job(job_id: str):
+    """Get a specific saved job by its ID (UUID) or job_id."""
+    async with get_connection() as conn:
+        # Try by UUID first
+        row = await conn.fetchrow(
+            "SELECT * FROM saved_jobs WHERE id::text = $1 OR job_id = $1",
+            job_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Saved job not found")
+        return _row_to_saved_job(row)
+
+
+@router.delete("/saved/{job_id}")
+async def delete_saved_job(job_id: str):
+    """Delete a saved job by its ID (UUID) or job_id."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM saved_jobs WHERE id::text = $1 OR job_id = $1",
+            job_id
+        )
+        if result == "DELETE 0":
+            raise HTTPException(status_code=404, detail="Saved job not found")
+        return {"status": "deleted"}
+
+
+def _row_to_saved_job(row) -> SavedJob:
+    """Convert a database row to a SavedJob model."""
+    extensions = None
+    if row["extensions"]:
+        extensions = json.loads(row["extensions"]) if isinstance(row["extensions"], str) else row["extensions"]
+
+    job_highlights = None
+    if row["job_highlights"]:
+        raw = json.loads(row["job_highlights"]) if isinstance(row["job_highlights"], str) else row["job_highlights"]
+        job_highlights = [JobHighlightSection(**h) for h in raw]
+
+    apply_links = None
+    if row["apply_links"]:
+        raw = json.loads(row["apply_links"]) if isinstance(row["apply_links"], str) else row["apply_links"]
+        apply_links = [JobApplyLink(**l) for l in raw]
+
+    return SavedJob(
+        id=str(row["id"]),
+        job_id=row["job_id"],
+        title=row["title"],
+        company_name=row["company_name"],
+        location=row["location"],
+        description=row["description"],
+        salary=row["salary"],
+        schedule_type=row["schedule_type"],
+        work_from_home=row["work_from_home"] or False,
+        posted_at=row["posted_at"],
+        apply_link=row["apply_link"],
+        thumbnail=row["thumbnail"],
+        extensions=extensions,
+        job_highlights=job_highlights,
+        apply_links=apply_links,
+        notes=row["notes"],
+        created_at=row["created_at"],
     )
