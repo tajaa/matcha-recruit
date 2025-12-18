@@ -181,13 +181,13 @@ class GeminiLiveSession:
                     if hasattr(server_content, "input_transcription") and server_content.input_transcription:
                         text = getattr(server_content.input_transcription, "text", None)
                         if text:
-                            self._input_transcript_buffer = text
+                            self._input_transcript_buffer += text
 
                     # Handle output transcription (what model said)
                     if hasattr(server_content, "output_transcription") and server_content.output_transcription:
                         text = getattr(server_content.output_transcription, "text", None)
                         if text:
-                            self._output_transcript_buffer = text
+                            self._output_transcript_buffer += text
 
                     # Handle turn complete
                     if server_content.turn_complete:
