@@ -272,9 +272,21 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
 
     except WebSocketDisconnect:
         print(f"[Interview {interview_id}] Client disconnected")
+    except RuntimeError as e:
+        if "disconnect" in str(e).lower() or "receive" in str(e).lower():
+            print(f"[Interview {interview_id}] Client disconnected (RuntimeError)")
+        else:
+            print(f"[Interview {interview_id}] RuntimeError: {e}")
+            try:
+                await send_message(MessageType.SYSTEM, f"Error: {str(e)}")
+            except Exception:
+                pass
     except Exception as e:
         print(f"[Interview {interview_id}] Error: {e}")
-        await send_message(MessageType.SYSTEM, f"Error: {str(e)}")
+        try:
+            await send_message(MessageType.SYSTEM, f"Error: {str(e)}")
+        except Exception:
+            pass
     finally:
         # Save transcript and extract culture data
         if gemini_session:
