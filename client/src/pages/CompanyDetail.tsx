@@ -12,6 +12,8 @@ export function CompanyDetail() {
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInterviewModal, setShowInterviewModal] = useState(false);
+  const [showTranscriptModal, setShowTranscriptModal] = useState(false);
+  const [selectedInterview, setSelectedInterview] = useState<Interview | null>(null);
   const [interviewForm, setInterviewForm] = useState({ interviewer_name: '', interviewer_role: '' });
   const [aggregating, setAggregating] = useState(false);
   const [matching, setMatching] = useState(false);
@@ -48,6 +50,11 @@ export function CompanyDetail() {
     } catch (err) {
       console.error('Failed to create interview:', err);
     }
+  };
+
+  const handleViewTranscript = (interview: Interview) => {
+    setSelectedInterview(interview);
+    setShowTranscriptModal(true);
   };
 
   const handleAggregate = async () => {
@@ -119,7 +126,8 @@ export function CompanyDetail() {
                 {interviews.map((interview) => (
                   <div
                     key={interview.id}
-                    className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-lg border border-zinc-800/50"
+                    onClick={() => handleViewTranscript(interview)}
+                    className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-lg border border-zinc-800/50 hover:border-zinc-600 cursor-pointer transition-colors"
                   >
                     <div>
                       <p className="font-medium text-zinc-200">
@@ -301,6 +309,44 @@ export function CompanyDetail() {
             <Button type="submit">Start Interview</Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Transcript Modal */}
+      <Modal
+        isOpen={showTranscriptModal}
+        onClose={() => setShowTranscriptModal(false)}
+        title={`Interview: ${selectedInterview?.interviewer_name}`}
+      >
+        <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
+          <div>
+            <h4 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-2">Transcript</h4>
+            {selectedInterview?.transcript ? (
+              <div className="bg-zinc-950 rounded-lg p-4 border border-zinc-800">
+                <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed">
+                  {selectedInterview.transcript}
+                </pre>
+              </div>
+            ) : (
+              <p className="text-zinc-500 text-sm italic">No transcript available for this session.</p>
+            )}
+          </div>
+
+          {selectedInterview?.raw_culture_data && (
+            <div>
+              <h4 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-2">Extracted Culture Data</h4>
+              <div className="bg-zinc-800/30 rounded-lg p-4 border border-zinc-800">
+                <pre className="text-xs text-matcha-400 overflow-x-auto">
+                  {JSON.stringify(selectedInterview.raw_culture_data, null, 2)}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex justify-end mt-6 pt-4 border-t border-zinc-800">
+          <Button onClick={() => setShowTranscriptModal(false)} variant="secondary">
+            Close
+          </Button>
+        </div>
       </Modal>
     </div>
   );
