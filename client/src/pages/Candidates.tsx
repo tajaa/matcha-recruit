@@ -65,13 +65,13 @@ export function Candidates() {
   };
 
   if (loading) {
-    return <div className="text-center py-12 text-gray-500">Loading...</div>;
+    return <div className="text-center py-12 text-zinc-500">Loading...</div>;
   }
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Candidates</h1>
+        <h1 className="text-3xl font-bold text-white tracking-tight">Candidates</h1>
         <div>
           <input
             ref={fileInputRef}
@@ -93,7 +93,7 @@ export function Candidates() {
         <Card>
           <CardContent className="text-center py-12">
             <svg
-              className="mx-auto h-12 w-12 text-gray-400"
+              className="mx-auto h-12 w-12 text-zinc-600"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -105,8 +105,8 @@ export function Candidates() {
                 d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
               />
             </svg>
-            <p className="mt-4 text-gray-500">No candidates yet</p>
-            <p className="text-sm text-gray-400 mt-1">Upload PDF or DOCX resumes to get started</p>
+            <p className="mt-4 text-zinc-500">No candidates yet</p>
+            <p className="text-sm text-zinc-600 mt-1">Upload PDF or DOCX resumes to get started</p>
             <Button
               className="mt-4"
               onClick={() => fileInputRef.current?.click()}
@@ -116,22 +116,22 @@ export function Candidates() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {candidates.map((candidate) => (
-            <Card key={candidate.id} className="hover:border-matcha-300 transition-colors">
+            <Card key={candidate.id} className="hover:border-matcha-500/50 transition-colors group">
               <CardContent>
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">
+                    <h3 className="text-lg font-semibold text-zinc-100 group-hover:text-matcha-400 transition-colors">
                       {candidate.name || 'Unknown'}
                     </h3>
                     {candidate.email && (
-                      <p className="text-sm text-gray-500">{candidate.email}</p>
+                      <p className="text-sm text-zinc-500">{candidate.email}</p>
                     )}
                   </div>
                   <button
                     onClick={() => handleDelete(candidate.id)}
-                    className="text-gray-400 hover:text-red-500 transition-colors"
+                    className="text-zinc-600 hover:text-red-400 transition-colors"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
@@ -144,24 +144,25 @@ export function Candidates() {
                   </button>
                 </div>
 
-                <div className="mt-3 space-y-2">
+                <div className="mt-4 space-y-3">
                   {candidate.experience_years && (
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm text-zinc-400 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-zinc-700"></span>
                       {candidate.experience_years} years experience
                     </p>
                   )}
                   {candidate.skills && candidate.skills.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-1.5">
                       {candidate.skills.slice(0, 5).map((skill) => (
                         <span
                           key={skill}
-                          className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
+                          className="px-2 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 rounded text-xs"
                         >
                           {skill}
                         </span>
                       ))}
                       {candidate.skills.length > 5 && (
-                        <span className="px-2 py-0.5 text-gray-400 text-xs">
+                        <span className="px-2 py-0.5 text-zinc-600 text-xs">
                           +{candidate.skills.length - 5} more
                         </span>
                       )}
@@ -172,7 +173,7 @@ export function Candidates() {
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="w-full mt-4"
+                  className="w-full mt-6"
                   onClick={() => handleViewDetail(candidate.id)}
                 >
                   View Details
@@ -190,36 +191,36 @@ export function Candidates() {
         title={selectedCandidate?.name || 'Candidate Details'}
       >
         {selectedCandidate && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-6 text-sm">
               {selectedCandidate.email && (
                 <div>
-                  <span className="text-gray-500">Email:</span>
-                  <p className="font-medium">{selectedCandidate.email}</p>
+                  <span className="text-zinc-500 block mb-1">Email</span>
+                  <p className="font-medium text-zinc-200">{selectedCandidate.email}</p>
                 </div>
               )}
               {selectedCandidate.phone && (
                 <div>
-                  <span className="text-gray-500">Phone:</span>
-                  <p className="font-medium">{selectedCandidate.phone}</p>
+                  <span className="text-zinc-500 block mb-1">Phone</span>
+                  <p className="font-medium text-zinc-200">{selectedCandidate.phone}</p>
                 </div>
               )}
               {selectedCandidate.experience_years && (
                 <div>
-                  <span className="text-gray-500">Experience:</span>
-                  <p className="font-medium">{selectedCandidate.experience_years} years</p>
+                  <span className="text-zinc-500 block mb-1">Experience</span>
+                  <p className="font-medium text-zinc-200">{selectedCandidate.experience_years} years</p>
                 </div>
               )}
             </div>
 
             {selectedCandidate.skills && selectedCandidate.skills.length > 0 && (
               <div>
-                <span className="text-sm text-gray-500">Skills:</span>
-                <div className="flex flex-wrap gap-1 mt-1">
+                <span className="text-sm text-zinc-500 block mb-2">Skills</span>
+                <div className="flex flex-wrap gap-2">
                   {selectedCandidate.skills.map((skill) => (
                     <span
                       key={skill}
-                      className="px-2 py-1 bg-matcha-50 text-matcha-700 rounded text-xs"
+                      className="px-2.5 py-1 bg-matcha-500/10 text-matcha-400 border border-matcha-500/20 rounded-md text-xs font-medium"
                     >
                       {skill}
                     </span>
@@ -230,14 +231,14 @@ export function Candidates() {
 
             {selectedCandidate.education && selectedCandidate.education.length > 0 && (
               <div>
-                <span className="text-sm text-gray-500">Education:</span>
-                <div className="mt-1 space-y-2">
+                <span className="text-sm text-zinc-500 block mb-2">Education</span>
+                <div className="space-y-3">
                   {selectedCandidate.education.map((edu, idx) => (
-                    <div key={idx} className="text-sm">
-                      <p className="font-medium">
+                    <div key={idx} className="text-sm bg-zinc-800/50 p-3 rounded-lg border border-zinc-800">
+                      <p className="font-medium text-zinc-200">
                         {edu.degree} in {edu.field}
                       </p>
-                      <p className="text-gray-500">
+                      <p className="text-zinc-500 mt-1">
                         {edu.institution} {edu.year && `(${edu.year})`}
                       </p>
                     </div>
@@ -248,8 +249,10 @@ export function Candidates() {
 
             {typeof selectedCandidate.parsed_data?.summary === 'string' && (
               <div>
-                <span className="text-sm text-gray-500">Summary:</span>
-                <p className="text-sm mt-1">{selectedCandidate.parsed_data.summary}</p>
+                <span className="text-sm text-zinc-500 block mb-2">Summary</span>
+                <p className="text-sm text-zinc-300 leading-relaxed bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50">
+                  {selectedCandidate.parsed_data.summary}
+                </p>
               </div>
             )}
           </div>

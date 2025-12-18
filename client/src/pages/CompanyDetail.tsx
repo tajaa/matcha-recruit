@@ -77,27 +77,27 @@ export function CompanyDetail() {
   };
 
   if (loading) {
-    return <div className="text-center py-12 text-gray-500">Loading...</div>;
+    return <div className="text-center py-12 text-zinc-500">Loading...</div>;
   }
 
   if (!company) {
-    return <div className="text-center py-12 text-gray-500">Company not found</div>;
+    return <div className="text-center py-12 text-zinc-500">Company not found</div>;
   }
 
   const completedInterviews = interviews.filter((i) => i.status === 'completed');
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center gap-4">
-        <button onClick={() => navigate('/')} className="text-gray-500 hover:text-gray-700">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <button onClick={() => navigate('/')} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{company.name}</h1>
-          <p className="text-gray-500">
-            {company.industry} {company.size && `• ${company.size}`}
+          <h1 className="text-3xl font-bold text-white tracking-tight">{company.name}</h1>
+          <p className="text-zinc-400 mt-1">
+            {company.industry} {company.size && <span className="text-zinc-600 mx-2">•</span>} {company.size}
           </p>
         </div>
       </div>
@@ -105,37 +105,37 @@ export function CompanyDetail() {
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Interviews Section */}
         <Card>
-          <CardHeader className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold">Culture Interviews</h2>
+          <CardHeader className="flex justify-between items-center border-zinc-800">
+            <h2 className="text-lg font-semibold text-zinc-100">Culture Interviews</h2>
             <Button size="sm" onClick={() => setShowInterviewModal(true)}>
               New Interview
             </Button>
           </CardHeader>
           <CardContent>
             {interviews.length === 0 ? (
-              <p className="text-gray-500 text-center py-4">No interviews yet</p>
+              <p className="text-zinc-500 text-center py-8">No interviews yet</p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 mt-2">
                 {interviews.map((interview) => (
                   <div
                     key={interview.id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-lg border border-zinc-800/50"
                   >
                     <div>
-                      <p className="font-medium">
+                      <p className="font-medium text-zinc-200">
                         {interview.interviewer_name || 'Anonymous'}
                       </p>
-                      <p className="text-sm text-gray-500">
+                      <p className="text-sm text-zinc-500">
                         {interview.interviewer_role || 'Unknown role'}
                       </p>
                     </div>
                     <span
-                      className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${
                         interview.status === 'completed'
-                          ? 'bg-matcha-100 text-matcha-800'
+                          ? 'bg-matcha-500/10 text-matcha-400 border-matcha-500/20'
                           : interview.status === 'in_progress'
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-gray-100 text-gray-600'
+                          ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                          : 'bg-zinc-700/50 text-zinc-400 border-zinc-700'
                       }`}
                     >
                       {interview.status}
@@ -145,7 +145,7 @@ export function CompanyDetail() {
               </div>
             )}
             {completedInterviews.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="mt-6 pt-4 border-t border-zinc-800">
                 <Button
                   size="sm"
                   variant="secondary"
@@ -162,39 +162,39 @@ export function CompanyDetail() {
 
         {/* Culture Profile Section */}
         <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold">Culture Profile</h2>
+          <CardHeader className="border-zinc-800">
+            <h2 className="text-lg font-semibold text-zinc-100">Culture Profile</h2>
           </CardHeader>
           <CardContent>
             {company.culture_profile ? (
-              <div className="space-y-4">
-                <p className="text-gray-700">{company.culture_profile.culture_summary}</p>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span className="text-gray-500">Collaboration:</span>
-                    <span className="ml-2 font-medium">{company.culture_profile.collaboration_style}</span>
+              <div className="space-y-6 mt-2">
+                <p className="text-zinc-300 leading-relaxed">{company.culture_profile.culture_summary}</p>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50">
+                    <span className="text-zinc-500 block mb-1">Collaboration</span>
+                    <span className="font-medium text-zinc-200">{company.culture_profile.collaboration_style}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-500">Pace:</span>
-                    <span className="ml-2 font-medium">{company.culture_profile.pace}</span>
+                  <div className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50">
+                    <span className="text-zinc-500 block mb-1">Pace</span>
+                    <span className="font-medium text-zinc-200">{company.culture_profile.pace}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-500">Hierarchy:</span>
-                    <span className="ml-2 font-medium">{company.culture_profile.hierarchy}</span>
+                  <div className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50">
+                    <span className="text-zinc-500 block mb-1">Hierarchy</span>
+                    <span className="font-medium text-zinc-200">{company.culture_profile.hierarchy}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-500">Remote:</span>
-                    <span className="ml-2 font-medium">{company.culture_profile.remote_policy}</span>
+                  <div className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50">
+                    <span className="text-zinc-500 block mb-1">Remote</span>
+                    <span className="font-medium text-zinc-200">{company.culture_profile.remote_policy}</span>
                   </div>
                 </div>
                 {company.culture_profile.values.length > 0 && (
                   <div>
-                    <span className="text-sm text-gray-500">Values:</span>
-                    <div className="flex flex-wrap gap-2 mt-1">
+                    <span className="text-sm text-zinc-500 block mb-2">Values</span>
+                    <div className="flex flex-wrap gap-2">
                       {company.culture_profile.values.map((value) => (
                         <span
                           key={value}
-                          className="px-2 py-1 bg-matcha-50 text-matcha-700 rounded text-xs"
+                          className="px-2.5 py-1 bg-matcha-500/10 text-matcha-400 border border-matcha-500/20 rounded-md text-xs font-medium"
                         >
                           {value}
                         </span>
@@ -204,7 +204,7 @@ export function CompanyDetail() {
                 )}
               </div>
             ) : (
-              <p className="text-gray-500 text-center py-4">
+              <p className="text-zinc-500 text-center py-8">
                 Complete interviews and aggregate to build culture profile
               </p>
             )}
@@ -215,43 +215,43 @@ export function CompanyDetail() {
       {/* Matches Section */}
       {company.culture_profile && (
         <Card>
-          <CardHeader className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold">Candidate Matches</h2>
+          <CardHeader className="flex justify-between items-center border-zinc-800">
+            <h2 className="text-lg font-semibold text-zinc-100">Candidate Matches</h2>
             <Button size="sm" onClick={handleRunMatching} disabled={matching}>
               {matching ? 'Matching...' : 'Run Matching'}
             </Button>
           </CardHeader>
           <CardContent>
             {matches.length === 0 ? (
-              <p className="text-gray-500 text-center py-4">
+              <p className="text-zinc-500 text-center py-8">
                 No matches yet. Upload candidates and run matching.
               </p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-4 mt-2">
                 {matches.map((match) => (
                   <div
                     key={match.id}
-                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                    className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-lg border border-zinc-800/50 hover:border-zinc-700 transition-colors"
                   >
-                    <div className="flex-1">
-                      <p className="font-medium">{match.candidate_name || 'Unknown'}</p>
-                      <p className="text-sm text-gray-500 line-clamp-2">
+                    <div className="flex-1 pr-4">
+                      <p className="font-medium text-zinc-200 text-lg mb-1">{match.candidate_name || 'Unknown'}</p>
+                      <p className="text-sm text-zinc-400 line-clamp-2 leading-relaxed">
                         {match.match_reasoning}
                       </p>
                     </div>
-                    <div className="ml-4 text-center">
+                    <div className="ml-4 text-center min-w-[80px]">
                       <div
-                        className={`text-2xl font-bold ${
+                        className={`text-3xl font-bold ${
                           match.match_score >= 80
-                            ? 'text-matcha-600'
+                            ? 'text-matcha-400'
                             : match.match_score >= 60
-                            ? 'text-yellow-600'
-                            : 'text-red-500'
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
                         }`}
                       >
                         {Math.round(match.match_score)}
                       </div>
-                      <div className="text-xs text-gray-500">Match Score</div>
+                      <div className="text-xs text-zinc-500 mt-1 uppercase tracking-wide font-medium">Match Score</div>
                     </div>
                   </div>
                 ))}
@@ -269,7 +269,7 @@ export function CompanyDetail() {
       >
         <form onSubmit={handleStartInterview} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-zinc-400 mb-1">
               Interviewer Name
             </label>
             <input
@@ -278,23 +278,23 @@ export function CompanyDetail() {
               onChange={(e) =>
                 setInterviewForm({ ...interviewForm, interviewer_name: e.target.value })
               }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-matcha-500"
+              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-transparent text-zinc-100 outline-none transition-all"
               placeholder="John Smith"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+            <label className="block text-sm font-medium text-zinc-400 mb-1">Role</label>
             <input
               type="text"
               value={interviewForm.interviewer_role}
               onChange={(e) =>
                 setInterviewForm({ ...interviewForm, interviewer_role: e.target.value })
               }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-matcha-500"
+              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-transparent text-zinc-100 outline-none transition-all"
               placeholder="VP of Engineering"
             />
           </div>
-          <div className="flex justify-end gap-3 pt-4">
+          <div className="flex justify-end gap-3 pt-4 border-t border-zinc-800 mt-6">
             <Button type="button" variant="secondary" onClick={() => setShowInterviewModal(false)}>
               Cancel
             </Button>
