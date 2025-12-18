@@ -232,6 +232,9 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
 
         await send_message(MessageType.STATUS, "Interview session started")
 
+        # Trigger the model to speak first
+        await gemini_session.send_text(f"Please start the interview now. Say hello to {interviewer_name} and begin.")
+
         # Start response forwarding task
         import asyncio
 
