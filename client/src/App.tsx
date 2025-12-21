@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider } from './context';
 import { Layout, ProtectedRoute } from './components';
 import {
@@ -18,6 +18,12 @@ import {
   Unauthorized,
 } from './pages';
 
+// Redirect component that properly handles the :id parameter
+function CompanyRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/app/companies/${id}`} replace />;
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -28,6 +34,10 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
+
+          {/* Redirects for old routes */}
+          <Route path="/companies/:id" element={<CompanyRedirect />} />
+          <Route path="/companies" element={<Navigate to="/app" replace />} />
 
           {/* Interview route (needs auth but outside layout) */}
           <Route

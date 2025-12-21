@@ -357,6 +357,14 @@ class GeminiLiveSession:
 
     def get_transcript_text(self) -> str:
         """Get the full transcript as formatted text."""
+        # Flush any remaining buffers that weren't captured by turn_complete
+        if self._input_transcript_buffer:
+            self.session_transcript.append(("user", self._input_transcript_buffer))
+            self._input_transcript_buffer = ""
+        if self._output_transcript_buffer:
+            self.session_transcript.append(("assistant", self._output_transcript_buffer))
+            self._output_transcript_buffer = ""
+
         lines = []
         for role, text in self.session_transcript:
             if role == "assistant":

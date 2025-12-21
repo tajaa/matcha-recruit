@@ -169,12 +169,12 @@ export function TestBot() {
               </div>
 
               {/* Company Selection */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-zinc-400 mb-2">Company Context</label>
+              <div className="mb-6 p-4 bg-zinc-800/30 rounded-lg border border-zinc-700">
+                <label className="block text-sm font-medium text-zinc-400 mb-2">Select Company</label>
                 <select
                   value={selectedCompany}
                   onChange={(e) => setSelectedCompany(e.target.value)}
-                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 focus:ring-2 focus:ring-matcha-500 focus:border-transparent outline-none"
+                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 focus:ring-2 focus:ring-matcha-500 focus:border-transparent outline-none text-lg font-medium"
                 >
                   {companiesList.map((company) => (
                     <option key={company.id} value={company.id}>
@@ -182,8 +182,13 @@ export function TestBot() {
                     </option>
                   ))}
                 </select>
+                {selectedCompanyName && (
+                  <p className="text-sm text-matcha-400 mt-2 font-medium">
+                    Testing with: {selectedCompanyName}
+                  </p>
+                )}
                 {mode === 'candidate' && (
-                  <p className="text-xs text-zinc-500 mt-2">
+                  <p className="text-xs text-zinc-500 mt-1">
                     The candidate interview will use this company's culture profile (if available) to understand fit.
                   </p>
                 )}
@@ -285,7 +290,7 @@ export function TestBot() {
             <CardContent className="p-6">
               {/* Session Info */}
               <div className="flex items-center justify-between mb-6">
-                <div>
+                <div className="flex items-center gap-3">
                   <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
                     mode === 'culture'
                       ? 'bg-matcha-500/15 text-matcha-400'
@@ -302,7 +307,12 @@ export function TestBot() {
                     )}
                     {mode === 'culture' ? 'Culture Interview' : 'Candidate Interview'}
                   </span>
-                  <span className="text-zinc-500 text-sm ml-3">with {selectedCompanyName}</span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-zinc-800 text-zinc-200 border border-zinc-700">
+                    <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                    {selectedCompanyName}
+                  </span>
                 </div>
                 <button
                   onClick={handleReset}
