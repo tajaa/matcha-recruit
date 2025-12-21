@@ -5,9 +5,10 @@ import json
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from ..database import get_connection
-from ..models.interview import InterviewCreate, InterviewResponse, InterviewStart
+from ..models.interview import InterviewCreate, InterviewResponse, InterviewStart, ConversationAnalysis
 from ..services.gemini_session import GeminiLiveSession
 from ..services.culture_analyzer import CultureAnalyzer
+from ..services.conversation_analyzer import ConversationAnalyzer
 from ..protocol import (
     MessageType,
     parse_text_message,
@@ -59,7 +60,7 @@ async def get_interview(interview_id: UUID):
         row = await conn.fetchrow(
             """
             SELECT id, company_id, interviewer_name, interviewer_role, interview_type,
-                   transcript, raw_culture_data, status, created_at, completed_at
+                   transcript, raw_culture_data, conversation_analysis, status, created_at, completed_at
             FROM interviews
             WHERE id = $1
             """,
@@ -72,6 +73,10 @@ async def get_interview(interview_id: UUID):
         if row["raw_culture_data"]:
             raw_culture_data = json.loads(row["raw_culture_data"]) if isinstance(row["raw_culture_data"], str) else row["raw_culture_data"]
 
+        conversation_analysis = None
+        if row["conversation_analysis"]:
+            conversation_analysis = json.loads(row["conversation_analysis"]) if isinstance(row["conversation_analysis"], str) else row["conversation_analysis"]
+
         return InterviewResponse(
             id=row["id"],
             company_id=row["company_id"],
@@ -80,6 +85,7 @@ async def get_interview(interview_id: UUID):
             interview_type=row["interview_type"] or "culture",
             transcript=row["transcript"],
             raw_culture_data=raw_culture_data,
+            conversation_analysis=conversation_analysis,
             status=row["status"],
             created_at=row["created_at"],
             completed_at=row["completed_at"],
@@ -93,7 +99,7 @@ async def list_company_interviews(company_id: UUID):
         rows = await conn.fetch(
             """
             SELECT id, company_id, interviewer_name, interviewer_role, interview_type,
-                   transcript, raw_culture_data, status, created_at, completed_at
+                   transcript, raw_culture_data, conversation_analysis, status, created_at, completed_at
             FROM interviews
             WHERE company_id = $1
             ORDER BY created_at DESC
@@ -105,6 +111,9 @@ async def list_company_interviews(company_id: UUID):
             raw_culture_data = None
             if row["raw_culture_data"]:
                 raw_culture_data = json.loads(row["raw_culture_data"]) if isinstance(row["raw_culture_data"], str) else row["raw_culture_data"]
+            conversation_analysis = None
+            if row["conversation_analysis"]:
+                conversation_analysis = json.loads(row["conversation_analysis"]) if isinstance(row["conversation_analysis"], str) else row["conversation_analysis"]
             results.append(InterviewResponse(
                 id=row["id"],
                 company_id=row["company_id"],
@@ -113,6 +122,7 @@ async def list_company_interviews(company_id: UUID):
                 interview_type=row["interview_type"] or "culture",
                 transcript=row["transcript"],
                 raw_culture_data=raw_culture_data,
+                conversation_analysis=conversation_analysis,
                 status=row["status"],
                 created_at=row["created_at"],
                 completed_at=row["completed_at"],
@@ -168,6 +178,90 @@ async def aggregate_culture(company_id: UUID):
         )
 
         return {"status": "aggregated", "profile": aggregated}
+
+
+@router.get("/interviews/{interview_id}/analysis")
+async def get_interview_analysis(interview_id: UUID):
+    """Get the conversation analysis for an interview."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT conversation_analysis
+            FROM interviews
+            WHERE id = $1
+            """,
+            interview_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Interview not found")
+
+        if not row["conversation_analysis"]:
+            raise HTTPException(status_code=404, detail="Analysis not yet generated for this interview")
+
+        analysis = json.loads(row["conversation_analysis"]) if isinstance(row["conversation_analysis"], str) else row["conversation_analysis"]
+        return analysis
+
+
+@router.post("/interviews/{interview_id}/analyze")
+async def analyze_interview(interview_id: UUID):
+    """Generate or regenerate conversation analysis for an interview."""
+    settings = get_settings()
+
+    async with get_connection() as conn:
+        # Fetch interview
+        row = await conn.fetchrow(
+            """
+            SELECT id, company_id, interview_type, transcript, status
+            FROM interviews
+            WHERE id = $1
+            """,
+            interview_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Interview not found")
+
+        if row["status"] != "completed":
+            raise HTTPException(status_code=400, detail="Interview must be completed before analysis")
+
+        if not row["transcript"]:
+            raise HTTPException(status_code=400, detail="Interview has no transcript to analyze")
+
+        # For candidate interviews, fetch culture profile
+        culture_profile = None
+        if row["interview_type"] == "candidate":
+            culture_row = await conn.fetchrow(
+                "SELECT profile_data FROM culture_profiles WHERE company_id = $1",
+                row["company_id"],
+            )
+            if culture_row and culture_row["profile_data"]:
+                culture_profile = json.loads(culture_row["profile_data"]) if isinstance(culture_row["profile_data"], str) else culture_row["profile_data"]
+
+        # Run analysis
+        conv_analyzer = ConversationAnalyzer(
+            api_key=settings.gemini_api_key,
+            vertex_project=settings.vertex_project,
+            vertex_location=settings.vertex_location,
+            model=settings.analysis_model,
+        )
+
+        analysis = await conv_analyzer.analyze_interview(
+            transcript=row["transcript"],
+            interview_type=row["interview_type"] or "culture",
+            culture_profile=culture_profile,
+        )
+
+        # Store analysis
+        await conn.execute(
+            """
+            UPDATE interviews
+            SET conversation_analysis = $1
+            WHERE id = $2
+            """,
+            json.dumps(analysis),
+            interview_id,
+        )
+
+        return analysis
 
 
 # WebSocket endpoint for voice interviews
@@ -311,6 +405,7 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
         if gemini_session:
             transcript_text = gemini_session.get_transcript_text()
             culture_data = None
+            conversation_analysis_data = None
 
             if transcript_text:
                 # Extract culture data from transcript
@@ -319,15 +414,33 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
                 except Exception as e:
                     print(f"[Interview {interview_id}] Failed to extract culture: {e}")
 
+                # Generate conversation analysis
+                try:
+                    conv_analyzer = ConversationAnalyzer(
+                        api_key=settings.gemini_api_key,
+                        vertex_project=settings.vertex_project,
+                        vertex_location=settings.vertex_location,
+                        model=settings.analysis_model,
+                    )
+                    conversation_analysis_data = await conv_analyzer.analyze_interview(
+                        transcript=transcript_text,
+                        interview_type=interview_type,
+                        culture_profile=culture_profile,
+                    )
+                except Exception as e:
+                    print(f"[Interview {interview_id}] Failed to generate conversation analysis: {e}")
+
             async with get_connection() as conn:
                 await conn.execute(
                     """
                     UPDATE interviews
-                    SET transcript = $1, raw_culture_data = $2, status = 'completed', completed_at = NOW()
-                    WHERE id = $3
+                    SET transcript = $1, raw_culture_data = $2, conversation_analysis = $3,
+                        status = 'completed', completed_at = NOW()
+                    WHERE id = $4
                     """,
                     transcript_text,
                     json.dumps(culture_data) if culture_data else None,
+                    json.dumps(conversation_analysis_data) if conversation_analysis_data else None,
                     interview_id,
                 )
 

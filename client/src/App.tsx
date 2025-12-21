@@ -5,6 +5,7 @@ import {
   Companies,
   CompanyDetail,
   Interview,
+  InterviewAnalysis,
   Landing,
   Candidates,
   Positions,
@@ -108,6 +109,14 @@ function App() {
               element={
                 <ProtectedRoute roles={['admin', 'candidate']}>
                   <TestBot />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="test-bot/analysis/:id"
+              element={
+                <ProtectedRoute roles={['admin', 'candidate']}>
+                  <InterviewAnalysis />
                 </ProtectedRoute>
               }
             />

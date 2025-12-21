@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button, Card, CardContent } from '../components';
 import { useAudioInterview } from '../hooks/useAudioInterview';
 import { companies, interviews } from '../api/client';
 import type { Company, InterviewType } from '../types';
 
 export function TestBot() {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<InterviewType>('culture');
   const [companiesList, setCompaniesList] = useState<Company[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<string>('');
@@ -71,6 +73,10 @@ export function TestBot() {
 
   const handleEndSession = () => {
     disconnect();
+    // Navigate to analysis page
+    if (interviewId) {
+      navigate(`/app/test-bot/analysis/${interviewId}`);
+    }
     setInterviewId(null);
   };
 

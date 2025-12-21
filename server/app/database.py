@@ -133,6 +133,19 @@ async def init_db():
             END $$;
         """)
 
+        # Add conversation_analysis column if not exists (for interview quality analysis)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'interviews' AND column_name = 'conversation_analysis'
+                ) THEN
+                    ALTER TABLE interviews ADD COLUMN conversation_analysis JSONB;
+                END IF;
+            END $$;
+        """)
+
         # Culture profiles table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS culture_profiles (

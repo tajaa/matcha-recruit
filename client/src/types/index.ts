@@ -34,6 +34,56 @@ export interface CultureProfile {
 // Interview types
 export type InterviewType = 'culture' | 'candidate';
 
+// Conversation Analysis types
+export interface CoverageDetail {
+  covered: boolean;
+  depth: 'deep' | 'shallow' | 'none';
+  evidence: string | null;
+}
+
+export interface CoverageCompleteness {
+  overall_score: number;
+  dimensions_covered: string[];
+  dimensions_missed: string[];
+  coverage_details: Record<string, CoverageDetail>;
+}
+
+export interface ResponseAnalysisItem {
+  question_summary: string;
+  response_quality: 'specific' | 'somewhat_specific' | 'vague';
+  actionability: 'high' | 'medium' | 'low';
+  notes: string | null;
+}
+
+export interface ResponseDepth {
+  overall_score: number;
+  specific_examples_count: number;
+  vague_responses_count: number;
+  response_analysis: ResponseAnalysisItem[];
+}
+
+export interface MissedOpportunity {
+  topic: string;
+  suggested_followup: string;
+  reason: string;
+}
+
+export interface PromptSuggestion {
+  category: string;
+  current_behavior: string;
+  suggested_improvement: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface ConversationAnalysis {
+  coverage_completeness: CoverageCompleteness;
+  response_depth: ResponseDepth;
+  missed_opportunities: MissedOpportunity[];
+  prompt_improvement_suggestions: PromptSuggestion[];
+  interview_summary: string;
+  analyzed_at: string;
+}
+
 export interface Interview {
   id: string;
   company_id: string;
@@ -42,6 +92,7 @@ export interface Interview {
   interview_type: InterviewType;
   transcript: string | null;
   raw_culture_data: CultureProfile | null;
+  conversation_analysis: ConversationAnalysis | null;
   status: 'pending' | 'in_progress' | 'completed';
   created_at: string;
   completed_at: string | null;

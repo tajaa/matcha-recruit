@@ -4,6 +4,7 @@ import type {
   Interview,
   InterviewCreate,
   InterviewStart,
+  ConversationAnalysis,
   Candidate,
   CandidateDetail,
   MatchResult,
@@ -219,6 +220,14 @@ export const interviews = {
     request<InterviewStart>(`/companies/${companyId}/interviews`, {
       method: 'POST',
       body: JSON.stringify({ ...data, company_id: companyId }),
+    }),
+
+  getAnalysis: (id: string) =>
+    request<ConversationAnalysis>(`/interviews/${id}/analysis`),
+
+  generateAnalysis: (id: string) =>
+    request<ConversationAnalysis>(`/interviews/${id}/analyze`, {
+      method: 'POST',
     }),
 };
 
