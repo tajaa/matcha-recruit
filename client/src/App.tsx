@@ -5,6 +5,7 @@ import {
   Companies,
   CompanyDetail,
   Interview,
+  Landing,
   Candidates,
   Positions,
   PositionDetail,
@@ -22,6 +23,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           {/* Public routes */}
+          <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
@@ -38,7 +40,7 @@ function App() {
 
           {/* Protected routes with Layout */}
           <Route
-            path="/"
+            path="/app"
             element={
               <ProtectedRoute>
                 <Layout />

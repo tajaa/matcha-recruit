@@ -9,12 +9,12 @@ interface NavItem {
 }
 
 const allNavItems: NavItem[] = [
-  { path: '/', label: 'Companies', roles: ['admin', 'client'] },
-  { path: '/positions', label: 'Positions', roles: ['admin', 'client', 'candidate'] },
-  { path: '/candidates', label: 'Candidates', roles: ['admin', 'client'] },
-  { path: '/jobs', label: 'Job Search', roles: ['candidate'] },
-  { path: '/test-bot', label: 'Test Bot', roles: ['admin', 'candidate'] },
-  { path: '/import', label: 'Import', roles: ['admin'] },
+  { path: '/app', label: 'Companies', roles: ['admin', 'client'] },
+  { path: '/app/positions', label: 'Positions', roles: ['admin', 'client', 'candidate'] },
+  { path: '/app/candidates', label: 'Candidates', roles: ['admin', 'client'] },
+  { path: '/app/jobs', label: 'Job Search', roles: ['candidate'] },
+  { path: '/app/test-bot', label: 'Test Bot', roles: ['admin', 'candidate'] },
+  { path: '/app/import', label: 'Import', roles: ['admin'] },
 ];
 
 export function Layout() {

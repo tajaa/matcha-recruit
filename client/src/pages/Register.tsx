@@ -63,7 +63,7 @@ export function Register() {
           job_title: jobTitle || undefined,
         });
       }
-      navigate('/');
+      navigate('/app');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {

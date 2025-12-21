@@ -1,3 +1,4 @@
+export { Landing } from './Landing';
 export { Companies } from './Companies';
 export { CompanyDetail } from './CompanyDetail';
 export { Interview } from './Interview';

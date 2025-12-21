@@ -12,7 +12,7 @@ export function Unauthorized() {
         </div>
         <h1 className="text-2xl font-bold text-white mb-2">Access Denied</h1>
         <p className="text-zinc-400 mb-6">You don't have permission to access this page.</p>
-        <Link to="/">
+        <Link to="/app">
           <Button>Go to Home</Button>
         </Link>
       </div>
