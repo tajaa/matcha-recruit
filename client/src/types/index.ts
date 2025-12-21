@@ -50,7 +50,7 @@ export interface CoverageCompleteness {
 
 export interface ResponseAnalysisItem {
   question_summary: string;
-  response_quality: 'specific' | 'somewhat_specific' | 'vague';
+  response_quality: 'specific' | 'somewhat_specific' | 'vague' | 'shallow';
   actionability: 'high' | 'medium' | 'low';
   notes: string | null;
 }

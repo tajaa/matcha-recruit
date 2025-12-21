@@ -246,7 +246,7 @@ export function InterviewAnalysis() {
                         <span className={`text-xs px-2 py-0.5 rounded ${
                           item.response_quality === 'specific'
                             ? 'bg-matcha-500/20 text-matcha-400'
-                            : item.response_quality === 'somewhat_specific'
+                            : item.response_quality === 'somewhat_specific' || item.response_quality === 'shallow'
                             ? 'bg-yellow-500/20 text-yellow-400'
                             : 'bg-zinc-700 text-zinc-400'
                         }`}>

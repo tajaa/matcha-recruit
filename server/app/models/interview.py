@@ -24,7 +24,7 @@ class CoverageCompleteness(BaseModel):
 
 class ResponseAnalysisItem(BaseModel):
     question_summary: str
-    response_quality: Literal["specific", "somewhat_specific", "vague"]
+    response_quality: Literal["specific", "somewhat_specific", "vague", "shallow"]  # shallow added for LLM variance
     actionability: Literal["high", "medium", "low"]
     notes: Optional[str] = None
 
