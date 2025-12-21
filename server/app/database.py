@@ -41,6 +41,39 @@ async def get_connection():
 async def init_db():
     """Create tables if they don't exist."""
     async with get_connection() as conn:
+        # Users table (auth)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(20) NOT NULL CHECK (role IN ('admin', 'client', 'candidate')),
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                last_login TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)
+        """)
+
+        # Admins table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS admins (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_admins_user_id ON admins(user_id)
+        """)
+
         # Companies table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS companies (
@@ -50,6 +83,25 @@ async def init_db():
                 size VARCHAR(50),
                 created_at TIMESTAMP DEFAULT NOW()
             )
+        """)
+
+        # Clients table (linked to companies)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS clients (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                phone VARCHAR(50),
+                job_title VARCHAR(100),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_clients_user_id ON clients(user_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_clients_company_id ON clients(company_id)
         """)
 
         # Interviews table
@@ -106,6 +158,22 @@ async def init_db():
                 parsed_data JSONB,
                 created_at TIMESTAMP DEFAULT NOW()
             )
+        """)
+
+        # Add user_id to candidates table if not exists
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'candidates' AND column_name = 'user_id'
+                ) THEN
+                    ALTER TABLE candidates ADD COLUMN user_id UUID UNIQUE REFERENCES users(id) ON DELETE SET NULL;
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_candidates_user_id ON candidates(user_id)
         """)
 
         # Match results table
@@ -224,5 +292,25 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_saved_jobs_company_name ON saved_jobs(company_name)
         """)
+
+        # Create default admin if no admins exist
+        admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        if admin_exists == 0:
+            import os
+            from .services.auth import hash_password
+            default_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme123")
+            user_row = await conn.fetchrow(
+                """
+                INSERT INTO users (email, password_hash, role)
+                VALUES ('admin@matcha.local', $1, 'admin')
+                RETURNING id
+                """,
+                hash_password(default_password)
+            )
+            await conn.execute(
+                "INSERT INTO admins (user_id, name) VALUES ($1, 'System Admin')",
+                user_row["id"]
+            )
+            print("[DB] Created default admin user (admin@matcha.local)")
 
         print("[DB] Tables initialized")

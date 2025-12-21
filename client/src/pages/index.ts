@@ -7,3 +7,6 @@ export { PositionDetail } from './PositionDetail';
 export { BulkImport } from './BulkImport';
 export { JobSearch } from './JobSearch';
 export { TestBot } from './TestBot';
+export { Login } from './Login';
+export { Register } from './Register';
+export { Unauthorized } from './Unauthorized';

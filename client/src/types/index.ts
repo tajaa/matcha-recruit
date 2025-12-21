@@ -316,3 +316,90 @@ export interface SavedJob extends SavedJobCreate {
   id: string;
   created_at: string;
 }
+
+// Auth types
+export type UserRole = 'admin' | 'client' | 'candidate';
+
+export interface User {
+  id: string;
+  email: string;
+  role: UserRole;
+  is_active: boolean;
+  created_at: string;
+  last_login: string | null;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+  user: User;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface AdminRegister {
+  email: string;
+  password: string;
+  name: string;
+}
+
+export interface ClientRegister {
+  email: string;
+  password: string;
+  name: string;
+  company_id: string;
+  phone?: string;
+  job_title?: string;
+}
+
+export interface CandidateRegister {
+  email: string;
+  password: string;
+  name: string;
+  phone?: string;
+}
+
+export interface AdminProfile {
+  id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  created_at: string;
+}
+
+export interface ClientProfile {
+  id: string;
+  user_id: string;
+  company_id: string;
+  company_name: string;
+  name: string;
+  phone: string | null;
+  job_title: string | null;
+  email: string;
+  created_at: string;
+}
+
+export interface CandidateAuthProfile {
+  id: string;
+  user_id: string | null;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  skills: string[] | null;
+  experience_years: number | null;
+  created_at: string;
+}
+
+export interface CurrentUserResponse {
+  user: {
+    id: string;
+    email: string;
+    role: UserRole;
+  };
+  profile: AdminProfile | ClientProfile | CandidateAuthProfile | null;
+}

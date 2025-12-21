@@ -19,21 +19,98 @@ import type {
   JobSearchResponse,
   SavedJob,
   SavedJobCreate,
+  TokenResponse,
+  LoginRequest,
+  ClientRegister,
+  CandidateRegister,
+  CurrentUserResponse,
 } from '../types';
 
 const API_BASE = 'http://localhost:8000/api';
+
+// Token storage helpers
+const TOKEN_KEY = 'matcha_access_token';
+const REFRESH_KEY = 'matcha_refresh_token';
+
+export function getAccessToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_KEY);
+}
+
+export function setTokens(accessToken: string, refreshToken: string): void {
+  localStorage.setItem(TOKEN_KEY, accessToken);
+  localStorage.setItem(REFRESH_KEY, refreshToken);
+}
+
+export function clearTokens(): void {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+}
+
+async function tryRefreshToken(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+
+  try {
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!response.ok) return false;
+
+    const data: TokenResponse = await response.json();
+    setTokens(data.access_token, data.refresh_token);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const token = getAccessToken();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+
+  if (token) {
+    (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   });
+
+  if (response.status === 401) {
+    // Try to refresh token
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      // Retry original request with new token
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${getAccessToken()}`;
+      const retryResponse = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers,
+      });
+      if (!retryResponse.ok) {
+        const error = await retryResponse.json().catch(() => ({ detail: 'Request failed' }));
+        throw new Error(error.detail || 'Request failed');
+      }
+      return retryResponse.json();
+    }
+    // Refresh failed, clear tokens and redirect to login
+    clearTokens();
+    window.location.href = '/login';
+    throw new Error('Session expired');
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
@@ -42,6 +119,70 @@ async function request<T>(
 
   return response.json();
 }
+
+// Auth API
+export const auth = {
+  login: async (data: LoginRequest): Promise<TokenResponse> => {
+    const response = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Login failed' }));
+      throw new Error(error.detail || 'Login failed');
+    }
+
+    const result: TokenResponse = await response.json();
+    setTokens(result.access_token, result.refresh_token);
+    return result;
+  },
+
+  logout: async (): Promise<void> => {
+    try {
+      await request('/auth/logout', { method: 'POST' });
+    } finally {
+      clearTokens();
+    }
+  },
+
+  registerClient: async (data: ClientRegister): Promise<TokenResponse> => {
+    const response = await fetch(`${API_BASE}/auth/register/client`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(error.detail || 'Registration failed');
+    }
+
+    const result: TokenResponse = await response.json();
+    setTokens(result.access_token, result.refresh_token);
+    return result;
+  },
+
+  registerCandidate: async (data: CandidateRegister): Promise<TokenResponse> => {
+    const response = await fetch(`${API_BASE}/auth/register/candidate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(error.detail || 'Registration failed');
+    }
+
+    const result: TokenResponse = await response.json();
+    setTokens(result.access_token, result.refresh_token);
+    return result;
+  },
+
+  me: () => request<CurrentUserResponse>('/auth/me'),
+};
 
 // Companies
 export const companies = {
@@ -91,8 +232,15 @@ export const candidates = {
     const formData = new FormData();
     formData.append('file', file);
 
+    const headers: HeadersInit = {};
+    const token = getAccessToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE}/candidates/upload`, {
       method: 'POST',
+      headers,
       body: formData,
     });
 
@@ -187,8 +335,15 @@ export const bulkImport = {
     const formData = new FormData();
     formData.append('file', file);
 
+    const headers: HeadersInit = {};
+    const token = getAccessToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE}/bulk/companies`, {
       method: 'POST',
+      headers,
       body: formData,
     });
 
@@ -204,8 +359,15 @@ export const bulkImport = {
     const formData = new FormData();
     formData.append('file', file);
 
+    const headers: HeadersInit = {};
+    const token = getAccessToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE}/bulk/positions`, {
       method: 'POST',
+      headers,
       body: formData,
     });
 

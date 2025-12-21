@@ -7,3 +7,4 @@ export { SkillsInput } from './SkillsInput';
 export { PositionCard } from './PositionCard';
 export { PositionForm } from './PositionForm';
 export { PositionMatchCard } from './PositionMatchCard';
+export { ProtectedRoute } from './ProtectedRoute';

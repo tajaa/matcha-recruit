@@ -1,16 +1,34 @@
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import type { UserRole } from '../types';
 
-const navItems = [
-  { path: '/', label: 'Companies' },
-  { path: '/positions', label: 'Positions' },
-  { path: '/candidates', label: 'Candidates' },
-  { path: '/jobs', label: 'Job Search' },
-  { path: '/test-bot', label: 'Test Bot' },
-  { path: '/import', label: 'Import' },
+interface NavItem {
+  path: string;
+  label: string;
+  roles: UserRole[];
+}
+
+const allNavItems: NavItem[] = [
+  { path: '/', label: 'Companies', roles: ['admin', 'client'] },
+  { path: '/positions', label: 'Positions', roles: ['admin', 'client', 'candidate'] },
+  { path: '/candidates', label: 'Candidates', roles: ['admin', 'client'] },
+  { path: '/jobs', label: 'Job Search', roles: ['candidate'] },
+  { path: '/test-bot', label: 'Test Bot', roles: ['admin', 'candidate'] },
+  { path: '/import', label: 'Import', roles: ['admin'] },
 ];
 
 export function Layout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout, hasRole } = useAuth();
+
+  // Filter nav items based on user role
+  const navItems = allNavItems.filter((item) => hasRole(...item.roles));
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-400 font-sans selection:bg-matcha-500 selection:text-white">
@@ -43,6 +61,25 @@ export function Layout() {
                 ))}
               </div>
             </div>
+
+            {/* User menu */}
+            {user && (
+              <div className="flex items-center gap-4">
+                <div className="text-sm hidden md:block">
+                  <span className="text-zinc-500">Signed in as </span>
+                  <span className="text-white">{user.email}</span>
+                  <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-matcha-500/20 text-matcha-400 capitalize">
+                    {user.role}
+                  </span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="text-sm text-zinc-400 hover:text-white transition-colors px-3 py-1.5 rounded-md hover:bg-white/5"
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </nav>

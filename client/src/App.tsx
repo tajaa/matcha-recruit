@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { Layout } from './components';
+import { AuthProvider } from './context';
+import { Layout, ProtectedRoute } from './components';
 import {
   Companies,
   CompanyDetail,
@@ -10,25 +11,108 @@ import {
   BulkImport,
   JobSearch,
   TestBot,
+  Login,
+  Register,
+  Unauthorized,
 } from './pages';
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Companies />} />
-          <Route path="companies/:id" element={<CompanyDetail />} />
-          <Route path="candidates" element={<Candidates />} />
-          <Route path="positions" element={<Positions />} />
-          <Route path="positions/:id" element={<PositionDetail />} />
-          <Route path="import" element={<BulkImport />} />
-          <Route path="jobs" element={<JobSearch />} />
-          <Route path="test-bot" element={<TestBot />} />
-        </Route>
-        <Route path="/interview/:id" element={<Interview />} />
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/unauthorized" element={<Unauthorized />} />
+
+          {/* Interview route (needs auth but outside layout) */}
+          <Route
+            path="/interview/:id"
+            element={
+              <ProtectedRoute>
+                <Interview />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Protected routes with Layout */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+            <Route
+              index
+              element={
+                <ProtectedRoute roles={['admin', 'client']}>
+                  <Companies />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="companies/:id"
+              element={
+                <ProtectedRoute roles={['admin', 'client']}>
+                  <CompanyDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="candidates"
+              element={
+                <ProtectedRoute roles={['admin', 'client']}>
+                  <Candidates />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="positions"
+              element={
+                <ProtectedRoute roles={['admin', 'client', 'candidate']}>
+                  <Positions />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="positions/:id"
+              element={
+                <ProtectedRoute roles={['admin', 'client', 'candidate']}>
+                  <PositionDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="import"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <BulkImport />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="jobs"
+              element={
+                <ProtectedRoute roles={['candidate']}>
+                  <JobSearch />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="test-bot"
+              element={
+                <ProtectedRoute roles={['admin', 'candidate']}>
+                  <TestBot />
+                </ProtectedRoute>
+              }
+            />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
 

@@ -26,6 +26,12 @@ class Settings:
     # External APIs
     search_api_key: Optional[str]
 
+    # Auth
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 30
+    jwt_refresh_token_expire_days: int = 7
+
 
 # Global settings instance
 _settings: Optional[Settings] = None
@@ -53,6 +59,14 @@ def load_settings() -> Settings:
     if not database_url:
         raise ValueError("DATABASE_URL environment variable is required")
 
+    # JWT settings
+    jwt_secret_key = os.getenv("JWT_SECRET_KEY", "")
+    if not jwt_secret_key:
+        # Generate a default for development, but warn
+        import secrets
+        jwt_secret_key = secrets.token_urlsafe(32)
+        print("[WARNING] JWT_SECRET_KEY not set. Using random key (sessions won't persist across restarts)")
+
     _settings = Settings(
         database_url=database_url.strip().strip('"'),
         gemini_api_key=api_key if api_key else None,
@@ -64,6 +78,10 @@ def load_settings() -> Settings:
         voice=os.getenv("GEMINI_VOICE", "Kore"),
         port=int(os.getenv("PORT", "8000")),
         search_api_key=os.getenv("SEARCH_API_KEY"),
+        jwt_secret_key=jwt_secret_key,
+        jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
+        jwt_access_token_expire_minutes=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30")),
+        jwt_refresh_token_expire_days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7")),
     )
     return _settings
 
