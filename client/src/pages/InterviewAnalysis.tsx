@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Card, CardContent } from '../components';
 import { interviews } from '../api/client';
-import type { Interview } from '../types';
+import type { Interview, ScreeningAnalysis } from '../types';
 
 export function InterviewAnalysis() {
   const { id } = useParams<{ id: string }>();
@@ -37,7 +37,16 @@ export function InterviewAnalysis() {
     setRegenerating(true);
     try {
       const analysis = await interviews.generateAnalysis(id);
-      setInterview(prev => prev ? { ...prev, conversation_analysis: analysis } : null);
+      setInterview((prev) => {
+        if (!prev) return null;
+        if (prev.interview_type === 'screening' && 'communication_clarity' in analysis) {
+          return { ...prev, screening_analysis: analysis };
+        }
+        if (prev.interview_type !== 'screening' && 'coverage_completeness' in analysis) {
+          return { ...prev, conversation_analysis: analysis };
+        }
+        return prev;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to regenerate analysis');
     } finally {
@@ -56,8 +65,8 @@ export function InterviewAnalysis() {
   if (error || !interview) {
     return (
       <div className="space-y-4">
-        <Button variant="secondary" onClick={() => navigate('/app/test-bot')}>
-          Back to Test Bot
+        <Button variant="secondary" onClick={() => navigate(-1)}>
+          Back
         </Button>
         <Card>
           <CardContent className="p-6 text-center text-red-400">
@@ -69,13 +78,15 @@ export function InterviewAnalysis() {
   }
 
   const analysis = interview.conversation_analysis;
+  const screeningAnalysis = interview.screening_analysis;
+  const isScreening = interview.interview_type === 'screening';
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="secondary" onClick={() => navigate('/app/test-bot')}>
+          <Button variant="secondary" onClick={() => navigate(-1)}>
             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
@@ -87,9 +98,15 @@ export function InterviewAnalysis() {
               <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                 interview.interview_type === 'culture'
                   ? 'bg-matcha-500/15 text-matcha-400'
+                  : interview.interview_type === 'screening'
+                  ? 'bg-orange-500/15 text-orange-400'
                   : 'bg-violet-500/15 text-violet-400'
               }`}>
-                {interview.interview_type === 'culture' ? 'Culture Interview' : 'Candidate Interview'}
+                {interview.interview_type === 'culture'
+                  ? 'Culture Interview'
+                  : interview.interview_type === 'screening'
+                  ? 'Screening Interview'
+                  : 'Candidate Interview'}
               </span>
               <span className="text-zinc-500 text-sm">
                 {new Date(interview.created_at).toLocaleDateString()}
@@ -121,7 +138,8 @@ export function InterviewAnalysis() {
         </Button>
       </div>
 
-      {!analysis ? (
+      {/* No Analysis State */}
+      {(isScreening ? !screeningAnalysis : !analysis) ? (
         <Card>
           <CardContent className="p-8 text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-zinc-800 flex items-center justify-center">
@@ -142,7 +160,9 @@ export function InterviewAnalysis() {
             )}
           </CardContent>
         </Card>
-      ) : (
+      ) : isScreening && screeningAnalysis ? (
+        <ScreeningAnalysisDisplay analysis={screeningAnalysis} />
+      ) : analysis ? (
         <>
           {/* Summary Card */}
           <Card>
@@ -338,8 +358,107 @@ export function InterviewAnalysis() {
             </Card>
           )}
         </>
-      )}
+      ) : null}
     </div>
+  );
+}
+
+function ScreeningAnalysisDisplay({ analysis }: { analysis: ScreeningAnalysis }) {
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return 'text-matcha-400';
+    if (score >= 60) return 'text-yellow-400';
+    if (score >= 40) return 'text-orange-400';
+    return 'text-red-400';
+  };
+
+  const getScoreBg = (score: number) => {
+    if (score >= 80) return 'bg-matcha-500/10 border-matcha-500/30';
+    if (score >= 60) return 'bg-yellow-500/10 border-yellow-500/30';
+    if (score >= 40) return 'bg-orange-500/10 border-orange-500/30';
+    return 'bg-red-500/10 border-red-500/30';
+  };
+
+  const getRecommendationStyle = (rec: string) => {
+    switch (rec) {
+      case 'strong_pass':
+        return 'bg-matcha-500/20 text-matcha-400';
+      case 'pass':
+        return 'bg-yellow-500/20 text-yellow-400';
+      case 'borderline':
+        return 'bg-orange-500/20 text-orange-400';
+      case 'fail':
+        return 'bg-red-500/20 text-red-400';
+      default:
+        return 'bg-zinc-700 text-zinc-400';
+    }
+  };
+
+  const attributes = [
+    { key: 'communication_clarity', label: 'Communication & Clarity', data: analysis.communication_clarity },
+    { key: 'engagement_energy', label: 'Engagement & Energy', data: analysis.engagement_energy },
+    { key: 'critical_thinking', label: 'Critical Thinking', data: analysis.critical_thinking },
+    { key: 'professionalism', label: 'Professionalism', data: analysis.professionalism },
+  ];
+
+  return (
+    <>
+      {/* Summary Card */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-zinc-100 mb-2">Screening Summary</h2>
+              <p className="text-zinc-300">{analysis.summary}</p>
+            </div>
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-zinc-500">Overall:</span>
+                <span className={`text-3xl font-bold ${getScoreColor(analysis.overall_score)}`}>
+                  {analysis.overall_score}
+                </span>
+                <span className="text-sm text-zinc-600">/100</span>
+              </div>
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getRecommendationStyle(analysis.recommendation)}`}>
+                {analysis.recommendation.replace('_', ' ').toUpperCase()}
+              </span>
+            </div>
+          </div>
+          <div className="text-sm text-zinc-500 pt-4 border-t border-zinc-800">
+            Analyzed: {new Date(analysis.analyzed_at).toLocaleString()}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Attribute Scores Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {attributes.map(({ key, label, data }) => (
+          <Card key={key}>
+            <CardContent className={`p-5 border rounded-lg ${getScoreBg(data.score)}`}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-zinc-200">{label}</h3>
+                <div className="flex items-center gap-1">
+                  <span className={`text-2xl font-bold ${getScoreColor(data.score)}`}>{data.score}</span>
+                  <span className="text-xs text-zinc-500">/100</span>
+                </div>
+              </div>
+              {data.notes && (
+                <p className="text-sm text-zinc-400 mb-3">{data.notes}</p>
+              )}
+              {data.evidence.length > 0 && (
+                <div className="space-y-2">
+                  <span className="text-xs text-zinc-500 uppercase tracking-wider">Evidence</span>
+                  {data.evidence.map((quote, idx) => (
+                    <p key={idx} className="text-xs text-zinc-400 italic pl-3 border-l-2 border-zinc-700">
+                      "{quote}"
+                    </p>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </>
   );
 }
 

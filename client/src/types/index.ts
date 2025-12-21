@@ -32,7 +32,7 @@ export interface CultureProfile {
 }
 
 // Interview types
-export type InterviewType = 'culture' | 'candidate';
+export type InterviewType = 'culture' | 'candidate' | 'screening';
 
 // Conversation Analysis types
 export interface CoverageDetail {
@@ -84,6 +84,24 @@ export interface ConversationAnalysis {
   analyzed_at: string;
 }
 
+// Screening Analysis types
+export interface ScreeningAttribute {
+  score: number;
+  evidence: string[];
+  notes: string | null;
+}
+
+export interface ScreeningAnalysis {
+  communication_clarity: ScreeningAttribute;
+  engagement_energy: ScreeningAttribute;
+  critical_thinking: ScreeningAttribute;
+  professionalism: ScreeningAttribute;
+  overall_score: number;
+  recommendation: 'strong_pass' | 'pass' | 'borderline' | 'fail';
+  summary: string;
+  analyzed_at: string;
+}
+
 export interface Interview {
   id: string;
   company_id: string;
@@ -93,6 +111,7 @@ export interface Interview {
   transcript: string | null;
   raw_culture_data: CultureProfile | null;
   conversation_analysis: ConversationAnalysis | null;
+  screening_analysis: ScreeningAnalysis | null;
   status: 'pending' | 'in_progress' | 'completed';
   created_at: string;
   completed_at: string | null;

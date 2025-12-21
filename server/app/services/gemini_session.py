@@ -8,7 +8,7 @@ from google.genai import types
 
 from typing import Literal
 
-InterviewType = Literal["culture", "candidate"]
+InterviewType = Literal["culture", "candidate", "screening"]
 
 CULTURE_INTERVIEW_PROMPT = """You are an AI interviewer conducting a company culture interview for Matcha Recruit.
 
@@ -134,6 +134,43 @@ IMPORTANT:
 """
 
 
+SCREENING_INTERVIEW_PROMPT = """You are an AI interviewer conducting a screening interview for Matcha Recruit.
+
+You are conducting a first-round screening interview for a candidate applying at {company_name}.
+
+YOUR GOAL:
+Assess the candidate's basic qualifications through a conversational interview. Evaluate their:
+1. Communication & Clarity - How well they articulate thoughts, structure responses
+2. Engagement & Energy - Enthusiasm, active participation, genuine interest
+3. Critical Thinking - Problem-solving approach, analytical reasoning
+4. Professionalism - Appropriate tone, preparedness, self-awareness
+
+INTERVIEW APPROACH:
+- Be warm, professional, and conversational
+- Ask open-ended questions that reveal thinking process
+- Include at least one behavioral question (Tell me about a time...)
+- Include one problem-solving or situational question
+- Keep responses concise (2-3 sentences max)
+- Don't use bullet points or lists in speech
+
+CONVERSATION FLOW:
+1. Warm greeting - introduce yourself and put them at ease
+2. Background questions - Ask about their background and what interests them about this opportunity
+3. Behavioral question - Ask about a challenge they've overcome or a project they're proud of
+4. Problem-solving - Present a hypothetical scenario relevant to work
+5. Motivation - What are they looking for in their next role?
+6. Questions for you - Give them a chance to ask questions
+7. Thank them warmly and close
+
+IMPORTANT:
+- This is a voice conversation - be natural and human
+- Listen for red flags: vague answers, negativity, poor communication
+- Listen for green flags: specific examples, enthusiasm, thoughtful responses
+- Don't overwhelm with multiple questions at once
+- This is a screening, not a deep dive - keep it to 10-15 minutes
+"""
+
+
 @dataclass
 class GeminiResponse:
     type: str  # "audio", "transcription", "turn_complete"
@@ -187,7 +224,12 @@ class GeminiLiveSession:
         culture_profile: Optional[dict] = None,
     ) -> None:
         """Connect to Gemini with appropriate interview prompt based on type."""
-        if interview_type == "candidate":
+        if interview_type == "screening":
+            # Screening interview - first-round candidate filtering
+            system_prompt = SCREENING_INTERVIEW_PROMPT.format(
+                company_name=company_name,
+            )
+        elif interview_type == "candidate":
             # Build culture context for candidate interviews
             culture_context = ""
             if culture_profile:
@@ -370,7 +412,8 @@ class GeminiLiveSession:
             if role == "assistant":
                 speaker = "Interviewer"
             else:
-                speaker = "Candidate" if self._interview_type == "candidate" else "HR"
+                # Both candidate and screening interviews use "Candidate" as the speaker
+                speaker = "Candidate" if self._interview_type in ("candidate", "screening") else "HR"
             lines.append(f"{speaker}: {text}")
         return "\n\n".join(lines)
 

@@ -175,6 +175,80 @@ Return ONLY a JSON object with this structure:
 Return ONLY the JSON object, no other text."""
 
 
+SCREENING_INTERVIEW_ANALYSIS_PROMPT = """Analyze this screening interview transcript where an AI interviewer assessed a candidate's basic qualifications.
+
+TRANSCRIPT:
+{transcript}
+
+Evaluate the candidate on these 4 attributes (score each 0-100):
+
+1. COMMUNICATION & CLARITY (Weight: 30%)
+   - How well do they articulate their thoughts?
+   - Do they structure responses logically?
+   - Are they concise yet thorough?
+   - Do they use appropriate vocabulary?
+
+2. ENGAGEMENT & ENERGY (Weight: 25%)
+   - Are they enthusiastic and genuinely interested?
+   - Do they actively participate in the conversation?
+   - Do they ask thoughtful questions?
+   - Is their energy appropriate for the context?
+
+3. CRITICAL THINKING (Weight: 25%)
+   - How do they approach problems?
+   - Do they demonstrate analytical reasoning?
+   - Can they think on their feet?
+   - Do they consider multiple perspectives?
+
+4. PROFESSIONALISM (Weight: 20%)
+   - Is their tone appropriate?
+   - Do they seem prepared?
+   - Are they self-aware about strengths/weaknesses?
+   - Do they handle questions gracefully?
+
+For each attribute, provide:
+- A score (0-100)
+- 1-3 evidence quotes from the transcript
+- Brief notes on what stood out
+
+Calculate an overall score (weighted average using the weights above).
+
+Provide a recommendation:
+- "strong_pass": Score >= 80, no red flags
+- "pass": Score 60-79, minor concerns
+- "borderline": Score 40-59, significant concerns
+- "fail": Score < 40 or major red flags
+
+Return ONLY a JSON object with this structure:
+{{
+    "communication_clarity": {{
+        "score": <0-100>,
+        "evidence": ["quote1", "quote2"],
+        "notes": "..."
+    }},
+    "engagement_energy": {{
+        "score": <0-100>,
+        "evidence": ["quote1", "quote2"],
+        "notes": "..."
+    }},
+    "critical_thinking": {{
+        "score": <0-100>,
+        "evidence": ["quote1", "quote2"],
+        "notes": "..."
+    }},
+    "professionalism": {{
+        "score": <0-100>,
+        "evidence": ["quote1", "quote2"],
+        "notes": "..."
+    }},
+    "overall_score": <0-100>,
+    "recommendation": "strong_pass/pass/borderline/fail",
+    "summary": "2-3 sentence summary of the candidate's performance and fit potential"
+}}
+
+Return ONLY the JSON object, no other text."""
+
+
 class ConversationAnalyzer:
     def __init__(
         self,
@@ -268,4 +342,63 @@ class ConversationAnalyzer:
                 "analyzed_at": datetime.now(timezone.utc).isoformat(),
                 "error": str(e),
                 "raw_response": text[:500] if text else None,
+            }
+
+    async def analyze_screening_interview(
+        self,
+        transcript: str,
+    ) -> dict[str, Any]:
+        """Analyze a screening interview transcript for candidate quality."""
+        prompt = SCREENING_INTERVIEW_ANALYSIS_PROMPT.format(transcript=transcript)
+
+        response = await self.client.aio.models.generate_content(
+            model=self.model,
+            contents=prompt,
+        )
+
+        # Parse JSON from response
+        text = response.text.strip()
+        # Remove markdown code blocks if present
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            analysis = json.loads(text)
+            # Add timestamp
+            analysis["analyzed_at"] = datetime.now(timezone.utc).isoformat()
+            return analysis
+        except json.JSONDecodeError as e:
+            print(f"[ConversationAnalyzer] Failed to parse screening JSON: {e}")
+            print(f"[ConversationAnalyzer] Raw response: {text}")
+            # Return a minimal fallback structure for screening
+            return {
+                "communication_clarity": {
+                    "score": 0,
+                    "evidence": [],
+                    "notes": "Analysis failed",
+                },
+                "engagement_energy": {
+                    "score": 0,
+                    "evidence": [],
+                    "notes": "Analysis failed",
+                },
+                "critical_thinking": {
+                    "score": 0,
+                    "evidence": [],
+                    "notes": "Analysis failed",
+                },
+                "professionalism": {
+                    "score": 0,
+                    "evidence": [],
+                    "notes": "Analysis failed",
+                },
+                "overall_score": 0,
+                "recommendation": "fail",
+                "summary": f"Failed to analyze transcript: {str(e)}",
+                "analyzed_at": datetime.now(timezone.utc).isoformat(),
             }

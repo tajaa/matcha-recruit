@@ -108,7 +108,7 @@ export function TestBot() {
             <CardContent className="p-6">
               <h2 className="text-lg font-semibold text-zinc-100 mb-4">Select Interview Mode</h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 {/* Culture Interview */}
                 <button
                   onClick={() => setMode('culture')}
@@ -134,7 +134,36 @@ export function TestBot() {
                     </div>
                   </div>
                   <p className="text-sm text-zinc-400">
-                    The AI will interview you as if you're an HR rep or team lead describing your company's culture, values, and work environment.
+                    The AI will interview you as an HR rep describing your company's culture and values.
+                  </p>
+                </button>
+
+                {/* Screening Interview */}
+                <button
+                  onClick={() => setMode('screening')}
+                  className={`p-5 rounded-xl border-2 text-left transition-all ${
+                    mode === 'screening'
+                      ? 'border-orange-500 bg-orange-500/10'
+                      : 'border-zinc-800 hover:border-zinc-700 bg-zinc-900/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                      mode === 'screening' ? 'bg-orange-500/20 text-orange-400' : 'bg-zinc-800 text-zinc-500'
+                    }`}>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h3 className={`font-semibold ${mode === 'screening' ? 'text-orange-400' : 'text-zinc-300'}`}>
+                        Screening Interview
+                      </h3>
+                      <p className="text-xs text-zinc-500">First-round filtering</p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-zinc-400">
+                    Quick assessment of communication, engagement, critical thinking, and professionalism.
                   </p>
                 </button>
 
@@ -157,13 +186,13 @@ export function TestBot() {
                     </div>
                     <div>
                       <h3 className={`font-semibold ${mode === 'candidate' ? 'text-violet-400' : 'text-zinc-300'}`}>
-                        Candidate Interview
+                        Culture Fit Interview
                       </h3>
-                      <p className="text-xs text-zinc-500">Test as job candidate</p>
+                      <p className="text-xs text-zinc-500">Requires culture profile</p>
                     </div>
                   </div>
                   <p className="text-sm text-zinc-400">
-                    The AI will interview you as a job candidate, asking about your work preferences, values, and what you're looking for in a role.
+                    Deep dive into work preferences and values, assessed against company culture profile.
                   </p>
                 </button>
               </div>
@@ -219,7 +248,7 @@ export function TestBot() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    Start {mode === 'culture' ? 'Culture' : 'Candidate'} Interview
+                    Start {mode === 'culture' ? 'Culture' : mode === 'screening' ? 'Screening' : 'Culture Fit'} Interview
                   </>
                 )}
               </Button>
@@ -230,15 +259,17 @@ export function TestBot() {
           <div className={`p-5 rounded-xl border ${
             mode === 'culture'
               ? 'bg-matcha-500/5 border-matcha-500/10'
+              : mode === 'screening'
+              ? 'bg-orange-500/5 border-orange-500/10'
               : 'bg-violet-500/5 border-violet-500/10'
           }`}>
             <h3 className={`font-semibold mb-3 flex items-center gap-2 ${
-              mode === 'culture' ? 'text-matcha-400' : 'text-violet-400'
+              mode === 'culture' ? 'text-matcha-400' : mode === 'screening' ? 'text-orange-400' : 'text-violet-400'
             }`}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              {mode === 'culture' ? 'Culture Interview Tips' : 'Candidate Interview Tips'}
+              {mode === 'culture' ? 'Culture Interview Tips' : mode === 'screening' ? 'Screening Interview Tips' : 'Culture Fit Interview Tips'}
             </h3>
             <ul className="text-sm text-zinc-400 space-y-2 ml-1">
               {mode === 'culture' ? (
@@ -258,6 +289,25 @@ export function TestBot() {
                   <li className="flex items-start gap-2">
                     <span className="mt-1.5 w-1 h-1 rounded-full bg-matcha-500 flex-shrink-0"></span>
                     This helps build the company's culture profile
+                  </li>
+                </>
+              ) : mode === 'screening' ? (
+                <>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 w-1 h-1 rounded-full bg-orange-500 flex-shrink-0"></span>
+                    Respond as yourself - a job candidate
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 w-1 h-1 rounded-full bg-orange-500 flex-shrink-0"></span>
+                    Be clear and concise in your responses
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 w-1 h-1 rounded-full bg-orange-500 flex-shrink-0"></span>
+                    Show enthusiasm and engagement
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 w-1 h-1 rounded-full bg-orange-500 flex-shrink-0"></span>
+                    Give specific examples when possible
                   </li>
                 </>
               ) : (
@@ -294,18 +344,24 @@ export function TestBot() {
                   <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
                     mode === 'culture'
                       ? 'bg-matcha-500/15 text-matcha-400'
+                      : mode === 'screening'
+                      ? 'bg-orange-500/15 text-orange-400'
                       : 'bg-violet-500/15 text-violet-400'
                   }`}>
                     {mode === 'culture' ? (
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                       </svg>
+                    ) : mode === 'screening' ? (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
                     ) : (
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                       </svg>
                     )}
-                    {mode === 'culture' ? 'Culture Interview' : 'Candidate Interview'}
+                    {mode === 'culture' ? 'Culture Interview' : mode === 'screening' ? 'Screening Interview' : 'Culture Fit Interview'}
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-zinc-800 text-zinc-200 border border-zinc-700">
                     <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -5,6 +5,7 @@ import type {
   InterviewCreate,
   InterviewStart,
   ConversationAnalysis,
+  ScreeningAnalysis,
   Candidate,
   CandidateDetail,
   MatchResult,
@@ -226,7 +227,7 @@ export const interviews = {
     request<ConversationAnalysis>(`/interviews/${id}/analysis`),
 
   generateAnalysis: (id: string) =>
-    request<ConversationAnalysis>(`/interviews/${id}/analyze`, {
+    request<ConversationAnalysis | ScreeningAnalysis>(`/interviews/${id}/analyze`, {
       method: 'POST',
     }),
 };

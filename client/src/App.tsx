@@ -130,6 +130,14 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="analysis/:id"
+              element={
+                <ProtectedRoute roles={['admin', 'client']}>
+                  <InterviewAnalysis />
+                </ProtectedRoute>
+              }
+            />
           </Route>
         </Routes>
       </BrowserRouter>

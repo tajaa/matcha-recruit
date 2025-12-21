@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
-InterviewType = Literal["culture", "candidate"]
+InterviewType = Literal["culture", "candidate", "screening"]
 
 
 # Conversation Analysis Models
@@ -58,6 +58,24 @@ class ConversationAnalysis(BaseModel):
     analyzed_at: datetime
 
 
+# Screening Analysis Models
+class ScreeningAttribute(BaseModel):
+    score: int  # 0-100
+    evidence: list[str]
+    notes: Optional[str] = None
+
+
+class ScreeningAnalysis(BaseModel):
+    communication_clarity: ScreeningAttribute
+    engagement_energy: ScreeningAttribute
+    critical_thinking: ScreeningAttribute
+    professionalism: ScreeningAttribute
+    overall_score: int  # 0-100
+    recommendation: Literal["strong_pass", "pass", "borderline", "fail"]
+    summary: str
+    analyzed_at: datetime
+
+
 class InterviewCreate(BaseModel):
     company_id: UUID
     interviewer_name: Optional[str] = None
@@ -74,6 +92,7 @@ class Interview(BaseModel):
     transcript: Optional[str] = None
     raw_culture_data: Optional[dict[str, Any]] = None
     conversation_analysis: Optional[ConversationAnalysis] = None
+    screening_analysis: Optional[ScreeningAnalysis] = None
     status: str  # pending, in_progress, completed
     created_at: datetime
     completed_at: Optional[datetime] = None
@@ -88,6 +107,7 @@ class InterviewResponse(BaseModel):
     transcript: Optional[str] = None
     raw_culture_data: Optional[dict[str, Any]] = None
     conversation_analysis: Optional[ConversationAnalysis] = None
+    screening_analysis: Optional[ScreeningAnalysis] = None
     status: str
     created_at: datetime
     completed_at: Optional[datetime] = None

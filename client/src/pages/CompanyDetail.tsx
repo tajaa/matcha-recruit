@@ -109,7 +109,19 @@ export function CompanyDetail() {
     return <div className="text-center py-12 text-zinc-500">Company not found</div>;
   }
 
-  const completedInterviews = interviews.filter((i) => i.status === 'completed');
+  const cultureInterviews = interviews.filter((i) => i.interview_type === 'culture');
+  const screeningInterviews = interviews.filter((i) => i.interview_type === 'screening');
+  const completedCultureInterviews = cultureInterviews.filter((i) => i.status === 'completed');
+
+  const handleStartScreening = async () => {
+    if (!id) return;
+    try {
+      const result = await interviewsApi.create(id, { interview_type: 'screening' });
+      navigate(`/interview/${result.interview_id}`);
+    } catch (err) {
+      console.error('Failed to create screening interview:', err);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -137,11 +149,11 @@ export function CompanyDetail() {
             </Button>
           </CardHeader>
           <CardContent>
-            {interviews.length === 0 ? (
-              <p className="text-zinc-500 text-center py-8">No interviews yet</p>
+            {cultureInterviews.length === 0 ? (
+              <p className="text-zinc-500 text-center py-8">No culture interviews yet</p>
             ) : (
               <div className="space-y-3 mt-2">
-                {interviews.map((interview) => (
+                {cultureInterviews.map((interview) => (
                   <div
                     key={interview.id}
                     onClick={() => handleViewTranscript(interview)}
@@ -170,7 +182,7 @@ export function CompanyDetail() {
                 ))}
               </div>
             )}
-            {completedInterviews.length > 0 && (
+            {completedCultureInterviews.length > 0 && (
               <div className="mt-6 pt-4 border-t border-zinc-800">
                 <Button
                   size="sm"
@@ -237,6 +249,84 @@ export function CompanyDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Screening Interviews Section */}
+      <Card>
+        <CardHeader className="flex justify-between items-center border-zinc-800">
+          <h2 className="text-lg font-semibold text-zinc-100">Screening Interviews</h2>
+          <Button size="sm" onClick={handleStartScreening} className="bg-orange-500 hover:bg-orange-600">
+            New Screening
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {screeningInterviews.length === 0 ? (
+            <p className="text-zinc-500 text-center py-8">
+              No screening interviews yet. Screen candidates to assess communication and professionalism.
+            </p>
+          ) : (
+            <div className="space-y-3 mt-2">
+              {screeningInterviews.map((interview) => {
+                const score = interview.screening_analysis?.overall_score;
+                const recommendation = interview.screening_analysis?.recommendation;
+                return (
+                  <div
+                    key={interview.id}
+                    onClick={() => navigate(`/app/analysis/${interview.id}`)}
+                    className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-lg border border-zinc-800/50 hover:border-orange-500/50 cursor-pointer transition-colors"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-zinc-200">
+                          Screening #{screeningInterviews.indexOf(interview) + 1}
+                        </p>
+                        <span className="text-xs text-zinc-500">
+                          {new Date(interview.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {interview.screening_analysis?.summary && (
+                        <p className="text-sm text-zinc-400 mt-1 line-clamp-1">
+                          {interview.screening_analysis.summary}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {interview.status === 'completed' && score !== undefined ? (
+                        <>
+                          <span className={`text-xl font-bold ${
+                            score >= 80 ? 'text-matcha-400' :
+                            score >= 60 ? 'text-yellow-400' :
+                            score >= 40 ? 'text-orange-400' : 'text-red-400'
+                          }`}>
+                            {score}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            recommendation === 'strong_pass' ? 'bg-matcha-500/20 text-matcha-400' :
+                            recommendation === 'pass' ? 'bg-yellow-500/20 text-yellow-400' :
+                            recommendation === 'borderline' ? 'bg-orange-500/20 text-orange-400' :
+                            'bg-red-500/20 text-red-400'
+                          }`}>
+                            {recommendation?.replace('_', ' ').toUpperCase()}
+                          </span>
+                        </>
+                      ) : (
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                            interview.status === 'in_progress'
+                              ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                              : 'bg-zinc-700/50 text-zinc-400 border-zinc-700'
+                          }`}
+                        >
+                          {interview.status}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Positions Section */}
       <Card>
