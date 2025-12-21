@@ -2,7 +2,9 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import type { WSMessage } from '../types';
 
 const AUDIO_SAMPLE_RATE = 16000;
+const OUTPUT_SAMPLE_RATE = 24000;
 const AUDIO_CHUNK_SIZE = 4096;
+const PLAYAHEAD_SECONDS = 0.25;
 
 // Audio message type prefixes (must match backend protocol)
 const AUDIO_FROM_CLIENT = 0x01;
@@ -28,55 +30,56 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
-  const audioQueueRef = useRef<AudioBuffer[]>([]);
-  const isPlayingRef = useRef(false);
+  const nextPlaybackTimeRef = useRef(0);
 
-  // Play audio from server
-  const playAudio = useCallback(async (pcmData: ArrayBuffer) => {
-    if (!playbackContextRef.current) {
-      playbackContextRef.current = new AudioContext({ sampleRate: 24000 });
-    }
-
+  const schedulePlayback = useCallback((buffer: AudioBuffer) => {
     const ctx = playbackContextRef.current;
-    const samples = new Int16Array(pcmData);
-    const floatSamples = new Float32Array(samples.length);
+    if (!ctx) return;
 
-    for (let i = 0; i < samples.length; i++) {
-      floatSamples[i] = samples[i] / 32768;
-    }
-
-    const audioBuffer = ctx.createBuffer(1, floatSamples.length, 24000);
-    audioBuffer.getChannelData(0).set(floatSamples);
-
-    audioQueueRef.current.push(audioBuffer);
-
-    if (!isPlayingRef.current) {
-      playNextInQueue();
-    }
-  }, []);
-
-  const playNextInQueue = useCallback(() => {
-    if (audioQueueRef.current.length === 0) {
-      isPlayingRef.current = false;
-      return;
-    }
-
-    isPlayingRef.current = true;
-    const buffer = audioQueueRef.current.shift()!;
-    const ctx = playbackContextRef.current!;
+    const now = ctx.currentTime;
+    const startTime = Math.max(nextPlaybackTimeRef.current, now + PLAYAHEAD_SECONDS);
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(ctx.destination);
-    source.onended = playNextInQueue;
-    source.start();
+    source.start(startTime);
+    nextPlaybackTimeRef.current = startTime + buffer.duration;
   }, []);
+
+  // Play audio from server
+  const playAudio = useCallback(
+    async (pcmData: ArrayBuffer) => {
+      if (!playbackContextRef.current) {
+        playbackContextRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
+        nextPlaybackTimeRef.current = 0;
+      }
+
+      const ctx = playbackContextRef.current;
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+
+      const samples = new Int16Array(pcmData);
+      const floatSamples = new Float32Array(samples.length);
+
+      for (let i = 0; i < samples.length; i++) {
+        floatSamples[i] = samples[i] / 32768;
+      }
+
+      const audioBuffer = ctx.createBuffer(1, floatSamples.length, OUTPUT_SAMPLE_RATE);
+      audioBuffer.getChannelData(0).set(floatSamples);
+
+      schedulePlayback(audioBuffer);
+    },
+    [schedulePlayback],
+  );
 
   // Connect to WebSocket
   const connect = useCallback(() => {
     if (wsRef.current) return;
 
     const ws = new WebSocket(`ws://localhost:8000/api/ws/interview/${interviewId}`);
+    ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
       setIsConnected(true);
@@ -103,24 +106,30 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
     };
 
     ws.onmessage = async (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        const dataView = new Uint8Array(event.data);
+        if (dataView[0] === AUDIO_FROM_SERVER) {
+          const audioData = event.data.slice(1);
+          playAudio(audioData);
+        }
+        return;
+      }
+
       if (event.data instanceof Blob) {
-        // Binary audio data from server
         const arrayBuffer = await event.data.arrayBuffer();
         const dataView = new Uint8Array(arrayBuffer);
-
         if (dataView[0] === AUDIO_FROM_SERVER) {
-          // Strip the prefix byte and play
           const audioData = arrayBuffer.slice(1);
           playAudio(audioData);
         }
-      } else {
-        // Text message
-        try {
-          const msg: WSMessage = JSON.parse(event.data);
-          setMessages((prev) => [...prev, msg]);
-        } catch {
-          console.error('Failed to parse message:', event.data);
-        }
+        return;
+      }
+
+      try {
+        const msg: WSMessage = JSON.parse(event.data);
+        setMessages((prev) => [...prev, msg]);
+      } catch {
+        console.error('Failed to parse message:', event.data);
       }
     };
 
@@ -134,6 +143,11 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
       wsRef.current.close();
       wsRef.current = null;
     }
+    if (playbackContextRef.current) {
+      playbackContextRef.current.close();
+      playbackContextRef.current = null;
+    }
+    nextPlaybackTimeRef.current = 0;
     setIsConnected(false);
   }, []);
 

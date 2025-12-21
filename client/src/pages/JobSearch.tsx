@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { jobSearch } from '../api/client';
-import { Button, Card, CardHeader, CardContent } from '../components';
+import { Button, Card, CardContent } from '../components';
 import type { JobSearchResponse, JobListing, DatePostedFilter, JobEmploymentTypeFilter, SavedJob } from '../types';
 
 type ViewMode = 'search' | 'saved';
@@ -242,7 +242,7 @@ export function JobSearch() {
     const isExpanded = expandedJobs.has(jobKey);
     const salary = extensions.salary || job.extensions?.find(ext => ext.includes('$') || ext.toLowerCase().includes('year') || ext.toLowerCase().includes('hour'));
     const isSaved = savedJobIds.has(job.job_id || jobKey);
-    const isSaving = savingJobs.has(jobKey) || (job.job_id && savingJobs.has(job.job_id));
+    const isSaving = savingJobs.has(jobKey) || (job.job_id ? savingJobs.has(job.job_id) : false);
 
     return (
       <div key={jobKey} className="p-5 bg-zinc-800/50 rounded-lg border border-zinc-800/50 hover:border-zinc-700 transition-colors">
