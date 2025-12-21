@@ -5,6 +5,8 @@ const AUDIO_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
 const AUDIO_CHUNK_SIZE = 4096;
 const PLAYAHEAD_SECONDS = 0.25;
+const TURN_START_DELAY_SECONDS = 0.5;
+const TURN_START_GRACE_SECONDS = 0.05;
 
 // Audio message type prefixes (must match backend protocol)
 const AUDIO_FROM_CLIENT = 0x01;
@@ -37,7 +39,12 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
     if (!ctx) return;
 
     const now = ctx.currentTime;
-    const startTime = Math.max(nextPlaybackTimeRef.current, now + PLAYAHEAD_SECONDS);
+    const isNewTurn = nextPlaybackTimeRef.current <= now + TURN_START_GRACE_SECONDS;
+    let startTime = Math.max(nextPlaybackTimeRef.current, now + PLAYAHEAD_SECONDS);
+
+    if (isNewTurn) {
+      startTime = Math.max(startTime, now + PLAYAHEAD_SECONDS + TURN_START_DELAY_SECONDS);
+    }
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
