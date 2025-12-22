@@ -16,7 +16,7 @@ const allNavItems: NavItem[] = [
   { path: '/app/jobs', label: 'Job Search', roles: ['admin', 'candidate'] },
   { path: '/app/test-bot', label: 'Test Bot', roles: ['admin', 'candidate'] },
   { path: '/app/import', label: 'Import', roles: ['admin'] },
-  { path: '/careers', label: 'Careers', roles: ['admin', 'client', 'candidate'] },
+  { path: '/app/careers', label: 'Careers', roles: ['admin', 'client', 'candidate'] },
 ];
 
 export function Layout() {
