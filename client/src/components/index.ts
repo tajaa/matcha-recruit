@@ -8,3 +8,4 @@ export { PositionCard } from './PositionCard';
 export { PositionForm } from './PositionForm';
 export { PositionMatchCard } from './PositionMatchCard';
 export { ProtectedRoute } from './ProtectedRoute';
+export { ParticleSphere } from './ParticleSphere';
