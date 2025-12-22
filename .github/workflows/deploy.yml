@@ -47,8 +47,8 @@ jobs:
 
       - name: Output image tags
         run: |
-          echo "Backend: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/matcha-backend:$(git rev-parse --short HEAD)"
-          echo "Frontend: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/matcha-frontend:$(git rev-parse --short HEAD)"
+          echo "Backend: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/matcha-backend:latest"
+          echo "Frontend: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/matcha-frontend:latest"
 
   deploy-to-ec2:
     name: Deploy to EC2
@@ -73,19 +73,15 @@ jobs:
         env:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-          GIT_SHA: ${{ github.sha }}
         run: |
-          SHORT_SHA=$(echo $GIT_SHA | cut -c1-7)
-
           # Send command to EC2 via SSM
           aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --parameters "commands=[
-              'cd /opt/matcha',
+              'cd ~/matcha',
               'aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com',
-              'docker pull $AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/matcha-backend:${SHORT_SHA}',
-              'docker pull $AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/matcha-frontend:${SHORT_SHA}',
+              'docker-compose pull',
               'docker-compose down',
               'docker-compose up -d',
               'docker system prune -f'

@@ -37,6 +37,12 @@ htmlcov/
 .env.backend
 .env.build
 
+# SSH/Deployment
+*.pem
+*.key
+*.p12
+service-account*.json
+
 # Node
 node_modules/
 client/node_modules/
