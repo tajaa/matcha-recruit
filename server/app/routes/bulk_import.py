@@ -34,10 +34,10 @@ async def bulk_import_companies(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
 
-    if not (file.filename.endswith(".csv") or file.filename.endswith(".json")):
+    if not (file.filename.endswith(".csv") or file.filename.endswith(".json") or file.filename.endswith(".pdf")):
         raise HTTPException(
             status_code=400,
-            detail="Unsupported file type. Use .csv or .json",
+            detail="Unsupported file type. Use .csv, .json, or .pdf",
         )
 
     try:
@@ -87,10 +87,10 @@ async def bulk_import_positions(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
 
-    if not (file.filename.endswith(".csv") or file.filename.endswith(".json")):
+    if not (file.filename.endswith(".csv") or file.filename.endswith(".json") or file.filename.endswith(".pdf")):
         raise HTTPException(
             status_code=400,
-            detail="Unsupported file type. Use .csv or .json",
+            detail="Unsupported file type. Use .csv, .json, or .pdf",
         )
 
     try:

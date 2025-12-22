@@ -1,10 +1,12 @@
 import csv
 import json
 import io
+import re
 from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import ValidationError
+from pypdf import PdfReader
 
 from ..models.bulk_import import (
     BulkImportResult,
@@ -31,14 +33,66 @@ class BulkImporter:
             raise ValueError("JSON must be an array of objects")
         return data
 
+    def parse_pdf(self, file_bytes: bytes) -> list[dict[str, Any]]:
+        """Parse PDF file into list of dicts.
+
+        Extracts text from PDF and attempts to parse as tabular data.
+        Expects first line to be headers, subsequent lines to be data rows.
+        """
+        reader = PdfReader(io.BytesIO(file_bytes))
+
+        # Extract all text from all pages
+        all_text = ""
+        for page in reader.pages:
+            all_text += page.extract_text() + "\n"
+
+        # Split into lines and filter empty ones
+        lines = [line.strip() for line in all_text.split("\n") if line.strip()]
+
+        if len(lines) < 2:
+            raise ValueError("PDF must contain at least a header row and one data row")
+
+        # Try to detect delimiter (comma, tab, or multiple spaces)
+        header_line = lines[0]
+        if "," in header_line:
+            delimiter = ","
+        elif "\t" in header_line:
+            delimiter = "\t"
+        else:
+            # Use regex to split on multiple spaces
+            delimiter = None
+
+        if delimiter:
+            headers = [h.strip().lower().replace(" ", "_") for h in header_line.split(delimiter)]
+            rows = []
+            for line in lines[1:]:
+                values = [v.strip() for v in line.split(delimiter)]
+                if len(values) == len(headers):
+                    rows.append(dict(zip(headers, values)))
+        else:
+            # Split on multiple whitespace
+            headers = [h.strip().lower().replace(" ", "_") for h in re.split(r"\s{2,}", header_line)]
+            rows = []
+            for line in lines[1:]:
+                values = [v.strip() for v in re.split(r"\s{2,}", line)]
+                if len(values) == len(headers):
+                    rows.append(dict(zip(headers, values)))
+
+        if not rows:
+            raise ValueError("Could not parse any data rows from PDF. Ensure data is in tabular format.")
+
+        return rows
+
     def parse_file(self, file_bytes: bytes, filename: str) -> list[dict[str, Any]]:
         """Parse file based on extension."""
         if filename.endswith(".csv"):
             return self.parse_csv(file_bytes)
         elif filename.endswith(".json"):
             return self.parse_json(file_bytes)
+        elif filename.endswith(".pdf"):
+            return self.parse_pdf(file_bytes)
         else:
-            raise ValueError(f"Unsupported file type: {filename}. Use .csv or .json")
+            raise ValueError(f"Unsupported file type: {filename}. Use .csv, .json, or .pdf")
 
     def _parse_comma_separated(self, value: Optional[str]) -> Optional[list[str]]:
         """Parse comma-separated string into list."""

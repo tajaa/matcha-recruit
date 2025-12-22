@@ -46,7 +46,7 @@ export function BulkImport() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-white tracking-tight">Bulk Import</h1>
-        <p className="text-zinc-400 mt-1">Import companies and positions from CSV or JSON files</p>
+        <p className="text-zinc-400 mt-1">Import companies and positions from CSV, JSON, or PDF files</p>
       </div>
 
       {/* Tabs */}
@@ -74,11 +74,11 @@ export function BulkImport() {
           </CardHeader>
           <CardContent>
             <FileUpload
-              accept=".csv,.json"
+              accept=".csv,.json,.pdf"
               onUpload={handleUpload}
               disabled={loading}
               label={loading ? 'Importing...' : `Upload ${activeTab} file`}
-              description="Drag and drop a CSV or JSON file, or click to browse"
+              description="Drag and drop a CSV, JSON, or PDF file, or click to browse"
             />
 
             {/* Instructions */}
@@ -97,6 +97,9 @@ export function BulkImport() {
                     <li><strong className="text-zinc-400">industry</strong>: e.g., Technology, Finance</li>
                     <li><strong className="text-zinc-400">size</strong>: startup, mid, or enterprise</li>
                   </ul>
+                  <p className="mt-3 text-zinc-400">
+                    PDF files should contain tabular data with headers in the first row.
+                  </p>
                 </div>
               ) : (
                 <div className="text-sm text-zinc-500 space-y-2">
@@ -114,6 +117,9 @@ export function BulkImport() {
                   </ul>
                   <p className="mt-3 text-amber-500">
                     Note: Companies must be imported first before positions.
+                  </p>
+                  <p className="mt-2 text-zinc-400">
+                    PDF files should contain tabular data with headers in the first row.
                   </p>
                 </div>
               )}
