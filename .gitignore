@@ -32,3 +32,12 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Docker
+.env.backend
+.env.build
+
+# Node
+node_modules/
+client/node_modules/
+client/dist/
