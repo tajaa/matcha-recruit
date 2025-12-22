@@ -10,7 +10,7 @@ const TURN_START_GRACE_SECONDS = 0.05;
 
 // Session protection constants
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes idle = auto-disconnect
-const MAX_SESSION_DURATION_MS = 30 * 60 * 1000; // 30 minutes max session
+const MAX_SESSION_DURATION_MS = 12 * 60 * 1000; // 12 minutes max session
 const WARNING_BEFORE_DISCONNECT_MS = 60 * 1000; // Warn 1 minute before auto-disconnect
 
 // Audio message type prefixes (must match backend protocol)
@@ -175,7 +175,7 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
           ...prev,
           {
             type: 'system',
-            content: '⏰ Maximum session duration reached (30 minutes). Disconnecting to save API credits.',
+            content: '⏰ Maximum session duration reached (12 minutes). Disconnecting to save API credits.',
             timestamp: Date.now(),
           },
         ]);
