@@ -108,3 +108,18 @@ class CurrentUser(BaseModel):
     email: str
     role: UserRole
     profile: Optional[AdminProfile | ClientProfile | CandidateProfile] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class ChangeEmailRequest(BaseModel):
+    password: str  # Require password confirmation
+    new_email: EmailStr
+
+
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None

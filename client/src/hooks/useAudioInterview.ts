@@ -8,6 +8,11 @@ const PLAYAHEAD_SECONDS = 0.25;
 const TURN_START_DELAY_SECONDS = 0.5;
 const TURN_START_GRACE_SECONDS = 0.05;
 
+// Session protection constants
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes idle = auto-disconnect
+const MAX_SESSION_DURATION_MS = 30 * 60 * 1000; // 30 minutes max session
+const WARNING_BEFORE_DISCONNECT_MS = 60 * 1000; // Warn 1 minute before auto-disconnect
+
 // Audio message type prefixes (must match backend protocol)
 const AUDIO_FROM_CLIENT = 0x01;
 const AUDIO_FROM_SERVER = 0x02;
@@ -16,16 +21,21 @@ interface UseAudioInterviewReturn {
   isConnected: boolean;
   isRecording: boolean;
   messages: WSMessage[];
+  sessionTimeRemaining: number | null; // seconds remaining, null if not connected
+  idleWarning: boolean;
   connect: () => void;
   disconnect: () => void;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
+  resetIdleTimer: () => void;
 }
 
 export function useAudioInterview(interviewId: string): UseAudioInterviewReturn {
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [messages, setMessages] = useState<WSMessage[]>([]);
+  const [sessionTimeRemaining, setSessionTimeRemaining] = useState<number | null>(null);
+  const [idleWarning, setIdleWarning] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -33,6 +43,13 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
   const nextPlaybackTimeRef = useRef(0);
+
+  // Session protection refs
+  const sessionStartTimeRef = useRef<number | null>(null);
+  const lastActivityTimeRef = useRef<number>(Date.now());
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const warningTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const schedulePlayback = useCallback((buffer: AudioBuffer) => {
     const ctx = playbackContextRef.current;
@@ -53,9 +70,130 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
     nextPlaybackTimeRef.current = startTime + buffer.duration;
   }, []);
 
+  // Clear all session protection timers
+  const clearAllTimers = useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    if (sessionTimerRef.current) {
+      clearInterval(sessionTimerRef.current);
+      sessionTimerRef.current = null;
+    }
+    if (warningTimerRef.current) {
+      clearTimeout(warningTimerRef.current);
+      warningTimerRef.current = null;
+    }
+    setIdleWarning(false);
+    setSessionTimeRemaining(null);
+  }, []);
+
+  // Reset idle timer (called on any activity)
+  const resetIdleTimer = useCallback(() => {
+    lastActivityTimeRef.current = Date.now();
+    setIdleWarning(false);
+
+    // Clear existing idle timer
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+    if (warningTimerRef.current) {
+      clearTimeout(warningTimerRef.current);
+    }
+
+    if (!wsRef.current || !isConnected) return;
+
+    // Set warning timer (1 minute before disconnect)
+    warningTimerRef.current = setTimeout(() => {
+      setIdleWarning(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: 'system',
+          content: '⚠️ Session idle - will disconnect in 1 minute. Click or speak to stay connected.',
+          timestamp: Date.now(),
+        },
+      ]);
+    }, IDLE_TIMEOUT_MS - WARNING_BEFORE_DISCONNECT_MS);
+
+    // Set disconnect timer
+    idleTimerRef.current = setTimeout(() => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: 'system',
+          content: '🔌 Session disconnected due to inactivity (saving API credits)',
+          timestamp: Date.now(),
+        },
+      ]);
+      // Will call disconnect after setting message
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    }, IDLE_TIMEOUT_MS);
+  }, [isConnected]);
+
+  // Start session timer (tracks max duration)
+  const startSessionTimer = useCallback(() => {
+    sessionStartTimeRef.current = Date.now();
+
+    // Update remaining time every second
+    sessionTimerRef.current = setInterval(() => {
+      if (!sessionStartTimeRef.current) return;
+
+      const elapsed = Date.now() - sessionStartTimeRef.current;
+      const remaining = Math.max(0, Math.floor((MAX_SESSION_DURATION_MS - elapsed) / 1000));
+      setSessionTimeRemaining(remaining);
+
+      // Warn at 5 minutes remaining
+      if (remaining === 300) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: 'system',
+            content: '⏱️ 5 minutes remaining in session',
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+
+      // Warn at 1 minute remaining
+      if (remaining === 60) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: 'system',
+            content: '⚠️ 1 minute remaining - session will end soon',
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+
+      // Auto-disconnect at max duration
+      if (remaining === 0) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: 'system',
+            content: '⏰ Maximum session duration reached (30 minutes). Disconnecting to save API credits.',
+            timestamp: Date.now(),
+          },
+        ]);
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
+      }
+    }, 1000);
+
+    resetIdleTimer();
+  }, [resetIdleTimer]);
+
   // Play audio from server
   const playAudio = useCallback(
     async (pcmData: ArrayBuffer) => {
+      // Reset idle timer on incoming audio (activity)
+      resetIdleTimer();
+
       if (!playbackContextRef.current) {
         playbackContextRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
         nextPlaybackTimeRef.current = 0;
@@ -78,7 +216,7 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
 
       schedulePlayback(audioBuffer);
     },
-    [schedulePlayback],
+    [schedulePlayback, resetIdleTimer],
   );
 
   // Connect to WebSocket
@@ -94,10 +232,12 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
         ...prev,
         { type: 'system', content: 'Connected to interview', timestamp: Date.now() },
       ]);
+      startSessionTimer();
     };
 
     ws.onclose = () => {
       setIsConnected(false);
+      clearAllTimers();
       setMessages((prev) => [
         ...prev,
         { type: 'system', content: 'Disconnected', timestamp: Date.now() },
@@ -141,11 +281,12 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
     };
 
     wsRef.current = ws;
-  }, [interviewId, playAudio]);
+  }, [interviewId, playAudio, startSessionTimer, clearAllTimers]);
 
   // Disconnect
   const disconnect = useCallback(() => {
     stopRecording();
+    clearAllTimers();
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -155,8 +296,9 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
       playbackContextRef.current = null;
     }
     nextPlaybackTimeRef.current = 0;
+    sessionStartTimeRef.current = null;
     setIsConnected(false);
-  }, []);
+  }, [clearAllTimers]);
 
   // Start recording
   const startRecording = useCallback(async () => {
@@ -180,6 +322,9 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
 
       processor.onaudioprocess = (e) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+        // Reset idle timer on outgoing audio (user activity)
+        resetIdleTimer();
 
         const inputData = e.inputBuffer.getChannelData(0);
         const pcmData = new Int16Array(inputData.length);
@@ -251,9 +396,12 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
     isConnected,
     isRecording,
     messages,
+    sessionTimeRemaining,
+    idleWarning,
     connect,
     disconnect,
     startRecording,
     stopRecording,
+    resetIdleTimer,
   };
 }
