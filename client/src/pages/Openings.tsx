@@ -155,14 +155,50 @@ export function Openings() {
     });
   }, [searchResult, filterKeyword, filterCompany]);
 
-  // Group by company
+  // Helper to extract domain from URL for display
+  const extractDomain = (url: string): string => {
+    try {
+      const hostname = new URL(url).hostname.replace('www.', '');
+      return hostname;
+    } catch {
+      return '';
+    }
+  };
+
+  // Helper to check if a company name looks generic/bad
+  const isGenericName = (name: string): boolean => {
+    const lower = name.toLowerCase().trim();
+    const genericNames = [
+      'careers', 'jobs', 'linkedin', 'indeed', 'glassdoor', 'hiring',
+      'openings', 'open positions', 'job search', 'work with us',
+      'join us', 'join our team', 'career opportunities'
+    ];
+    return genericNames.includes(lower) || lower.length < 2;
+  };
+
+  // Get a better display name for a company
+  const getDisplayName = (job: ScrapedJob): string => {
+    if (!isGenericName(job.company_name)) {
+      return job.company_name;
+    }
+    // Fallback to domain name
+    const domain = extractDomain(job.source_url);
+    if (domain) {
+      // Clean up domain for display
+      return domain.split('.')[0].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+    return job.company_name;
+  };
+
+  // Group by company (using improved display names)
   const jobsByCompany = useMemo(() => {
-    const groups: Record<string, ScrapedJob[]> = {};
+    const groups: Record<string, { jobs: ScrapedJob[]; sourceUrl: string }> = {};
     for (const job of filteredJobs) {
-      if (!groups[job.company_name]) {
-        groups[job.company_name] = [];
+      const displayName = getDisplayName(job);
+      if (!groups[displayName]) {
+        groups[displayName] = { jobs: [], sourceUrl: job.source_url };
       }
-      groups[job.company_name].push(job);
+      groups[displayName].jobs.push(job);
     }
     return groups;
   }, [filteredJobs]);
@@ -364,31 +400,42 @@ export function Openings() {
                 </Card>
               ) : (
                 <div className="space-y-4">
-                  {companyNames.map((companyName) => (
+                  {companyNames.map((companyName) => {
+                    const companyData = jobsByCompany[companyName];
+                    const sourceDomain = extractDomain(companyData.sourceUrl);
+
+                    return (
                     <Card key={companyName}>
                       <CardContent className="p-4">
                         {/* Company Header */}
                         <div className="flex items-center justify-between mb-3 pb-3 border-b border-zinc-800/50">
                           <div>
-                            <h3 className="text-xs text-zinc-200 tracking-wide">{companyName}</h3>
-                            <p className="text-[9px] text-zinc-600 mt-0.5">
-                              {jobsByCompany[companyName].length} position
-                              {jobsByCompany[companyName].length !== 1 ? 's' : ''}
-                            </p>
+                            <h3 className="text-sm text-zinc-100 font-medium tracking-wide">{companyName}</h3>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[9px] text-zinc-500">
+                                {companyData.jobs.length} position{companyData.jobs.length !== 1 ? 's' : ''}
+                              </span>
+                              {sourceDomain && (
+                                <>
+                                  <span className="text-zinc-700">•</span>
+                                  <span className="text-[9px] text-zinc-600">{sourceDomain}</span>
+                                </>
+                              )}
+                            </div>
                           </div>
                           <a
-                            href={jobsByCompany[companyName][0].source_url}
+                            href={companyData.sourceUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-[9px] text-matcha-500 hover:text-matcha-400 tracking-wide"
                           >
-                            View Career Page
+                            View Career Page →
                           </a>
                         </div>
 
                         {/* Jobs */}
                         <div className="space-y-2">
-                          {jobsByCompany[companyName].map((job, idx) => {
+                          {companyData.jobs.map((job, idx) => {
                             const isSaved = savedUrls.has(job.apply_url);
                             const isSaving = savingUrls.has(job.apply_url);
 
@@ -474,7 +521,8 @@ export function Openings() {
                         </div>
                       </CardContent>
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>

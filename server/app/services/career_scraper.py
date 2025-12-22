@@ -96,16 +96,82 @@ async def search_career_pages(
 
     results = []
     for item in data.get("organic_results", []):
+        title = item.get("title", "")
+        url = item.get("link", "")
+
+        # Extract company name from search result title
+        # Titles are often like "Careers at Sweetgreen" or "Jobs | Company Name"
+        company_name = _extract_company_from_title(title, url)
+
         results.append({
-            "title": item.get("title", ""),
-            "url": item.get("link", ""),
+            "title": title,
+            "url": url,
             "snippet": item.get("snippet", ""),
+            "company_name": company_name,
         })
 
     return results
 
 
-async def scrape_career_page(url: str, timeout: float = 15.0) -> CareerPageResult:
+def _extract_company_from_title(title: str, url: str) -> str:
+    """Extract company name from search result title."""
+    # Common patterns in career page titles:
+    # "Careers at Company" -> Company
+    # "Company - Careers" -> Company
+    # "Company | Jobs" -> Company
+    # "Jobs at Company" -> Company
+    # "Company Careers" -> Company
+    # "Company | Careers | Glassdoor" -> Company
+
+    # Words that indicate it's not a real company name
+    generic_words = {
+        "careers", "jobs", "hiring", "openings", "open positions",
+        "work with us", "join us", "join our team", "employment",
+        "linkedin", "glassdoor", "indeed", "job search"
+    }
+
+    def is_valid_name(name: str) -> bool:
+        """Check if the name is a valid company name (not generic)."""
+        cleaned = name.strip().lower()
+        return len(cleaned) >= 2 and cleaned not in generic_words
+
+    # Try "Careers at X" or "Jobs at X"
+    match = re.search(r"(?:careers?|jobs?)\s+at\s+(.+?)(?:\s*[-|]|$)", title, re.I)
+    if match and is_valid_name(match.group(1)):
+        return match.group(1).strip()
+
+    # Try "Work at X" or "Join X"
+    match = re.search(r"(?:work|join)\s+(?:at\s+)?(.+?)(?:\s*[-|]|$)", title, re.I)
+    if match and is_valid_name(match.group(1)):
+        return match.group(1).strip()
+
+    # Try "X - Careers" or "X | Jobs" (taking first part before separator)
+    match = re.search(r"^(.+?)\s*[-|]\s*(?:careers?|jobs?|hiring|openings?|work with us)", title, re.I)
+    if match and is_valid_name(match.group(1)):
+        return match.group(1).strip()
+
+    # Try "X Careers" or "X Jobs" at end
+    match = re.search(r"^(.+?)\s+(?:careers?|jobs?)$", title, re.I)
+    if match and is_valid_name(match.group(1)):
+        return match.group(1).strip()
+
+    # Try extracting from "Company | Something | Something Else" format
+    # Take first segment if it looks like a company name
+    parts = re.split(r"\s*[|–-]\s*", title)
+    for part in parts:
+        part = part.strip()
+        if is_valid_name(part) and len(part) < 50:
+            return part
+
+    # Fallback: extract from URL
+    return _extract_company_name(url)
+
+
+async def scrape_career_page(
+    url: str,
+    company_name: Optional[str] = None,
+    timeout: float = 15.0
+) -> CareerPageResult:
     """
     Fetch and parse a career page to extract job listings.
 
@@ -115,9 +181,16 @@ async def scrape_career_page(url: str, timeout: float = 15.0) -> CareerPageResul
     - Lever
     - Ashby
     - Generic job boards
+
+    Args:
+        url: The career page URL to scrape
+        company_name: Optional company name from search results (preferred over URL extraction)
+        timeout: Request timeout in seconds
     """
     parsed = urlparse(url)
-    company_name = _extract_company_name(url)
+    # Use provided company name, or extract from URL as fallback
+    if not company_name:
+        company_name = _extract_company_name(url)
 
     try:
         async with httpx.AsyncClient(
@@ -467,7 +540,11 @@ async def search_openings(
     batch_size = 3
     for i in range(0, len(career_pages), batch_size):
         batch = career_pages[i:i + batch_size]
-        tasks = [scrape_career_page(page["url"]) for page in batch]
+        # Pass company name from search results to scraper
+        tasks = [
+            scrape_career_page(page["url"], company_name=page.get("company_name"))
+            for page in batch
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for result in results:
