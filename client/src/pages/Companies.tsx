@@ -4,6 +4,9 @@ import { Button, Card, CardContent, Modal } from '../components';
 import { companies as companiesApi } from '../api/client';
 import type { Company, CompanyCreate } from '../types';
 
+const inputClasses =
+  'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50 focus:shadow-[0_0_10px_rgba(34,197,94,0.1)] transition-all font-mono';
+
 export function Companies() {
   const navigate = useNavigate();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -39,21 +42,39 @@ export function Companies() {
   };
 
   if (loading) {
-    return <div className="text-center py-12 text-zinc-500">Loading...</div>;
+    return (
+      <div className="flex items-center justify-center py-24">
+        <div className="flex items-center gap-3">
+          <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse" />
+          <span className="text-[11px] tracking-[0.2em] uppercase text-zinc-500">Loading</span>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-white tracking-tight">Companies</h1>
+    <div className="pb-12">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          <h1 className="text-2xl font-bold tracking-[-0.02em] text-white mb-1">COMPANIES</h1>
+          <p className="text-[10px] tracking-[0.3em] uppercase text-zinc-600">
+            Organization Management
+          </p>
+        </div>
         <Button onClick={() => setShowModal(true)}>Add Company</Button>
       </div>
 
       {companies.length === 0 ? (
         <Card>
-          <CardContent className="text-center py-12">
-            <p className="text-zinc-500 mb-4">No companies yet</p>
-            <Button onClick={() => setShowModal(true)}>Add your first company</Button>
+          <CardContent className="text-center py-16">
+            <div className="w-12 h-12 mx-auto mb-4 border border-zinc-800 flex items-center justify-center">
+              <span className="text-zinc-600 text-2xl">+</span>
+            </div>
+            <p className="text-[11px] tracking-[0.15em] uppercase text-zinc-500 mb-6">
+              No companies registered
+            </p>
+            <Button onClick={() => setShowModal(true)}>Initialize First Company</Button>
           </CardContent>
         </Card>
       ) : (
@@ -61,27 +82,53 @@ export function Companies() {
           {companies.map((company) => (
             <Card
               key={company.id}
-              className="hover:border-matcha-500/50 transition-colors cursor-pointer group"
+              className="cursor-pointer group"
             >
               <CardContent
                 className="cursor-pointer"
-                onClick={() => navigate(`/companies/${company.id}`)}
+                onClick={() => navigate(`/app/companies/${company.id}`)}
               >
-                <h3 className="text-xl font-semibold text-zinc-100 group-hover:text-matcha-400 transition-colors">{company.name}</h3>
-                <div className="mt-2 space-y-1 text-sm text-zinc-400">
-                  {company.industry && <p>Industry: <span className="text-zinc-300">{company.industry}</span></p>}
-                  {company.size && <p>Size: <span className="text-zinc-300">{company.size}</span></p>}
-                  <p>{company.interview_count} interview(s)</p>
+                <div className="flex items-start justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-white group-hover:text-matcha-400 transition-colors tracking-tight">
+                    {company.name}
+                  </h3>
+                  <div className="w-1.5 h-1.5 rounded-full bg-matcha-500 animate-pulse" />
                 </div>
-                <div className="mt-4">
+
+                <div className="space-y-2 text-[11px] tracking-wide">
+                  {company.industry && (
+                    <div className="flex justify-between">
+                      <span className="text-zinc-600 uppercase">Industry</span>
+                      <span className="text-zinc-300">{company.industry}</span>
+                    </div>
+                  )}
+                  {company.size && (
+                    <div className="flex justify-between">
+                      <span className="text-zinc-600 uppercase">Size</span>
+                      <span className="text-zinc-300 capitalize">{company.size}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-zinc-600 uppercase">Interviews</span>
+                    <span className="text-zinc-300">{company.interview_count}</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-zinc-800">
                   {company.culture_profile ? (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-matcha-500/10 text-matcha-400 border border-matcha-500/20">
-                      Culture Profile Ready
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <div className="w-1 h-1 rounded-full bg-matcha-500" />
+                      <span className="text-[9px] tracking-[0.15em] uppercase text-matcha-500">
+                        Culture Profile Active
+                      </span>
+                    </div>
                   ) : (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
-                      No Culture Profile
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <div className="w-1 h-1 rounded-full bg-zinc-600" />
+                      <span className="text-[9px] tracking-[0.15em] uppercase text-zinc-600">
+                        No Culture Profile
+                      </span>
+                    </div>
                   )}
                 </div>
               </CardContent>
@@ -91,36 +138,46 @@ export function Companies() {
       )}
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Add Company">
-        <form onSubmit={handleCreate} className="space-y-4">
+        <form onSubmit={handleCreate} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1">
-              Company Name *
+            <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+              Company Name <span className="text-matcha-500">*</span>
             </label>
             <input
               type="text"
               required
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-transparent text-zinc-100 placeholder-zinc-600 outline-none transition-all"
+              className={inputClasses}
               placeholder="Acme Corp"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1">Industry</label>
+            <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+              Industry
+            </label>
             <input
               type="text"
               value={formData.industry}
               onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
-              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-transparent text-zinc-100 placeholder-zinc-600 outline-none transition-all"
+              className={inputClasses}
               placeholder="Technology"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1">Size</label>
+            <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+              Size
+            </label>
             <select
               value={formData.size}
               onChange={(e) => setFormData({ ...formData, size: e.target.value })}
-              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-transparent text-zinc-100 outline-none transition-all"
+              className={`${inputClasses} appearance-none cursor-pointer`}
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2371717a'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 12px center',
+                backgroundSize: '16px',
+              }}
             >
               <option value="">Select size</option>
               <option value="startup">Startup (1-50)</option>

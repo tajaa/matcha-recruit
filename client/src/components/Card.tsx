@@ -8,15 +8,23 @@ interface CardProps {
 
 export function Card({ children, className = '' }: CardProps) {
   return (
-    <div className={`bg-zinc-900 rounded-xl shadow-lg shadow-black/20 border border-zinc-800 ${className}`}>
-      {children}
+    <div className={`relative ${className}`}>
+      {/* Corner brackets */}
+      <div className="absolute -top-1.5 -left-1.5 w-3 h-3 border-t border-l border-zinc-700" />
+      <div className="absolute -top-1.5 -right-1.5 w-3 h-3 border-t border-r border-zinc-700" />
+      <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 border-b border-l border-zinc-700" />
+      <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 border-b border-r border-zinc-700" />
+
+      <div className="bg-zinc-900/50 border border-zinc-800 transition-all hover:border-zinc-700">
+        {children}
+      </div>
     </div>
   );
 }
 
 export function CardHeader({ children, className = '' }: CardProps) {
   return (
-    <div className={`px-6 py-4 border-b border-zinc-800 ${className}`}>
+    <div className={`px-5 py-3 border-b border-zinc-800 ${className}`}>
       {children}
     </div>
   );
@@ -24,7 +32,7 @@ export function CardHeader({ children, className = '' }: CardProps) {
 
 export function CardContent({ children, className = '', onClick }: CardProps) {
   return (
-    <div className={`px-6 py-4 ${className}`} onClick={onClick}>
+    <div className={`px-5 py-4 ${className}`} onClick={onClick}>
       {children}
     </div>
   );

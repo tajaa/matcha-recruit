@@ -31,29 +31,40 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-400 font-sans selection:bg-matcha-500 selection:text-white">
-      <nav className="fixed top-0 inset-x-0 z-50 bg-zinc-900/80 backdrop-blur-md border-b border-white/5">
+    <div className="min-h-screen bg-zinc-950 text-zinc-400 font-mono selection:bg-matcha-500 selection:text-black">
+      {/* Subtle grid background */}
+      <div className="fixed inset-0 z-0 pointer-events-none">
+        <div
+          className="absolute inset-0 opacity-[0.02]"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, #22c55e 1px, transparent 1px),
+              linear-gradient(to bottom, #22c55e 1px, transparent 1px)
+            `,
+            backgroundSize: '60px 60px',
+          }}
+        />
+      </div>
+
+      <nav className="fixed top-0 inset-x-0 z-50 bg-zinc-950/90 backdrop-blur-sm border-b border-zinc-800/50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
+          <div className="flex justify-between h-14">
             <div className="flex items-center gap-8">
-              <div className="flex-shrink-0 flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-matcha-500 flex items-center justify-center text-zinc-950 font-bold text-lg">
-                  M
-                </div>
-                <div>
-                  <span className="text-xl font-bold text-white tracking-tight">Matcha</span>
-                  <span className="text-xl font-light text-zinc-500 ml-1">Recruit</span>
-                </div>
-              </div>
-              <div className="hidden sm:flex sm:space-x-1">
+              <Link to="/" className="flex-shrink-0 flex items-center gap-2 group">
+                <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+                <span className="text-xs tracking-[0.25em] uppercase text-matcha-500 font-medium group-hover:text-matcha-400 transition-colors">
+                  Matcha
+                </span>
+              </Link>
+              <div className="hidden sm:flex sm:items-center sm:gap-1">
                 {navItems.map((item) => (
                   <Link
                     key={item.path}
                     to={item.path}
-                    className={`inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-all duration-200 ${
+                    className={`px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
                       location.pathname === item.path
-                        ? 'text-matcha-400 bg-matcha-500/10'
-                        : 'text-zinc-400 hover:text-zinc-100 hover:bg-white/5'
+                        ? 'text-matcha-400 bg-matcha-500/10 border border-matcha-500/20'
+                        : 'text-zinc-500 hover:text-zinc-300 border border-transparent hover:border-zinc-800'
                     }`}
                   >
                     {item.label}
@@ -65,24 +76,24 @@ export function Layout() {
             {/* User menu */}
             {user && (
               <div className="flex items-center gap-4">
-                <div className="text-sm hidden md:block">
-                  <span className="text-zinc-500">Signed in as </span>
-                  <span className="text-white">{user.email}</span>
-                  <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-matcha-500/20 text-matcha-400 capitalize">
+                <div className="hidden md:flex items-center gap-3 text-[10px]">
+                  <span className="text-zinc-600 tracking-wide">OPERATOR:</span>
+                  <span className="text-zinc-300 tracking-wide">{user.email}</span>
+                  <span className="px-2 py-0.5 bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 tracking-[0.15em] uppercase">
                     {user.role}
                   </span>
                 </div>
                 <Link
                   to="/app/settings"
-                  className={`text-sm transition-colors px-3 py-1.5 rounded-md ${
+                  className={`p-2 transition-colors ${
                     location.pathname === '/app/settings'
-                      ? 'text-matcha-400 bg-matcha-500/10'
-                      : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                      ? 'text-matcha-400'
+                      : 'text-zinc-600 hover:text-zinc-300'
                   }`}
                   title="Settings"
                 >
                   <svg
-                    className="w-5 h-5"
+                    className="w-4 h-4"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -103,9 +114,9 @@ export function Layout() {
                 </Link>
                 <button
                   onClick={handleLogout}
-                  className="text-sm text-zinc-400 hover:text-white transition-colors px-3 py-1.5 rounded-md hover:bg-white/5"
+                  className="text-[10px] tracking-[0.15em] uppercase text-zinc-600 hover:text-zinc-300 transition-colors px-3 py-1.5 border border-transparent hover:border-zinc-800"
                 >
-                  Sign out
+                  Logout
                 </button>
               </div>
             )}
@@ -113,9 +124,24 @@ export function Layout() {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-12">
+      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-12">
         <Outlet />
       </main>
+
+      {/* Bottom status bar */}
+      <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-800/50 bg-zinc-950/90 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-matcha-500 animate-pulse" />
+            <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-600">
+              System Active
+            </span>
+          </div>
+          <span className="text-[9px] tracking-[0.15em] uppercase text-zinc-700">
+            Matcha Recruit v1.0
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }
