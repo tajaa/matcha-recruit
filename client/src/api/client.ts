@@ -448,6 +448,30 @@ export interface IndustriesResponse {
   industries: string[];
 }
 
+export interface SavedOpeningCreate {
+  title: string;
+  company_name: string;
+  location?: string;
+  department?: string;
+  apply_url: string;
+  source_url?: string;
+  industry?: string;
+  notes?: string;
+}
+
+export interface SavedOpening {
+  id: string;
+  title: string;
+  company_name: string;
+  location: string | null;
+  department: string | null;
+  apply_url: string;
+  source_url: string | null;
+  industry: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
 export const openings = {
   getIndustries: () => request<IndustriesResponse>('/openings/industries'),
 
@@ -455,6 +479,22 @@ export const openings = {
     request<OpeningsSearchResponse>('/openings/search', {
       method: 'POST',
       body: JSON.stringify(params),
+    }),
+
+  // Saved openings
+  save: (opening: SavedOpeningCreate) =>
+    request<SavedOpening>('/openings/saved', {
+      method: 'POST',
+      body: JSON.stringify(opening),
+    }),
+
+  listSaved: () => request<SavedOpening[]>('/openings/saved'),
+
+  getSavedUrls: () => request<string[]>('/openings/saved/urls'),
+
+  deleteSaved: (id: string) =>
+    request<{ status: string }>(`/openings/saved/${id}`, {
+      method: 'DELETE',
     }),
 };
 

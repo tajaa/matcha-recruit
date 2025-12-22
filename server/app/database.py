@@ -319,6 +319,27 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_saved_jobs_company_name ON saved_jobs(company_name)
         """)
 
+        # Saved openings table (scraped from career pages)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS saved_openings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                title VARCHAR(255) NOT NULL,
+                company_name VARCHAR(255) NOT NULL,
+                location VARCHAR(255),
+                department VARCHAR(255),
+                apply_url TEXT NOT NULL,
+                source_url TEXT,
+                industry VARCHAR(100),
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(apply_url)
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_openings_company ON saved_openings(company_name)
+        """)
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:

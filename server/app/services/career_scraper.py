@@ -54,6 +54,9 @@ INDUSTRIES = [
     "Gaming",
     "Real Estate",
     "Logistics",
+    "Food & Beverage",
+    "Hospitality",
+    "Retail",
 ]
 
 
