@@ -2,10 +2,12 @@ import { useState, useRef, type DragEvent, type ChangeEvent } from 'react';
 
 interface FileUploadProps {
   accept?: string;
-  onUpload: (file: File) => void;
+  onUpload: (files: File[]) => void;
   disabled?: boolean;
   label?: string;
   description?: string;
+  multiple?: boolean;
+  allowFolder?: boolean;
 }
 
 export function FileUpload({
@@ -14,10 +16,16 @@ export function FileUpload({
   disabled = false,
   label = 'Upload file',
   description = 'Drag and drop or click to upload',
+  multiple = false,
+  allowFolder = false,
 }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [fileName, setFileName] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [fileNames, setFileNames] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // Get accepted extensions for filtering folder contents
+  const acceptedExtensions = accept.split(',').map(ext => ext.trim().toLowerCase());
 
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
@@ -37,53 +45,130 @@ export function FileUpload({
 
     if (disabled) return;
 
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      handleFile(files[0]);
+    const items = e.dataTransfer.items;
+    const files: File[] = [];
+
+    // Handle dropped items (could be files or folders)
+    if (items) {
+      const filePromises: Promise<File[]>[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+          const entry = item.webkitGetAsEntry?.();
+          if (entry) {
+            filePromises.push(traverseFileTree(entry));
+          } else {
+            const file = item.getAsFile();
+            if (file) files.push(file);
+          }
+        }
+      }
+
+      if (filePromises.length > 0) {
+        Promise.all(filePromises).then(results => {
+          const allFiles = results.flat();
+          handleFiles(allFiles);
+        });
+        return;
+      }
     }
+
+    // Fallback to regular file list
+    const droppedFiles = e.dataTransfer.files;
+    if (droppedFiles.length > 0) {
+      handleFiles(Array.from(droppedFiles));
+    }
+  };
+
+  // Recursively traverse directory entries
+  const traverseFileTree = (entry: FileSystemEntry): Promise<File[]> => {
+    return new Promise((resolve) => {
+      if (entry.isFile) {
+        (entry as FileSystemFileEntry).file((file) => {
+          resolve([file]);
+        });
+      } else if (entry.isDirectory) {
+        const dirReader = (entry as FileSystemDirectoryEntry).createReader();
+        dirReader.readEntries((entries) => {
+          Promise.all(entries.map(traverseFileTree)).then((results) => {
+            resolve(results.flat());
+          });
+        });
+      } else {
+        resolve([]);
+      }
+    });
   };
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      handleFile(files[0]);
+      handleFiles(Array.from(files));
     }
   };
 
-  const handleFile = (file: File) => {
-    setFileName(file.name);
-    onUpload(file);
+  const handleFiles = (files: File[]) => {
+    // Filter files by accepted extensions
+    const filteredFiles = files.filter(file => {
+      const fileName = file.name.toLowerCase();
+      return acceptedExtensions.some(ext => fileName.endsWith(ext));
+    });
+
+    if (filteredFiles.length === 0) return;
+
+    setFileNames(filteredFiles.map(f => f.name));
+    onUpload(filteredFiles);
   };
 
-  const handleClick = () => {
+  const handleFileClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!disabled) {
-      inputRef.current?.click();
+      fileInputRef.current?.click();
+    }
+  };
+
+  const handleFolderClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!disabled) {
+      folderInputRef.current?.click();
     }
   };
 
   return (
     <div
-      onClick={handleClick}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={`
-        relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200
+        relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200
         ${isDragging
           ? 'border-matcha-500 bg-matcha-500/10'
-          : 'border-zinc-700 hover:border-zinc-600 bg-zinc-900/50'
+          : 'border-zinc-700 bg-zinc-900/50'
         }
         ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
       `}
     >
       <input
-        ref={inputRef}
+        ref={fileInputRef}
         type="file"
         accept={accept}
         onChange={handleChange}
         disabled={disabled}
+        multiple={multiple}
         className="hidden"
       />
+      {allowFolder && (
+        <input
+          ref={folderInputRef}
+          type="file"
+          onChange={handleChange}
+          disabled={disabled}
+          // @ts-expect-error webkitdirectory is not in the type definitions
+          webkitdirectory=""
+          className="hidden"
+        />
+      )}
 
       <div className="flex flex-col items-center gap-3">
         <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isDragging ? 'bg-matcha-500/20' : 'bg-zinc-800'}`}>
@@ -107,9 +192,34 @@ export function FileUpload({
           <p className="text-zinc-500 text-sm mt-1">{description}</p>
         </div>
 
-        {fileName && (
+        <div className="flex gap-2 mt-2">
+          <button
+            type="button"
+            onClick={handleFileClick}
+            disabled={disabled}
+            className="px-4 py-2 text-sm font-medium rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Select Files
+          </button>
+          {allowFolder && (
+            <button
+              type="button"
+              onClick={handleFolderClick}
+              disabled={disabled}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Select Folder
+            </button>
+          )}
+        </div>
+
+        {fileNames.length > 0 && (
           <div className="mt-2 px-3 py-1.5 bg-zinc-800 rounded-lg border border-zinc-700">
-            <p className="text-sm text-zinc-300">{fileName}</p>
+            <p className="text-sm text-zinc-300">
+              {fileNames.length === 1
+                ? fileNames[0]
+                : `${fileNames.length} files selected`}
+            </p>
           </div>
         )}
 

@@ -1,19 +1,34 @@
+import hashlib
 import os
 import json
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from pydantic import BaseModel
 
 from ..database import get_connection
 from ..models.candidate import CandidateResponse, CandidateDetail
 from ..services.resume_parser import ResumeParser
-from ..config import get_settings
+from ..services.storage import get_storage
+
+
+def compute_file_hash(file_bytes: bytes) -> str:
+    """Compute SHA-256 hash of file contents."""
+    return hashlib.sha256(file_bytes).hexdigest()
 
 router = APIRouter()
 
-# Directory to store uploaded resumes
+# Directory to store uploaded resumes (local fallback)
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+class BulkUploadResult(BaseModel):
+    success_count: int
+    error_count: int
+    errors: list[dict]
+    imported_ids: list[str]
 
 
 @router.post("/upload", response_model=CandidateResponse)
@@ -30,16 +45,24 @@ async def upload_resume(file: UploadFile = File(...)):
     # Read file content
     file_bytes = await file.read()
 
-    # Parse resume
-    settings = get_settings()
-    parser = ResumeParser(
-        api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-        model=settings.analysis_model,
-    )
+    # Compute hash for duplicate detection
+    file_hash = compute_file_hash(file_bytes)
 
-    parsed = await parser.parse_resume_file(file_bytes, file.filename)
+    # Check for duplicate
+    async with get_connection() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id, name FROM candidates WHERE resume_hash = $1",
+            file_hash,
+        )
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Duplicate resume - already exists as '{existing['name'] or 'Unknown'}'"
+            )
+
+    # Parse resume
+    parser = ResumeParser()
+    parsed = parser.parse_resume_file(file_bytes, file.filename)
 
     # Extract fields
     name = parsed.get("name")
@@ -54,14 +77,15 @@ async def upload_resume(file: UploadFile = File(...)):
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO candidates (name, email, phone, resume_text, skills, experience_years, education, parsed_data)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO candidates (name, email, phone, resume_text, resume_hash, skills, experience_years, education, parsed_data)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id, name, email, phone, skills, experience_years, education, created_at
             """,
             name,
             email,
             phone,
             resume_text,
+            file_hash,
             json.dumps(skills),
             experience_years,
             json.dumps(education),
@@ -94,6 +118,116 @@ async def upload_resume(file: UploadFile = File(...)):
             education=education_data,
             created_at=row["created_at"],
         )
+
+
+@router.post("/bulk-upload", response_model=BulkUploadResult)
+async def bulk_upload_resumes(files: list[UploadFile] = File(...)):
+    """Upload and parse multiple resumes (PDF or DOCX).
+
+    Files are stored in S3 (or locally as fallback) and parsed using AI.
+    """
+    storage = get_storage()
+    parser = ResumeParser()
+
+    success_count = 0
+    errors = []
+    imported_ids = []
+
+    for i, file in enumerate(files):
+        try:
+            # Validate file type
+            if not file.filename:
+                errors.append({
+                    "file": f"File {i + 1}",
+                    "error": "No filename provided",
+                })
+                continue
+
+            ext = os.path.splitext(file.filename)[1].lower()
+            if ext not in [".pdf", ".docx", ".doc"]:
+                errors.append({
+                    "file": file.filename,
+                    "error": "Only PDF and DOCX files are supported",
+                })
+                continue
+
+            # Read file content
+            file_bytes = await file.read()
+
+            # Compute hash for duplicate detection
+            file_hash = compute_file_hash(file_bytes)
+
+            # Check for duplicate
+            async with get_connection() as conn:
+                existing = await conn.fetchrow(
+                    "SELECT id, name FROM candidates WHERE resume_hash = $1",
+                    file_hash,
+                )
+                if existing:
+                    errors.append({
+                        "file": file.filename,
+                        "error": f"Duplicate resume - already exists as '{existing['name'] or 'Unknown'}'",
+                    })
+                    continue
+
+            # Store file in S3/local storage
+            file_path = await storage.upload_file(
+                file_bytes,
+                file.filename,
+                prefix="resumes",
+            )
+
+            # Parse resume
+            try:
+                parsed = parser.parse_resume_file(file_bytes, file.filename)
+            except Exception as parse_error:
+                # Still save the file even if parsing fails
+                parsed = {"_parse_error": str(parse_error)}
+
+            # Extract fields
+            name = parsed.get("name")
+            email = parsed.get("email")
+            phone = parsed.get("phone")
+            skills = parsed.get("skills", [])
+            experience_years = parsed.get("experience_years")
+            education = parsed.get("education", [])
+            resume_text = parsed.pop("_resume_text", "")
+
+            # Save to database
+            async with get_connection() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO candidates (name, email, phone, resume_text, resume_file_path, resume_hash, skills, experience_years, education, parsed_data)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    RETURNING id
+                    """,
+                    name,
+                    email,
+                    phone,
+                    resume_text,
+                    file_path,
+                    file_hash,
+                    json.dumps(skills) if skills else None,
+                    experience_years,
+                    json.dumps(education) if education else None,
+                    json.dumps(parsed),
+                )
+
+                imported_ids.append(str(row["id"]))
+                success_count += 1
+
+        except Exception as e:
+            errors.append({
+                "file": file.filename if file.filename else f"File {i + 1}",
+                "error": str(e),
+            })
+
+    return BulkUploadResult(
+        success_count=success_count,
+        error_count=len(errors),
+        errors=errors,
+        imported_ids=imported_ids,
+    )
 
 
 @router.get("", response_model=list[CandidateResponse])

@@ -262,6 +262,32 @@ export const candidates = {
     return response.json();
   },
 
+  bulkUpload: async (files: File[]): Promise<BulkImportResult> => {
+    const formData = new FormData();
+    files.forEach(file => {
+      formData.append('files', file);
+    });
+
+    const headers: HeadersInit = {};
+    const token = getAccessToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/candidates/bulk-upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return response.json();
+  },
+
   delete: (id: string) =>
     request<{ status: string }>(`/candidates/${id}`, {
       method: 'DELETE',

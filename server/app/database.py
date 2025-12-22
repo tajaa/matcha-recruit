@@ -202,6 +202,19 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_candidates_user_id ON candidates(user_id)
         """)
 
+        # Add resume_hash column for duplicate detection
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'candidates' AND column_name = 'resume_hash'
+                ) THEN
+                    ALTER TABLE candidates ADD COLUMN resume_hash VARCHAR(64) UNIQUE;
+                END IF;
+            END $$;
+        """)
+
         # Match results table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS match_results (

@@ -298,9 +298,10 @@ export interface PositionCultureFitBreakdown {
 
 // Bulk Import types
 export interface BulkImportError {
-  row: number;
+  row?: number;
+  file?: string;
   error: string;
-  data: Record<string, unknown> | null;
+  data?: Record<string, unknown> | null;
 }
 
 export interface BulkImportResult {

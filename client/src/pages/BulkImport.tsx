@@ -1,27 +1,46 @@
 import { useState } from 'react';
 import type { BulkImportResult } from '../types';
-import { bulkImport } from '../api/client';
+import { bulkImport, candidates } from '../api/client';
 import { Button, Card, CardHeader, CardContent, FileUpload } from '../components';
 
-type ImportType = 'companies' | 'positions';
+type ImportType = 'companies' | 'positions' | 'candidates';
 
 export function BulkImport() {
-  const [activeTab, setActiveTab] = useState<ImportType>('companies');
+  const [activeTab, setActiveTab] = useState<ImportType>('candidates');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BulkImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = async (files: File[]) => {
     try {
       setLoading(true);
       setError(null);
       setResult(null);
 
-      const importResult = activeTab === 'companies'
-        ? await bulkImport.companies(file)
-        : await bulkImport.positions(file);
+      if (activeTab === 'candidates') {
+        // Candidates use bulk upload endpoint that handles all files at once
+        const importResult = await candidates.bulkUpload(files);
+        setResult(importResult);
+      } else {
+        // Companies/positions process files one at a time
+        const results: BulkImportResult[] = [];
+        for (const file of files) {
+          const importResult = activeTab === 'companies'
+            ? await bulkImport.companies(file)
+            : await bulkImport.positions(file);
+          results.push(importResult);
+        }
 
-      setResult(importResult);
+        // Combine all results into one
+        const combinedResult: BulkImportResult = {
+          success_count: results.reduce((sum, r) => sum + r.success_count, 0),
+          error_count: results.reduce((sum, r) => sum + r.error_count, 0),
+          errors: results.flatMap(r => r.errors),
+          imported_ids: results.flatMap(r => r.imported_ids),
+        };
+
+        setResult(combinedResult);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed');
     } finally {
@@ -30,7 +49,9 @@ export function BulkImport() {
   };
 
   const handleDownloadTemplate = () => {
-    window.open(bulkImport.downloadTemplate(activeTab), '_blank');
+    if (activeTab !== 'candidates') {
+      window.open(bulkImport.downloadTemplate(activeTab), '_blank');
+    }
   };
 
   const tabClass = (tab: ImportType) => `
@@ -46,11 +67,14 @@ export function BulkImport() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-white tracking-tight">Bulk Import</h1>
-        <p className="text-zinc-400 mt-1">Import companies and positions from CSV, JSON, or PDF files</p>
+        <p className="text-zinc-400 mt-1">Import candidates, companies, and positions</p>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-2">
+        <button className={tabClass('candidates')} onClick={() => setActiveTab('candidates')}>
+          Candidates
+        </button>
         <button className={tabClass('companies')} onClick={() => setActiveTab('companies')}>
           Companies
         </button>
@@ -65,26 +89,53 @@ export function BulkImport() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-zinc-100">
-                Upload {activeTab === 'companies' ? 'Companies' : 'Positions'}
+                Upload {activeTab === 'candidates' ? 'Resumes' : activeTab === 'companies' ? 'Companies' : 'Positions'}
               </h2>
-              <Button variant="secondary" size="sm" onClick={handleDownloadTemplate}>
-                Download Template
-              </Button>
+              {activeTab !== 'candidates' && (
+                <Button variant="secondary" size="sm" onClick={handleDownloadTemplate}>
+                  Download Template
+                </Button>
+              )}
             </div>
           </CardHeader>
           <CardContent>
             <FileUpload
-              accept=".csv,.json,.pdf"
+              accept={activeTab === 'candidates' ? '.pdf,.docx,.doc' : '.csv,.json,.pdf'}
               onUpload={handleUpload}
               disabled={loading}
-              label={loading ? 'Importing...' : `Upload ${activeTab} file`}
-              description="Drag and drop a CSV, JSON, or PDF file, or click to browse"
+              multiple
+              allowFolder
+              label={loading ? 'Importing...' : activeTab === 'candidates' ? 'Upload resumes' : `Upload ${activeTab} files`}
+              description={activeTab === 'candidates'
+                ? 'Drag and drop PDF or DOCX resumes, or select a folder'
+                : 'Drag and drop files or folders, or use the buttons below'}
             />
 
             {/* Instructions */}
             <div className="mt-6 p-4 bg-zinc-900/50 rounded-lg border border-zinc-800">
               <h3 className="text-sm font-medium text-zinc-300 mb-2">Instructions</h3>
-              {activeTab === 'companies' ? (
+              {activeTab === 'candidates' ? (
+                <div className="text-sm text-zinc-500 space-y-2">
+                  <p>Upload resume files to add candidates to your talent pool.</p>
+                  <p className="mt-3">Supported formats:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li><strong className="text-zinc-400">PDF</strong> - Most common resume format</li>
+                    <li><strong className="text-zinc-400">DOCX</strong> - Microsoft Word documents</li>
+                  </ul>
+                  <p className="mt-3 text-zinc-400">
+                    Each resume will be parsed using AI to extract:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 mt-2">
+                    <li>Name, email, phone</li>
+                    <li>Skills and experience</li>
+                    <li>Education history</li>
+                    <li>Work history</li>
+                  </ul>
+                  <p className="mt-3 text-matcha-400">
+                    Tip: Select an entire folder to import many resumes at once.
+                  </p>
+                </div>
+              ) : activeTab === 'companies' ? (
                 <div className="text-sm text-zinc-500 space-y-2">
                   <p>CSV format:</p>
                   <code className="block p-2 bg-zinc-900 rounded text-xs text-zinc-400">
@@ -170,7 +221,11 @@ export function BulkImport() {
                           className="p-3 bg-red-500/5 border border-red-500/10 rounded-lg"
                         >
                           <p className="text-sm text-red-400">
-                            <span className="font-medium">Row {err.row}:</span> {err.error}
+                            {/* Handle both row-based errors (companies/positions) and file-based errors (candidates) */}
+                            <span className="font-medium">
+                              {err.row ? `Row ${err.row}:` : err.file ? `${err.file}:` : ''}
+                            </span>{' '}
+                            {err.error}
                           </p>
                           {err.data && (
                             <pre className="mt-2 text-xs text-zinc-500 overflow-x-auto">
@@ -187,7 +242,7 @@ export function BulkImport() {
                 {result.success_count > 0 && result.error_count === 0 && (
                   <div className="p-4 bg-matcha-500/10 border border-matcha-500/20 rounded-lg">
                     <p className="text-matcha-400">
-                      All {result.success_count} {activeTab} imported successfully!
+                      All {result.success_count} {activeTab === 'candidates' ? 'resumes' : activeTab} imported successfully!
                     </p>
                   </div>
                 )}

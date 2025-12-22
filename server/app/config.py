@@ -32,6 +32,12 @@ class Settings:
     jwt_access_token_expire_minutes: int = 1440  # 24 hours
     jwt_refresh_token_expire_days: int = 30
 
+    # S3 Storage
+    s3_bucket: Optional[str] = None
+    s3_region: str = "us-east-1"
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+
 
 # Global settings instance
 _settings: Optional[Settings] = None
@@ -82,6 +88,10 @@ def load_settings() -> Settings:
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
         jwt_access_token_expire_minutes=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),
         jwt_refresh_token_expire_days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")),
+        s3_bucket=os.getenv("S3_BUCKET"),
+        s3_region=os.getenv("S3_REGION", "us-east-1"),
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     )
     return _settings
 

@@ -60,7 +60,7 @@ class ConversationAnalysis(BaseModel):
 
 # Screening Analysis Models
 class ScreeningAttribute(BaseModel):
-    score: int  # 0-100
+    score: float  # 0-100
     evidence: list[str]
     notes: Optional[str] = None
 
@@ -70,7 +70,7 @@ class ScreeningAnalysis(BaseModel):
     engagement_energy: ScreeningAttribute
     critical_thinking: ScreeningAttribute
     professionalism: ScreeningAttribute
-    overall_score: int  # 0-100
+    overall_score: float  # 0-100
     recommendation: Literal["strong_pass", "pass", "borderline", "fail"]
     summary: str
     analyzed_at: datetime
