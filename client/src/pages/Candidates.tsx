@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button, Card, CardContent, Modal } from '../components';
-import { candidates as candidatesApi } from '../api/client';
+import { candidates as candidatesApi, type CandidateFilters } from '../api/client';
 import type { Candidate, CandidateDetail } from '../types';
 
 export function Candidates() {
@@ -11,20 +11,50 @@ export function Candidates() {
   const [showDetail, setShowDetail] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchCandidates = async () => {
+  // Filter state
+  const [filters, setFilters] = useState<CandidateFilters>({});
+  const [searchInput, setSearchInput] = useState('');
+  const [skillsInput, setSkillsInput] = useState('');
+  const [minExp, setMinExp] = useState('');
+  const [maxExp, setMaxExp] = useState('');
+  const [education, setEducation] = useState('');
+
+  const fetchCandidates = useCallback(async (currentFilters: CandidateFilters) => {
     try {
-      const data = await candidatesApi.list();
+      setLoading(true);
+      const data = await candidatesApi.list(currentFilters);
       setCandidates(data);
     } catch (err) {
       console.error('Failed to fetch candidates:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchCandidates();
-  }, []);
+    fetchCandidates(filters);
+  }, [filters, fetchCandidates]);
+
+  const applyFilters = () => {
+    const newFilters: CandidateFilters = {};
+    if (searchInput.trim()) newFilters.search = searchInput.trim();
+    if (skillsInput.trim()) newFilters.skills = skillsInput.trim();
+    if (minExp) newFilters.min_experience = parseInt(minExp);
+    if (maxExp) newFilters.max_experience = parseInt(maxExp);
+    if (education) newFilters.education = education;
+    setFilters(newFilters);
+  };
+
+  const clearFilters = () => {
+    setSearchInput('');
+    setSkillsInput('');
+    setMinExp('');
+    setMaxExp('');
+    setEducation('');
+    setFilters({});
+  };
+
+  const hasActiveFilters = Object.keys(filters).length > 0;
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -33,7 +63,7 @@ export function Candidates() {
     setUploading(true);
     try {
       await candidatesApi.upload(file);
-      fetchCandidates();
+      fetchCandidates(filters);
     } catch (err) {
       console.error('Failed to upload:', err);
     } finally {
@@ -58,15 +88,11 @@ export function Candidates() {
     if (!confirm('Delete this candidate?')) return;
     try {
       await candidatesApi.delete(id);
-      fetchCandidates();
+      fetchCandidates(filters);
     } catch (err) {
       console.error('Failed to delete:', err);
     }
   };
-
-  if (loading) {
-    return <div className="text-center py-12 text-zinc-500">Loading...</div>;
-  }
 
   return (
     <div>
@@ -89,7 +115,99 @@ export function Candidates() {
         </div>
       </div>
 
-      {candidates.length === 0 ? (
+      {/* Filters */}
+      <Card className="mb-6">
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* Search */}
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Search</label>
+              <input
+                type="text"
+                placeholder="Name or email..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+              />
+            </div>
+
+            {/* Skills */}
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Skills</label>
+              <input
+                type="text"
+                placeholder="python, react, aws..."
+                value={skillsInput}
+                onChange={(e) => setSkillsInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+              />
+            </div>
+
+            {/* Experience Range */}
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Experience (years)</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  placeholder="Min"
+                  value={minExp}
+                  onChange={(e) => setMinExp(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                />
+                <input
+                  type="number"
+                  placeholder="Max"
+                  value={maxExp}
+                  onChange={(e) => setMaxExp(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                />
+              </div>
+            </div>
+
+            {/* Education */}
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Education</label>
+              <select
+                value={education}
+                onChange={(e) => setEducation(e.target.value)}
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500"
+              >
+                <option value="">Any</option>
+                <option value="phd">PhD / Doctorate</option>
+                <option value="master">Master's</option>
+                <option value="bachelor">Bachelor's</option>
+                <option value="associate">Associate's</option>
+              </select>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-end gap-2">
+              <Button onClick={applyFilters} className="flex-1">
+                Filter
+              </Button>
+              {hasActiveFilters && (
+                <Button variant="secondary" onClick={clearFilters}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {hasActiveFilters && (
+            <div className="mt-3 text-sm text-zinc-500">
+              Showing {candidates.length} result{candidates.length !== 1 ? 's' : ''}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {loading ? (
+        <div className="text-center py-12 text-zinc-500">Loading...</div>
+      ) : candidates.length === 0 ? (
         <Card>
           <CardContent className="text-center py-12">
             <svg
@@ -105,14 +223,29 @@ export function Candidates() {
                 d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
               />
             </svg>
-            <p className="mt-4 text-zinc-500">No candidates yet</p>
-            <p className="text-sm text-zinc-600 mt-1">Upload PDF or DOCX resumes to get started</p>
-            <Button
-              className="mt-4"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              Upload Resume
-            </Button>
+            {hasActiveFilters ? (
+              <>
+                <p className="mt-4 text-zinc-500">No candidates match your filters</p>
+                <Button
+                  variant="secondary"
+                  className="mt-4"
+                  onClick={clearFilters}
+                >
+                  Clear Filters
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="mt-4 text-zinc-500">No candidates yet</p>
+                <p className="text-sm text-zinc-600 mt-1">Upload PDF or DOCX resumes to get started</p>
+                <Button
+                  className="mt-4"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Upload Resume
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
       ) : (

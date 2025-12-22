@@ -231,16 +231,66 @@ async def bulk_upload_resumes(files: list[UploadFile] = File(...)):
 
 
 @router.get("", response_model=list[CandidateResponse])
-async def list_candidates():
-    """List all candidates."""
+async def list_candidates(
+    search: Optional[str] = None,
+    skills: Optional[str] = None,  # Comma-separated
+    min_experience: Optional[int] = None,
+    max_experience: Optional[int] = None,
+    education: Optional[str] = None,  # e.g., "bachelor", "master", "phd"
+):
+    """List candidates with optional filters."""
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            """
+        # Build dynamic query
+        conditions = []
+        params = []
+        param_idx = 1
+
+        if search:
+            conditions.append(f"(name ILIKE ${param_idx} OR email ILIKE ${param_idx})")
+            params.append(f"%{search}%")
+            param_idx += 1
+
+        if skills:
+            # Filter by any of the provided skills
+            skill_list = [s.strip().lower() for s in skills.split(",") if s.strip()]
+            if skill_list:
+                # Check if skills JSONB contains any of the requested skills (case-insensitive)
+                skill_conditions = []
+                for skill in skill_list:
+                    skill_conditions.append(f"LOWER(skills::text) LIKE ${param_idx}")
+                    params.append(f"%{skill}%")
+                    param_idx += 1
+                conditions.append(f"({' OR '.join(skill_conditions)})")
+
+        if min_experience is not None:
+            conditions.append(f"experience_years >= ${param_idx}")
+            params.append(min_experience)
+            param_idx += 1
+
+        if max_experience is not None:
+            conditions.append(f"experience_years <= ${param_idx}")
+            params.append(max_experience)
+            param_idx += 1
+
+        if education:
+            # Search in education JSONB for degree type
+            conditions.append(f"LOWER(education::text) LIKE ${param_idx}")
+            params.append(f"%{education.lower()}%")
+            param_idx += 1
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        query = f"""
             SELECT id, name, email, phone, skills, experience_years, education, created_at
             FROM candidates
+            {where_clause}
             ORDER BY created_at DESC
-            """
-        )
+        """
+
+        rows = await conn.fetch(query, *params)
+
         results = []
         for row in rows:
             skills_data = json.loads(row["skills"]) if row["skills"] else []

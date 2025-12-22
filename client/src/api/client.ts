@@ -233,8 +233,25 @@ export const interviews = {
 };
 
 // Candidates
+export interface CandidateFilters {
+  search?: string;
+  skills?: string;  // Comma-separated
+  min_experience?: number;
+  max_experience?: number;
+  education?: string;
+}
+
 export const candidates = {
-  list: () => request<Candidate[]>('/candidates'),
+  list: (filters?: CandidateFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.search) params.append('search', filters.search);
+    if (filters?.skills) params.append('skills', filters.skills);
+    if (filters?.min_experience !== undefined) params.append('min_experience', String(filters.min_experience));
+    if (filters?.max_experience !== undefined) params.append('max_experience', String(filters.max_experience));
+    if (filters?.education) params.append('education', filters.education);
+    const query = params.toString();
+    return request<Candidate[]>(`/candidates${query ? `?${query}` : ''}`);
+  },
 
   get: (id: string) => request<CandidateDetail>(`/candidates/${id}`),
 
