@@ -6,6 +6,7 @@ from .positions import router as positions_router
 from .bulk_import import router as bulk_import_router
 from .job_search import router as job_search_router
 from .auth import router as auth_router
+from .openings import router as openings_router
 
 __all__ = [
     "companies_router",
@@ -16,4 +17,5 @@ __all__ = [
     "bulk_import_router",
     "job_search_router",
     "auth_router",
+    "openings_router",
 ]

@@ -7,17 +7,103 @@ interface NavItem {
   path: string;
   label: string;
   roles: UserRole[];
+  icon: React.ReactNode;
 }
 
 const allNavItems: NavItem[] = [
-  { path: '/app', label: 'Companies', roles: ['admin', 'client'] },
-  { path: '/app/positions', label: 'Positions', roles: ['admin', 'client', 'candidate'] },
-  { path: '/app/candidates', label: 'Candidates', roles: ['admin', 'client'] },
-  { path: '/app/jobs', label: 'Job Search', roles: ['admin', 'candidate'] },
-  { path: '/app/test-bot', label: 'Test Bot', roles: ['admin', 'candidate'] },
-  { path: '/app/import', label: 'Import', roles: ['admin'] },
-  { path: '/app/careers', label: 'Careers', roles: ['admin', 'client', 'candidate'] },
+  {
+    path: '/app',
+    label: 'Companies',
+    roles: ['admin', 'client'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+      </svg>
+    ),
+  },
+  {
+    path: '/app/positions',
+    label: 'Positions',
+    roles: ['admin', 'client', 'candidate'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+      </svg>
+    ),
+  },
+  {
+    path: '/app/candidates',
+    label: 'Candidates',
+    roles: ['admin', 'client'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+      </svg>
+    ),
+  },
+  {
+    path: '/app/jobs',
+    label: 'Job Search',
+    roles: ['admin', 'candidate'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      </svg>
+    ),
+  },
+  {
+    path: '/app/openings',
+    label: 'Openings',
+    roles: ['admin', 'client'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+      </svg>
+    ),
+  },
+  {
+    path: '/app/test-bot',
+    label: 'Test Bot',
+    roles: ['admin', 'candidate'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    path: '/app/import',
+    label: 'Import',
+    roles: ['admin'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+      </svg>
+    ),
+  },
+  {
+    path: '/app/careers',
+    label: 'Careers',
+    roles: ['admin', 'client', 'candidate'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
 ];
+
+const settingsItem: NavItem = {
+  path: '/app/settings',
+  label: 'Settings',
+  roles: ['admin', 'client', 'candidate'],
+  icon: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  ),
+};
 
 export function Layout() {
   const location = useLocation();
@@ -31,6 +117,23 @@ export function Layout() {
   const handleLogout = async () => {
     await logout();
     navigate('/login');
+  };
+
+  const NavLink = ({ item }: { item: NavItem }) => {
+    const isActive = location.pathname === item.path;
+    return (
+      <Link
+        to={item.path}
+        className={`flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${
+          isActive
+            ? 'text-matcha-400 bg-matcha-500/10 border-l-2 border-matcha-500'
+            : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
+        }`}
+      >
+        {item.icon}
+        <span>{item.label}</span>
+      </Link>
+    );
   };
 
   return (
@@ -49,82 +152,65 @@ export function Layout() {
         />
       </div>
 
-      <nav className="fixed top-0 inset-x-0 z-50 bg-zinc-950/90 backdrop-blur-sm border-b border-zinc-800/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      {/* Desktop Sidebar - hidden on mobile */}
+      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-50 w-48 flex-col bg-zinc-950/95 border-r border-zinc-800/50">
+        {/* Logo */}
+        <div className="h-14 flex items-center px-4 border-b border-zinc-800/50">
+          <Link to="/" className="flex items-center gap-2 group">
+            <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+            <span className="text-xs tracking-[0.25em] uppercase text-matcha-500 font-medium group-hover:text-matcha-400 transition-colors">
+              Matcha
+            </span>
+          </Link>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 py-4 overflow-y-auto">
+          <div className="space-y-1 px-2">
+            {navItems.map((item) => (
+              <NavLink key={item.path} item={item} />
+            ))}
+          </div>
+        </nav>
+
+        {/* Bottom section - Settings & User */}
+        <div className="border-t border-zinc-800/50 p-2">
+          <NavLink item={settingsItem} />
+          <div className="mt-3 px-3 py-2">
+            <div className="text-[9px] text-zinc-600 tracking-wide truncate">{user?.email}</div>
+            <div className="flex items-center justify-between mt-1">
+              <span className="px-1.5 py-0.5 text-[8px] bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 tracking-[0.15em] uppercase">
+                {user?.role}
+              </span>
+              <button
+                onClick={handleLogout}
+                className="text-[9px] tracking-[0.1em] uppercase text-zinc-600 hover:text-zinc-300 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* Mobile Header - visible only on mobile */}
+      <nav className="md:hidden fixed top-0 inset-x-0 z-50 bg-zinc-950/90 backdrop-blur-sm border-b border-zinc-800/50">
+        <div className="px-4">
           <div className="flex justify-between h-14">
-            <div className="flex items-center gap-8">
-              <Link to="/" className="flex-shrink-0 flex items-center gap-2 group">
+            <div className="flex items-center">
+              <Link to="/" className="flex items-center gap-2 group">
                 <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
                 <span className="text-xs tracking-[0.25em] uppercase text-matcha-500 font-medium group-hover:text-matcha-400 transition-colors">
                   Matcha
                 </span>
               </Link>
-              <div className="hidden sm:flex sm:items-center sm:gap-1">
-                {navItems.map((item) => (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
-                      location.pathname === item.path
-                        ? 'text-matcha-400 bg-matcha-500/10 border border-matcha-500/20'
-                        : 'text-zinc-500 hover:text-zinc-300 border border-transparent hover:border-zinc-800'
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                ))}
-              </div>
             </div>
 
-            {/* User menu */}
             {user && (
-              <div className="flex items-center gap-2 sm:gap-4">
-                <div className="hidden md:flex items-center gap-3 text-[10px]">
-                  <span className="text-zinc-600 tracking-wide">OPERATOR:</span>
-                  <span className="text-zinc-300 tracking-wide">{user.email}</span>
-                  <span className="px-2 py-0.5 bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 tracking-[0.15em] uppercase">
-                    {user.role}
-                  </span>
-                </div>
-                <Link
-                  to="/app/settings"
-                  className={`p-2 transition-colors ${
-                    location.pathname === '/app/settings'
-                      ? 'text-matcha-400'
-                      : 'text-zinc-600 hover:text-zinc-300'
-                  }`}
-                  title="Settings"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                  </svg>
-                </Link>
-                <button
-                  onClick={handleLogout}
-                  className="hidden sm:block text-[10px] tracking-[0.15em] uppercase text-zinc-600 hover:text-zinc-300 transition-colors px-3 py-1.5 border border-transparent hover:border-zinc-800"
-                >
-                  Logout
-                </button>
-                {/* Mobile hamburger menu */}
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                  className="sm:hidden p-2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="p-2 text-zinc-500 hover:text-zinc-300 transition-colors"
                   aria-label="Toggle menu"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -142,22 +228,35 @@ export function Layout() {
 
         {/* Mobile menu dropdown */}
         {mobileMenuOpen && (
-          <div className="sm:hidden border-t border-zinc-800/50 bg-zinc-950/95 backdrop-blur-sm">
+          <div className="border-t border-zinc-800/50 bg-zinc-950/95 backdrop-blur-sm">
             <div className="px-4 py-3 space-y-1">
               {navItems.map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`block px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
+                  className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
                     location.pathname === item.path
                       ? 'text-matcha-400 bg-matcha-500/10 border-l-2 border-matcha-500'
                       : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
                   }`}
                 >
-                  {item.label}
+                  {item.icon}
+                  <span>{item.label}</span>
                 </Link>
               ))}
+              <Link
+                to="/app/settings"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
+                  location.pathname === '/app/settings'
+                    ? 'text-matcha-400 bg-matcha-500/10 border-l-2 border-matcha-500'
+                    : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
+                }`}
+              >
+                {settingsItem.icon}
+                <span>Settings</span>
+              </Link>
               <div className="pt-3 mt-3 border-t border-zinc-800/50">
                 <div className="px-3 py-2 text-[10px] text-zinc-600 tracking-wide">
                   {user?.email}
@@ -180,13 +279,16 @@ export function Layout() {
         )}
       </nav>
 
-      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-12">
-        <Outlet />
+      {/* Main content - offset for sidebar on desktop, header on mobile */}
+      <main className="relative z-10 md:ml-48 pt-16 md:pt-6 pb-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-6xl mx-auto">
+          <Outlet />
+        </div>
       </main>
 
       {/* Bottom status bar */}
-      <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-800/50 bg-zinc-950/90 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex items-center justify-between">
+      <footer className="fixed bottom-0 left-0 md:left-48 right-0 z-40 border-t border-zinc-800/50 bg-zinc-950/90 backdrop-blur-sm">
+        <div className="px-4 sm:px-6 lg:px-8 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-matcha-500 animate-pulse" />
             <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-600">

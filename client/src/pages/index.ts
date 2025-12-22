@@ -14,3 +14,4 @@ export { Register } from './Register';
 export { Unauthorized } from './Unauthorized';
 export { Settings } from './Settings';
 export { Careers } from './Careers';
+export { Openings } from './Openings';

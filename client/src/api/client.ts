@@ -420,6 +420,44 @@ export const jobSearch = {
     }),
 };
 
+// Openings (scrape career pages by industry)
+export interface ScrapedJob {
+  title: string;
+  company_name: string;
+  location: string | null;
+  department: string | null;
+  apply_url: string;
+  source_url: string;
+}
+
+export interface OpeningsSearchRequest {
+  industry: string;
+  query?: string;
+  max_sources?: number;
+}
+
+export interface OpeningsSearchResponse {
+  jobs: ScrapedJob[];
+  sources_scraped: number;
+  sources_failed: number;
+  industry: string;
+  query: string | null;
+}
+
+export interface IndustriesResponse {
+  industries: string[];
+}
+
+export const openings = {
+  getIndustries: () => request<IndustriesResponse>('/openings/industries'),
+
+  search: (params: OpeningsSearchRequest) =>
+    request<OpeningsSearchResponse>('/openings/search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+};
+
 // Settings/Account API
 export const settings = {
   changePassword: (currentPassword: string, newPassword: string) =>
