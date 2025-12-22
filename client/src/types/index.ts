@@ -474,3 +474,91 @@ export interface CurrentUserResponse {
   };
   profile: AdminProfile | ClientProfile | CandidateAuthProfile | null;
 }
+
+// Project types
+export type ProjectStatus = 'draft' | 'active' | 'completed' | 'cancelled';
+export type CandidateStage = 'initial' | 'screening' | 'interview' | 'finalist' | 'placed' | 'rejected';
+
+export interface Project {
+  id: string;
+  company_name: string;
+  name: string;
+  position_title: string | null;
+  location: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  benefits: string | null;
+  requirements: string | null;
+  status: ProjectStatus;
+  notes: string | null;
+  candidate_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectCreate {
+  company_name: string;
+  name: string;
+  position_title?: string;
+  location?: string;
+  salary_min?: number;
+  salary_max?: number;
+  benefits?: string;
+  requirements?: string;
+  status?: ProjectStatus;
+  notes?: string;
+}
+
+export interface ProjectUpdate {
+  company_name?: string;
+  name?: string;
+  position_title?: string;
+  location?: string;
+  salary_min?: number;
+  salary_max?: number;
+  benefits?: string;
+  requirements?: string;
+  status?: ProjectStatus;
+  notes?: string;
+}
+
+export interface ProjectCandidate {
+  id: string;
+  project_id: string;
+  candidate_id: string;
+  candidate_name: string | null;
+  candidate_email: string | null;
+  candidate_phone: string | null;
+  candidate_skills: string[];
+  candidate_experience_years: number | null;
+  stage: CandidateStage;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectCandidateAdd {
+  candidate_id: string;
+  stage?: CandidateStage;
+  notes?: string;
+}
+
+export interface ProjectCandidateBulkAdd {
+  candidate_ids: string[];
+  stage?: CandidateStage;
+}
+
+export interface ProjectCandidateUpdate {
+  stage?: CandidateStage;
+  notes?: string;
+}
+
+export interface ProjectStats {
+  initial: number;
+  screening: number;
+  interview: number;
+  finalist: number;
+  placed: number;
+  rejected: number;
+  total: number;
+}

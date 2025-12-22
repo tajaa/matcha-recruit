@@ -21,6 +21,8 @@ import {
   Openings,
   ForCandidates,
   WorkWithUs,
+  Projects,
+  ProjectDetail,
 } from './pages';
 
 // Redirect component that properly handles the :id parameter
@@ -126,6 +128,22 @@ function App() {
               element={
                 <ProtectedRoute roles={['admin', 'client']}>
                   <Openings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="projects"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <Projects />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="projects/:id"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <ProjectDetail />
                 </ProtectedRoute>
               }
             />

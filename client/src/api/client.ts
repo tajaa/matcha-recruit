@@ -26,6 +26,16 @@ import type {
   ClientRegister,
   CandidateRegister,
   CurrentUserResponse,
+  Project,
+  ProjectCreate,
+  ProjectUpdate,
+  ProjectCandidate,
+  ProjectCandidateAdd,
+  ProjectCandidateBulkAdd,
+  ProjectCandidateUpdate,
+  ProjectStats,
+  ProjectStatus,
+  CandidateStage,
 } from '../types';
 
 const API_BASE = 'http://localhost:8000/api';
@@ -644,6 +654,71 @@ export const settings = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+};
+
+// Projects API
+export interface ProjectFilters {
+  status?: ProjectStatus;
+}
+
+export const projects = {
+  list: (filters?: ProjectFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.status) params.append('status', filters.status);
+    const query = params.toString();
+    return request<Project[]>(`/projects${query ? `?${query}` : ''}`);
+  },
+
+  get: (id: string) => request<Project>(`/projects/${id}`),
+
+  create: (data: ProjectCreate) =>
+    request<Project>('/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (id: string, data: ProjectUpdate) =>
+    request<Project>(`/projects/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    request<{ status: string }>(`/projects/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Project candidates
+  addCandidate: (projectId: string, data: ProjectCandidateAdd) =>
+    request<ProjectCandidate>(`/projects/${projectId}/candidates`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  bulkAddCandidates: (projectId: string, data: ProjectCandidateBulkAdd) =>
+    request<{ added: number; skipped: number }>(`/projects/${projectId}/candidates/bulk`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listCandidates: (projectId: string, stage?: CandidateStage) => {
+    const params = stage ? `?stage=${stage}` : '';
+    return request<ProjectCandidate[]>(`/projects/${projectId}/candidates${params}`);
+  },
+
+  updateCandidate: (projectId: string, candidateId: string, data: ProjectCandidateUpdate) =>
+    request<ProjectCandidate>(`/projects/${projectId}/candidates/${candidateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  removeCandidate: (projectId: string, candidateId: string) =>
+    request<{ status: string }>(`/projects/${projectId}/candidates/${candidateId}`, {
+      method: 'DELETE',
+    }),
+
+  getStats: (projectId: string) =>
+    request<ProjectStats>(`/projects/${projectId}/stats`),
 };
 
 // WebSocket URL helper

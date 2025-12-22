@@ -388,6 +388,48 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_tracked_company_jobs_company_id ON tracked_company_jobs(company_id)
         """)
 
+        # Projects table (for recruitment project management)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_name VARCHAR(255) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                position_title VARCHAR(255),
+                location VARCHAR(255),
+                salary_min INTEGER,
+                salary_max INTEGER,
+                benefits TEXT,
+                requirements TEXT,
+                status VARCHAR(50) DEFAULT 'draft',
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status)
+        """)
+
+        # Project candidates junction table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS project_candidates (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                candidate_id UUID NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+                stage VARCHAR(50) DEFAULT 'initial',
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(project_id, candidate_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_project_candidates_project_id ON project_candidates(project_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_project_candidates_candidate_id ON project_candidates(candidate_id)
+        """)
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:

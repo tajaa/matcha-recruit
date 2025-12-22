@@ -52,6 +52,7 @@ from .routes import (
     job_search_router,
     auth_router,
     openings_router,
+    projects_router,
 )
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
@@ -63,6 +64,7 @@ app.include_router(positions_router, prefix="/api/positions", tags=["positions"]
 app.include_router(bulk_import_router, prefix="/api/bulk", tags=["bulk-import"])
 app.include_router(job_search_router, prefix="/api/jobs", tags=["job-search"])
 app.include_router(openings_router, prefix="/api/openings", tags=["openings"])
+app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
 
 
 @app.get("/health")
