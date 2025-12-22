@@ -6,9 +6,9 @@ interface CardProps {
   onClick?: () => void;
 }
 
-export function Card({ children, className = '' }: CardProps) {
+export function Card({ children, className = '', onClick }: CardProps) {
   return (
-    <div className={`relative ${className}`}>
+    <div className={`relative ${className}`} onClick={onClick}>
       {/* Corner brackets */}
       <div className="absolute -top-1.5 -left-1.5 w-3 h-3 border-t border-l border-zinc-700" />
       <div className="absolute -top-1.5 -right-1.5 w-3 h-3 border-t border-r border-zinc-700" />

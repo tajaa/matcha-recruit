@@ -156,7 +156,7 @@ export function Positions() {
             <PositionCard
               key={position.id}
               position={position}
-              onClick={() => navigate(`/positions/${position.id}`)}
+              onClick={() => navigate(`/app/positions/${position.id}`)}
             />
           ))}
         </div>
