@@ -19,6 +19,8 @@ import {
   Settings,
   Careers,
   Openings,
+  ForCandidates,
+  WorkWithUs,
 } from './pages';
 
 // Redirect component that properly handles the :id parameter
@@ -34,6 +36,8 @@ function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Landing />} />
+          <Route path="/for-candidates" element={<ForCandidates />} />
+          <Route path="/work-with-us" element={<WorkWithUs />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/unauthorized" element={<Unauthorized />} />

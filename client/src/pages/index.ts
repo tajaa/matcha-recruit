@@ -15,3 +15,5 @@ export { Unauthorized } from './Unauthorized';
 export { Settings } from './Settings';
 export { Careers } from './Careers';
 export { Openings } from './Openings';
+export { ForCandidates } from './ForCandidates';
+export { WorkWithUs } from './WorkWithUs';

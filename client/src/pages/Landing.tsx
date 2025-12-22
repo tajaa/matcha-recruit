@@ -83,15 +83,36 @@ export function Landing() {
             <div className="mt-12 space-y-3 hidden lg:block">
               <div className="flex items-center gap-3 text-[10px] tracking-widest text-zinc-600">
                 <span className="w-2 h-px bg-zinc-700" />
-                <span>AUTONOMOUS INTERVIEWS</span>
+                <span>THOUGHTFUL CANDIDATE SCREENING</span>
               </div>
               <div className="flex items-center gap-3 text-[10px] tracking-widest text-zinc-600">
                 <span className="w-2 h-px bg-zinc-700" />
-                <span>REAL-TIME ANALYSIS</span>
+                <span>COMMUNICATION & FIT SIGNALS</span>
               </div>
               <div className="flex items-center gap-3 text-[10px] tracking-widest text-zinc-600">
                 <span className="w-2 h-px bg-zinc-700" />
-                <span>CANDIDATE MATCHING</span>
+                <span>CURATED SHORTLISTS, NOT RESUME PILES</span>
+              </div>
+
+              <div className="pt-8 space-y-6">
+                <p className="text-zinc-500 text-sm leading-relaxed max-w-md">
+                  Currently in private beta. We are working closely with a small number of candidates and teams.
+                </p>
+                
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <Link
+                    to="/for-candidates"
+                    className="inline-flex items-center justify-center px-6 py-2.5 text-xs font-medium tracking-widest uppercase text-matcha-500 border border-matcha-500/50 hover:bg-matcha-500/10 transition-colors"
+                  >
+                    For Candidates
+                  </Link>
+                  <Link
+                    to="/work-with-us"
+                    className="inline-flex items-center justify-center px-6 py-2.5 text-xs font-medium tracking-widest uppercase text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors"
+                  >
+                    Work with us
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
