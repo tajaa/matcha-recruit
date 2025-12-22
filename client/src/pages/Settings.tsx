@@ -1,7 +1,38 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { settings, setTokens } from '../api/client';
-import { Button } from '../components';
+
+interface PasswordStrength {
+  score: number;
+  checks: {
+    length: boolean;
+    uppercase: boolean;
+    lowercase: boolean;
+    number: boolean;
+    special: boolean;
+  };
+}
+
+function checkPasswordStrength(password: string): PasswordStrength {
+  const checks = {
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /[0-9]/.test(password),
+    special: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+  };
+
+  const score = Object.values(checks).filter(Boolean).length;
+  return { score, checks };
+}
+
+function getStrengthLabel(score: number): { label: string; color: string } {
+  if (score <= 1) return { label: 'WEAK', color: 'text-red-500' };
+  if (score <= 2) return { label: 'FAIR', color: 'text-orange-500' };
+  if (score <= 3) return { label: 'GOOD', color: 'text-yellow-500' };
+  if (score <= 4) return { label: 'STRONG', color: 'text-matcha-400' };
+  return { label: 'EXCELLENT', color: 'text-matcha-500' };
+}
 
 export function Settings() {
   const { user, refreshUser } = useAuth();
@@ -21,6 +52,13 @@ export function Settings() {
   const [emailSuccess, setEmailSuccess] = useState('');
   const [emailLoading, setEmailLoading] = useState(false);
 
+  // Password strength
+  const passwordStrength = useMemo(() => checkPasswordStrength(newPassword), [newPassword]);
+  const strengthInfo = useMemo(() => getStrengthLabel(passwordStrength.score), [passwordStrength.score]);
+
+  const inputClasses =
+    'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50 focus:shadow-[0_0_10px_rgba(34,197,94,0.1)] transition-all font-mono';
+
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError('');
@@ -31,15 +69,15 @@ export function Settings() {
       return;
     }
 
-    if (newPassword.length < 8) {
-      setPasswordError('Password must be at least 8 characters');
+    if (passwordStrength.score < 3) {
+      setPasswordError('Password is too weak. Please include uppercase, lowercase, numbers, and special characters.');
       return;
     }
 
     setPasswordLoading(true);
     try {
       await settings.changePassword(currentPassword, newPassword);
-      setPasswordSuccess('Password changed successfully');
+      setPasswordSuccess('Password updated successfully');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -63,10 +101,9 @@ export function Settings() {
     setEmailLoading(true);
     try {
       const response = await settings.changeEmail(emailPassword, newEmail);
-      // Update tokens and refresh user data
       setTokens(response.access_token, response.refresh_token);
       await refreshUser();
-      setEmailSuccess('Email changed successfully');
+      setEmailSuccess('Email updated successfully');
       setEmailPassword('');
       setNewEmail('');
     } catch (err) {
@@ -77,134 +114,255 @@ export function Settings() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto p-6">
-      <h1 className="text-2xl font-bold text-white mb-8">Account Settings</h1>
+    <div className="max-w-2xl mx-auto p-6 font-mono">
+      {/* Header */}
+      <div className="mb-10">
+        <h1 className="text-2xl font-bold tracking-[-0.02em] text-white mb-2">SETTINGS</h1>
+        <p className="text-[10px] tracking-[0.3em] uppercase text-zinc-600">
+          Account Configuration
+        </p>
+      </div>
 
       {/* Current Account Info */}
-      <div className="bg-zinc-900 rounded-xl p-6 border border-white/5 mb-6">
-        <h2 className="text-lg font-semibold text-white mb-4">Account Information</h2>
-        <div className="space-y-2 text-zinc-400">
-          <p>
-            <span className="text-zinc-500">Email:</span> {user?.email}
-          </p>
-          <p>
-            <span className="text-zinc-500">Role:</span>{' '}
-            <span className="capitalize">{user?.role}</span>
-          </p>
+      <div className="relative mb-8">
+        <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-zinc-700" />
+        <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-zinc-700" />
+        <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-zinc-700" />
+        <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-zinc-700" />
+
+        <div className="bg-zinc-900/50 border border-zinc-800 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-1.5 h-1.5 rounded-full bg-matcha-500 animate-pulse" />
+            <h2 className="text-[10px] tracking-[0.2em] uppercase text-zinc-500">
+              Current Profile
+            </h2>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-600">Email</span>
+              <span className="text-sm text-white">{user?.email}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-600">Role</span>
+              <span className="text-sm text-matcha-500 uppercase tracking-wider">{user?.role}</span>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Change Password */}
-      <div className="bg-zinc-900 rounded-xl p-6 border border-white/5 mb-6">
-        <h2 className="text-lg font-semibold text-white mb-4">Change Password</h2>
-        <form onSubmit={handlePasswordChange}>
-          {passwordError && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
-              {passwordError}
+      <div className="relative mb-8">
+        <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-zinc-700" />
+        <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-zinc-700" />
+        <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-zinc-700" />
+        <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-zinc-700" />
+
+        <div className="bg-zinc-900/50 border border-zinc-800 p-6">
+          <h2 className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 mb-6">
+            Update Password
+          </h2>
+
+          <form onSubmit={handlePasswordChange}>
+            {passwordError && (
+              <div className="mb-6 p-3 border border-red-500/30 bg-red-500/5 text-red-400 text-[11px] tracking-wide">
+                <span className="text-red-500 mr-2">!</span>
+                {passwordError}
+              </div>
+            )}
+            {passwordSuccess && (
+              <div className="mb-6 p-3 border border-matcha-500/30 bg-matcha-500/5 text-matcha-400 text-[11px] tracking-wide">
+                <span className="text-matcha-500 mr-2">+</span>
+                {passwordSuccess}
+              </div>
+            )}
+
+            <div className="mb-5">
+              <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+                Current Password
+              </label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                required
+                className={inputClasses}
+                placeholder="Enter current password"
+              />
             </div>
-          )}
-          {passwordSuccess && (
-            <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-green-400 text-sm">
-              {passwordSuccess}
+
+            <div className="mb-5">
+              <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+                New Password
+              </label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                className={inputClasses}
+                placeholder="Enter new password"
+              />
+
+              {/* Password Strength Indicator */}
+              {newPassword && (
+                <div className="mt-4 space-y-3">
+                  {/* Strength bar */}
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-1 bg-zinc-800 overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          passwordStrength.score <= 1
+                            ? 'bg-red-500'
+                            : passwordStrength.score <= 2
+                              ? 'bg-orange-500'
+                              : passwordStrength.score <= 3
+                                ? 'bg-yellow-500'
+                                : passwordStrength.score <= 4
+                                  ? 'bg-matcha-400'
+                                  : 'bg-matcha-500'
+                        }`}
+                        style={{ width: `${(passwordStrength.score / 5) * 100}%` }}
+                      />
+                    </div>
+                    <span className={`text-[9px] tracking-[0.15em] ${strengthInfo.color}`}>
+                      {strengthInfo.label}
+                    </span>
+                  </div>
+
+                  {/* Requirements checklist */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.length ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                      <span>{passwordStrength.checks.length ? '+' : '-'}</span>
+                      <span>8+ Characters</span>
+                    </div>
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.uppercase ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                      <span>{passwordStrength.checks.uppercase ? '+' : '-'}</span>
+                      <span>Uppercase</span>
+                    </div>
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.lowercase ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                      <span>{passwordStrength.checks.lowercase ? '+' : '-'}</span>
+                      <span>Lowercase</span>
+                    </div>
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.number ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                      <span>{passwordStrength.checks.number ? '+' : '-'}</span>
+                      <span>Number</span>
+                    </div>
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.special ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                      <span>{passwordStrength.checks.special ? '+' : '-'}</span>
+                      <span>Special Char</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
 
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-zinc-400 mb-2">
-              Current Password
-            </label>
-            <input
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              required
-              className="w-full px-3 py-2 bg-zinc-800 border border-white/10 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-matcha-500"
-              placeholder="Enter current password"
-            />
-          </div>
+            <div className="mb-6">
+              <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+                Confirm New Password
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                className={inputClasses}
+                placeholder="Confirm new password"
+              />
+              {confirmPassword && newPassword !== confirmPassword && (
+                <p className="mt-2 text-[9px] text-red-400 tracking-wide">
+                  ! Passwords do not match
+                </p>
+              )}
+            </div>
 
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-zinc-400 mb-2">
-              New Password
-            </label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              required
-              minLength={8}
-              className="w-full px-3 py-2 bg-zinc-800 border border-white/10 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-matcha-500"
-              placeholder="Enter new password (min 8 characters)"
-            />
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-zinc-400 mb-2">
-              Confirm New Password
-            </label>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-              className="w-full px-3 py-2 bg-zinc-800 border border-white/10 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-matcha-500"
-              placeholder="Confirm new password"
-            />
-          </div>
-
-          <Button type="submit" disabled={passwordLoading}>
-            {passwordLoading ? 'Changing...' : 'Change Password'}
-          </Button>
-        </form>
+            <button
+              type="submit"
+              disabled={passwordLoading || passwordStrength.score < 3}
+              className="w-full py-3 bg-matcha-500 text-black text-[11px] tracking-[0.2em] uppercase font-medium hover:bg-matcha-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:shadow-[0_0_20px_rgba(34,197,94,0.3)]"
+            >
+              {passwordLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-black/50 animate-pulse" />
+                  Updating
+                </span>
+              ) : (
+                'Update Password'
+              )}
+            </button>
+          </form>
+        </div>
       </div>
 
       {/* Change Email */}
-      <div className="bg-zinc-900 rounded-xl p-6 border border-white/5">
-        <h2 className="text-lg font-semibold text-white mb-4">Change Email</h2>
-        <form onSubmit={handleEmailChange}>
-          {emailError && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
-              {emailError}
+      <div className="relative">
+        <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-zinc-700" />
+        <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-zinc-700" />
+        <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-zinc-700" />
+        <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-zinc-700" />
+
+        <div className="bg-zinc-900/50 border border-zinc-800 p-6">
+          <h2 className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 mb-6">
+            Update Email
+          </h2>
+
+          <form onSubmit={handleEmailChange}>
+            {emailError && (
+              <div className="mb-6 p-3 border border-red-500/30 bg-red-500/5 text-red-400 text-[11px] tracking-wide">
+                <span className="text-red-500 mr-2">!</span>
+                {emailError}
+              </div>
+            )}
+            {emailSuccess && (
+              <div className="mb-6 p-3 border border-matcha-500/30 bg-matcha-500/5 text-matcha-400 text-[11px] tracking-wide">
+                <span className="text-matcha-500 mr-2">+</span>
+                {emailSuccess}
+              </div>
+            )}
+
+            <div className="mb-5">
+              <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+                New Email Address
+              </label>
+              <input
+                type="email"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                required
+                className={inputClasses}
+                placeholder="Enter new email address"
+              />
             </div>
-          )}
-          {emailSuccess && (
-            <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-green-400 text-sm">
-              {emailSuccess}
+
+            <div className="mb-6">
+              <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+                Confirm with Password
+              </label>
+              <input
+                type="password"
+                value={emailPassword}
+                onChange={(e) => setEmailPassword(e.target.value)}
+                required
+                className={inputClasses}
+                placeholder="Enter current password"
+              />
             </div>
-          )}
 
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-zinc-400 mb-2">
-              New Email
-            </label>
-            <input
-              type="email"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              required
-              className="w-full px-3 py-2 bg-zinc-800 border border-white/10 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-matcha-500"
-              placeholder="Enter new email address"
-            />
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-zinc-400 mb-2">
-              Confirm with Password
-            </label>
-            <input
-              type="password"
-              value={emailPassword}
-              onChange={(e) => setEmailPassword(e.target.value)}
-              required
-              className="w-full px-3 py-2 bg-zinc-800 border border-white/10 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-matcha-500"
-              placeholder="Enter your password to confirm"
-            />
-          </div>
-
-          <Button type="submit" disabled={emailLoading}>
-            {emailLoading ? 'Changing...' : 'Change Email'}
-          </Button>
-        </form>
+            <button
+              type="submit"
+              disabled={emailLoading}
+              className="w-full py-3 bg-matcha-500 text-black text-[11px] tracking-[0.2em] uppercase font-medium hover:bg-matcha-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:shadow-[0_0_20px_rgba(34,197,94,0.3)]"
+            >
+              {emailLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-black/50 animate-pulse" />
+                  Updating
+                </span>
+              ) : (
+                'Update Email'
+              )}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
