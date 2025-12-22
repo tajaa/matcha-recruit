@@ -39,6 +39,12 @@ export function ProjectDetail() {
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [adding, setAdding] = useState(false);
 
+  // Add modal filter state
+  const [addSearch, setAddSearch] = useState('');
+  const [addSkills, setAddSkills] = useState('');
+  const [addMinExp, setAddMinExp] = useState('');
+  const [addMaxExp, setAddMaxExp] = useState('');
+
   const [showEditModal, setShowEditModal] = useState(false);
   const [editData, setEditData] = useState<ProjectUpdate>({});
   const [saving, setSaving] = useState(false);
@@ -103,6 +109,11 @@ export function ProjectDetail() {
     setShowAddModal(true);
     setLoadingCandidates(true);
     setSelectedCandidateIds([]);
+    // Reset filters
+    setAddSearch('');
+    setAddSkills('');
+    setAddMinExp('');
+    setAddMaxExp('');
     try {
       const all = await candidatesApi.list();
       // Filter out candidates already in this project
@@ -113,6 +124,50 @@ export function ProjectDetail() {
     } finally {
       setLoadingCandidates(false);
     }
+  };
+
+  // Filter available candidates based on search criteria
+  const filteredAvailableCandidates = availableCandidates.filter((c) => {
+    // Search filter (name or email)
+    if (addSearch.trim()) {
+      const search = addSearch.toLowerCase();
+      const nameMatch = c.name?.toLowerCase().includes(search);
+      const emailMatch = c.email?.toLowerCase().includes(search);
+      if (!nameMatch && !emailMatch) return false;
+    }
+
+    // Skills filter
+    if (addSkills.trim()) {
+      const searchSkills = addSkills.toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
+      const candidateSkills = (c.skills || []).map((s) => s.toLowerCase());
+      const hasAnySkill = searchSkills.some((skill) =>
+        candidateSkills.some((cs) => cs.includes(skill))
+      );
+      if (!hasAnySkill) return false;
+    }
+
+    // Min experience filter
+    if (addMinExp) {
+      const min = parseInt(addMinExp);
+      if (!c.experience_years || c.experience_years < min) return false;
+    }
+
+    // Max experience filter
+    if (addMaxExp) {
+      const max = parseInt(addMaxExp);
+      if (!c.experience_years || c.experience_years > max) return false;
+    }
+
+    return true;
+  });
+
+  const handleSelectAll = () => {
+    const filteredIds = filteredAvailableCandidates.map((c) => c.id);
+    setSelectedCandidateIds(filteredIds);
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedCandidateIds([]);
   };
 
   const handleAddCandidates = async () => {
@@ -437,41 +492,135 @@ export function ProjectDetail() {
           </div>
         ) : (
           <>
-            <div className="mb-4 text-sm text-zinc-500">
-              Select candidates to add to this project ({selectedCandidateIds.length} selected)
-            </div>
-            <div className="max-h-96 overflow-y-auto space-y-2">
-              {availableCandidates.map((c) => (
-                <label
-                  key={c.id}
-                  className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
-                    selectedCandidateIds.includes(c.id)
-                      ? 'bg-matcha-500/10 border-matcha-500/30'
-                      : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
-                  }`}
-                >
+            {/* Filters */}
+            <div className="mb-4 p-3 bg-zinc-900 rounded-lg border border-zinc-800">
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Search</label>
                   <input
-                    type="checkbox"
-                    checked={selectedCandidateIds.includes(c.id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedCandidateIds([...selectedCandidateIds, c.id]);
-                      } else {
-                        setSelectedCandidateIds(selectedCandidateIds.filter((id) => id !== c.id));
-                      }
-                    }}
-                    className="mr-3"
+                    type="text"
+                    placeholder="Name or email..."
+                    value={addSearch}
+                    onChange={(e) => setAddSearch(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
                   />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-zinc-200 truncate">{c.name || 'Unknown'}</p>
-                    <div className="flex items-center gap-3 text-xs text-zinc-500 mt-1">
-                      {c.email && <span>{c.email}</span>}
-                      {c.experience_years && <span>{c.experience_years} yrs exp</span>}
-                    </div>
-                  </div>
-                </label>
-              ))}
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Skills</label>
+                  <input
+                    type="text"
+                    placeholder="python, react..."
+                    value={addSkills}
+                    onChange={(e) => setAddSkills(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Min Experience</label>
+                  <input
+                    type="number"
+                    placeholder="Years"
+                    value={addMinExp}
+                    onChange={(e) => setAddMinExp(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Max Experience</label>
+                  <input
+                    type="number"
+                    placeholder="Years"
+                    value={addMaxExp}
+                    onChange={(e) => setAddMaxExp(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                  />
+                </div>
+              </div>
             </div>
+
+            {/* Selection controls */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm text-zinc-500">
+                {filteredAvailableCandidates.length === availableCandidates.length
+                  ? `${availableCandidates.length} candidates`
+                  : `${filteredAvailableCandidates.length} of ${availableCandidates.length} candidates`}
+                {selectedCandidateIds.length > 0 && ` (${selectedCandidateIds.length} selected)`}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSelectAll}
+                  className="text-xs text-matcha-400 hover:text-matcha-300 transition-colors"
+                >
+                  Select All ({filteredAvailableCandidates.length})
+                </button>
+                {selectedCandidateIds.length > 0 && (
+                  <button
+                    onClick={handleDeselectAll}
+                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  >
+                    Deselect All
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Candidate list */}
+            {filteredAvailableCandidates.length === 0 ? (
+              <div className="text-center py-8 text-zinc-500">
+                No candidates match your filters
+              </div>
+            ) : (
+              <div className="max-h-72 overflow-y-auto space-y-2">
+                {filteredAvailableCandidates.map((c) => (
+                  <label
+                    key={c.id}
+                    className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
+                      selectedCandidateIds.includes(c.id)
+                        ? 'bg-matcha-500/10 border-matcha-500/30'
+                        : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedCandidateIds.includes(c.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedCandidateIds([...selectedCandidateIds, c.id]);
+                        } else {
+                          setSelectedCandidateIds(selectedCandidateIds.filter((cid) => cid !== c.id));
+                        }
+                      }}
+                      className="mr-3"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-zinc-200 truncate">{c.name || 'Unknown'}</p>
+                      <div className="flex items-center gap-3 text-xs text-zinc-500 mt-1">
+                        {c.email && <span>{c.email}</span>}
+                        {c.experience_years && <span>{c.experience_years} yrs exp</span>}
+                      </div>
+                      {c.skills && c.skills.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {c.skills.slice(0, 4).map((skill) => (
+                            <span
+                              key={skill}
+                              className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded text-xs"
+                            >
+                              {skill}
+                            </span>
+                          ))}
+                          {c.skills.length > 4 && (
+                            <span className="text-xs text-zinc-600">+{c.skills.length - 4}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+
             <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-zinc-800">
               <Button variant="secondary" onClick={() => setShowAddModal(false)}>
                 Cancel
