@@ -340,6 +340,41 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_saved_openings_company ON saved_openings(company_name)
         """)
 
+        # Tracked companies table (company watchlist)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tracked_companies (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(255) NOT NULL,
+                career_url TEXT NOT NULL UNIQUE,
+                logo_url TEXT,
+                industry VARCHAR(100),
+                last_scraped_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tracked_companies_name ON tracked_companies(name)
+        """)
+
+        # Tracked company jobs table (jobs found from tracked companies)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tracked_company_jobs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES tracked_companies(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL,
+                location VARCHAR(255),
+                department VARCHAR(255),
+                apply_url TEXT NOT NULL UNIQUE,
+                first_seen_at TIMESTAMP DEFAULT NOW(),
+                is_new BOOLEAN DEFAULT true
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tracked_company_jobs_company_id ON tracked_company_jobs(company_id)
+        """)
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:

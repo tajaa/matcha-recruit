@@ -420,34 +420,79 @@ export const jobSearch = {
     }),
 };
 
-// Openings (scrape career pages by industry)
+// =============================================================================
+// OPENINGS - Company Watchlist + Niche Sources
+// =============================================================================
+
+// Tracked Companies (Company Watchlist)
+export interface TrackedCompanyCreate {
+  name: string;
+  career_url: string;
+  industry?: string;
+}
+
+export interface TrackedCompany {
+  id: string;
+  name: string;
+  career_url: string;
+  industry: string | null;
+  last_scraped_at: string | null;
+  job_count: number;
+  new_job_count: number;
+  created_at: string;
+}
+
+export interface TrackedCompanyJob {
+  id: string;
+  company_id: string;
+  company_name: string;
+  title: string;
+  location: string | null;
+  department: string | null;
+  apply_url: string;
+  is_new: boolean;
+  first_seen_at: string;
+}
+
+export interface RefreshResult {
+  companies_refreshed: number;
+  new_jobs_found: number;
+  total_jobs: number;
+}
+
+// Niche Job Sources
+export interface JobSource {
+  id: string;
+  name: string;
+  description: string;
+  industries: string[];
+}
+
+export interface SourceSearchRequest {
+  sources: string[];
+  query?: string;
+  location?: string;
+  limit?: number;
+}
+
 export interface ScrapedJob {
   title: string;
   company_name: string;
   location: string | null;
   department: string | null;
+  salary: string | null;
   apply_url: string;
   source_url: string;
+  source_name: string;
 }
 
-export interface OpeningsSearchRequest {
-  industry: string;
-  query?: string;
-  max_sources?: number;
-}
-
-export interface OpeningsSearchResponse {
+export interface SourceSearchResult {
   jobs: ScrapedJob[];
-  sources_scraped: number;
+  sources_searched: number;
   sources_failed: number;
-  industry: string;
-  query: string | null;
 }
 
-export interface IndustriesResponse {
-  industries: string[];
-}
-
+// Saved Openings
 export interface SavedOpeningCreate {
   title: string;
   company_name: string;
@@ -473,10 +518,38 @@ export interface SavedOpening {
 }
 
 export const openings = {
-  getIndustries: () => request<IndustriesResponse>('/openings/industries'),
+  // Tracked Companies (Watchlist)
+  addCompany: (data: TrackedCompanyCreate) =>
+    request<TrackedCompany>('/openings/companies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
-  search: (params: OpeningsSearchRequest) =>
-    request<OpeningsSearchResponse>('/openings/search', {
+  listCompanies: () => request<TrackedCompany[]>('/openings/companies'),
+
+  deleteCompany: (id: string) =>
+    request<{ status: string }>(`/openings/companies/${id}`, {
+      method: 'DELETE',
+    }),
+
+  getCompanyJobs: (companyId: string) =>
+    request<TrackedCompanyJob[]>(`/openings/companies/${companyId}/jobs`),
+
+  refreshCompanies: () =>
+    request<RefreshResult>('/openings/companies/refresh', {
+      method: 'POST',
+    }),
+
+  markCompanySeen: (companyId: string) =>
+    request<{ status: string }>(`/openings/companies/${companyId}/mark-seen`, {
+      method: 'POST',
+    }),
+
+  // Niche Job Sources
+  listSources: () => request<JobSource[]>('/openings/sources'),
+
+  searchSources: (params: SourceSearchRequest) =>
+    request<SourceSearchResult>('/openings/sources/search', {
       method: 'POST',
       body: JSON.stringify(params),
     }),
