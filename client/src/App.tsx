@@ -112,7 +112,7 @@ function App() {
             <Route
               path="jobs"
               element={
-                <ProtectedRoute roles={['candidate']}>
+                <ProtectedRoute roles={['admin', 'candidate']}>
                   <JobSearch />
                 </ProtectedRoute>
               }
