@@ -7,7 +7,8 @@ from ..database import get_connection
 from ..models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
     AdminRegister, ClientRegister, CandidateRegister,
-    AdminProfile, ClientProfile, CandidateProfile, CurrentUser
+    AdminProfile, ClientProfile, CandidateProfile, CurrentUser,
+    ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest
 )
 from ..services.auth import (
     hash_password, verify_password,
@@ -339,3 +340,142 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
 async def logout(current_user: CurrentUser = Depends(get_current_user)):
     """Logout endpoint (for audit/future token blacklist)."""
     return {"status": "logged_out"}
+
+
+@router.post("/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Change password for current user."""
+    async with get_connection() as conn:
+        # Get current password hash
+        user = await conn.fetchrow(
+            "SELECT password_hash FROM users WHERE id = $1",
+            current_user.id
+        )
+
+        if not user or not verify_password(request.current_password, user["password_hash"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect"
+            )
+
+        # Validate new password
+        if len(request.new_password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New password must be at least 8 characters"
+            )
+
+        # Update password
+        new_hash = hash_password(request.new_password)
+        await conn.execute(
+            "UPDATE users SET password_hash = $1 WHERE id = $2",
+            new_hash, current_user.id
+        )
+
+        return {"status": "password_changed"}
+
+
+@router.post("/change-email")
+async def change_email(
+    request: ChangeEmailRequest,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Change email for current user."""
+    async with get_connection() as conn:
+        # Verify password
+        user = await conn.fetchrow(
+            "SELECT password_hash FROM users WHERE id = $1",
+            current_user.id
+        )
+
+        if not user or not verify_password(request.password, user["password_hash"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password is incorrect"
+            )
+
+        # Check if new email is already taken
+        existing = await conn.fetchval(
+            "SELECT id FROM users WHERE email = $1 AND id != $2",
+            request.new_email, current_user.id
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is already in use"
+            )
+
+        # Update email in users table
+        await conn.execute(
+            "UPDATE users SET email = $1 WHERE id = $2",
+            request.new_email, current_user.id
+        )
+
+        # Also update email in role-specific table if applicable
+        if current_user.role == "candidate":
+            await conn.execute(
+                "UPDATE candidates SET email = $1 WHERE user_id = $2",
+                request.new_email, current_user.id
+            )
+
+        # Generate new tokens with updated email
+        settings = get_settings()
+        access_token = create_access_token(current_user.id, request.new_email, current_user.role)
+        refresh_token = create_refresh_token(current_user.id, request.new_email, current_user.role)
+
+        return {
+            "status": "email_changed",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_in": settings.jwt_access_token_expire_minutes * 60
+        }
+
+
+@router.put("/profile")
+async def update_profile(
+    request: UpdateProfileRequest,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Update profile information for current user."""
+    async with get_connection() as conn:
+        if current_user.role == "admin":
+            if request.name:
+                await conn.execute(
+                    "UPDATE admins SET name = $1 WHERE user_id = $2",
+                    request.name, current_user.id
+                )
+        elif current_user.role == "client":
+            updates = []
+            values = []
+            if request.name:
+                updates.append("name = $" + str(len(values) + 1))
+                values.append(request.name)
+            if request.phone:
+                updates.append("phone = $" + str(len(values) + 1))
+                values.append(request.phone)
+            if updates:
+                values.append(current_user.id)
+                await conn.execute(
+                    f"UPDATE clients SET {', '.join(updates)} WHERE user_id = ${len(values)}",
+                    *values
+                )
+        elif current_user.role == "candidate":
+            updates = []
+            values = []
+            if request.name:
+                updates.append("name = $" + str(len(values) + 1))
+                values.append(request.name)
+            if request.phone:
+                updates.append("phone = $" + str(len(values) + 1))
+                values.append(request.phone)
+            if updates:
+                values.append(current_user.id)
+                await conn.execute(
+                    f"UPDATE candidates SET {', '.join(updates)} WHERE user_id = ${len(values)}",
+                    *values
+                )
+
+        return {"status": "profile_updated"}

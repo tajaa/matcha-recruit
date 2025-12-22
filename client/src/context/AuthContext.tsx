@@ -12,6 +12,7 @@ interface AuthContextType {
   registerClient: (data: ClientRegister) => Promise<void>;
   registerCandidate: (data: CandidateRegister) => Promise<void>;
   hasRole: (...roles: UserRole[]) => boolean;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -81,6 +82,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return roles.includes(user.role);
   };
 
+  const refreshUser = useCallback(async () => {
+    await loadUser();
+  }, [loadUser]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -93,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         registerClient,
         registerCandidate,
         hasRole,
+        refreshUser,
       }}
     >
       {children}

@@ -16,6 +16,7 @@ import {
   Login,
   Register,
   Unauthorized,
+  Settings,
 } from './pages';
 
 // Redirect component that properly handles the :id parameter
@@ -135,6 +136,14 @@ function App() {
               element={
                 <ProtectedRoute roles={['admin', 'client']}>
                   <InterviewAnalysis />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
                 </ProtectedRoute>
               }
             />

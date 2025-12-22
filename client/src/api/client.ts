@@ -420,6 +420,38 @@ export const jobSearch = {
     }),
 };
 
+// Settings/Account API
+export const settings = {
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ status: string }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    }),
+
+  changeEmail: (password: string, newEmail: string) =>
+    request<{
+      status: string;
+      access_token: string;
+      refresh_token: string;
+      expires_in: number;
+    }>('/auth/change-email', {
+      method: 'POST',
+      body: JSON.stringify({
+        password,
+        new_email: newEmail,
+      }),
+    }),
+
+  updateProfile: (data: { name?: string; phone?: string }) =>
+    request<{ status: string }>('/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+};
+
 // WebSocket URL helper
 export function getInterviewWSUrl(interviewId: string): string {
   return `ws://localhost:8000/api/ws/interview/${interviewId}`;
