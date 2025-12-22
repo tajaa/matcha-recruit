@@ -52,7 +52,7 @@ export function ForCandidates() {
               For Candidates
             </h1>
             <p className="text-zinc-400 text-lg leading-relaxed max-w-2xl">
-              We work with a small number of people-first teams to place candidates where fit actually matters.
+              With 15 years in hiring and 5,000+ people placed, we know where fit actually matters.
               If you are open to opportunities and want to be considered for roles we are actively recruiting for, you can apply here.
             </p>
             <div>

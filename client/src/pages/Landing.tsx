@@ -95,7 +95,7 @@ export function Landing() {
 
               <div className="pt-8 space-y-6">
                 <p className="text-zinc-500 text-sm leading-relaxed max-w-md">
-                  Currently in private beta. We are working closely with a small number of candidates and teams.
+                  15 years in hiring. More than 5,000 people placed. We've built the tool we always wanted.
                 </p>
                 
                 <div className="flex flex-col sm:flex-row gap-4">
