@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
@@ -22,6 +23,7 @@ export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout, hasRole } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Filter nav items based on user role
   const navItems = allNavItems.filter((item) => hasRole(...item.roles));
@@ -76,7 +78,7 @@ export function Layout() {
 
             {/* User menu */}
             {user && (
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 sm:gap-4">
                 <div className="hidden md:flex items-center gap-3 text-[10px]">
                   <span className="text-zinc-600 tracking-wide">OPERATOR:</span>
                   <span className="text-zinc-300 tracking-wide">{user.email}</span>
@@ -115,14 +117,67 @@ export function Layout() {
                 </Link>
                 <button
                   onClick={handleLogout}
-                  className="text-[10px] tracking-[0.15em] uppercase text-zinc-600 hover:text-zinc-300 transition-colors px-3 py-1.5 border border-transparent hover:border-zinc-800"
+                  className="hidden sm:block text-[10px] tracking-[0.15em] uppercase text-zinc-600 hover:text-zinc-300 transition-colors px-3 py-1.5 border border-transparent hover:border-zinc-800"
                 >
                   Logout
+                </button>
+                {/* Mobile hamburger menu */}
+                <button
+                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                  className="sm:hidden p-2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  aria-label="Toggle menu"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {mobileMenuOpen ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h16" />
+                    )}
+                  </svg>
                 </button>
               </div>
             )}
           </div>
         </div>
+
+        {/* Mobile menu dropdown */}
+        {mobileMenuOpen && (
+          <div className="sm:hidden border-t border-zinc-800/50 bg-zinc-950/95 backdrop-blur-sm">
+            <div className="px-4 py-3 space-y-1">
+              {navItems.map((item) => (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`block px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
+                    location.pathname === item.path
+                      ? 'text-matcha-400 bg-matcha-500/10 border-l-2 border-matcha-500'
+                      : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
+              <div className="pt-3 mt-3 border-t border-zinc-800/50">
+                <div className="px-3 py-2 text-[10px] text-zinc-600 tracking-wide">
+                  {user?.email}
+                  <span className="ml-2 px-2 py-0.5 bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 tracking-[0.15em] uppercase">
+                    {user?.role}
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    handleLogout();
+                  }}
+                  className="block w-full text-left px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </nav>
 
       <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-12">

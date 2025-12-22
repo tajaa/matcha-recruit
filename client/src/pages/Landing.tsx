@@ -42,7 +42,7 @@ export function Landing() {
       </div>
 
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-8 py-6">
+      <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-6">
         <div className="flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.8)]" />
           <span className="text-xs tracking-[0.3em] uppercase text-matcha-500 font-medium">
@@ -73,12 +73,12 @@ export function Landing() {
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 flex items-center justify-center min-h-[calc(100vh-180px)] px-8">
+      <main className="relative z-10 flex items-center justify-center min-h-[calc(100vh-180px)] px-4 sm:px-8">
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(400px,500px)_1fr] gap-8 items-center w-full max-w-7xl">
           {/* Left - Title */}
           <div className="flex flex-col justify-center lg:text-left text-center">
             <div className="space-y-4">
-              <h1 className="text-6xl lg:text-7xl font-bold tracking-[-0.02em] text-white">
+              <h1 className="text-4xl sm:text-6xl lg:text-7xl font-bold tracking-[-0.02em] text-white">
                 MATCHA
               </h1>
               <p className="text-xs tracking-[0.3em] uppercase text-zinc-500">
@@ -162,11 +162,11 @@ export function Landing() {
 
       {/* Bottom Stats Bar */}
       <footer className="absolute bottom-0 left-0 right-0 z-10 border-t border-zinc-800/50 bg-zinc-950/80 backdrop-blur-sm">
-        <div className="flex items-center justify-between px-8 py-4 max-w-7xl mx-auto">
-          <div className="flex items-center gap-8 lg:gap-16">
+        <div className="flex items-center justify-between px-4 sm:px-8 py-4 max-w-7xl mx-auto">
+          <div className="flex items-center gap-4 sm:gap-8 lg:gap-16">
             {/* Interviews */}
-            <div className="flex items-center gap-4">
-              <span className="text-[9px] tracking-[0.2em] text-zinc-600 uppercase">
+            <div className="flex items-center gap-2 sm:gap-4">
+              <span className="text-[9px] tracking-[0.2em] text-zinc-600 uppercase hidden sm:inline">
                 Interviews
               </span>
               <span className="text-sm tracking-wider text-white tabular-nums">

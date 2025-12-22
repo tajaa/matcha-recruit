@@ -48,7 +48,7 @@ export function Login() {
       </div>
 
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-8 py-6">
+      <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-6">
         <Link to="/" className="flex items-center gap-3 group">
           <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.8)]" />
           <span className="text-xs tracking-[0.3em] uppercase text-matcha-500 font-medium group-hover:text-matcha-400 transition-colors">
@@ -161,7 +161,7 @@ export function Login() {
 
       {/* Bottom line */}
       <footer className="absolute bottom-0 left-0 right-0 z-10 border-t border-zinc-800/50">
-        <div className="flex items-center justify-center px-8 py-4">
+        <div className="flex items-center justify-center px-4 sm:px-8 py-4">
           <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-700">
             Matcha Recruit v1.0
           </span>
