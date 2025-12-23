@@ -19,3 +19,5 @@ export { ForCandidates } from './ForCandidates';
 export { WorkWithUs } from './WorkWithUs';
 export { Projects } from './Projects';
 export { ProjectDetail } from './ProjectDetail';
+export { OutreachLanding } from './OutreachLanding';
+export { OutreachScreening } from './OutreachScreening';

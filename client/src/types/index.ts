@@ -562,3 +562,56 @@ export interface ProjectStats {
   rejected: number;
   total: number;
 }
+
+// Outreach types
+export type OutreachStatus = 'sent' | 'opened' | 'interested' | 'declined' | 'screening_started' | 'screening_complete' | 'email_failed';
+
+export interface Outreach {
+  id: string;
+  project_id: string;
+  candidate_id: string;
+  candidate_name: string | null;
+  candidate_email: string | null;
+  token: string;
+  status: OutreachStatus;
+  email_sent_at: string | null;
+  interest_response_at: string | null;
+  interview_id: string | null;
+  screening_score: number | null;
+  screening_recommendation: string | null;
+  created_at: string;
+}
+
+export interface OutreachSendRequest {
+  candidate_ids: string[];
+  custom_message?: string;
+}
+
+export interface OutreachSendResult {
+  sent_count: number;
+  failed_count: number;
+  skipped_count: number;
+  errors: { candidate_id?: string; error: string }[];
+}
+
+export interface OutreachPublicInfo {
+  company_name: string;
+  position_title: string | null;
+  location: string | null;
+  salary_range: string | null;
+  requirements: string | null;
+  benefits: string | null;
+  status: string;
+  candidate_name: string | null;
+}
+
+export interface OutreachInterestResponse {
+  status: string;
+  message: string;
+  interview_url: string | null;
+}
+
+export interface OutreachInterviewStart {
+  interview_id: string;
+  websocket_url: string;
+}

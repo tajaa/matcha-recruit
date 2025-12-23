@@ -10,6 +10,7 @@ import type {
   CandidateStage,
   Candidate,
   ProjectUpdate,
+  Outreach,
 } from '../types';
 
 const STAGES: { value: CandidateStage; label: string; color: string }[] = [
@@ -48,6 +49,13 @@ export function ProjectDetail() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editData, setEditData] = useState<ProjectUpdate>({});
   const [saving, setSaving] = useState(false);
+
+  // Outreach state
+  const [outreachRecords, setOutreachRecords] = useState<Outreach[]>([]);
+  const [showOutreachModal, setShowOutreachModal] = useState(false);
+  const [outreachCandidateIds, setOutreachCandidateIds] = useState<string[]>([]);
+  const [sendingOutreach, setSendingOutreach] = useState(false);
+  const [customMessage, setCustomMessage] = useState('');
 
   const fetchProject = useCallback(async () => {
     if (!id) return;
@@ -92,14 +100,24 @@ export function ProjectDetail() {
     }
   }, [id]);
 
+  const fetchOutreach = useCallback(async () => {
+    if (!id) return;
+    try {
+      const data = await projectsApi.listOutreach(id);
+      setOutreachRecords(data);
+    } catch (err) {
+      console.error('Failed to fetch outreach:', err);
+    }
+  }, [id]);
+
   useEffect(() => {
     const loadAll = async () => {
       setLoading(true);
-      await Promise.all([fetchProject(), fetchCandidates(), fetchStats()]);
+      await Promise.all([fetchProject(), fetchCandidates(), fetchStats(), fetchOutreach()]);
       setLoading(false);
     };
     loadAll();
-  }, [fetchProject, fetchCandidates, fetchStats]);
+  }, [fetchProject, fetchCandidates, fetchStats, fetchOutreach]);
 
   useEffect(() => {
     fetchCandidates();
@@ -229,6 +247,56 @@ export function ProjectDetail() {
     }
   };
 
+  // Get outreach status for a candidate
+  const getOutreachStatus = (candidateId: string) => {
+    return outreachRecords.find((o) => o.candidate_id === candidateId);
+  };
+
+  // Get candidates eligible for outreach (initial stage, no existing outreach)
+  const getOutreachEligibleCandidates = () => {
+    const outreachCandidateSet = new Set(outreachRecords.map((o) => o.candidate_id));
+    return candidates.filter(
+      (c) => c.stage === 'initial' && !outreachCandidateSet.has(c.candidate_id)
+    );
+  };
+
+  // Open outreach modal with eligible candidates pre-selected
+  const openOutreachModal = () => {
+    const eligible = getOutreachEligibleCandidates();
+    setOutreachCandidateIds(eligible.map((c) => c.candidate_id));
+    setCustomMessage('');
+    setShowOutreachModal(true);
+  };
+
+  // Send outreach to selected candidates
+  const handleSendOutreach = async () => {
+    if (!id || outreachCandidateIds.length === 0) return;
+    setSendingOutreach(true);
+    try {
+      const result = await projectsApi.sendOutreach(id, {
+        candidate_ids: outreachCandidateIds,
+        custom_message: customMessage || undefined,
+      });
+      setShowOutreachModal(false);
+      await fetchOutreach();
+      alert(`Outreach sent: ${result.sent_count} successful, ${result.skipped_count} skipped, ${result.failed_count} failed`);
+    } catch (err) {
+      console.error('Failed to send outreach:', err);
+      alert('Failed to send outreach. Please try again.');
+    } finally {
+      setSendingOutreach(false);
+    }
+  };
+
+  // Outreach stats
+  const outreachStats = {
+    sent: outreachRecords.filter((o) => o.status === 'sent' || o.status === 'opened').length,
+    interested: outreachRecords.filter((o) => o.status === 'interested' || o.status === 'screening_started').length,
+    screened: outreachRecords.filter((o) => o.status === 'screening_complete').length,
+    declined: outreachRecords.filter((o) => o.status === 'declined').length,
+    total: outreachRecords.length,
+  };
+
   const formatSalary = (min?: number | null, max?: number | null) => {
     if (!min && !max) return 'Not specified';
     const fmt = (n: number) => `$${n.toLocaleString()}`;
@@ -272,6 +340,9 @@ export function ProjectDetail() {
         <div className="flex gap-3">
           <Button variant="secondary" onClick={() => setShowEditModal(true)}>
             Edit
+          </Button>
+          <Button variant="secondary" onClick={openOutreachModal} disabled={getOutreachEligibleCandidates().length === 0}>
+            Send Outreach
           </Button>
           <Button onClick={openAddModal}>Add Candidates</Button>
         </div>
@@ -360,15 +431,46 @@ export function ProjectDetail() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {candidates.map((pc) => (
+                  {candidates.map((pc) => {
+                    const outreach = getOutreachStatus(pc.candidate_id);
+                    return (
                     <div
                       key={pc.id}
                       className="flex items-center justify-between p-3 bg-zinc-900 rounded-lg border border-zinc-800"
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-zinc-200 truncate">
-                          {pc.candidate_name || 'Unknown'}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-zinc-200 truncate">
+                            {pc.candidate_name || 'Unknown'}
+                          </p>
+                          {outreach && (
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                              outreach.status === 'screening_complete'
+                                ? outreach.screening_recommendation === 'strong_pass' || outreach.screening_recommendation === 'pass'
+                                  ? 'bg-matcha-500/20 text-matcha-400'
+                                  : outreach.screening_recommendation === 'borderline'
+                                  ? 'bg-yellow-500/20 text-yellow-400'
+                                  : 'bg-red-500/20 text-red-400'
+                                : outreach.status === 'interested' || outreach.status === 'screening_started'
+                                ? 'bg-blue-500/20 text-blue-400'
+                                : outreach.status === 'declined'
+                                ? 'bg-red-500/20 text-red-400'
+                                : 'bg-zinc-700 text-zinc-400'
+                            }`}>
+                              {outreach.status === 'screening_complete'
+                                ? `${outreach.screening_recommendation} (${Math.round(outreach.screening_score || 0)}%)`
+                                : outreach.status === 'interested'
+                                ? 'Interested'
+                                : outreach.status === 'screening_started'
+                                ? 'Screening...'
+                                : outreach.status === 'declined'
+                                ? 'Declined'
+                                : outreach.status === 'opened'
+                                ? 'Opened'
+                                : 'Sent'}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-3 text-xs text-zinc-500 mt-1">
                           {pc.candidate_email && <span>{pc.candidate_email}</span>}
                           {pc.candidate_experience_years && (
@@ -414,7 +516,8 @@ export function ProjectDetail() {
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -468,6 +571,39 @@ export function ProjectDetail() {
             </CardContent>
           </Card>
 
+          {/* Outreach Stats Card */}
+          {outreachStats.total > 0 && (
+            <Card>
+              <CardContent>
+                <h3 className="text-sm font-medium text-zinc-400 mb-3">Outreach Status</h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Pending Response</span>
+                    <span className="text-zinc-200">{outreachStats.sent}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Interested</span>
+                    <span className="text-blue-400">{outreachStats.interested}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Screened</span>
+                    <span className="text-matcha-400">{outreachStats.screened}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Declined</span>
+                    <span className="text-red-400">{outreachStats.declined}</span>
+                  </div>
+                  <div className="border-t border-zinc-800 pt-2 mt-2">
+                    <div className="flex justify-between text-sm font-medium">
+                      <span className="text-zinc-400">Total Outreach</span>
+                      <span className="text-zinc-200">{outreachStats.total}</span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Quick Actions */}
           <Card>
             <CardContent>
@@ -475,6 +611,15 @@ export function ProjectDetail() {
               <div className="space-y-2">
                 <Button variant="secondary" size="sm" className="w-full" onClick={openAddModal}>
                   Add Candidates
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full"
+                  onClick={openOutreachModal}
+                  disabled={getOutreachEligibleCandidates().length === 0}
+                >
+                  Send Outreach ({getOutreachEligibleCandidates().length})
                 </Button>
               </div>
             </CardContent>
@@ -735,6 +880,119 @@ export function ProjectDetail() {
             </Button>
             <Button onClick={handleSaveProject} disabled={saving}>
               {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Send Outreach Modal */}
+      <Modal isOpen={showOutreachModal} onClose={() => setShowOutreachModal(false)} title="Send Outreach">
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-400">
+            Send outreach emails to candidates in the Initial stage who haven't been contacted yet.
+            They'll receive a link to express interest and complete a screening interview.
+          </p>
+
+          {/* Candidate selection */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs text-zinc-500">
+                Select Candidates ({outreachCandidateIds.length} selected)
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setOutreachCandidateIds(getOutreachEligibleCandidates().map((c) => c.candidate_id))}
+                  className="text-xs text-matcha-400 hover:text-matcha-300 transition-colors"
+                >
+                  Select All
+                </button>
+                {outreachCandidateIds.length > 0 && (
+                  <button
+                    onClick={() => setOutreachCandidateIds([])}
+                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="max-h-48 overflow-y-auto space-y-1 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
+              {getOutreachEligibleCandidates().map((pc) => (
+                <label
+                  key={pc.candidate_id}
+                  className={`flex items-center p-2 rounded cursor-pointer transition-colors ${
+                    outreachCandidateIds.includes(pc.candidate_id)
+                      ? 'bg-matcha-500/10'
+                      : 'hover:bg-zinc-800'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={outreachCandidateIds.includes(pc.candidate_id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setOutreachCandidateIds([...outreachCandidateIds, pc.candidate_id]);
+                      } else {
+                        setOutreachCandidateIds(outreachCandidateIds.filter((cid) => cid !== pc.candidate_id));
+                      }
+                    }}
+                    className="mr-2"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-zinc-200">{pc.candidate_name || 'Unknown'}</span>
+                    {pc.candidate_email && (
+                      <span className="text-xs text-zinc-500 ml-2">{pc.candidate_email}</span>
+                    )}
+                  </div>
+                </label>
+              ))}
+              {getOutreachEligibleCandidates().length === 0 && (
+                <p className="text-sm text-zinc-500 text-center py-4">
+                  No candidates eligible for outreach
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Custom message */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">
+              Custom Message (optional)
+            </label>
+            <textarea
+              value={customMessage}
+              onChange={(e) => setCustomMessage(e.target.value)}
+              placeholder="Add a personalized note to the email..."
+              rows={3}
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500 resize-none"
+            />
+          </div>
+
+          {/* Preview info */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+            <h4 className="text-xs text-zinc-500 uppercase mb-2">Email will include:</h4>
+            <ul className="text-sm text-zinc-400 space-y-1">
+              <li>• Position: {project?.position_title || project?.name}</li>
+              <li>• Company: {project?.company_name}</li>
+              {project?.location && <li>• Location: {project.location}</li>}
+              {(project?.salary_min || project?.salary_max) && (
+                <li>• Salary: {formatSalary(project?.salary_min, project?.salary_max)}</li>
+              )}
+            </ul>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4">
+            <Button variant="secondary" onClick={() => setShowOutreachModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendOutreach}
+              disabled={sendingOutreach || outreachCandidateIds.length === 0}
+            >
+              {sendingOutreach
+                ? 'Sending...'
+                : `Send to ${outreachCandidateIds.length} Candidate${outreachCandidateIds.length !== 1 ? 's' : ''}`}
             </Button>
           </div>
         </div>

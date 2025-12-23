@@ -8,6 +8,7 @@ from .job_search import router as job_search_router
 from .auth import router as auth_router
 from .openings import router as openings_router
 from .projects import router as projects_router
+from .outreach import router as outreach_router
 
 __all__ = [
     "companies_router",
@@ -20,4 +21,5 @@ __all__ = [
     "auth_router",
     "openings_router",
     "projects_router",
+    "outreach_router",
 ]

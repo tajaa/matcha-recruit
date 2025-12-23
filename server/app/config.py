@@ -38,6 +38,12 @@ class Settings:
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
 
+    # Email (MailerSend)
+    mailersend_api_key: Optional[str] = None
+    mailersend_from_email: str = "outreach@matcha.app"
+    mailersend_from_name: str = "Matcha Recruit"
+    app_base_url: str = "http://localhost:5173"
+
 
 # Global settings instance
 _settings: Optional[Settings] = None
@@ -92,6 +98,10 @@ def load_settings() -> Settings:
         s3_region=os.getenv("S3_REGION", "us-east-1"),
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        mailersend_api_key=os.getenv("MAILERSEND_API_KEY"),
+        mailersend_from_email=os.getenv("MAILERSEND_FROM_EMAIL", "outreach@matcha.app"),
+        mailersend_from_name=os.getenv("MAILERSEND_FROM_NAME", "Matcha Recruit"),
+        app_base_url=os.getenv("APP_BASE_URL", "http://localhost:5173"),
     )
     return _settings
 

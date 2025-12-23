@@ -495,6 +495,58 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
                     interview_id,
                 )
 
+                # If this was a screening interview from outreach, update the outreach status
+                if interview_type == "screening" and screening_analysis_data:
+                    outreach = await conn.fetchrow(
+                        "SELECT id, project_id, candidate_id FROM project_outreach WHERE interview_id = $1",
+                        interview_id,
+                    )
+                    if outreach:
+                        overall_score = screening_analysis_data.get("overall_score", 0)
+                        recommendation = screening_analysis_data.get("recommendation", "fail")
+
+                        # Update outreach record
+                        await conn.execute(
+                            """
+                            UPDATE project_outreach
+                            SET status = 'screening_complete', screening_score = $1, screening_recommendation = $2
+                            WHERE id = $3
+                            """,
+                            overall_score,
+                            recommendation,
+                            outreach["id"],
+                        )
+
+                        # Update candidate stage in project based on recommendation
+                        new_stage = "initial"
+                        notes_addition = f"Screening score: {overall_score:.0f}% - {recommendation}"
+
+                        if recommendation == "strong_pass":
+                            new_stage = "interview"
+                            notes_addition += " - Advanced to interview round"
+                        elif recommendation == "pass":
+                            new_stage = "screening"
+                            notes_addition += " - Passed initial screening"
+                        elif recommendation == "borderline":
+                            new_stage = "initial"
+                            notes_addition += " - Needs review"
+                        else:  # fail
+                            new_stage = "rejected"
+                            notes_addition += " - Did not pass screening"
+
+                        await conn.execute(
+                            """
+                            UPDATE project_candidates
+                            SET stage = $1, notes = COALESCE(notes, '') || E'\\n' || $2, updated_at = NOW()
+                            WHERE project_id = $3 AND candidate_id = $4
+                            """,
+                            new_stage,
+                            notes_addition,
+                            outreach["project_id"],
+                            outreach["candidate_id"],
+                        )
+                        print(f"[Interview {interview_id}] Outreach screening complete: {recommendation} -> stage {new_stage}")
+
             await gemini_session.close()
 
         if "forward_task" in dir() and forward_task:

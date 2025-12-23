@@ -23,6 +23,8 @@ import {
   WorkWithUs,
   Projects,
   ProjectDetail,
+  OutreachLanding,
+  OutreachScreening,
 } from './pages';
 
 // Redirect component that properly handles the :id parameter
@@ -43,6 +45,10 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
+
+          {/* Public outreach routes (token-based access) */}
+          <Route path="/outreach/:token" element={<OutreachLanding />} />
+          <Route path="/outreach/:token/screening" element={<OutreachScreening />} />
 
           {/* Redirects for old routes */}
           <Route path="/companies/:id" element={<CompanyRedirect />} />

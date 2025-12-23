@@ -36,6 +36,13 @@ import type {
   ProjectStats,
   ProjectStatus,
   CandidateStage,
+  Outreach,
+  OutreachSendRequest,
+  OutreachSendResult,
+  OutreachPublicInfo,
+  OutreachInterestResponse,
+  OutreachInterviewStart,
+  OutreachStatus,
 } from '../types';
 
 const API_BASE = 'http://localhost:8000/api';
@@ -719,6 +726,52 @@ export const projects = {
 
   getStats: (projectId: string) =>
     request<ProjectStats>(`/projects/${projectId}/stats`),
+
+  // Outreach
+  sendOutreach: (projectId: string, data: OutreachSendRequest) =>
+    request<OutreachSendResult>(`/projects/${projectId}/outreach`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listOutreach: (projectId: string, status?: OutreachStatus) => {
+    const params = status ? `?status=${status}` : '';
+    return request<Outreach[]>(`/projects/${projectId}/outreach${params}`);
+  },
+};
+
+// Outreach API (public endpoints - no auth required)
+export const outreach = {
+  getInfo: async (token: string): Promise<OutreachPublicInfo> => {
+    const response = await fetch(`${API_BASE}/outreach/${token}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to load' }));
+      throw new Error(error.detail || 'Failed to load');
+    }
+    return response.json();
+  },
+
+  respond: async (token: string, interested: boolean): Promise<OutreachInterestResponse> => {
+    const response = await fetch(`${API_BASE}/outreach/${token}/respond?interested=${interested}`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to respond' }));
+      throw new Error(error.detail || 'Failed to respond');
+    }
+    return response.json();
+  },
+
+  startInterview: async (token: string): Promise<OutreachInterviewStart> => {
+    const response = await fetch(`${API_BASE}/outreach/${token}/start-interview`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to start interview' }));
+      throw new Error(error.detail || 'Failed to start interview');
+    }
+    return response.json();
+  },
 };
 
 // WebSocket URL helper
