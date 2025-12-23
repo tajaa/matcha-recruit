@@ -454,6 +454,30 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_project_outreach_token ON project_outreach(token)
         """)
 
+        # Job applications table (for public job board applications)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS job_applications (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                position_id UUID NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
+                candidate_id UUID NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+                source VARCHAR(100),
+                cover_letter TEXT,
+                status VARCHAR(50) DEFAULT 'new',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(position_id, candidate_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_job_applications_position_id ON job_applications(position_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_job_applications_candidate_id ON job_applications(candidate_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_job_applications_status ON job_applications(status)
+        """)
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:
