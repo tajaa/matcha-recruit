@@ -43,6 +43,10 @@ import type {
   OutreachInterestResponse,
   OutreachInterviewStart,
   OutreachStatus,
+  PublicJobListing,
+  PublicJobDetail,
+  JobListResponse,
+  ApplicationSubmitResponse,
 } from '../types';
 
 const API_BASE = 'http://localhost:8000/api';
@@ -778,3 +782,73 @@ export const outreach = {
 export function getInterviewWSUrl(interviewId: string): string {
   return `ws://localhost:8000/api/ws/interview/${interviewId}`;
 }
+
+// Public Jobs API (no auth required)
+const JOBS_BASE = 'http://localhost:8000/jobs';
+
+export const publicJobs = {
+  list: async (filters?: {
+    location?: string;
+    department?: string;
+    remote?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<JobListResponse> => {
+    const params = new URLSearchParams();
+    if (filters?.location) params.append('location', filters.location);
+    if (filters?.department) params.append('department', filters.department);
+    if (filters?.remote !== undefined) params.append('remote', String(filters.remote));
+    if (filters?.limit) params.append('limit', String(filters.limit));
+    if (filters?.offset) params.append('offset', String(filters.offset));
+
+    const queryString = params.toString();
+    const url = queryString ? `${JOBS_BASE}?${queryString}` : JOBS_BASE;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to load jobs' }));
+      throw new Error(error.detail || 'Failed to load jobs');
+    }
+    return response.json();
+  },
+
+  getDetail: async (jobId: string): Promise<PublicJobDetail> => {
+    const response = await fetch(`${JOBS_BASE}/${jobId}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Job not found' }));
+      throw new Error(error.detail || 'Job not found');
+    }
+    return response.json();
+  },
+
+  apply: async (
+    jobId: string,
+    data: {
+      name: string;
+      email: string;
+      phone?: string;
+      cover_letter?: string;
+      source?: string;
+      resume: File;
+    }
+  ): Promise<ApplicationSubmitResponse> => {
+    const formData = new FormData();
+    formData.append('name', data.name);
+    formData.append('email', data.email);
+    if (data.phone) formData.append('phone', data.phone);
+    if (data.cover_letter) formData.append('cover_letter', data.cover_letter);
+    formData.append('source', data.source || 'direct');
+    formData.append('resume', data.resume);
+
+    const response = await fetch(`${JOBS_BASE}/${jobId}/apply`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to submit application' }));
+      throw new Error(error.detail || 'Failed to submit application');
+    }
+    return response.json();
+  },
+};

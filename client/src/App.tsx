@@ -25,6 +25,9 @@ import {
   ProjectDetail,
   OutreachLanding,
   OutreachScreening,
+  PublicJobs,
+  PublicJobDetail,
+  PublicJobApply,
 } from './pages';
 
 // Redirect component that properly handles the :id parameter
@@ -49,6 +52,11 @@ function App() {
           {/* Public outreach routes (token-based access) */}
           <Route path="/outreach/:token" element={<OutreachLanding />} />
           <Route path="/outreach/:token/screening" element={<OutreachScreening />} />
+
+          {/* Public job board */}
+          <Route path="/careers" element={<PublicJobs />} />
+          <Route path="/careers/:jobId" element={<PublicJobDetail />} />
+          <Route path="/careers/:jobId/apply" element={<PublicJobApply />} />
 
           {/* Redirects for old routes */}
           <Route path="/companies/:id" element={<CompanyRedirect />} />

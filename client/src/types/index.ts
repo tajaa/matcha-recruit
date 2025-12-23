@@ -615,3 +615,51 @@ export interface OutreachInterviewStart {
   interview_id: string;
   websocket_url: string;
 }
+
+// Public Job Board types
+export interface PublicJobListing {
+  id: string;
+  title: string;
+  company_name: string;
+  location: string | null;
+  employment_type: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string;
+  remote_policy: string | null;
+  created_at: string;
+}
+
+export interface PublicJobDetail {
+  id: string;
+  title: string;
+  company_name: string;
+  company_id: string;
+  location: string | null;
+  employment_type: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string;
+  requirements: string[] | null;
+  responsibilities: string[] | null;
+  required_skills: string[] | null;
+  preferred_skills: string[] | null;
+  experience_level: string | null;
+  benefits: string[] | null;
+  department: string | null;
+  remote_policy: string | null;
+  visa_sponsorship: boolean;
+  created_at: string;
+  json_ld: Record<string, unknown>;
+}
+
+export interface JobListResponse {
+  jobs: PublicJobListing[];
+  total: number;
+}
+
+export interface ApplicationSubmitResponse {
+  success: boolean;
+  message: string;
+  application_id: string;
+}

@@ -21,3 +21,6 @@ export { Projects } from './Projects';
 export { ProjectDetail } from './ProjectDetail';
 export { OutreachLanding } from './OutreachLanding';
 export { OutreachScreening } from './OutreachScreening';
+export { PublicJobs } from './PublicJobs';
+export { PublicJobDetail } from './PublicJobDetail';
+export { PublicJobApply } from './PublicJobApply';
