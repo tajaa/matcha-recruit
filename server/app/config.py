@@ -44,6 +44,9 @@ class Settings:
     mailersend_from_name: str = "Matcha Recruit"
     app_base_url: str = "http://localhost:5173"
 
+    # Jina AI Reader API (for job scraping)
+    jina_api_key: Optional[str] = None
+
 
 # Global settings instance
 _settings: Optional[Settings] = None
@@ -102,6 +105,7 @@ def load_settings() -> Settings:
         mailersend_from_email=os.getenv("MAILERSEND_FROM_EMAIL", "outreach@matcha.app"),
         mailersend_from_name=os.getenv("MAILERSEND_FROM_NAME", "Matcha Recruit"),
         app_base_url=os.getenv("APP_BASE_URL", "http://localhost:5173"),
+        jina_api_key=os.getenv("JINA_API_KEY"),
     )
     return _settings
 

@@ -1,16 +1,38 @@
-"""Direct company career page scraper."""
+"""Direct company career page scraper using Jina AI Reader."""
 
 from typing import Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
-import httpx
-from bs4 import BeautifulSoup
-
+from ..jina_reader import JinaReaderClient
+from ..job_extractor import JobExtractor, ExtractedJob
 from .base import JobSource, ScrapedJob
 
 
 class DirectCompanyScraper(JobSource):
-    """Scrapes jobs directly from company career pages."""
+    """Scrapes jobs directly from company career pages using Jina AI Reader."""
+
+    def __init__(
+        self,
+        jina_api_key: str,
+        gemini_api_key: Optional[str] = None,
+        vertex_project: Optional[str] = None,
+        vertex_location: str = "us-central1",
+    ):
+        """
+        Initialize the scraper.
+
+        Args:
+            jina_api_key: Jina AI Reader API key
+            gemini_api_key: Gemini API key (if not using Vertex)
+            vertex_project: GCP project for Vertex AI (alternative to API key)
+            vertex_location: Vertex AI location
+        """
+        self._jina_client = JinaReaderClient(api_key=jina_api_key)
+        self._extractor = JobExtractor(
+            api_key=gemini_api_key,
+            vertex_project=vertex_project,
+            vertex_location=vertex_location,
+        )
 
     @property
     def source_id(self) -> str:
@@ -41,7 +63,7 @@ class DirectCompanyScraper(JobSource):
         self,
         url: str,
         company_name: Optional[str] = None,
-        timeout: float = 15.0,
+        timeout: float = 30.0,
     ) -> list[ScrapedJob]:
         """
         Scrape jobs from a specific career page URL.
@@ -54,37 +76,42 @@ class DirectCompanyScraper(JobSource):
         Returns:
             List of jobs found on the page
         """
-        parsed = urlparse(url)
-
         # Extract company name if not provided
         if not company_name:
             company_name = self._extract_company_name(url)
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=timeout,
-                follow_redirects=True,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-                }
-            ) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                html = response.text
-        except Exception:
+        # Fetch page content as markdown via Jina Reader
+        response = await self._jina_client.fetch_as_markdown(url, timeout=timeout)
+
+        if response.error:
+            print(f"[DirectCompanyScraper] Jina fetch failed for {url}: {response.error}")
             return []
 
-        soup = BeautifulSoup(html, "lxml")
+        if not response.markdown or len(response.markdown.strip()) < 100:
+            print(f"[DirectCompanyScraper] Empty or minimal content from {url}")
+            return []
 
-        # Try different parsing strategies based on the page structure
-        if "greenhouse.io" in parsed.netloc:
-            return self._parse_greenhouse(soup, url, company_name)
-        elif "lever.co" in parsed.netloc:
-            return self._parse_lever(soup, url, company_name)
-        elif "ashbyhq.com" in parsed.netloc:
-            return self._parse_ashby(soup, url, company_name)
-        else:
-            return self._parse_generic(soup, url, company_name)
+        # Extract jobs from markdown using LLM
+        extracted = await self._extractor.extract_jobs(
+            markdown=response.markdown,
+            url=url,
+        )
+
+        # Convert ExtractedJob to ScrapedJob
+        jobs = [
+            ScrapedJob(
+                title=job.title,
+                company_name=company_name,
+                location=job.location,
+                department=job.department,
+                apply_url=job.apply_url,
+                source_url=url,
+                source_name="direct",
+            )
+            for job in extracted
+        ]
+
+        return jobs
 
     def _extract_company_name(self, url: str) -> str:
         """Extract company name from URL."""
@@ -108,191 +135,3 @@ class DirectCompanyScraper(JobSource):
         domain = parsed.netloc.replace("www.", "")
         domain = domain.split(".")[0]
         return domain.replace("-", " ").title()
-
-    def _parse_greenhouse(self, soup: BeautifulSoup, base_url: str, company_name: str) -> list[ScrapedJob]:
-        """Parse Greenhouse job board pages."""
-        jobs = []
-        job_elements = soup.select(".opening, .job-post, [class*='job'], [class*='opening']")
-
-        for elem in job_elements[:50]:
-            title_elem = elem.select_one("a, h2, h3, .opening-title, [class*='title']")
-            if not title_elem:
-                continue
-
-            title = title_elem.get_text(strip=True)
-            if len(title) < 3 or len(title) > 200:
-                continue
-
-            link_elem = elem.select_one("a[href]") or title_elem
-            href = link_elem.get("href", "") if link_elem.name == "a" else ""
-            if not href:
-                continue
-
-            apply_url = urljoin(base_url, href)
-            location = None
-            department = None
-
-            location_elem = elem.select_one(".location, [class*='location']")
-            if location_elem:
-                location = location_elem.get_text(strip=True)
-
-            dept_elem = elem.select_one(".department, [class*='department']")
-            if dept_elem:
-                department = dept_elem.get_text(strip=True)
-
-            jobs.append(ScrapedJob(
-                title=title,
-                company_name=company_name,
-                location=location,
-                department=department,
-                apply_url=apply_url,
-                source_url=base_url,
-                source_name="direct",
-            ))
-
-        return jobs
-
-    def _parse_lever(self, soup: BeautifulSoup, base_url: str, company_name: str) -> list[ScrapedJob]:
-        """Parse Lever job board pages."""
-        jobs = []
-
-        for posting in soup.select(".posting, .posting-title"):
-            title_elem = posting.select_one("h5, .posting-name, a")
-            if not title_elem:
-                continue
-
-            title = title_elem.get_text(strip=True)
-            if len(title) < 3:
-                continue
-
-            link_elem = posting.select_one("a.posting-title, a[href*='/jobs/']") or posting.find_parent("a")
-            href = link_elem.get("href", "") if link_elem else ""
-            if not href:
-                continue
-
-            apply_url = urljoin(base_url, href)
-            location = None
-            department = None
-
-            location_elem = posting.select_one(".posting-categories .location, .sort-by-location")
-            if location_elem:
-                location = location_elem.get_text(strip=True)
-
-            dept_elem = posting.select_one(".posting-categories .department, .sort-by-team")
-            if dept_elem:
-                department = dept_elem.get_text(strip=True)
-
-            jobs.append(ScrapedJob(
-                title=title,
-                company_name=company_name,
-                location=location,
-                department=department,
-                apply_url=apply_url,
-                source_url=base_url,
-                source_name="direct",
-            ))
-
-        return jobs
-
-    def _parse_ashby(self, soup: BeautifulSoup, base_url: str, company_name: str) -> list[ScrapedJob]:
-        """Parse Ashby job board pages."""
-        jobs = []
-
-        for posting in soup.select("[class*='job'], [class*='posting'], [class*='position']"):
-            title_elem = posting.select_one("a, h3, h4, [class*='title']")
-            if not title_elem:
-                continue
-
-            title = title_elem.get_text(strip=True)
-            if len(title) < 3 or len(title) > 200:
-                continue
-
-            link_elem = posting.select_one("a[href]") or title_elem
-            href = link_elem.get("href", "") if link_elem.name == "a" else ""
-            if not href:
-                continue
-
-            apply_url = urljoin(base_url, href)
-            location = None
-
-            location_elem = posting.select_one("[class*='location']")
-            if location_elem:
-                location = location_elem.get_text(strip=True)
-
-            jobs.append(ScrapedJob(
-                title=title,
-                company_name=company_name,
-                location=location,
-                department=None,
-                apply_url=apply_url,
-                source_url=base_url,
-                source_name="direct",
-            ))
-
-        return jobs
-
-    def _parse_generic(self, soup: BeautifulSoup, base_url: str, company_name: str) -> list[ScrapedJob]:
-        """Parse generic career pages using common patterns."""
-        jobs = []
-        seen_titles = set()
-
-        job_patterns = [
-            "[class*='job-listing']",
-            "[class*='job-item']",
-            "[class*='job-card']",
-            "[class*='career-item']",
-            "[class*='position-item']",
-            "[class*='opening']",
-            "[id*='job']",
-            "li[class*='job']",
-            ".jobs-list li",
-            ".careers-list li",
-            "tr[class*='job']",
-        ]
-
-        for pattern in job_patterns:
-            elements = soup.select(pattern)
-            for elem in elements[:30]:
-                title_elem = elem.select_one("a, h2, h3, h4, [class*='title']")
-                if not title_elem:
-                    continue
-
-                title = title_elem.get_text(strip=True)
-                if len(title) < 5 or len(title) > 200:
-                    continue
-                if title.lower() in seen_titles:
-                    continue
-
-                skip_words = ["apply", "search", "filter", "sort", "view all", "see all", "load more"]
-                if any(word in title.lower() for word in skip_words):
-                    continue
-
-                link_elem = elem.select_one("a[href]")
-                if not link_elem:
-                    link_elem = title_elem if title_elem.name == "a" else None
-                if not link_elem:
-                    continue
-
-                href = link_elem.get("href", "")
-                if not href or href == "#":
-                    continue
-
-                apply_url = urljoin(base_url, href)
-                location = None
-
-                location_elem = elem.select_one("[class*='location'], [class*='place'], [class*='city']")
-                if location_elem:
-                    location = location_elem.get_text(strip=True)
-
-                seen_titles.add(title.lower())
-                jobs.append(ScrapedJob(
-                    title=title,
-                    company_name=company_name,
-                    location=location,
-                    department=None,
-                    apply_url=apply_url,
-                    source_url=base_url,
-                    source_name="direct",
-                ))
-
-        return jobs

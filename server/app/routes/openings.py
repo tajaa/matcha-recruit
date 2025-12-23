@@ -17,8 +17,27 @@ from ..services.job_sources import (
 
 router = APIRouter()
 
-# Initialize the direct company scraper
-direct_scraper = DirectCompanyScraper()
+# Lazy-initialized direct company scraper (requires settings to be loaded)
+_direct_scraper = None
+
+
+def get_direct_scraper() -> DirectCompanyScraper:
+    """Get or create the DirectCompanyScraper instance."""
+    global _direct_scraper
+    if _direct_scraper is None:
+        settings = get_settings()
+        if not settings.jina_api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="Jina API key not configured. Set JINA_API_KEY environment variable."
+            )
+        _direct_scraper = DirectCompanyScraper(
+            jina_api_key=settings.jina_api_key,
+            gemini_api_key=settings.gemini_api_key,
+            vertex_project=settings.vertex_project,
+            vertex_location=settings.vertex_location,
+        )
+    return _direct_scraper
 
 
 # =============================================================================
@@ -191,10 +210,12 @@ async def refresh_tracked_companies():
         total_new_jobs = 0
         total_jobs = 0
 
+        scraper = get_direct_scraper()
+
         for company in companies:
             try:
                 # Scrape the company's career page
-                jobs = await direct_scraper.scrape_url(
+                jobs = await scraper.scrape_url(
                     url=company["career_url"],
                     company_name=company["name"],
                 )
