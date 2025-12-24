@@ -806,7 +806,7 @@ export const outreach = {
 
 // WebSocket URL helper
 export function getInterviewWSUrl(interviewId: string): string {
-  return `ws://localhost:8001/ws/interview/${interviewId}`;
+  return `ws://localhost:8001/api/ws/interview/${interviewId}`;
 }
 
 // Public Jobs API (no auth required)

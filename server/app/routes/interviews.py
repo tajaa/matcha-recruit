@@ -61,7 +61,7 @@ async def create_interview(company_id: UUID, interview: InterviewCreate):
 
         return InterviewStart(
             interview_id=interview_id,
-            websocket_url=f"/ws/interview/{interview_id}",
+            websocket_url=f"/api/ws/interview/{interview_id}",
         )
 
 
