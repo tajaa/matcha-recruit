@@ -289,6 +289,22 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_position_match_results_candidate_id ON position_match_results(candidate_id)
         """)
 
+        # Add show_on_job_board column to positions table
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'positions' AND column_name = 'show_on_job_board'
+                ) THEN
+                    ALTER TABLE positions ADD COLUMN show_on_job_board BOOLEAN DEFAULT false;
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_positions_show_on_job_board ON positions(show_on_job_board)
+        """)
+
         # Saved jobs table (external jobs from SearchAPI)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS saved_jobs (

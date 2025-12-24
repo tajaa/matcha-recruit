@@ -307,7 +307,7 @@ async def list_jobs(
     """List all active job postings."""
     async with get_connection() as conn:
         # Build query with filters
-        conditions = ["p.status = 'active'"]
+        conditions = ["p.status = 'active'", "p.show_on_job_board = true"]
         params = []
         param_idx = 1
 
@@ -384,7 +384,7 @@ async def get_indeed_xml_feed():
                 p.created_at
             FROM positions p
             JOIN companies c ON p.company_id = c.id
-            WHERE p.status = 'active'
+            WHERE p.status = 'active' AND p.show_on_job_board = true
             ORDER BY p.created_at DESC
             LIMIT 500
         """)
@@ -410,7 +410,7 @@ async def get_job_detail(position_id: str):
                 p.*, c.name as company_name
             FROM positions p
             JOIN companies c ON p.company_id = c.id
-            WHERE p.id::text = $1 AND p.status = 'active'
+            WHERE p.id::text = $1 AND p.status = 'active' AND p.show_on_job_board = true
         """, position_id)
 
         if not row:

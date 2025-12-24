@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import load_settings, get_settings
-from .database import init_pool, init_db, close_pool
+from .config import get_settings, load_settings
+from .database import close_pool, init_db, init_pool
 
 
 @asynccontextmanager
@@ -12,7 +12,9 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     settings = load_settings()
     print(f"[Matcha] Starting server on port {settings.port}")
-    print(f"[Matcha] Using {'Vertex AI' if settings.use_vertex else 'API Key'} for Gemini")
+    print(
+        f"[Matcha] Using {'Vertex AI' if settings.use_vertex else 'API Key'} for Gemini"
+    )
 
     # Initialize database
     await init_pool(settings.database_url)
@@ -35,7 +37,11 @@ app = FastAPI(
 # CORS - allow frontend dev server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,17 +49,17 @@ app.add_middleware(
 
 # Import and include routers
 from .routes import (
+    auth_router,
+    bulk_import_router,
+    candidates_router,
     companies_router,
     interviews_router,
-    candidates_router,
-    matching_router,
-    positions_router,
-    bulk_import_router,
     job_search_router,
-    auth_router,
+    matching_router,
     openings_router,
-    projects_router,
     outreach_router,
+    positions_router,
+    projects_router,
     public_jobs_router,
 )
 

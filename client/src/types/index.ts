@@ -212,6 +212,7 @@ export interface Position {
   remote_policy: RemotePolicy | null;
   visa_sponsorship: boolean;
   status: PositionStatus;
+  show_on_job_board: boolean;
   created_at: string;
   updated_at: string;
 }

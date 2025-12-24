@@ -111,6 +111,7 @@ class Position(BaseModel):
     remote_policy: Optional[str] = None
     visa_sponsorship: bool = False
     status: str = "active"
+    show_on_job_board: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -136,6 +137,7 @@ class PositionResponse(BaseModel):
     remote_policy: Optional[str] = None
     visa_sponsorship: bool = False
     status: str = "active"
+    show_on_job_board: bool = False
     created_at: datetime
     updated_at: datetime
     company_name: Optional[str] = None

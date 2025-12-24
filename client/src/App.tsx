@@ -28,6 +28,7 @@ import {
   PublicJobs,
   PublicJobDetail,
   PublicJobApply,
+  JobBoards,
 } from './pages';
 
 // Redirect component that properly handles the :id parameter
@@ -142,6 +143,14 @@ function App() {
               element={
                 <ProtectedRoute roles={['admin', 'client']}>
                   <Openings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="job-boards"
+              element={
+                <ProtectedRoute roles={['admin', 'client']}>
+                  <JobBoards />
                 </ProtectedRoute>
               }
             />

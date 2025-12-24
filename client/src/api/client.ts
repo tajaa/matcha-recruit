@@ -49,7 +49,7 @@ import type {
   ApplicationSubmitResponse,
 } from '../types';
 
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = 'http://localhost:8001/api';
 
 // Token storage helpers
 const TOKEN_KEY = 'matcha_access_token';
@@ -401,6 +401,11 @@ export const positions = {
 
   getMatches: (positionId: string) =>
     request<PositionMatchResult[]>(`/positions/${positionId}/matches`),
+
+  toggleJobBoard: (positionId: string, showOnJobBoard: boolean) =>
+    request<Position>(`/positions/${positionId}/job-board?show_on_job_board=${showOnJobBoard}`, {
+      method: 'PATCH',
+    }),
 };
 
 // Bulk Import
@@ -780,11 +785,11 @@ export const outreach = {
 
 // WebSocket URL helper
 export function getInterviewWSUrl(interviewId: string): string {
-  return `ws://localhost:8000/api/ws/interview/${interviewId}`;
+  return `ws://localhost:8001/api/ws/interview/${interviewId}`;
 }
 
 // Public Jobs API (no auth required)
-const JOBS_BASE = 'http://localhost:8000/jobs';
+const JOBS_BASE = 'http://localhost:8001/jobs';
 
 export const publicJobs = {
   list: async (filters?: {

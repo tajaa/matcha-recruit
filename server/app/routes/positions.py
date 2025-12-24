@@ -48,6 +48,7 @@ def row_to_position_response(row, company_name: Optional[str] = None) -> Positio
         remote_policy=row["remote_policy"],
         visa_sponsorship=row["visa_sponsorship"],
         status=row["status"],
+        show_on_job_board=row.get("show_on_job_board", False),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         company_name=company_name,
@@ -283,3 +284,29 @@ async def list_company_positions(
 
         rows = await conn.fetch(query, *params)
         return [row_to_position_response(row, company_row["name"]) for row in rows]
+
+
+@router.patch("/{position_id}/job-board", response_model=PositionResponse)
+async def toggle_job_board(position_id: UUID, show_on_job_board: bool):
+    """Toggle whether a position appears on the public job board."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE positions
+            SET show_on_job_board = $1, updated_at = NOW()
+            WHERE id = $2
+            RETURNING *
+            """,
+            show_on_job_board,
+            position_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Position not found")
+
+        # Get company name
+        company_row = await conn.fetchrow(
+            "SELECT name FROM companies WHERE id = $1",
+            row["company_id"],
+        )
+
+        return row_to_position_response(row, company_row["name"] if company_row else None)
