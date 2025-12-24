@@ -7,31 +7,11 @@ company culture profiles or position requirements.
 
 import asyncio
 import json
-import os
 from typing import Any, Optional
-
-import asyncpg
-from dotenv import load_dotenv
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error, publish_task_progress
-
-load_dotenv()
-
-
-async def get_db_connection() -> asyncpg.Connection:
-    """Create a database connection for the worker."""
-    database_url = os.getenv("DATABASE_URL", "")
-    return await asyncpg.connect(database_url)
-
-
-def parse_jsonb(value: Any) -> Any:
-    """Parse JSONB value from database."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return json.loads(value)
-    return value
+from ..utils import get_db_connection, parse_jsonb
 
 
 async def _match_candidates(
@@ -350,6 +330,20 @@ def match_position_candidates_async(
     """
     print(f"[Worker] Starting position matching for position {position_id}")
 
+    # Look up company_id before try block so it's available for error notifications
+    async def get_company_id() -> str:
+        conn = await get_db_connection()
+        try:
+            row = await conn.fetchrow(
+                "SELECT company_id FROM positions WHERE id = $1",
+                position_id,
+            )
+            return str(row["company_id"]) if row else "unknown"
+        finally:
+            await conn.close()
+
+    company_id = asyncio.run(get_company_id())
+
     try:
         result = asyncio.run(
             _match_position_candidates(
@@ -357,8 +351,6 @@ def match_position_candidates_async(
                 candidate_ids=candidate_ids,
             )
         )
-
-        company_id = result.get("company_id", "unknown")
 
         # Notify frontend via Redis pub/sub
         publish_task_complete(
@@ -375,7 +367,7 @@ def match_position_candidates_async(
         print(f"[Worker] Failed position matching for position {position_id}: {e}")
 
         publish_task_error(
-            channel=f"company:{position_id}",
+            channel=f"company:{company_id}",
             task_type="position_matching",
             entity_id=position_id,
             error=str(e),

@@ -6,22 +6,11 @@ Aggregates culture data from multiple interviews into a unified company profile.
 
 import asyncio
 import json
-import os
 from typing import Any
-
-import asyncpg
-from dotenv import load_dotenv
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
-
-load_dotenv()
-
-
-async def get_db_connection() -> asyncpg.Connection:
-    """Create a database connection for the worker."""
-    database_url = os.getenv("DATABASE_URL", "")
-    return await asyncpg.connect(database_url)
+from ..utils import get_db_connection
 
 
 async def _aggregate_culture(company_id: str) -> dict[str, Any]:
