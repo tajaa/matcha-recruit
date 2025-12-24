@@ -326,3 +326,100 @@ async def get_position_matches(position_id: UUID):
             ))
 
         return results
+
+
+# Async endpoints for background processing
+
+
+@router.post("/companies/{company_id}/match/async")
+async def run_matching_async(company_id: UUID, request: MatchRequest = None):
+    """
+    Queue matching task for background processing.
+
+    Returns immediately with a task_id. Use GET /tasks/{task_id}/status to check progress.
+    Subscribe to WebSocket /ws/notifications and send {"action": "subscribe", "channel": "company:{company_id}"}
+    to receive real-time progress updates and completion notifications.
+    """
+    from app.workers.tasks.matching import match_candidates_async
+
+    async with get_connection() as conn:
+        # Verify company has culture profile
+        profile_row = await conn.fetchrow(
+            "SELECT id FROM culture_profiles WHERE company_id = $1",
+            company_id,
+        )
+        if not profile_row:
+            raise HTTPException(
+                status_code=400,
+                detail="Company has no culture profile. Complete interviews and aggregate first.",
+            )
+
+    candidate_ids = [str(c) for c in request.candidate_ids] if request and request.candidate_ids else None
+
+    task = match_candidates_async.delay(
+        company_id=str(company_id),
+        candidate_ids=candidate_ids,
+    )
+
+    return {
+        "task_id": task.id,
+        "status": "processing",
+        "message": "Matching task queued. Subscribe to WebSocket notifications for updates.",
+    }
+
+
+@router.post("/positions/{position_id}/match/async")
+async def run_position_matching_async(position_id: UUID, request: MatchRequest = None):
+    """
+    Queue position matching task for background processing.
+
+    Returns immediately with a task_id. Use GET /tasks/{task_id}/status to check progress.
+    Subscribe to WebSocket /ws/notifications for real-time updates.
+    """
+    from app.workers.tasks.matching import match_position_candidates_async
+
+    async with get_connection() as conn:
+        # Verify position exists
+        position_exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM positions WHERE id = $1)",
+            position_id,
+        )
+        if not position_exists:
+            raise HTTPException(status_code=404, detail="Position not found")
+
+    candidate_ids = [str(c) for c in request.candidate_ids] if request and request.candidate_ids else None
+
+    task = match_position_candidates_async.delay(
+        position_id=str(position_id),
+        candidate_ids=candidate_ids,
+    )
+
+    return {
+        "task_id": task.id,
+        "status": "processing",
+        "message": "Position matching task queued. Subscribe to WebSocket notifications for updates.",
+    }
+
+
+@router.get("/tasks/{task_id}/status")
+async def get_task_status(task_id: str):
+    """
+    Check status of a background task.
+
+    Returns the current status and result (if completed) of an async task.
+    """
+    from app.workers.celery_app import celery_app
+
+    result = celery_app.AsyncResult(task_id)
+
+    response = {
+        "task_id": task_id,
+        "status": result.status,
+    }
+
+    if result.ready():
+        response["result"] = result.result
+    elif result.status == "PROGRESS":
+        response["progress"] = result.info
+
+    return response

@@ -203,6 +203,37 @@ async def aggregate_culture(company_id: UUID):
         return {"status": "aggregated", "profile": aggregated}
 
 
+@router.post("/companies/{company_id}/aggregate-culture/async")
+async def aggregate_culture_async(company_id: UUID):
+    """
+    Queue culture aggregation for background processing.
+
+    Returns immediately with a task_id. Subscribe to WebSocket /ws/notifications
+    for real-time completion notification.
+    """
+    from app.workers.tasks.culture_aggregation import aggregate_culture_async as aggregate_task
+
+    async with get_connection() as conn:
+        # Verify there are interviews to aggregate
+        count = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM interviews
+            WHERE company_id = $1 AND status = 'completed' AND raw_culture_data IS NOT NULL
+            """,
+            company_id,
+        )
+        if count == 0:
+            raise HTTPException(status_code=400, detail="No completed interviews with culture data")
+
+    task = aggregate_task.delay(company_id=str(company_id))
+
+    return {
+        "task_id": task.id,
+        "status": "processing",
+        "message": "Culture aggregation task queued. Subscribe to WebSocket notifications for updates.",
+    }
+
+
 @router.get("/interviews/{interview_id}/analysis")
 async def get_interview_analysis(interview_id: UUID):
     """Get the conversation analysis for an interview."""
@@ -441,111 +472,41 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
         except Exception:
             pass
     finally:
-        # Save transcript and extract data
+        # Save transcript immediately and queue analysis for background processing
         if gemini_session:
             transcript_text = gemini_session.get_transcript_text()
-            culture_data = None
-            conversation_analysis_data = None
-            screening_analysis_data = None
 
-            if transcript_text:
-                conv_analyzer = ConversationAnalyzer(
-                    api_key=settings.gemini_api_key,
-                    vertex_project=settings.vertex_project,
-                    vertex_location=settings.vertex_location,
-                    model=settings.analysis_model,
-                )
-
-                if interview_type == "screening":
-                    # Screening interviews: generate screening analysis
-                    try:
-                        screening_analysis_data = await conv_analyzer.analyze_screening_interview(
-                            transcript=transcript_text,
-                        )
-                    except Exception as e:
-                        print(f"[Interview {interview_id}] Failed to generate screening analysis: {e}")
-                else:
-                    # Culture/candidate interviews: extract culture data and generate conversation analysis
-                    try:
-                        culture_data = await analyzer.extract_culture_from_transcript(transcript_text)
-                    except Exception as e:
-                        print(f"[Interview {interview_id}] Failed to extract culture: {e}")
-
-                    try:
-                        conversation_analysis_data = await conv_analyzer.analyze_interview(
-                            transcript=transcript_text,
-                            interview_type=interview_type,
-                            culture_profile=culture_profile,
-                        )
-                    except Exception as e:
-                        print(f"[Interview {interview_id}] Failed to generate conversation analysis: {e}")
-
+            # Save transcript with 'analyzing' status - analysis will run in background worker
             async with get_connection() as conn:
                 await conn.execute(
                     """
                     UPDATE interviews
-                    SET transcript = $1, raw_culture_data = $2, conversation_analysis = $3,
-                        screening_analysis = $4, status = 'completed', completed_at = NOW()
-                    WHERE id = $5
+                    SET transcript = $1, status = 'analyzing', completed_at = NOW()
+                    WHERE id = $2
                     """,
                     transcript_text,
-                    json.dumps(culture_data) if culture_data else None,
-                    json.dumps(conversation_analysis_data) if conversation_analysis_data else None,
-                    json.dumps(screening_analysis_data) if screening_analysis_data else None,
                     interview_id,
                 )
 
-                # If this was a screening interview from outreach, update the outreach status
-                if interview_type == "screening" and screening_analysis_data:
-                    outreach = await conn.fetchrow(
-                        "SELECT id, project_id, candidate_id FROM project_outreach WHERE interview_id = $1",
+            # Queue analysis task for Celery worker
+            if transcript_text:
+                from app.workers.tasks.interview_analysis import analyze_interview_async
+
+                analyze_interview_async.delay(
+                    interview_id=str(interview_id),
+                    interview_type=interview_type,
+                    transcript=transcript_text,
+                    company_id=str(row["company_id"]),
+                    culture_profile=culture_profile,
+                )
+                print(f"[Interview {interview_id}] Queued analysis task for background processing")
+            else:
+                # No transcript, mark as completed without analysis
+                async with get_connection() as conn:
+                    await conn.execute(
+                        "UPDATE interviews SET status = 'completed' WHERE id = $1",
                         interview_id,
                     )
-                    if outreach:
-                        overall_score = screening_analysis_data.get("overall_score", 0)
-                        recommendation = screening_analysis_data.get("recommendation", "fail")
-
-                        # Update outreach record
-                        await conn.execute(
-                            """
-                            UPDATE project_outreach
-                            SET status = 'screening_complete', screening_score = $1, screening_recommendation = $2
-                            WHERE id = $3
-                            """,
-                            overall_score,
-                            recommendation,
-                            outreach["id"],
-                        )
-
-                        # Update candidate stage in project based on recommendation
-                        new_stage = "initial"
-                        notes_addition = f"Screening score: {overall_score:.0f}% - {recommendation}"
-
-                        if recommendation == "strong_pass":
-                            new_stage = "interview"
-                            notes_addition += " - Advanced to interview round"
-                        elif recommendation == "pass":
-                            new_stage = "screening"
-                            notes_addition += " - Passed initial screening"
-                        elif recommendation == "borderline":
-                            new_stage = "initial"
-                            notes_addition += " - Needs review"
-                        else:  # fail
-                            new_stage = "rejected"
-                            notes_addition += " - Did not pass screening"
-
-                        await conn.execute(
-                            """
-                            UPDATE project_candidates
-                            SET stage = $1, notes = COALESCE(notes, '') || E'\\n' || $2, updated_at = NOW()
-                            WHERE project_id = $3 AND candidate_id = $4
-                            """,
-                            new_stage,
-                            notes_addition,
-                            outreach["project_id"],
-                            outreach["candidate_id"],
-                        )
-                        print(f"[Interview {interview_id}] Outreach screening complete: {recommendation} -> stage {new_stage}")
 
             await gemini_session.close()
 

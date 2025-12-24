@@ -1,10 +1,15 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings, load_settings
 from .database import close_pool, init_db, init_pool
+from .services.notification_manager import (
+    close_notification_manager,
+    get_notification_manager,
+    init_notification_manager,
+)
 
 
 @asynccontextmanager
@@ -20,9 +25,14 @@ async def lifespan(app: FastAPI):
     await init_pool(settings.database_url)
     await init_db()
 
+    # Initialize Redis notification manager (for worker task notifications)
+    await init_notification_manager(settings.redis_url)
+    print(f"[Matcha] Redis notification manager connected to {settings.redis_url}")
+
     yield
 
     # Cleanup
+    await close_notification_manager()
     await close_pool()
     print("[Matcha] Server shutdown complete")
 
@@ -80,3 +90,41 @@ app.include_router(public_jobs_router, prefix="/jobs", tags=["public-jobs"])
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "matcha-recruit"}
+
+
+@app.websocket("/ws/notifications")
+async def notifications_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for receiving real-time task notifications.
+
+    Clients can subscribe to channels by sending:
+        {"action": "subscribe", "channel": "company:{company_id}"}
+
+    They will receive notifications when worker tasks complete:
+        {"type": "task_complete", "task_type": "interview_analysis", "entity_id": "...", "result": {...}}
+    """
+    await websocket.accept()
+    manager = get_notification_manager()
+    subscribed_channels: list[str] = []
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            action = data.get("action")
+            channel = data.get("channel")
+
+            if action == "subscribe" and channel:
+                await manager.subscribe(websocket, channel)
+                subscribed_channels.append(channel)
+                await websocket.send_json({"type": "subscribed", "channel": channel})
+
+            elif action == "unsubscribe" and channel:
+                await manager.unsubscribe(websocket, channel)
+                if channel in subscribed_channels:
+                    subscribed_channels.remove(channel)
+                await websocket.send_json({"type": "unsubscribed", "channel": channel})
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await manager.disconnect(websocket)

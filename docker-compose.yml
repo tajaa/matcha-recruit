@@ -1,6 +1,33 @@
 version: '3.8'
 
 services:
+  # Redis for Celery broker, result backend, and caching
+  redis:
+    image: redis:7-alpine
+    container_name: matcha-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - matcha-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   matcha-backend:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-backend:latest
     container_name: matcha-backend
@@ -8,8 +35,15 @@ services:
       - "8002:8002"
     env_file:
       - .env.backend
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     volumes:
       - uploads:/app/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - matcha-network
@@ -23,6 +57,35 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Worker for background tasks
+  matcha-worker:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-backend:latest
+    container_name: matcha-worker
+    env_file:
+      - .env.backend
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - matcha-network
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     logging:
       driver: "json-file"
       options:
@@ -65,4 +128,6 @@ networks:
 
 volumes:
   uploads:
+    driver: local
+  redis_data:
     driver: local

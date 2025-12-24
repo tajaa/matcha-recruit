@@ -47,6 +47,11 @@ class Settings:
     # Jina AI Reader API (for job scraping)
     jina_api_key: Optional[str] = None
 
+    # Redis / Celery
+    redis_url: str = "redis://localhost:6379/0"
+    celery_broker_url: Optional[str] = None  # Falls back to redis_url
+    celery_result_backend: Optional[str] = None  # Falls back to redis_url
+
 
 # Global settings instance
 _settings: Optional[Settings] = None
@@ -106,6 +111,9 @@ def load_settings() -> Settings:
         mailersend_from_name=os.getenv("MAILERSEND_FROM_NAME", "Matcha Recruit"),
         app_base_url=os.getenv("APP_BASE_URL", "http://localhost:5173"),
         jina_api_key=os.getenv("JINA_API_KEY"),
+        redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+        celery_broker_url=os.getenv("CELERY_BROKER_URL"),
+        celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),
     )
     return _settings
 
