@@ -84,7 +84,7 @@ app.include_router(job_search_router, prefix="/api/jobs", tags=["job-search"])
 app.include_router(openings_router, prefix="/api/openings", tags=["openings"])
 app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
 app.include_router(outreach_router, prefix="/api", tags=["outreach"])
-app.include_router(public_jobs_router, prefix="/jobs", tags=["public-jobs"])
+app.include_router(public_jobs_router, prefix="/api/job-board", tags=["public-jobs"])
 
 
 @app.get("/health")

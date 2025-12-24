@@ -810,7 +810,7 @@ export function getInterviewWSUrl(interviewId: string): string {
 }
 
 // Public Jobs API (no auth required)
-const JOBS_BASE = 'http://localhost:8001/jobs';
+const JOBS_BASE = 'http://localhost:8001/api/job-board';
 
 export const publicJobs = {
   list: async (filters?: {
