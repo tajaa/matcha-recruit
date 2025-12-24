@@ -346,7 +346,7 @@ async def start_screening_interview(token: str):
         if row["interview_id"]:
             return InterviewStartResponse(
                 interview_id=row["interview_id"],
-                websocket_url=f"ws://localhost:8000/api/ws/interview/{row['interview_id']}",
+                websocket_url=f"/ws/interview/{row['interview_id']}",
             )
 
         # Get or create a company for this project (use existing or create temporary)
@@ -379,7 +379,7 @@ async def start_screening_interview(token: str):
 
         return InterviewStartResponse(
             interview_id=interview_id,
-            websocket_url=f"ws://localhost:8000/api/ws/interview/{interview_id}",
+            websocket_url=f"/ws/interview/{interview_id}",
         )
 
 

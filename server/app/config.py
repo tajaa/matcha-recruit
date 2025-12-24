@@ -96,7 +96,7 @@ def load_settings() -> Settings:
         live_model=os.getenv("GEMINI_LIVE_MODEL", "gemini-live-2.5-flash-native-audio"),
         analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-2.5-flash-lite"),
         voice=os.getenv("GEMINI_VOICE", "Kore"),
-        port=int(os.getenv("PORT", "8000")),
+        port=int(os.getenv("PORT", "8002")),
         search_api_key=os.getenv("SEARCH_API_KEY"),
         jwt_secret_key=jwt_secret_key,
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),

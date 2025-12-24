@@ -223,7 +223,7 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
   const connect = useCallback(() => {
     if (wsRef.current) return;
 
-    const ws = new WebSocket(`ws://localhost:8001/api/ws/interview/${interviewId}`);
+    const ws = new WebSocket(`ws://localhost:8001/ws/interview/${interviewId}`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {

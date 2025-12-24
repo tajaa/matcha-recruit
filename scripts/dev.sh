@@ -2,11 +2,22 @@
 
 # Development startup script for Matcha Recruit
 # Uses tmux to manage all services in split panes
+#
+# Usage:
+#   ./scripts/dev.sh        - Start all services
+#   ./scripts/dev.sh stop   - Stop all services
 
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION_NAME="matcha-dev"
+
+# Handle stop command
+if [ "$1" = "stop" ]; then
+    echo "Stopping Matcha development environment..."
+    tmux kill-session -t "$SESSION_NAME" 2>/dev/null && echo "Stopped!" || echo "Not running."
+    exit 0
+fi
 
 # Colors
 GREEN='\033[0;32m'
@@ -80,7 +91,7 @@ tmux select-pane -t "$SESSION_NAME:dev.0"
 echo -e "${GREEN}Development environment started!${NC}"
 echo ""
 echo -e "${YELLOW}Services:${NC}"
-echo -e "  - Backend:  http://localhost:8000"
+echo -e "  - Backend:  http://localhost:8001"
 echo -e "  - Frontend: http://localhost:5174"
 echo -e "  - Redis:    localhost:6379"
 echo ""
