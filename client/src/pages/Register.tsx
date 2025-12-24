@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { companies } from '../api/client';
 import type { Company } from '../types';
@@ -21,6 +21,8 @@ export function Register() {
 
   const { registerClient, registerCandidate } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('returnTo');
 
   useEffect(() => {
     if (type === 'client') {
@@ -62,7 +64,8 @@ export function Register() {
           job_title: jobTitle || undefined,
         });
       }
-      navigate('/app');
+      // Redirect to returnTo URL if provided, otherwise go to app
+      navigate(returnTo || '/app');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
