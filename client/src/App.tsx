@@ -29,6 +29,7 @@ import {
   PublicJobDetail,
   PublicJobApply,
   JobBoards,
+  ResumeOnboarding,
 } from './pages';
 
 // Redirect component that properly handles the :id parameter
@@ -48,6 +49,7 @@ function App() {
           <Route path="/work-with-us" element={<WorkWithUs />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/onboarding/resume" element={<ResumeOnboarding />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
 
           {/* Public outreach routes (token-based access) */}

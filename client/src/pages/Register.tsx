@@ -64,8 +64,12 @@ export function Register() {
           job_title: jobTitle || undefined,
         });
       }
-      // Redirect to returnTo URL if provided, otherwise go to app
-      navigate(returnTo || '/app');
+      // If returnTo exists, go through resume onboarding first
+      if (returnTo) {
+        navigate(`/onboarding/resume?returnTo=${encodeURIComponent(returnTo)}`);
+      } else {
+        navigate('/app');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {

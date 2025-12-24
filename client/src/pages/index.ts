@@ -25,3 +25,4 @@ export { PublicJobs } from './PublicJobs';
 export { PublicJobDetail } from './PublicJobDetail';
 export { PublicJobApply } from './PublicJobApply';
 export { JobBoards } from './JobBoards';
+export { ResumeOnboarding } from './ResumeOnboarding';
