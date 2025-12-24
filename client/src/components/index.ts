@@ -9,3 +9,4 @@ export { PositionForm } from './PositionForm';
 export { PositionMatchCard } from './PositionMatchCard';
 export { ProtectedRoute } from './ProtectedRoute';
 export { ParticleSphere } from './ParticleSphere';
+export { CompanySelectModal } from './CompanySelectModal';

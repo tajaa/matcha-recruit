@@ -222,6 +222,20 @@ async def delete_saved_job(job_id: str):
         return {"status": "deleted"}
 
 
+@router.patch("/saved/{job_id}/job-board")
+async def toggle_saved_job_board(job_id: str, show_on_job_board: bool):
+    """Toggle whether a saved job appears on the public job board."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "UPDATE saved_jobs SET show_on_job_board = $1 WHERE id::text = $2 OR job_id = $2",
+            show_on_job_board,
+            job_id
+        )
+        if result == "UPDATE 0":
+            raise HTTPException(status_code=404, detail="Saved job not found")
+        return {"status": "updated", "show_on_job_board": show_on_job_board}
+
+
 def _row_to_saved_job(row) -> SavedJob:
     """Convert a database row to a SavedJob model."""
     extensions = None

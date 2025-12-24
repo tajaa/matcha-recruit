@@ -1,18 +1,29 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   openings,
+  positions as positionsApi,
   type TrackedCompany,
   type TrackedCompanyJob,
   type JobSource,
   type ScrapedJob,
   type SavedOpening,
 } from '../api/client';
-import { Button, Card, CardContent } from '../components';
+import { Button, Card, CardContent, CompanySelectModal } from '../components';
 
 type ViewMode = 'tracked' | 'discover' | 'saved';
 
 export function Openings() {
+  const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<ViewMode>('tracked');
+
+  // Convert to position state
+  const [showConvertModal, setShowConvertModal] = useState(false);
+  const [convertingOpeningId, setConvertingOpeningId] = useState<string | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
+
+  // Job board toggle state
+  const [togglingJobBoard, setTogglingJobBoard] = useState<Set<string>>(new Set());
 
   // Tracked companies state
   const [trackedCompanies, setTrackedCompanies] = useState<TrackedCompany[]>([]);
@@ -234,6 +245,50 @@ export function Openings() {
       }
       return next;
     });
+  };
+
+  const handleConvertToPosition = (openingId: string) => {
+    setConvertingOpeningId(openingId);
+    setShowConvertModal(true);
+  };
+
+  const handleToggleJobBoard = async (opening: SavedOpening) => {
+    if (togglingJobBoard.has(opening.id)) return;
+
+    setTogglingJobBoard(prev => new Set(prev).add(opening.id));
+    try {
+      const newValue = !(opening as any).show_on_job_board;
+      await openings.toggleJobBoard(opening.id, newValue);
+      setSavedOpenings(prev => prev.map(o =>
+        o.id === opening.id ? { ...o, show_on_job_board: newValue } as any : o
+      ));
+    } catch (err) {
+      console.error('Failed to toggle job board:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update job board status');
+    } finally {
+      setTogglingJobBoard(prev => {
+        const next = new Set(prev);
+        next.delete(opening.id);
+        return next;
+      });
+    }
+  };
+
+  const handleConvertConfirm = async (companyId: string) => {
+    if (!convertingOpeningId) return;
+
+    setIsConverting(true);
+    try {
+      const position = await positionsApi.createFromSavedOpening(convertingOpeningId, companyId);
+      setShowConvertModal(false);
+      setConvertingOpeningId(null);
+      navigate(`/app/positions/${position.id}`);
+    } catch (err) {
+      console.error('Failed to convert opening:', err);
+      setError(err instanceof Error ? err.message : 'Failed to convert opening to position');
+    } finally {
+      setIsConverting(false);
+    }
   };
 
   const totalNewJobs = trackedCompanies.reduce((sum, c) => sum + c.new_job_count, 0);
@@ -637,61 +692,118 @@ export function Openings() {
             </Card>
           ) : (
             <div className="space-y-2">
-              {savedOpenings.map((opening) => (
-                <Card key={opening.id}>
-                  <CardContent className="p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <a
-                          href={opening.apply_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-zinc-300 hover:text-matcha-400 block truncate"
-                        >
-                          {opening.title}
-                        </a>
-                        <div className="flex items-center gap-2 mt-1 text-[9px] text-zinc-600">
-                          <span>{opening.company_name}</span>
-                          {opening.location && (
-                            <>
-                              <span>·</span>
-                              <span>{opening.location}</span>
-                            </>
-                          )}
-                          {opening.industry && (
-                            <>
-                              <span>·</span>
-                              <span>{opening.industry}</span>
-                            </>
-                          )}
+              {savedOpenings.map((opening) => {
+                const isPublished = (opening as any).show_on_job_board || false;
+                const isTogglingBoard = togglingJobBoard.has(opening.id);
+
+                return (
+                  <Card key={opening.id}>
+                    <CardContent className="p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={opening.apply_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-zinc-300 hover:text-matcha-400 block truncate"
+                            >
+                              {opening.title}
+                            </a>
+                            {isPublished && (
+                              <span className="px-1.5 py-0.5 text-[8px] tracking-wide uppercase bg-matcha-500/20 text-matcha-400 rounded">
+                                Published
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1 text-[9px] text-zinc-600">
+                            <span>{opening.company_name}</span>
+                            {opening.location && (
+                              <>
+                                <span>·</span>
+                                <span>{opening.location}</span>
+                              </>
+                            )}
+                            {opening.industry && (
+                              <>
+                                <span>·</span>
+                                <span>{opening.industry}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 ml-4">
+                          {/* Publish to Job Board button */}
+                          <button
+                            onClick={() => handleToggleJobBoard(opening)}
+                            disabled={isTogglingBoard}
+                            className={`p-1.5 transition-colors ${
+                              isPublished
+                                ? 'text-matcha-400 hover:text-matcha-300'
+                                : 'text-zinc-600 hover:text-matcha-400'
+                            } ${isTogglingBoard ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            title={isPublished ? 'Remove from Job Board' : 'Publish to Job Board'}
+                          >
+                            {isTogglingBoard ? (
+                              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                              </svg>
+                            ) : (
+                              <svg className="w-4 h-4" fill={isPublished ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            )}
+                          </button>
+                          {/* Convert to Position button */}
+                          <button
+                            onClick={() => handleConvertToPosition(opening.id)}
+                            className="p-1.5 text-violet-400 hover:text-violet-300 transition-colors"
+                            title="Convert to Position"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => handleUnsave(opening)}
+                            className="p-1.5 text-amber-500 hover:text-red-400 transition-colors"
+                            title="Remove from Saved"
+                          >
+                            <svg className="w-4 h-4" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                            </svg>
+                          </button>
+                          <a
+                            href={opening.apply_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1 text-[9px] tracking-[0.1em] uppercase text-matcha-500 border border-matcha-500/30 hover:bg-matcha-500/10 transition-colors"
+                          >
+                            Apply
+                          </a>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 ml-4">
-                        <button
-                          onClick={() => handleUnsave(opening)}
-                          className="p-1.5 text-matcha-500 hover:text-red-400 transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                          </svg>
-                        </button>
-                        <a
-                          href={opening.apply_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-3 py-1 text-[9px] tracking-[0.1em] uppercase text-matcha-500 border border-matcha-500/30 hover:bg-matcha-500/10 transition-colors"
-                        >
-                          Apply
-                        </a>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </>
       )}
+
+      {/* Convert to Position Modal */}
+      <CompanySelectModal
+        isOpen={showConvertModal}
+        onClose={() => {
+          setShowConvertModal(false);
+          setConvertingOpeningId(null);
+        }}
+        onSelect={handleConvertConfirm}
+        title="Convert to Position"
+        isLoading={isConverting}
+      />
     </div>
   );
 }

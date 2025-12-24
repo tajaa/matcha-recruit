@@ -1,8 +1,10 @@
 from typing import Optional
 from uuid import UUID
 import json
+import re
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from ..database import get_connection
 from ..models.position import (
@@ -13,6 +15,10 @@ from ..models.position import (
     ExperienceLevel,
     RemotePolicy,
 )
+
+
+class ConvertToPositionRequest(BaseModel):
+    company_id: UUID
 
 router = APIRouter()
 
@@ -310,3 +316,134 @@ async def toggle_job_board(position_id: UUID, show_on_job_board: bool):
         )
 
         return row_to_position_response(row, company_row["name"] if company_row else None)
+
+
+def parse_salary(salary_str: Optional[str]) -> tuple[Optional[int], Optional[int]]:
+    """Parse salary string into min/max integers."""
+    if not salary_str:
+        return None, None
+
+    # Remove common prefixes and clean up
+    salary_str = salary_str.replace(',', '').replace('$', '').lower()
+
+    # Try to extract numbers
+    numbers = re.findall(r'(\d+(?:\.\d+)?)\s*k?', salary_str)
+    if not numbers:
+        return None, None
+
+    # Convert to integers (handle 'k' suffix)
+    values = []
+    for num in numbers[:2]:  # Take at most 2 numbers
+        val = float(num)
+        if 'k' in salary_str or val < 1000:
+            val *= 1000
+        values.append(int(val))
+
+    if len(values) == 1:
+        return values[0], values[0]
+    elif len(values) >= 2:
+        return min(values), max(values)
+    return None, None
+
+
+def map_schedule_type(schedule_type: Optional[str]) -> Optional[str]:
+    """Map schedule type to employment type."""
+    if not schedule_type:
+        return None
+    schedule_lower = schedule_type.lower()
+    if 'full' in schedule_lower:
+        return 'full-time'
+    elif 'part' in schedule_lower:
+        return 'part-time'
+    elif 'contract' in schedule_lower:
+        return 'contract'
+    elif 'intern' in schedule_lower:
+        return 'internship'
+    return None
+
+
+@router.post("/from-saved-job/{saved_job_id}", response_model=PositionResponse)
+async def create_position_from_saved_job(saved_job_id: UUID, request: ConvertToPositionRequest):
+    """Convert a saved job into a position."""
+    async with get_connection() as conn:
+        # Verify company exists
+        company_row = await conn.fetchrow(
+            "SELECT id, name FROM companies WHERE id = $1",
+            request.company_id,
+        )
+        if not company_row:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        # Get saved job
+        saved_job = await conn.fetchrow(
+            "SELECT * FROM saved_jobs WHERE id = $1",
+            saved_job_id,
+        )
+        if not saved_job:
+            raise HTTPException(status_code=404, detail="Saved job not found")
+
+        # Parse salary
+        salary_min, salary_max = parse_salary(saved_job["salary"])
+
+        # Map fields
+        employment_type = map_schedule_type(saved_job["schedule_type"])
+        remote_policy = "remote" if saved_job["work_from_home"] else None
+
+        # Create position
+        row = await conn.fetchrow(
+            """
+            INSERT INTO positions (
+                company_id, title, salary_min, salary_max, salary_currency,
+                location, employment_type, remote_policy, status, show_on_job_board
+            )
+            VALUES ($1, $2, $3, $4, 'USD', $5, $6, $7, 'active', true)
+            RETURNING *
+            """,
+            request.company_id,
+            saved_job["title"],
+            salary_min,
+            salary_max,
+            saved_job["location"],
+            employment_type,
+            remote_policy,
+        )
+
+        return row_to_position_response(row, company_row["name"])
+
+
+@router.post("/from-saved-opening/{saved_opening_id}", response_model=PositionResponse)
+async def create_position_from_saved_opening(saved_opening_id: UUID, request: ConvertToPositionRequest):
+    """Convert a saved opening into a position."""
+    async with get_connection() as conn:
+        # Verify company exists
+        company_row = await conn.fetchrow(
+            "SELECT id, name FROM companies WHERE id = $1",
+            request.company_id,
+        )
+        if not company_row:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        # Get saved opening
+        saved_opening = await conn.fetchrow(
+            "SELECT * FROM saved_openings WHERE id = $1",
+            saved_opening_id,
+        )
+        if not saved_opening:
+            raise HTTPException(status_code=404, detail="Saved opening not found")
+
+        # Create position
+        row = await conn.fetchrow(
+            """
+            INSERT INTO positions (
+                company_id, title, location, department, status, show_on_job_board
+            )
+            VALUES ($1, $2, $3, $4, 'active', true)
+            RETURNING *
+            """,
+            request.company_id,
+            saved_opening["title"],
+            saved_opening["location"],
+            saved_opening["department"],
+        )
+
+        return row_to_position_response(row, company_row["name"])

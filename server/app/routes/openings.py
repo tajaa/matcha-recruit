@@ -461,6 +461,20 @@ async def delete_saved_opening(opening_id: str):
         return {"status": "deleted"}
 
 
+@router.patch("/saved/{opening_id}/job-board")
+async def toggle_saved_opening_job_board(opening_id: str, show_on_job_board: bool):
+    """Toggle whether a saved opening appears on the public job board."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "UPDATE saved_openings SET show_on_job_board = $1 WHERE id::text = $2",
+            show_on_job_board,
+            opening_id
+        )
+        if result == "UPDATE 0":
+            raise HTTPException(status_code=404, detail="Saved opening not found")
+        return {"status": "updated", "show_on_job_board": show_on_job_board}
+
+
 def _row_to_saved_opening(row) -> SavedOpening:
     """Convert database row to SavedOpening model."""
     return SavedOpening(

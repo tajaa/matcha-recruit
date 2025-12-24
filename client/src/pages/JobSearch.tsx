@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
-import { jobSearch } from '../api/client';
-import { Button, Card, CardContent } from '../components';
+import { useNavigate } from 'react-router-dom';
+import { jobSearch, positions as positionsApi } from '../api/client';
+import { Button, Card, CardContent, CompanySelectModal } from '../components';
 import type { JobSearchResponse, JobListing, DatePostedFilter, JobEmploymentTypeFilter, SavedJob } from '../types';
 
 type ViewMode = 'search' | 'saved';
 
 export function JobSearch() {
+  const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<ViewMode>('search');
   const [query, setQuery] = useState('');
   const [location, setLocation] = useState('');
@@ -22,6 +24,14 @@ export function JobSearch() {
   const [savedJobs, setSavedJobs] = useState<SavedJob[]>([]);
   const [savingJobs, setSavingJobs] = useState<Set<string>>(new Set());
   const [loadingSaved, setLoadingSaved] = useState(false);
+
+  // Convert to position state
+  const [showConvertModal, setShowConvertModal] = useState(false);
+  const [convertingJobId, setConvertingJobId] = useState<string | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
+
+  // Job board toggle state
+  const [togglingJobBoard, setTogglingJobBoard] = useState<Set<string>>(new Set());
 
   // Client-side result filters
   const [filterKeyword, setFilterKeyword] = useState('');
@@ -233,6 +243,51 @@ export function JobSearch() {
       }
       return next;
     });
+  };
+
+  const handleConvertToPosition = (savedJobId: string) => {
+    setConvertingJobId(savedJobId);
+    setShowConvertModal(true);
+  };
+
+  const handleToggleJobBoard = async (savedJob: SavedJob) => {
+    if (togglingJobBoard.has(savedJob.id)) return;
+
+    setTogglingJobBoard(prev => new Set(prev).add(savedJob.id));
+    try {
+      const newValue = !(savedJob as any).show_on_job_board;
+      await jobSearch.toggleJobBoard(savedJob.id, newValue);
+      setSavedJobs(prev => prev.map(j =>
+        j.id === savedJob.id ? { ...j, show_on_job_board: newValue } as any : j
+      ));
+    } catch (err) {
+      console.error('Failed to toggle job board:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update job board status');
+    } finally {
+      setTogglingJobBoard(prev => {
+        const next = new Set(prev);
+        next.delete(savedJob.id);
+        return next;
+      });
+    }
+  };
+
+  const handleConvertConfirm = async (companyId: string) => {
+    if (!convertingJobId) return;
+
+    setIsConverting(true);
+    try {
+      const position = await positionsApi.createFromSavedJob(convertingJobId, companyId);
+      setShowConvertModal(false);
+      setConvertingJobId(null);
+      // Navigate to the new position
+      navigate(`/app/positions/${position.id}`);
+    } catch (err) {
+      console.error('Failed to convert job:', err);
+      setError(err instanceof Error ? err.message : 'Failed to convert job to position');
+    } finally {
+      setIsConverting(false);
+    }
   };
 
   const renderJobCard = (job: JobListing, index: number, isSavedView = false) => {
@@ -468,7 +523,50 @@ export function JobSearch() {
       thumbnail: savedJob.thumbnail,
       job_id: savedJob.job_id,
     };
-    return renderJobCard(job, index, true);
+
+    const isPublished = (savedJob as any).show_on_job_board || false;
+    const isTogglingBoard = togglingJobBoard.has(savedJob.id);
+
+    return (
+      <div key={savedJob.id} className="relative">
+        {renderJobCard(job, index, true)}
+        {/* Action buttons overlay */}
+        <div className="absolute top-5 right-14 flex gap-1">
+          {/* Publish to Job Board button */}
+          <button
+            onClick={() => handleToggleJobBoard(savedJob)}
+            disabled={isTogglingBoard}
+            className={`p-2 rounded-lg transition-colors ${
+              isPublished
+                ? 'text-matcha-400 bg-matcha-500/20 hover:bg-matcha-500/30'
+                : 'text-zinc-500 bg-zinc-800/50 hover:text-matcha-400 hover:bg-matcha-500/10'
+            } ${isTogglingBoard ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={isPublished ? 'Remove from Job Board' : 'Publish to Job Board'}
+          >
+            {isTogglingBoard ? (
+              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill={isPublished ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+          </button>
+          {/* Convert to Position button */}
+          <button
+            onClick={() => handleConvertToPosition(savedJob.id)}
+            className="p-2 rounded-lg text-violet-400 bg-violet-500/10 hover:bg-violet-500/20 transition-colors"
+            title="Convert to Position"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -822,6 +920,18 @@ export function JobSearch() {
           </CardContent>
         </Card>
       )}
+
+      {/* Convert to Position Modal */}
+      <CompanySelectModal
+        isOpen={showConvertModal}
+        onClose={() => {
+          setShowConvertModal(false);
+          setConvertingJobId(null);
+        }}
+        onSelect={handleConvertConfirm}
+        title="Convert to Position"
+        isLoading={isConverting}
+      />
     </div>
   );
 }

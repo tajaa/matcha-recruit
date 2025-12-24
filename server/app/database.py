@@ -369,6 +369,32 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_saved_openings_company ON saved_openings(company_name)
         """)
 
+        # Add show_on_job_board column to saved_jobs table
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'saved_jobs' AND column_name = 'show_on_job_board'
+                ) THEN
+                    ALTER TABLE saved_jobs ADD COLUMN show_on_job_board BOOLEAN DEFAULT false;
+                END IF;
+            END $$;
+        """)
+
+        # Add show_on_job_board column to saved_openings table
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'saved_openings' AND column_name = 'show_on_job_board'
+                ) THEN
+                    ALTER TABLE saved_openings ADD COLUMN show_on_job_board BOOLEAN DEFAULT false;
+                END IF;
+            END $$;
+        """)
+
         # Tracked companies table (company watchlist)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS tracked_companies (

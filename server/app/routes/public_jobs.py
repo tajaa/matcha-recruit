@@ -304,55 +304,89 @@ async def list_jobs(
     limit: int = Query(50, le=100),
     offset: int = Query(0),
 ):
-    """List all active job postings."""
+    """List all active job postings from positions, saved jobs, and saved openings."""
     async with get_connection() as conn:
-        # Build query with filters
-        conditions = ["p.status = 'active'", "p.show_on_job_board = true"]
+        # Build UNION query for all three sources
         params = []
         param_idx = 1
 
+        # Build location filter
+        location_filter = ""
         if location:
-            conditions.append(f"p.location ILIKE ${param_idx}")
+            location_filter = f"AND location ILIKE ${param_idx}"
             params.append(f"%{location}%")
             param_idx += 1
 
-        if department:
-            conditions.append(f"p.department ILIKE ${param_idx}")
-            params.append(f"%{department}%")
-            param_idx += 1
-
+        # Build remote filter
+        remote_filter = ""
         if remote:
-            conditions.append("p.remote_policy = 'remote'")
+            remote_filter = "AND remote_policy = 'remote'"
 
-        where_clause = " AND ".join(conditions)
-
-        # Get total count
-        count_query = f"""
-            SELECT COUNT(*) FROM positions p
-            JOIN companies c ON p.company_id = c.id
-            WHERE {where_clause}
-        """
-        total = await conn.fetchval(count_query, *params)
-
-        # Get jobs
+        # Combined query using UNION ALL
         query = f"""
-            SELECT
-                p.id, p.title, c.name as company_name, p.location,
-                p.employment_type, p.salary_min, p.salary_max,
-                p.salary_currency, p.remote_policy, p.created_at
-            FROM positions p
-            JOIN companies c ON p.company_id = c.id
-            WHERE {where_clause}
-            ORDER BY p.created_at DESC
+            WITH all_jobs AS (
+                -- Positions
+                SELECT
+                    p.id::text as id, p.title, c.name as company_name, p.location,
+                    p.employment_type, p.salary_min, p.salary_max,
+                    COALESCE(p.salary_currency, 'USD') as salary_currency, p.remote_policy, p.created_at,
+                    'position' as source_type
+                FROM positions p
+                JOIN companies c ON p.company_id = c.id
+                WHERE p.status = 'active' AND p.show_on_job_board = true
+
+                UNION ALL
+
+                -- Saved Jobs (from Google Jobs search)
+                SELECT
+                    sj.id::text as id, sj.title, sj.company_name, sj.location,
+                    sj.schedule_type as employment_type, NULL::int as salary_min, NULL::int as salary_max,
+                    'USD' as salary_currency,
+                    CASE WHEN sj.work_from_home THEN 'remote' ELSE NULL END as remote_policy,
+                    sj.created_at,
+                    'saved_job' as source_type
+                FROM saved_jobs sj
+                WHERE sj.show_on_job_board = true
+
+                UNION ALL
+
+                -- Saved Openings (from career page scraping)
+                SELECT
+                    so.id::text as id, so.title, so.company_name, so.location,
+                    NULL as employment_type, NULL::int as salary_min, NULL::int as salary_max,
+                    'USD' as salary_currency, NULL as remote_policy, so.created_at,
+                    'saved_opening' as source_type
+                FROM saved_openings so
+                WHERE so.show_on_job_board = true
+            )
+            SELECT * FROM all_jobs
+            WHERE 1=1 {location_filter} {remote_filter}
+            ORDER BY created_at DESC
             LIMIT ${param_idx} OFFSET ${param_idx + 1}
         """
         params.extend([limit, offset])
 
         rows = await conn.fetch(query, *params)
 
+        # Get total count
+        count_query = f"""
+            WITH all_jobs AS (
+                SELECT p.id, p.location, p.remote_policy
+                FROM positions p WHERE p.status = 'active' AND p.show_on_job_board = true
+                UNION ALL
+                SELECT sj.id, sj.location, CASE WHEN sj.work_from_home THEN 'remote' ELSE NULL END as remote_policy
+                FROM saved_jobs sj WHERE sj.show_on_job_board = true
+                UNION ALL
+                SELECT so.id, so.location, NULL as remote_policy
+                FROM saved_openings so WHERE so.show_on_job_board = true
+            )
+            SELECT COUNT(*) FROM all_jobs WHERE 1=1 {location_filter} {remote_filter}
+        """
+        total = await conn.fetchval(count_query, *params[:param_idx-1])
+
         jobs = [
             PublicJobListing(
-                id=str(row["id"]),
+                id=row["id"],
                 title=row["title"],
                 company_name=row["company_name"],
                 location=row["location"],
@@ -377,6 +411,7 @@ async def get_indeed_xml_feed():
 
     async with get_connection() as conn:
         rows = await conn.fetch("""
+            -- Positions
             SELECT
                 p.id, p.title, c.name as company_name, p.location,
                 p.employment_type, p.salary_min, p.salary_max,
@@ -385,7 +420,30 @@ async def get_indeed_xml_feed():
             FROM positions p
             JOIN companies c ON p.company_id = c.id
             WHERE p.status = 'active' AND p.show_on_job_board = true
-            ORDER BY p.created_at DESC
+
+            UNION ALL
+
+            -- Saved Jobs
+            SELECT
+                sj.id, sj.title, sj.company_name, sj.location,
+                sj.schedule_type as employment_type, NULL::int as salary_min, NULL::int as salary_max,
+                'USD' as salary_currency, NULL as requirements, NULL as responsibilities,
+                sj.created_at
+            FROM saved_jobs sj
+            WHERE sj.show_on_job_board = true
+
+            UNION ALL
+
+            -- Saved Openings
+            SELECT
+                so.id, so.title, so.company_name, so.location,
+                NULL as employment_type, NULL::int as salary_min, NULL::int as salary_max,
+                'USD' as salary_currency, NULL as requirements, NULL as responsibilities,
+                so.created_at
+            FROM saved_openings so
+            WHERE so.show_on_job_board = true
+
+            ORDER BY created_at DESC
             LIMIT 500
         """)
 

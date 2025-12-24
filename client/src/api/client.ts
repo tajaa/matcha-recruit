@@ -406,6 +406,18 @@ export const positions = {
     request<Position>(`/positions/${positionId}/job-board?show_on_job_board=${showOnJobBoard}`, {
       method: 'PATCH',
     }),
+
+  createFromSavedJob: (savedJobId: string, companyId: string) =>
+    request<Position>(`/positions/from-saved-job/${savedJobId}`, {
+      method: 'POST',
+      body: JSON.stringify({ company_id: companyId }),
+    }),
+
+  createFromSavedOpening: (savedOpeningId: string, companyId: string) =>
+    request<Position>(`/positions/from-saved-opening/${savedOpeningId}`, {
+      method: 'POST',
+      body: JSON.stringify({ company_id: companyId }),
+    }),
 };
 
 // Bulk Import
@@ -486,6 +498,11 @@ export const jobSearch = {
   deleteSaved: (jobId: string) =>
     request<{ status: string }>(`/jobs/saved/${jobId}`, {
       method: 'DELETE',
+    }),
+
+  toggleJobBoard: (jobId: string, showOnJobBoard: boolean) =>
+    request<{ status: string; show_on_job_board: boolean }>(`/jobs/saved/${jobId}/job-board?show_on_job_board=${showOnJobBoard}`, {
+      method: 'PATCH',
     }),
 };
 
@@ -637,6 +654,11 @@ export const openings = {
   deleteSaved: (id: string) =>
     request<{ status: string }>(`/openings/saved/${id}`, {
       method: 'DELETE',
+    }),
+
+  toggleJobBoard: (id: string, showOnJobBoard: boolean) =>
+    request<{ status: string; show_on_job_board: boolean }>(`/openings/saved/${id}/job-board?show_on_job_board=${showOnJobBoard}`, {
+      method: 'PATCH',
     }),
 };
 
