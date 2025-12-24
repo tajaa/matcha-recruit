@@ -43,7 +43,6 @@ import type {
   OutreachInterestResponse,
   OutreachInterviewStart,
   OutreachStatus,
-  PublicJobListing,
   PublicJobDetail,
   JobListResponse,
   ApplicationSubmitResponse,

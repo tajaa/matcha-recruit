@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import type { Position, SavedJob, SavedOpening } from '../types';
+import type { Position, SavedJob } from '../types';
+import type { SavedOpening } from '../api/client';
 import { positions as positionsApi, jobSearch, openings } from '../api/client';
 
 // Unified job item for display
@@ -49,7 +50,7 @@ export function JobBoards() {
         id: sj.id,
         title: sj.title,
         company_name: sj.company_name,
-        location: sj.location,
+        location: sj.location ?? null,
         remote_policy: sj.work_from_home ? 'remote' : null,
         show_on_job_board: (sj as any).show_on_job_board || false,
         source_type: 'saved_job' as const,
