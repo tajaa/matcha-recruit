@@ -1,0 +1,14 @@
+[Unit]
+Description=Matcha Celery Worker Cycle
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/matcha
+ExecStart=/home/ec2-user/matcha/scripts/worker-cycle.sh
+Environment=WORKER_RUN_TIME=300
+
+[Install]
+WantedBy=multi-user.target

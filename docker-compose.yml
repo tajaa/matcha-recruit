@@ -64,9 +64,13 @@ services:
         max-file: "3"
 
   # Celery Worker for background tasks
+  # Start with: docker-compose --profile worker up -d
+  # Or set COMPOSE_PROFILES=worker in .env
   matcha-worker:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-backend:latest
     container_name: matcha-worker
+    profiles:
+      - worker
     env_file:
       - .env.backend
     environment:
@@ -81,11 +85,12 @@ services:
     restart: unless-stopped
     networks:
       - matcha-network
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    # Low memory mode: 1 concurrent task, restart after each to free memory
+    command: python -m celery -A app.workers.celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=5
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 256M
     logging:
       driver: "json-file"
       options:
