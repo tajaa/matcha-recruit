@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { Button, Card, CardContent } from '../components';
 import { screening as screeningApi } from '../api/client';
 import type { ScreeningPublicInfo } from '../types';
@@ -8,7 +8,6 @@ import { useAudioInterview } from '../hooks/useAudioInterview';
 
 export function ScreeningLanding() {
   const { token } = useParams<{ token: string }>();
-  const navigate = useNavigate();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
