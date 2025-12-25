@@ -51,7 +51,7 @@ else
     echo -e "${YELLOW}Starting Redis...${NC}"
     docker run -d \
         --name matcha-redis \
-        -p 6379:6379 \
+        -p 6380:6379 \
         -v matcha_redis_data:/data \
         redis:7-alpine \
         redis-server --appendonly yes
@@ -93,7 +93,7 @@ echo ""
 echo -e "${YELLOW}Services:${NC}"
 echo -e "  - Backend:  http://localhost:8001"
 echo -e "  - Frontend: http://localhost:5174"
-echo -e "  - Redis:    localhost:6379"
+echo -e "  - Redis:    localhost:6380"
 echo ""
 echo -e "${YELLOW}Tmux Controls:${NC}"
 echo -e "  ${GREEN}Navigation:${NC}"
