@@ -92,6 +92,7 @@ async def create_tutor_session(request: TutorSessionCreate):
         return InterviewStart(
             interview_id=interview_id,
             websocket_url=f"/api/ws/interview/{interview_id}",
+            max_session_duration_seconds=240,  # 4 minutes for tutor sessions
         )
 
 

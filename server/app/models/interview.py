@@ -117,6 +117,7 @@ class InterviewStart(BaseModel):
     """Response when starting a new interview session."""
     interview_id: UUID
     websocket_url: str
+    max_session_duration_seconds: Optional[int] = None  # Session time limit
 
 
 class TutorSessionCreate(BaseModel):

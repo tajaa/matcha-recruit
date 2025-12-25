@@ -15,11 +15,12 @@ export function Tutor() {
 
   // Session state
   const [interviewId, setInterviewId] = useState<string | null>(null);
+  const [maxSessionDurationMs, setMaxSessionDurationMs] = useState<number | undefined>(undefined);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
 
-  // Audio interview hook
+  // Audio interview hook with server-configured session limit
   const {
     isConnected,
     isRecording,
@@ -29,7 +30,7 @@ export function Tutor() {
     disconnect,
     startRecording,
     stopRecording,
-  } = useAudioInterview(interviewId || '');
+  } = useAudioInterview(interviewId || '', { maxSessionDurationMs });
 
   // Scroll to bottom of messages
   useEffect(() => {
@@ -46,6 +47,7 @@ export function Tutor() {
         language: mode === 'language_test' ? language : undefined,
       });
       setInterviewId(result.interview_id);
+      setMaxSessionDurationMs(result.max_session_duration_seconds * 1000);
       setSelectedMode(mode);
       if (language) setSelectedLanguage(language);
     } catch (err) {
@@ -373,7 +375,7 @@ export function Tutor() {
             </li>
             <li className="flex items-start gap-2">
               <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
-              Sessions are limited to 12 minutes to keep practice focused
+              Sessions are limited to 4 minutes to keep practice focused
             </li>
           </ul>
         </CardContent>

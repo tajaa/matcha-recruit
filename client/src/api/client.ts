@@ -848,6 +848,7 @@ export interface TutorSessionCreate {
 export interface TutorSessionStart {
   interview_id: string;
   websocket_url: string;
+  max_session_duration_seconds: number;
 }
 
 export const tutor = {

@@ -10,8 +10,12 @@ const TURN_START_GRACE_SECONDS = 0.05;
 
 // Session protection constants
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes idle = auto-disconnect
-const MAX_SESSION_DURATION_MS = 12 * 60 * 1000; // 12 minutes max session
+const DEFAULT_MAX_SESSION_DURATION_MS = 12 * 60 * 1000; // 12 minutes max session (default)
 const WARNING_BEFORE_DISCONNECT_MS = 60 * 1000; // Warn 1 minute before auto-disconnect
+
+interface UseAudioInterviewOptions {
+  maxSessionDurationMs?: number; // Custom max session duration (default: 12 minutes)
+}
 
 // Audio message type prefixes (must match backend protocol)
 const AUDIO_FROM_CLIENT = 0x01;
@@ -30,7 +34,11 @@ interface UseAudioInterviewReturn {
   resetIdleTimer: () => void;
 }
 
-export function useAudioInterview(interviewId: string): UseAudioInterviewReturn {
+export function useAudioInterview(
+  interviewId: string,
+  options: UseAudioInterviewOptions = {}
+): UseAudioInterviewReturn {
+  const maxSessionDurationMs = options.maxSessionDurationMs ?? DEFAULT_MAX_SESSION_DURATION_MS;
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [messages, setMessages] = useState<WSMessage[]>([]);
@@ -142,20 +150,10 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
       if (!sessionStartTimeRef.current) return;
 
       const elapsed = Date.now() - sessionStartTimeRef.current;
-      const remaining = Math.max(0, Math.floor((MAX_SESSION_DURATION_MS - elapsed) / 1000));
+      const remaining = Math.max(0, Math.floor((maxSessionDurationMs - elapsed) / 1000));
       setSessionTimeRemaining(remaining);
 
-      // Warn at 5 minutes remaining
-      if (remaining === 300) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            type: 'system',
-            content: '⏱️ 5 minutes remaining in session',
-            timestamp: Date.now(),
-          },
-        ]);
-      }
+      const maxMinutes = Math.floor(maxSessionDurationMs / 60000);
 
       // Warn at 1 minute remaining
       if (remaining === 60) {
@@ -175,7 +173,7 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
           ...prev,
           {
             type: 'system',
-            content: '⏰ Maximum session duration reached (12 minutes). Disconnecting to save API credits.',
+            content: `⏰ Maximum session duration reached (${maxMinutes} minutes). Disconnecting to save API credits.`,
             timestamp: Date.now(),
           },
         ]);
@@ -186,7 +184,7 @@ export function useAudioInterview(interviewId: string): UseAudioInterviewReturn 
     }, 1000);
 
     resetIdleTimer();
-  }, [resetIdleTimer]);
+  }, [resetIdleTimer, maxSessionDurationMs]);
 
   // Play audio from server
   const playAudio = useCallback(
