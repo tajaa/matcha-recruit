@@ -25,6 +25,7 @@ import {
   ProjectDetail,
   OutreachLanding,
   OutreachScreening,
+  ScreeningLanding,
   PublicJobs,
   PublicJobDetail,
   PublicJobApply,
@@ -55,6 +56,9 @@ function App() {
           {/* Public outreach routes (token-based access) */}
           <Route path="/outreach/:token" element={<OutreachLanding />} />
           <Route path="/outreach/:token/screening" element={<OutreachScreening />} />
+
+          {/* Direct screening invite (handles auth internally) */}
+          <Route path="/screening/:token" element={<ScreeningLanding />} />
 
           {/* Public job board */}
           <Route path="/careers" element={<PublicJobs />} />

@@ -617,6 +617,19 @@ export interface OutreachInterviewStart {
   websocket_url: string;
 }
 
+export interface ScreeningPublicInfo {
+  company_name: string;
+  position_title: string | null;
+  location: string | null;
+  salary_range: string | null;
+  requirements: string | null;
+  benefits: string | null;
+  status: string;
+  candidate_name: string | null;
+  candidate_email: string | null;
+  interview_id: string | null;
+}
+
 // Public Job Board types
 export interface PublicJobListing {
   id: string;

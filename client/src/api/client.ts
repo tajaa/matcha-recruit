@@ -43,6 +43,7 @@ import type {
   OutreachInterestResponse,
   OutreachInterviewStart,
   OutreachStatus,
+  ScreeningPublicInfo,
   PublicJobDetail,
   JobListResponse,
   ApplicationSubmitResponse,
@@ -768,6 +769,13 @@ export const projects = {
     const params = status ? `?status=${status}` : '';
     return request<Outreach[]>(`/projects/${projectId}/outreach${params}`);
   },
+
+  // Direct screening invites (skips interest step)
+  sendScreeningInvite: (projectId: string, data: OutreachSendRequest) =>
+    request<OutreachSendResult>(`/projects/${projectId}/screening-invite`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // Outreach API (public endpoints - no auth required)
@@ -799,6 +807,33 @@ export const outreach = {
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Failed to start interview' }));
       throw new Error(error.detail || 'Failed to start interview');
+    }
+    return response.json();
+  },
+};
+
+// Screening API (direct screening invites - requires auth to start)
+export const screening = {
+  getInfo: async (token: string): Promise<ScreeningPublicInfo> => {
+    const response = await fetch(`${API_BASE}/screening/${token}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to load' }));
+      throw new Error(error.detail || 'Failed to load');
+    }
+    return response.json();
+  },
+
+  start: async (token: string, userEmail: string): Promise<OutreachInterviewStart> => {
+    const response = await fetch(`${API_BASE}/screening/${token}/start?user_email=${encodeURIComponent(userEmail)}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${getAccessToken()}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to start screening' }));
+      throw new Error(error.detail || 'Failed to start screening');
     }
     return response.json();
   },

@@ -57,6 +57,12 @@ export function ProjectDetail() {
   const [sendingOutreach, setSendingOutreach] = useState(false);
   const [customMessage, setCustomMessage] = useState('');
 
+  // Screening invite state
+  const [showScreeningModal, setShowScreeningModal] = useState(false);
+  const [screeningCandidateIds, setScreeningCandidateIds] = useState<string[]>([]);
+  const [sendingScreening, setSendingScreening] = useState(false);
+  const [screeningMessage, setScreeningMessage] = useState('');
+
   const fetchProject = useCallback(async () => {
     if (!id) return;
     try {
@@ -260,12 +266,26 @@ export function ProjectDetail() {
     );
   };
 
+  // Get candidates eligible for screening invite (any stage, no existing outreach)
+  const getScreeningEligibleCandidates = () => {
+    const outreachCandidateSet = new Set(outreachRecords.map((o) => o.candidate_id));
+    return candidates.filter((c) => !outreachCandidateSet.has(c.candidate_id));
+  };
+
   // Open outreach modal with eligible candidates pre-selected
   const openOutreachModal = () => {
     const eligible = getOutreachEligibleCandidates();
     setOutreachCandidateIds(eligible.map((c) => c.candidate_id));
     setCustomMessage('');
     setShowOutreachModal(true);
+  };
+
+  // Open screening modal with eligible candidates pre-selected
+  const openScreeningModal = () => {
+    const eligible = getScreeningEligibleCandidates();
+    setScreeningCandidateIds(eligible.map((c) => c.candidate_id));
+    setScreeningMessage('');
+    setShowScreeningModal(true);
   };
 
   // Send outreach to selected candidates
@@ -285,6 +305,26 @@ export function ProjectDetail() {
       alert('Failed to send outreach. Please try again.');
     } finally {
       setSendingOutreach(false);
+    }
+  };
+
+  // Send screening invites to selected candidates
+  const handleSendScreening = async () => {
+    if (!id || screeningCandidateIds.length === 0) return;
+    setSendingScreening(true);
+    try {
+      const result = await projectsApi.sendScreeningInvite(id, {
+        candidate_ids: screeningCandidateIds,
+        custom_message: screeningMessage || undefined,
+      });
+      setShowScreeningModal(false);
+      await fetchOutreach();
+      alert(`Screening invites sent: ${result.sent_count} successful, ${result.skipped_count} skipped, ${result.failed_count} failed`);
+    } catch (err) {
+      console.error('Failed to send screening invites:', err);
+      alert('Failed to send screening invites. Please try again.');
+    } finally {
+      setSendingScreening(false);
     }
   };
 
@@ -343,6 +383,9 @@ export function ProjectDetail() {
           </Button>
           <Button variant="secondary" onClick={openOutreachModal} disabled={getOutreachEligibleCandidates().length === 0}>
             Send Outreach
+          </Button>
+          <Button variant="secondary" onClick={openScreeningModal} disabled={getScreeningEligibleCandidates().length === 0}>
+            Send Screening
           </Button>
           <Button onClick={openAddModal}>Add Candidates</Button>
         </div>
@@ -620,6 +663,15 @@ export function ProjectDetail() {
                   disabled={getOutreachEligibleCandidates().length === 0}
                 >
                   Send Outreach ({getOutreachEligibleCandidates().length})
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full"
+                  onClick={openScreeningModal}
+                  disabled={getScreeningEligibleCandidates().length === 0}
+                >
+                  Send Screening ({getScreeningEligibleCandidates().length})
                 </Button>
               </div>
             </CardContent>
@@ -993,6 +1045,128 @@ export function ProjectDetail() {
               {sendingOutreach
                 ? 'Sending...'
                 : `Send to ${outreachCandidateIds.length} Candidate${outreachCandidateIds.length !== 1 ? 's' : ''}`}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Send Screening Modal */}
+      <Modal isOpen={showScreeningModal} onClose={() => setShowScreeningModal(false)} title="Send Screening Interview">
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-400">
+            Send screening interview invitations directly to candidates.
+            They'll need to log in or create an account to complete the interview.
+          </p>
+
+          {/* Candidate selection */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs text-zinc-500">
+                Select Candidates ({screeningCandidateIds.length} selected)
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setScreeningCandidateIds(getScreeningEligibleCandidates().map((c) => c.candidate_id))}
+                  className="text-xs text-matcha-400 hover:text-matcha-300 transition-colors"
+                >
+                  Select All
+                </button>
+                {screeningCandidateIds.length > 0 && (
+                  <button
+                    onClick={() => setScreeningCandidateIds([])}
+                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="max-h-48 overflow-y-auto space-y-1 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
+              {getScreeningEligibleCandidates().map((pc) => (
+                <label
+                  key={pc.candidate_id}
+                  className={`flex items-center p-2 rounded cursor-pointer transition-colors ${
+                    screeningCandidateIds.includes(pc.candidate_id)
+                      ? 'bg-matcha-500/10'
+                      : 'hover:bg-zinc-800'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={screeningCandidateIds.includes(pc.candidate_id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setScreeningCandidateIds([...screeningCandidateIds, pc.candidate_id]);
+                      } else {
+                        setScreeningCandidateIds(screeningCandidateIds.filter((cid) => cid !== pc.candidate_id));
+                      }
+                    }}
+                    className="mr-2"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-zinc-200">{pc.candidate_name || 'Unknown'}</span>
+                    {pc.candidate_email && (
+                      <span className="text-xs text-zinc-500 ml-2">{pc.candidate_email}</span>
+                    )}
+                    <span className={`ml-2 px-1.5 py-0.5 rounded text-xs font-medium ${
+                      pc.stage === 'interview' ? 'bg-blue-500/20 text-blue-400' :
+                      pc.stage === 'screening' ? 'bg-yellow-500/20 text-yellow-400' :
+                      pc.stage === 'finalist' ? 'bg-purple-500/20 text-purple-400' :
+                      'bg-zinc-700 text-zinc-400'
+                    }`}>
+                      {pc.stage}
+                    </span>
+                  </div>
+                </label>
+              ))}
+              {getScreeningEligibleCandidates().length === 0 && (
+                <p className="text-sm text-zinc-500 text-center py-4">
+                  No candidates eligible for screening
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Custom message */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">
+              Custom Message (optional)
+            </label>
+            <textarea
+              value={screeningMessage}
+              onChange={(e) => setScreeningMessage(e.target.value)}
+              placeholder="Add a personalized note to the email..."
+              rows={3}
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500 resize-none"
+            />
+          </div>
+
+          {/* Preview info */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+            <h4 className="text-xs text-zinc-500 uppercase mb-2">Email will include:</h4>
+            <ul className="text-sm text-zinc-400 space-y-1">
+              <li>• Position: {project?.position_title || project?.name}</li>
+              <li>• Company: {project?.company_name}</li>
+              {project?.location && <li>• Location: {project.location}</li>}
+              {(project?.salary_min || project?.salary_max) && (
+                <li>• Salary: {formatSalary(project?.salary_min, project?.salary_max)}</li>
+              )}
+              <li className="text-matcha-400">• Direct link to screening interview</li>
+            </ul>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4">
+            <Button variant="secondary" onClick={() => setShowScreeningModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendScreening}
+              disabled={sendingScreening || screeningCandidateIds.length === 0}
+            >
+              {sendingScreening
+                ? 'Sending...'
+                : `Send to ${screeningCandidateIds.length} Candidate${screeningCandidateIds.length !== 1 ? 's' : ''}`}
             </Button>
           </div>
         </div>

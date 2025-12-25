@@ -17,6 +17,7 @@ from ..models.outreach import (
     OutreachInterestResponse,
     InterviewStartResponse,
     OutreachStatus,
+    ScreeningPublicInfo,
 )
 
 router = APIRouter()
@@ -190,6 +191,106 @@ async def list_project_outreach(project_id: UUID, status: Optional[str] = None):
             )
             for row in rows
         ]
+
+
+@router.post("/projects/{project_id}/screening-invite", response_model=OutreachSendResult)
+async def send_screening_invite(project_id: UUID, request: OutreachSendRequest):
+    """Send direct screening interview invitations to selected candidates.
+
+    Unlike outreach, this skips the "express interest" step and sends candidates
+    directly to the screening interview (they still need to create an account).
+    """
+    email_service = get_email_service()
+    settings = get_settings()
+
+    async with get_connection() as conn:
+        # Get project details
+        project = await conn.fetchrow(
+            """
+            SELECT company_name, name, position_title, location, salary_min, salary_max, requirements, benefits
+            FROM projects WHERE id = $1
+            """,
+            project_id,
+        )
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        salary_range = format_salary_range(project["salary_min"], project["salary_max"])
+
+        sent_count = 0
+        failed_count = 0
+        skipped_count = 0
+        errors = []
+
+        for candidate_id in request.candidate_ids:
+            # Get candidate details
+            candidate = await conn.fetchrow(
+                "SELECT id, name, email FROM candidates WHERE id = $1",
+                candidate_id,
+            )
+            if not candidate:
+                errors.append({"candidate_id": str(candidate_id), "error": "Candidate not found"})
+                failed_count += 1
+                continue
+
+            if not candidate["email"]:
+                errors.append({"candidate_id": str(candidate_id), "error": "No email address"})
+                skipped_count += 1
+                continue
+
+            # Check if outreach already exists
+            existing = await conn.fetchval(
+                "SELECT id FROM project_outreach WHERE project_id = $1 AND candidate_id = $2",
+                project_id,
+                candidate_id,
+            )
+            if existing:
+                skipped_count += 1
+                continue
+
+            # Generate token and create outreach record with SCREENING_INVITED status
+            token = generate_token()
+
+            await conn.execute(
+                """
+                INSERT INTO project_outreach (project_id, candidate_id, token, status, email_sent_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                """,
+                project_id,
+                candidate_id,
+                token,
+                OutreachStatus.SCREENING_INVITED.value,
+            )
+
+            # Send screening invite email
+            success = await email_service.send_screening_invite_email(
+                to_email=candidate["email"],
+                to_name=candidate["name"],
+                company_name=project["company_name"],
+                position_title=project["position_title"] or project["name"],
+                location=project["location"],
+                salary_range=salary_range,
+                screening_token=token,
+                custom_message=request.custom_message,
+            )
+
+            if success:
+                sent_count += 1
+            else:
+                # Email failed but record created - mark as failed
+                await conn.execute(
+                    "UPDATE project_outreach SET status = 'email_failed' WHERE token = $1",
+                    token,
+                )
+                errors.append({"candidate_id": str(candidate_id), "error": "Email send failed"})
+                failed_count += 1
+
+        return OutreachSendResult(
+            sent_count=sent_count,
+            failed_count=failed_count,
+            skipped_count=skipped_count,
+            errors=errors,
+        )
 
 
 # ============================================================================
@@ -466,3 +567,123 @@ async def handle_screening_complete(interview_id: UUID):
             "score": overall_score,
             "new_stage": new_stage,
         }
+
+
+# ============================================================================
+# Direct Screening endpoints (for screening invites - requires account)
+# ============================================================================
+
+@router.get("/screening/{token}", response_model=ScreeningPublicInfo)
+async def get_screening_info(token: str):
+    """Get public info for a screening invite link.
+
+    Returns candidate email so frontend can verify the logged-in user matches.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT o.*, p.company_name, p.name as project_name, p.position_title,
+                   p.location, p.salary_min, p.salary_max, p.requirements, p.benefits,
+                   c.name as candidate_name, c.email as candidate_email
+            FROM project_outreach o
+            JOIN projects p ON o.project_id = p.id
+            JOIN candidates c ON o.candidate_id = c.id
+            WHERE o.token = $1
+            """,
+            token,
+        )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Invalid or expired link")
+
+        return ScreeningPublicInfo(
+            company_name=row["company_name"],
+            position_title=row["position_title"] or row["project_name"],
+            location=row["location"],
+            salary_range=format_salary_range(row["salary_min"], row["salary_max"]),
+            requirements=row["requirements"],
+            benefits=row["benefits"],
+            status=row["status"],
+            candidate_name=row["candidate_name"],
+            candidate_email=row["candidate_email"],
+            interview_id=row["interview_id"],
+        )
+
+
+@router.post("/screening/{token}/start", response_model=InterviewStartResponse)
+async def start_direct_screening(token: str, user_email: str):
+    """Start a screening interview for a direct screening invite.
+
+    Requires the user to be authenticated and their email to match the candidate.
+    The user_email parameter should be provided by the authenticated frontend.
+    """
+    settings = get_settings()
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT o.id, o.status, o.project_id, o.candidate_id, o.interview_id,
+                   p.company_name, c.name as candidate_name, c.email as candidate_email
+            FROM project_outreach o
+            JOIN projects p ON o.project_id = p.id
+            JOIN candidates c ON o.candidate_id = c.id
+            WHERE o.token = $1
+            """,
+            token,
+        )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Invalid or expired link")
+
+        # Verify email matches
+        if row["candidate_email"].lower() != user_email.lower():
+            raise HTTPException(
+                status_code=403,
+                detail=f"Please login with {row['candidate_email']} to access this screening.",
+            )
+
+        # Must be in SCREENING_INVITED status (or already started)
+        if row["status"] not in (
+            OutreachStatus.SCREENING_INVITED.value,
+            OutreachStatus.SCREENING_STARTED.value,
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="This screening link is no longer valid.",
+            )
+
+        # If interview already exists, return it
+        if row["interview_id"]:
+            return InterviewStartResponse(
+                interview_id=row["interview_id"],
+                websocket_url=f"/api/ws/interview/{row['interview_id']}",
+            )
+
+        # Create the screening interview
+        interview_row = await conn.fetchrow(
+            """
+            INSERT INTO interviews (interviewer_name, interview_type, status)
+            VALUES ($1, 'screening', 'pending')
+            RETURNING id
+            """,
+            row["candidate_name"] or "Candidate",
+        )
+
+        interview_id = interview_row["id"]
+
+        # Update outreach with interview reference
+        await conn.execute(
+            """
+            UPDATE project_outreach
+            SET interview_id = $1, status = $2
+            WHERE token = $3
+            """,
+            interview_id,
+            OutreachStatus.SCREENING_STARTED.value,
+            token,
+        )
+
+        return InterviewStartResponse(
+            interview_id=interview_id,
+            websocket_url=f"/api/ws/interview/{interview_id}",
+        )

@@ -14,6 +14,7 @@ class OutreachStatus(str, Enum):
     DECLINED = "declined"
     SCREENING_STARTED = "screening_started"
     SCREENING_COMPLETE = "screening_complete"
+    SCREENING_INVITED = "screening_invited"  # Direct screening invite (skips interest step)
 
 
 class OutreachSendRequest(BaseModel):
@@ -70,3 +71,17 @@ class InterviewStartResponse(BaseModel):
     """Response when starting a screening interview."""
     interview_id: UUID
     websocket_url: str
+
+
+class ScreeningPublicInfo(BaseModel):
+    """Public info shown to candidate on direct screening landing page."""
+    company_name: str
+    position_title: Optional[str] = None
+    location: Optional[str] = None
+    salary_range: Optional[str] = None
+    requirements: Optional[str] = None
+    benefits: Optional[str] = None
+    status: str  # Current outreach status
+    candidate_name: Optional[str] = None
+    candidate_email: Optional[str] = None  # For email verification
+    interview_id: Optional[UUID] = None  # If already started
