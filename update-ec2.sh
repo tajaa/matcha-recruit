@@ -71,16 +71,33 @@ update_matcha() {
 update_oceaneca() {
     log_info "Updating Oceaneca..."
 
+    local BACKEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/oceaneca-backend:latest"
+    local FRONTEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/oceaneca-frontend:latest"
+
     # Pull new images
-    ssh_cmd "cd ~ && docker-compose pull"
+    log_info "Pulling images..."
+    ssh_cmd "docker pull $BACKEND_IMAGE && docker pull $FRONTEND_IMAGE"
 
-    # Recreate app containers only (they use external matcha network)
+    # Recreate app containers (they use matcha network for shared postgres/redis)
+    log_info "Recreating containers..."
     ssh_cmd "docker rm -f oceaneca-backend oceaneca-frontend 2>/dev/null || true"
-    ssh_cmd "cd ~ && docker-compose up -d"
 
-    # Restart worker with updated env
-    ssh_cmd "docker rm -f drooli-worker 2>/dev/null || true"
-    ssh_cmd "docker run -d --name drooli-worker --network matcha_matcha-network --env-file ~/.env --restart unless-stopped 010438494410.dkr.ecr.us-west-1.amazonaws.com/oceaneca-backend:latest sh -c 'PYTHONPATH=/app celery -A workers.celery_app worker --loglevel=info --concurrency=1'"
+    ssh_cmd "docker run -d --name oceaneca-backend \
+        --network matcha_matcha-network \
+        -p 8001:8001 \
+        --env-file ~/.env \
+        --restart unless-stopped \
+        $BACKEND_IMAGE \
+        uvicorn main:app --host 0.0.0.0 --port 8001 --workers 4 --loop asyncio"
+
+    ssh_cmd "docker run -d --name oceaneca-frontend \
+        --network matcha_matcha-network \
+        -p 8080:80 \
+        -e VITE_API_URL=https://gummfit.com \
+        --restart unless-stopped \
+        $FRONTEND_IMAGE"
+
+    ssh_cmd "sudo systemctl restart nginx || true"
 
     log_success "Oceaneca updated!"
 }
