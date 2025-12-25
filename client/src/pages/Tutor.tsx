@@ -1,0 +1,383 @@
+import { useState, useEffect, useRef } from 'react';
+import { Button, Card, CardContent } from '../components';
+import { tutor } from '../api/client';
+import { useAudioInterview } from '../hooks/useAudioInterview';
+
+type TutorMode = 'interview_prep' | 'language_test';
+type Language = 'en' | 'es';
+
+export function Tutor() {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Mode selection state
+  const [selectedMode, setSelectedMode] = useState<TutorMode | null>(null);
+  const [selectedLanguage, setSelectedLanguage] = useState<Language>('en');
+
+  // Session state
+  const [interviewId, setInterviewId] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [completed, setCompleted] = useState(false);
+
+  // Audio interview hook
+  const {
+    isConnected,
+    isRecording,
+    messages,
+    sessionTimeRemaining,
+    connect,
+    disconnect,
+    startRecording,
+    stopRecording,
+  } = useAudioInterview(interviewId || '');
+
+  // Scroll to bottom of messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Start a tutor session
+  const handleStartSession = async (mode: TutorMode, language?: Language) => {
+    setStarting(true);
+    setError(null);
+    try {
+      const result = await tutor.createSession({
+        mode,
+        language: mode === 'language_test' ? language : undefined,
+      });
+      setInterviewId(result.interview_id);
+      setSelectedMode(mode);
+      if (language) setSelectedLanguage(language);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start session');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  // End the session
+  const handleEnd = () => {
+    disconnect();
+    setCompleted(true);
+  };
+
+  // Reset to mode selection
+  const handleReset = () => {
+    setInterviewId(null);
+    setSelectedMode(null);
+    setCompleted(false);
+    setError(null);
+  };
+
+  // Format time remaining
+  const formatTime = (seconds: number | null) => {
+    if (seconds === null) return '';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Completed state
+  if (completed) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white tracking-tight">Session Complete</h1>
+            <p className="text-zinc-500 mt-1">Great practice session!</p>
+          </div>
+        </div>
+
+        <Card>
+          <CardContent className="py-12 text-center">
+            <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-matcha-500/20 flex items-center justify-center">
+              <svg className="w-8 h-8 text-matcha-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-semibold text-white mb-2">
+              {selectedMode === 'interview_prep' ? 'Interview Practice Complete' : 'Language Practice Complete'}
+            </h2>
+            <p className="text-zinc-400 mb-6">
+              {selectedMode === 'interview_prep'
+                ? 'Keep practicing to build your confidence!'
+                : `Great job practicing ${selectedLanguage === 'es' ? 'Spanish' : 'English'}!`}
+            </p>
+            <Button onClick={handleReset}>Start Another Session</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Active session
+  if (interviewId) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white tracking-tight">
+              {selectedMode === 'interview_prep' ? 'Interview Practice' : 'Language Practice'}
+            </h1>
+            <p className="text-zinc-500 mt-1">
+              {selectedMode === 'interview_prep'
+                ? 'Practice answering interview questions'
+                : `Practicing ${selectedLanguage === 'es' ? 'Spanish' : 'English'} conversation`}
+            </p>
+          </div>
+          {sessionTimeRemaining !== null && (
+            <div className="text-sm text-zinc-500">
+              Time: <span className="text-zinc-300 font-medium">{formatTime(sessionTimeRemaining)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Controls */}
+        <Card>
+          <CardContent>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] transition-colors ${
+                    isConnected ? 'bg-matcha-500 text-matcha-500' : 'bg-zinc-600 text-zinc-600'
+                  }`}
+                />
+                <span className="text-sm font-medium text-zinc-300">
+                  {isConnected ? 'Connected' : 'Disconnected'}
+                </span>
+              </div>
+              {isRecording && (
+                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20">
+                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-sm font-medium text-red-400">Recording</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-4">
+              {!isConnected ? (
+                <Button onClick={connect} className="flex-1 py-4 text-lg">
+                  Connect to {selectedMode === 'interview_prep' ? 'Coach' : 'Tutor'}
+                </Button>
+              ) : (
+                <>
+                  {!isRecording ? (
+                    <Button onClick={startRecording} className="flex-1 py-4 text-lg shadow-[0_0_20px_rgba(34,197,94,0.2)]">
+                      <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+                        <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+                      </svg>
+                      Start Speaking
+                    </Button>
+                  ) : (
+                    <Button onClick={stopRecording} variant="danger" className="flex-1 py-4 text-lg">
+                      <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 24 24">
+                        <rect x="6" y="6" width="12" height="12" />
+                      </svg>
+                      Stop Speaking
+                    </Button>
+                  )}
+                  <Button onClick={handleEnd} variant="secondary" className="px-8">
+                    End
+                  </Button>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Conversation */}
+        <Card>
+          <CardContent className="h-[400px] overflow-y-auto custom-scrollbar p-6">
+            {messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-zinc-500 space-y-4">
+                <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center">
+                  <svg className="w-8 h-8 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                </div>
+                <p>Connect and start speaking to begin</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {messages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[80%] px-5 py-3 rounded-2xl shadow-md ${
+                        msg.type === 'user'
+                          ? 'bg-matcha-500 text-zinc-950 rounded-br-none'
+                          : msg.type === 'assistant'
+                          ? 'bg-zinc-800 text-zinc-100 rounded-bl-none border border-zinc-700'
+                          : msg.type === 'system'
+                          ? 'bg-yellow-500/10 text-yellow-400 text-sm border border-yellow-500/20 text-center mx-auto'
+                          : 'bg-blue-500/10 text-blue-400 text-sm border border-blue-500/20 text-center mx-auto'
+                      }`}
+                    >
+                      {msg.type === 'system' || msg.type === 'status' ? (
+                        <span className="text-xs uppercase font-bold mr-2 opacity-75">
+                          {msg.type}:
+                        </span>
+                      ) : null}
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Mode selection
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-white tracking-tight">Tutor</h1>
+        <p className="text-zinc-500 mt-1">Practice your interview skills or language proficiency</p>
+      </div>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-red-400">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Interview Prep Card */}
+        <Card className="overflow-hidden">
+          <div className="h-2 bg-gradient-to-r from-matcha-500 to-matcha-400" />
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-matcha-500/20 flex items-center justify-center">
+                <svg className="w-6 h-6 text-matcha-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Interview Prep</h3>
+                <p className="text-sm text-zinc-500">Practice common questions</p>
+              </div>
+            </div>
+
+            <p className="text-zinc-400 text-sm mb-6">
+              Practice answering behavioral, situational, and self-presentation questions.
+              Get real-time feedback on your responses.
+            </p>
+
+            <ul className="text-sm text-zinc-500 space-y-2 mb-6">
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-matcha-500" />
+                "Tell me about yourself"
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-matcha-500" />
+                Behavioral questions (STAR method)
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-matcha-500" />
+                Situational problem-solving
+              </li>
+            </ul>
+
+            <Button
+              onClick={() => handleStartSession('interview_prep')}
+              disabled={starting}
+              className="w-full"
+            >
+              {starting ? 'Starting...' : 'Start Practice'}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Language Test Card */}
+        <Card className="overflow-hidden">
+          <div className="h-2 bg-gradient-to-r from-blue-500 to-blue-400" />
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Language Test</h3>
+                <p className="text-sm text-zinc-500">Practice conversation</p>
+              </div>
+            </div>
+
+            <p className="text-zinc-400 text-sm mb-6">
+              Have a natural conversation to practice and improve your language skills.
+              Get gentle corrections and vocabulary suggestions.
+            </p>
+
+            <div className="mb-6">
+              <label className="block text-xs text-zinc-500 mb-2">Select Language</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedLanguage('en')}
+                  className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
+                    selectedLanguage === 'en'
+                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
+                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                  }`}
+                >
+                  English
+                </button>
+                <button
+                  onClick={() => setSelectedLanguage('es')}
+                  className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
+                    selectedLanguage === 'es'
+                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
+                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                  }`}
+                >
+                  Spanish
+                </button>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => handleStartSession('language_test', selectedLanguage)}
+              disabled={starting}
+              variant="secondary"
+              className="w-full border-blue-500/30 hover:bg-blue-500/10"
+            >
+              {starting ? 'Starting...' : `Practice ${selectedLanguage === 'es' ? 'Spanish' : 'English'}`}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tips */}
+      <Card>
+        <CardContent>
+          <h3 className="text-sm font-medium text-zinc-400 mb-3">Tips for a good session</h3>
+          <ul className="text-sm text-zinc-500 space-y-2">
+            <li className="flex items-start gap-2">
+              <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
+              Find a quiet place with minimal background noise
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
+              Use headphones for the best audio quality
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
+              Speak naturally and take your time with responses
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
+              Sessions are limited to 12 minutes to keep practice focused
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

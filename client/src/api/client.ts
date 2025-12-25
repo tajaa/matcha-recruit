@@ -839,6 +839,25 @@ export const screening = {
   },
 };
 
+// Tutor API
+export interface TutorSessionCreate {
+  mode: 'interview_prep' | 'language_test';
+  language?: 'en' | 'es';
+}
+
+export interface TutorSessionStart {
+  interview_id: string;
+  websocket_url: string;
+}
+
+export const tutor = {
+  createSession: (data: TutorSessionCreate) =>
+    request<TutorSessionStart>('/tutor/sessions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
 // WebSocket URL helper
 export function getInterviewWSUrl(interviewId: string): string {
   return `ws://localhost:8001/api/ws/interview/${interviewId}`;

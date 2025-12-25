@@ -5,7 +5,7 @@ import json
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from ..database import get_connection
-from ..models.interview import InterviewCreate, InterviewResponse, InterviewStart, ConversationAnalysis
+from ..models.interview import InterviewCreate, InterviewResponse, InterviewStart, ConversationAnalysis, TutorSessionCreate
 from ..services.gemini_session import GeminiLiveSession
 from ..services.culture_analyzer import CultureAnalyzer
 from ..services.conversation_analyzer import ConversationAnalyzer
@@ -56,6 +56,36 @@ async def create_interview(company_id: UUID, interview: InterviewCreate):
             interview.interviewer_name,
             interview.interviewer_role,
             interview.interview_type,
+        )
+        interview_id = row["id"]
+
+        return InterviewStart(
+            interview_id=interview_id,
+            websocket_url=f"/api/ws/interview/{interview_id}",
+        )
+
+
+@router.post("/tutor/sessions", response_model=InterviewStart)
+async def create_tutor_session(request: TutorSessionCreate):
+    """Create a new tutor session for interview prep or language practice."""
+    # Validate language is provided for language test mode
+    if request.mode == "language_test" and not request.language:
+        raise HTTPException(status_code=400, detail="Language must be specified for language test mode")
+
+    # Map mode to interview type
+    interview_type = "tutor_interview" if request.mode == "interview_prep" else "tutor_language"
+
+    async with get_connection() as conn:
+        # Create interview record (company_id is NULL for tutor sessions)
+        # Store language in interviewer_role field
+        row = await conn.fetchrow(
+            """
+            INSERT INTO interviews (company_id, interviewer_name, interviewer_role, interview_type, status)
+            VALUES (NULL, 'Tutor', $1, $2, 'pending')
+            RETURNING id
+            """,
+            request.language,  # Store language in interviewer_role for retrieval
+            interview_type,
         )
         interview_id = row["id"]
 
@@ -356,7 +386,7 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
             """
             SELECT i.id, i.company_id, i.interviewer_name, i.interviewer_role, i.interview_type, c.name as company_name
             FROM interviews i
-            JOIN companies c ON i.company_id = c.id
+            LEFT JOIN companies c ON i.company_id = c.id
             WHERE i.id = $1
             """,
             interview_id,
@@ -365,14 +395,20 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
             await websocket.close(code=4004, reason="Interview not found")
             return
 
-        company_name = row["company_name"]
+        company_name = row["company_name"] or "Practice Session"
         interviewer_name = row["interviewer_name"] or "HR Representative"
-        interviewer_role = row["interviewer_role"] or "HR"
+        interviewer_role = row["interviewer_role"]  # May contain language for tutor sessions
         interview_type = row["interview_type"] or "culture"
+
+        # For tutor_language, interviewer_role contains the language code
+        tutor_language = None
+        if interview_type == "tutor_language":
+            tutor_language = interviewer_role  # "en" or "es"
+            interviewer_role = "Tutor"
 
         # For candidate interviews, fetch the company's culture profile
         culture_profile = None
-        if interview_type == "candidate":
+        if interview_type == "candidate" and row["company_id"]:
             culture_row = await conn.fetchrow(
                 "SELECT profile_data FROM culture_profiles WHERE company_id = $1",
                 row["company_id"],
@@ -406,15 +442,23 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
         await gemini_session.connect(
             company_name=company_name,
             interviewer_name=interviewer_name,
-            interviewer_role=interviewer_role,
+            interviewer_role=interviewer_role or "HR",
             interview_type=interview_type,
             culture_profile=culture_profile,
+            tutor_language=tutor_language,
         )
 
-        await send_message(MessageType.STATUS, "Interview session started")
+        await send_message(MessageType.STATUS, "Session started")
 
         # Trigger the model to speak first
-        if interview_type in ("candidate", "screening"):
+        if interview_type == "tutor_interview":
+            await gemini_session.send_text("Please start the coaching session now. Greet them warmly and explain you'll help them practice interview questions.")
+        elif interview_type == "tutor_language":
+            if tutor_language == "es":
+                await gemini_session.send_text("Por favor, comienza la sesión de práctica. Saluda calurosamente y pregunta cómo pueden ayudarte a practicar español hoy.")
+            else:
+                await gemini_session.send_text("Please start the practice session now. Greet them warmly and ask how you can help them practice English today.")
+        elif interview_type in ("candidate", "screening"):
             await gemini_session.send_text("Please start the interview now. Greet the candidate warmly and begin.")
         else:
             await gemini_session.send_text(f"Please start the interview now. Say hello to {interviewer_name} and begin.")
@@ -488,20 +532,20 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
                     interview_id,
                 )
 
-            # Queue analysis task for Celery worker
-            if transcript_text:
+            # Queue analysis task for Celery worker (skip for tutor sessions)
+            if transcript_text and interview_type not in ("tutor_interview", "tutor_language"):
                 from app.workers.tasks.interview_analysis import analyze_interview_async
 
                 analyze_interview_async.delay(
                     interview_id=str(interview_id),
                     interview_type=interview_type,
                     transcript=transcript_text,
-                    company_id=str(row["company_id"]),
+                    company_id=str(row["company_id"]) if row["company_id"] else None,
                     culture_profile=culture_profile,
                 )
                 print(f"[Interview {interview_id}] Queued analysis task for background processing")
             else:
-                # No transcript, mark as completed without analysis
+                # No transcript or tutor session, mark as completed without analysis
                 async with get_connection() as conn:
                     await conn.execute(
                         "UPDATE interviews SET status = 'completed' WHERE id = $1",

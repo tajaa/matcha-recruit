@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
-InterviewType = Literal["culture", "candidate", "screening"]
+InterviewType = Literal["culture", "candidate", "screening", "tutor_interview", "tutor_language"]
 
 
 # Conversation Analysis Models
@@ -117,3 +117,9 @@ class InterviewStart(BaseModel):
     """Response when starting a new interview session."""
     interview_id: UUID
     websocket_url: str
+
+
+class TutorSessionCreate(BaseModel):
+    """Request to create a tutor session."""
+    mode: Literal["interview_prep", "language_test"]
+    language: Optional[Literal["en", "es"]] = None  # Required for language_test mode
