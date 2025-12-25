@@ -8,7 +8,7 @@
 set -e
 
 # Configuration
-EC2_HOST="ec2-13-52-75-8.us-west-1.compute.amazonaws.com"
+EC2_HOST="54.177.107.107"
 EC2_USER="ec2-user"
 SSH_KEY="${SSH_KEY:-roonMT-arm.pem}"
 AWS_REGION="us-west-1"

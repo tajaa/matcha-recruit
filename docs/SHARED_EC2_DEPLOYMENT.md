@@ -5,7 +5,7 @@ This document explains how **matcha-recruit** and **drooli** (oceaneca) share th
 ## EC2 Instance Access
 
 ```bash
-ssh -i "roonMT-arm.pem" ec2-user@ec2-13-52-75-8.us-west-1.compute.amazonaws.com
+ssh -i "roonMT-arm.pem" ec2-user@54.177.107.107
 ```
 
 **Instance Details:**
@@ -171,7 +171,7 @@ Workers run every 15 minutes, process tasks for ~5 minutes, then stop to free me
 
 ### Check all containers
 ```bash
-ssh -i "roonMT-arm.pem" ec2-user@ec2-13-52-75-8.us-west-1.compute.amazonaws.com
+ssh -i "roonMT-arm.pem" ec2-user@54.177.107.107
 docker ps -a
 ```
 

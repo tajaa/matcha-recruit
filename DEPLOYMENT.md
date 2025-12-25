@@ -52,7 +52,7 @@ CREATE DATABASE matcha;
 ### 2. Add Gemini API Key
 SSH into EC2 and edit the environment file:
 ```bash
-ssh -i "roonMT-arm.pem" ec2-user@ec2-13-52-75-8.us-west-1.compute.amazonaws.com
+ssh -i "roonMT-arm.pem" ec2-user@54.177.107.107
 nano /opt/matcha/.env.backend
 ```
 Replace `REPLACE_WITH_YOUR_GEMINI_API_KEY` with your actual Gemini API key.
@@ -143,7 +143,7 @@ docker system prune -f
 
 | Environment | Backend | Frontend |
 |-------------|---------|----------|
-| Production | `http://ec2-13-52-75-8.us-west-1.compute.amazonaws.com:8002` | `http://ec2-13-52-75-8.us-west-1.compute.amazonaws.com:8082` |
+| Production | `http://54.177.107.107:8002` | `http://54.177.107.107:8082` |
 | Local Dev | `http://localhost:8000` | `http://localhost:5173` |
 
 ---
