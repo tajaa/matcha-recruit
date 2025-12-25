@@ -56,15 +56,33 @@ ecr_login() {
     ssh_cmd "aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 }
 
-update_app() {
-    local app_name=$1
-    local app_dir=$2
+update_matcha() {
+    log_info "Updating Matcha-Recruit..."
 
-    log_info "Updating $app_name..."
+    # Only restart app containers, not shared infrastructure (postgres, redis)
+    ssh_cmd "cd ~/matcha && docker-compose pull && docker-compose up -d --no-deps matcha-backend matcha-frontend"
 
-    ssh_cmd "cd ~/$app_dir && docker-compose pull && docker-compose down && docker-compose up -d"
+    # Restart worker if running
+    ssh_cmd "docker restart matcha-worker 2>/dev/null || true"
 
-    log_success "$app_name updated!"
+    log_success "Matcha-Recruit updated!"
+}
+
+update_oceaneca() {
+    log_info "Updating Oceaneca..."
+
+    # Pull new images
+    ssh_cmd "cd ~ && docker-compose pull"
+
+    # Recreate app containers only (they use external matcha network)
+    ssh_cmd "docker rm -f oceaneca-backend oceaneca-frontend 2>/dev/null || true"
+    ssh_cmd "cd ~ && docker-compose up -d"
+
+    # Restart worker with updated env
+    ssh_cmd "docker rm -f drooli-worker 2>/dev/null || true"
+    ssh_cmd "docker run -d --name drooli-worker --network matcha_matcha-network --env-file ~/.env --restart unless-stopped 010438494410.dkr.ecr.us-west-1.amazonaws.com/oceaneca-backend:latest sh -c 'PYTHONPATH=/app celery -A workers.celery_app worker --loglevel=info --concurrency=1'"
+
+    log_success "Oceaneca updated!"
 }
 
 show_status() {
@@ -135,11 +153,11 @@ fi
 ecr_login
 
 if [ "$UPDATE_MATCHA" = true ]; then
-    update_app "Matcha-Recruit" "matcha"
+    update_matcha
 fi
 
 if [ "$UPDATE_OCEANECA" = true ]; then
-    update_app "Oceaneca" "oceaneca"
+    update_oceaneca
 fi
 
 cleanup
