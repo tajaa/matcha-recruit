@@ -32,6 +32,8 @@ import {
   JobBoards,
   ResumeOnboarding,
   Tutor,
+  TutorMetrics,
+  TutorSessionDetail,
 } from './pages';
 
 // Redirect component that properly handles the :id parameter
@@ -198,6 +200,22 @@ function App() {
               element={
                 <ProtectedRoute roles={['admin']}>
                   <Tutor />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="tutor-metrics"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <TutorMetrics />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="tutor-metrics/:id"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <TutorSessionDetail />
                 </ProtectedRoute>
               }
             />

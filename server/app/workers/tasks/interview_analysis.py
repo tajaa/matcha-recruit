@@ -18,8 +18,9 @@ async def _analyze_interview(
     interview_id: str,
     interview_type: str,
     transcript: str,
-    company_id: str,
+    company_id: Optional[str] = None,
     culture_profile: Optional[dict[str, Any]] = None,
+    language: Optional[str] = None,
 ) -> dict[str, Any]:
     """Run interview analysis and save results to database."""
     from app.services.culture_analyzer import CultureAnalyzer
@@ -31,6 +32,7 @@ async def _analyze_interview(
     culture_data = None
     conversation_analysis_data = None
     screening_analysis_data = None
+    tutor_analysis_data = None
 
     # Initialize analyzers
     conv_analyzer = ConversationAnalyzer(
@@ -47,7 +49,18 @@ async def _analyze_interview(
         model=settings.analysis_model,
     )
 
-    if interview_type == "screening":
+    if interview_type == "tutor_interview":
+        # Tutor interview prep: analyze for interview skills feedback
+        tutor_analysis_data = await conv_analyzer.analyze_tutor_interview(
+            transcript=transcript,
+        )
+    elif interview_type == "tutor_language":
+        # Tutor language practice: analyze for language proficiency feedback
+        tutor_analysis_data = await conv_analyzer.analyze_tutor_language(
+            transcript=transcript,
+            language=language or "en",
+        )
+    elif interview_type == "screening":
         # Screening interviews: generate screening analysis
         screening_analysis_data = await conv_analyzer.analyze_screening_interview(
             transcript=transcript,
@@ -68,12 +81,13 @@ async def _analyze_interview(
             """
             UPDATE interviews
             SET raw_culture_data = $1, conversation_analysis = $2,
-                screening_analysis = $3, status = 'completed'
-            WHERE id = $4
+                screening_analysis = $3, tutor_analysis = $4, status = 'completed'
+            WHERE id = $5
             """,
             json.dumps(culture_data) if culture_data else None,
             json.dumps(conversation_analysis_data) if conversation_analysis_data else None,
             json.dumps(screening_analysis_data) if screening_analysis_data else None,
+            json.dumps(tutor_analysis_data) if tutor_analysis_data else None,
             interview_id,
         )
 
@@ -138,6 +152,7 @@ async def _analyze_interview(
         "has_culture_data": culture_data is not None,
         "has_conversation_analysis": conversation_analysis_data is not None,
         "has_screening_analysis": screening_analysis_data is not None,
+        "has_tutor_analysis": tutor_analysis_data is not None,
         "screening_recommendation": screening_analysis_data.get("recommendation") if screening_analysis_data else None,
     }
 
@@ -148,8 +163,9 @@ def analyze_interview_async(
     interview_id: str,
     interview_type: str,
     transcript: str,
-    company_id: str,
+    company_id: Optional[str] = None,
     culture_profile: Optional[dict[str, Any]] = None,
+    language: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Analyze interview transcript in background.
@@ -159,10 +175,11 @@ def analyze_interview_async(
 
     Args:
         interview_id: UUID of the interview
-        interview_type: "culture", "candidate", or "screening"
+        interview_type: "culture", "candidate", "screening", "tutor_interview", or "tutor_language"
         transcript: Full transcript text
-        company_id: UUID of the company (for notification channel)
+        company_id: UUID of the company (for notification channel), None for tutor sessions
         culture_profile: Optional culture profile for candidate interviews
+        language: Optional language code for tutor_language sessions ("en" or "es")
     """
     print(f"[Worker] Starting analysis for interview {interview_id} (type: {interview_type})")
 
@@ -174,16 +191,18 @@ def analyze_interview_async(
                 transcript=transcript,
                 company_id=company_id,
                 culture_profile=culture_profile,
+                language=language,
             )
         )
 
-        # Notify frontend via Redis pub/sub
-        publish_task_complete(
-            channel=f"company:{company_id}",
-            task_type="interview_analysis",
-            entity_id=interview_id,
-            result=result,
-        )
+        # Notify frontend via Redis pub/sub (only for company interviews)
+        if company_id:
+            publish_task_complete(
+                channel=f"company:{company_id}",
+                task_type="interview_analysis",
+                entity_id=interview_id,
+                result=result,
+            )
 
         print(f"[Worker] Completed analysis for interview {interview_id}")
         return {"status": "success", **result}
@@ -191,13 +210,14 @@ def analyze_interview_async(
     except Exception as e:
         print(f"[Worker] Failed to analyze interview {interview_id}: {e}")
 
-        # Notify frontend of error
-        publish_task_error(
-            channel=f"company:{company_id}",
-            task_type="interview_analysis",
-            entity_id=interview_id,
-            error=str(e),
-        )
+        # Notify frontend of error (only for company interviews)
+        if company_id:
+            publish_task_error(
+                channel=f"company:{company_id}",
+                task_type="interview_analysis",
+                entity_id=interview_id,
+                error=str(e),
+            )
 
         # Retry with exponential backoff
         raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))

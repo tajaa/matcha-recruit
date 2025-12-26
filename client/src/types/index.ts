@@ -677,3 +677,159 @@ export interface ApplicationSubmitResponse {
   message: string;
   application_id: string;
 }
+
+// Tutor Analysis types
+export type TutorInterviewType = 'tutor_interview' | 'tutor_language';
+
+// Tutor Interview Analysis (for interview prep mode)
+export interface TutorResponseBreakdown {
+  question: string;
+  quality: 'specific' | 'somewhat_specific' | 'vague';
+  used_examples: boolean;
+  depth: 'excellent' | 'good' | 'shallow';
+  feedback: string;
+}
+
+export interface TutorResponseQuality {
+  overall_score: number;
+  specificity_score: number;
+  example_usage_score: number;
+  depth_score: number;
+  breakdown: TutorResponseBreakdown[];
+}
+
+export interface TutorCommunicationSkills {
+  overall_score: number;
+  clarity_score: number;
+  confidence_score: number;
+  professionalism_score: number;
+  engagement_score: number;
+  notes: string | null;
+}
+
+export interface TutorMissedOpportunity {
+  topic: string;
+  suggestion: string;
+}
+
+export interface TutorContentCoverage {
+  topics_covered: string[];
+  missed_opportunities: TutorMissedOpportunity[];
+  follow_up_depth: 'excellent' | 'good' | 'shallow';
+}
+
+export interface TutorImprovementSuggestion {
+  area: string;
+  suggestion: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface TutorInterviewAnalysis {
+  response_quality: TutorResponseQuality;
+  communication_skills: TutorCommunicationSkills;
+  content_coverage: TutorContentCoverage;
+  improvement_suggestions: TutorImprovementSuggestion[];
+  session_summary: string;
+  analyzed_at: string;
+}
+
+// Tutor Language Analysis (for language test mode)
+export interface TutorFluencyPace {
+  overall_score: number;
+  speaking_speed: 'natural' | 'too_fast' | 'too_slow' | 'varies';
+  pause_frequency: 'rare' | 'occasional' | 'frequent';
+  filler_word_count: number;
+  filler_words_used: string[];
+  flow_rating: 'excellent' | 'good' | 'choppy' | 'poor';
+  notes: string | null;
+}
+
+export interface TutorVocabulary {
+  overall_score: number;
+  variety_score: number;
+  appropriateness_score: number;
+  complexity_level: 'basic' | 'intermediate' | 'advanced';
+  notable_good_usage: string[];
+  suggestions: string[];
+}
+
+export interface TutorGrammarError {
+  error: string;
+  correction: string;
+  type: string;
+}
+
+export interface TutorGrammar {
+  overall_score: number;
+  sentence_structure_score: number;
+  tense_usage_score: number;
+  common_errors: TutorGrammarError[];
+  notes: string | null;
+}
+
+export interface TutorProficiencyLevel {
+  level: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
+  level_description: string;
+  strengths: string[];
+  areas_to_improve: string[];
+}
+
+export interface TutorPracticeSuggestion {
+  skill: string;
+  exercise: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface TutorLanguageAnalysis {
+  fluency_pace: TutorFluencyPace;
+  vocabulary: TutorVocabulary;
+  grammar: TutorGrammar;
+  overall_proficiency: TutorProficiencyLevel;
+  practice_suggestions: TutorPracticeSuggestion[];
+  session_summary: string;
+  analyzed_at: string;
+  language: string;
+}
+
+// Tutor Session types
+export interface TutorSessionSummary {
+  id: string;
+  interview_type: TutorInterviewType;
+  language: string | null;
+  status: string;
+  overall_score: number | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface TutorSessionDetail {
+  id: string;
+  interview_type: TutorInterviewType;
+  language: string | null;
+  transcript: string | null;
+  tutor_analysis: TutorInterviewAnalysis | TutorLanguageAnalysis | null;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+}
+
+// Tutor Metrics Aggregate types
+export interface TutorInterviewPrepStats {
+  total_sessions: number;
+  avg_response_quality: number;
+  avg_communication_score: number;
+  common_improvement_areas: { area: string; count: number }[];
+}
+
+export interface TutorLanguageTestStats {
+  total_sessions: number;
+  by_language: Record<string, { count: number; avg_proficiency: string | null }>;
+  avg_fluency_score: number;
+  avg_grammar_score: number;
+  common_grammar_errors: { type: string; count: number }[];
+}
+
+export interface TutorMetricsAggregate {
+  interview_prep: TutorInterviewPrepStats;
+  language_test: TutorLanguageTestStats;
+}

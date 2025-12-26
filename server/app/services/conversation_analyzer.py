@@ -249,6 +249,171 @@ Return ONLY a JSON object with this structure:
 Return ONLY the JSON object, no other text."""
 
 
+TUTOR_INTERVIEW_ANALYSIS_PROMPT = """Analyze this interview practice session transcript where a user practiced answering interview questions with an AI interviewer.
+
+Provide feedback to help the user improve their interview skills.
+
+TRANSCRIPT:
+{transcript}
+
+Evaluate the user's performance across three key areas:
+
+1. RESPONSE QUALITY (How well-crafted are their answers?)
+   - Specificity: Do they give concrete details or vague generalities?
+   - Example Usage: Do they use the STAR method or similar structured examples?
+   - Depth: Do they fully address the question or give surface-level answers?
+
+2. COMMUNICATION SKILLS (How effectively do they communicate?)
+   - Clarity: Are responses well-organized and easy to follow?
+   - Confidence: Do they sound assured in their answers?
+   - Professionalism: Is the tone appropriate for an interview?
+   - Engagement: Do they show enthusiasm and interest?
+
+3. CONTENT COVERAGE (What topics did they handle well or miss?)
+   - Topics Covered: What interview topics were addressed?
+   - Missed Opportunities: Where could they have elaborated more?
+   - Follow-up Depth: Did they anticipate and address likely follow-ups?
+
+For each response in the transcript, analyze:
+- What question was asked
+- Quality of the answer (specific, somewhat_specific, or vague)
+- Whether they used concrete examples
+- Specific feedback for improvement
+
+Return ONLY a JSON object with this structure:
+{{
+    "response_quality": {{
+        "overall_score": <0-100>,
+        "specificity_score": <0-100>,
+        "example_usage_score": <0-100>,
+        "depth_score": <0-100>,
+        "breakdown": [
+            {{
+                "question": "...",
+                "quality": "specific/somewhat_specific/vague",
+                "used_examples": true/false,
+                "depth": "excellent/good/shallow",
+                "feedback": "specific improvement suggestion"
+            }}
+        ]
+    }},
+    "communication_skills": {{
+        "overall_score": <0-100>,
+        "clarity_score": <0-100>,
+        "confidence_score": <0-100>,
+        "professionalism_score": <0-100>,
+        "engagement_score": <0-100>,
+        "notes": "overall communication feedback"
+    }},
+    "content_coverage": {{
+        "topics_covered": ["list of topics discussed well"],
+        "missed_opportunities": [
+            {{
+                "topic": "what could have been discussed",
+                "suggestion": "how to address it"
+            }}
+        ],
+        "follow_up_depth": "excellent/good/shallow"
+    }},
+    "improvement_suggestions": [
+        {{
+            "area": "which skill area",
+            "suggestion": "specific actionable advice",
+            "priority": "high/medium/low"
+        }}
+    ],
+    "session_summary": "2-3 sentence summary of performance with key strengths and areas to improve"
+}}
+
+Return ONLY the JSON object, no other text."""
+
+
+TUTOR_LANGUAGE_ANALYSIS_PROMPT = """Analyze this language practice session transcript where a user practiced speaking {language_name} with an AI conversation partner.
+
+Provide feedback to help the user improve their {language_name} speaking skills.
+
+TRANSCRIPT:
+{transcript}
+
+Evaluate the user's language proficiency across three key areas:
+
+1. FLUENCY & PACE
+   - Speaking Speed: Is it natural, too fast, or too slow?
+   - Pause Frequency: Are there many hesitations or unnatural pauses?
+   - Filler Words: How often do they use fillers (um, uh, like, etc.)?
+   - Flow: Does the conversation flow naturally?
+
+2. VOCABULARY
+   - Word Variety: Do they use diverse vocabulary or repeat the same words?
+   - Appropriateness: Are word choices suitable for the context?
+   - Complexity: What level of vocabulary complexity (basic/intermediate/advanced)?
+   - Notable Usage: Any particularly good or problematic word choices?
+
+3. GRAMMAR
+   - Sentence Structure: Are sentences well-formed?
+   - Tense Usage: Are verb tenses used correctly and consistently?
+   - Common Errors: What grammar mistakes appear? (List specific examples with corrections)
+   - Complexity: Can they form complex sentences or only simple ones?
+
+Determine overall proficiency level using CEFR scale:
+- A1: Beginner - Basic phrases only
+- A2: Elementary - Simple everyday expressions
+- B1: Intermediate - Can handle most situations
+- B2: Upper Intermediate - Can interact fluently
+- C1: Advanced - Can express fluently and spontaneously
+- C2: Mastery - Near-native command
+
+Return ONLY a JSON object with this structure:
+{{
+    "fluency_pace": {{
+        "overall_score": <0-100>,
+        "speaking_speed": "natural/too_fast/too_slow/varies",
+        "pause_frequency": "rare/occasional/frequent",
+        "filler_word_count": <estimated number>,
+        "filler_words_used": ["list of fillers noted"],
+        "flow_rating": "excellent/good/choppy/poor",
+        "notes": "feedback on fluency"
+    }},
+    "vocabulary": {{
+        "overall_score": <0-100>,
+        "variety_score": <0-100>,
+        "appropriateness_score": <0-100>,
+        "complexity_level": "basic/intermediate/advanced",
+        "notable_good_usage": ["words/phrases used well"],
+        "suggestions": ["vocabulary improvements to focus on"]
+    }},
+    "grammar": {{
+        "overall_score": <0-100>,
+        "sentence_structure_score": <0-100>,
+        "tense_usage_score": <0-100>,
+        "common_errors": [
+            {{
+                "error": "what the user said",
+                "correction": "correct form",
+                "type": "tense/agreement/word_order/article/preposition/other"
+            }}
+        ],
+        "notes": "overall grammar feedback"
+    }},
+    "overall_proficiency": {{
+        "level": "A1/A2/B1/B2/C1/C2",
+        "level_description": "brief description of what this level means",
+        "strengths": ["what they do well"],
+        "areas_to_improve": ["what to focus on next"]
+    }},
+    "practice_suggestions": [
+        {{
+            "skill": "which aspect to practice",
+            "exercise": "specific practice activity",
+            "priority": "high/medium/low"
+        }}
+    ],
+    "session_summary": "2-3 sentence summary of language performance with encouragement and clear next steps"
+}}
+
+Return ONLY the JSON object, no other text."""
+
+
 class ConversationAnalyzer:
     def __init__(
         self,
@@ -401,4 +566,133 @@ class ConversationAnalyzer:
                 "recommendation": "fail",
                 "summary": f"Failed to analyze transcript: {str(e)}",
                 "analyzed_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+    async def analyze_tutor_interview(
+        self,
+        transcript: str,
+    ) -> dict[str, Any]:
+        """Analyze an interview practice session for user improvement feedback."""
+        prompt = TUTOR_INTERVIEW_ANALYSIS_PROMPT.format(transcript=transcript)
+
+        response = await self.client.aio.models.generate_content(
+            model=self.model,
+            contents=prompt,
+        )
+
+        # Parse JSON from response
+        text = response.text.strip()
+        # Remove markdown code blocks if present
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            analysis = json.loads(text)
+            analysis["analyzed_at"] = datetime.now(timezone.utc).isoformat()
+            return analysis
+        except json.JSONDecodeError as e:
+            print(f"[ConversationAnalyzer] Failed to parse tutor interview JSON: {e}")
+            print(f"[ConversationAnalyzer] Raw response: {text}")
+            return {
+                "response_quality": {
+                    "overall_score": 0,
+                    "specificity_score": 0,
+                    "example_usage_score": 0,
+                    "depth_score": 0,
+                    "breakdown": [],
+                },
+                "communication_skills": {
+                    "overall_score": 0,
+                    "clarity_score": 0,
+                    "confidence_score": 0,
+                    "professionalism_score": 0,
+                    "engagement_score": 0,
+                    "notes": "Analysis failed",
+                },
+                "content_coverage": {
+                    "topics_covered": [],
+                    "missed_opportunities": [],
+                    "follow_up_depth": "shallow",
+                },
+                "improvement_suggestions": [],
+                "session_summary": f"Failed to analyze transcript: {str(e)}",
+                "analyzed_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+    async def analyze_tutor_language(
+        self,
+        transcript: str,
+        language: str = "en",
+    ) -> dict[str, Any]:
+        """Analyze a language practice session for proficiency feedback."""
+        language_name = "English" if language == "en" else "Spanish"
+        prompt = TUTOR_LANGUAGE_ANALYSIS_PROMPT.format(
+            transcript=transcript,
+            language_name=language_name,
+        )
+
+        response = await self.client.aio.models.generate_content(
+            model=self.model,
+            contents=prompt,
+        )
+
+        # Parse JSON from response
+        text = response.text.strip()
+        # Remove markdown code blocks if present
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            analysis = json.loads(text)
+            analysis["analyzed_at"] = datetime.now(timezone.utc).isoformat()
+            analysis["language"] = language
+            return analysis
+        except json.JSONDecodeError as e:
+            print(f"[ConversationAnalyzer] Failed to parse tutor language JSON: {e}")
+            print(f"[ConversationAnalyzer] Raw response: {text}")
+            return {
+                "fluency_pace": {
+                    "overall_score": 0,
+                    "speaking_speed": "varies",
+                    "pause_frequency": "occasional",
+                    "filler_word_count": 0,
+                    "filler_words_used": [],
+                    "flow_rating": "poor",
+                    "notes": "Analysis failed",
+                },
+                "vocabulary": {
+                    "overall_score": 0,
+                    "variety_score": 0,
+                    "appropriateness_score": 0,
+                    "complexity_level": "basic",
+                    "notable_good_usage": [],
+                    "suggestions": [],
+                },
+                "grammar": {
+                    "overall_score": 0,
+                    "sentence_structure_score": 0,
+                    "tense_usage_score": 0,
+                    "common_errors": [],
+                    "notes": "Analysis failed",
+                },
+                "overall_proficiency": {
+                    "level": "A1",
+                    "level_description": "Unable to assess",
+                    "strengths": [],
+                    "areas_to_improve": [],
+                },
+                "practice_suggestions": [],
+                "session_summary": f"Failed to analyze transcript: {str(e)}",
+                "analyzed_at": datetime.now(timezone.utc).isoformat(),
+                "language": language,
             }

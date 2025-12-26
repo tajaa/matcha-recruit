@@ -28,3 +28,5 @@ export { PublicJobApply } from './PublicJobApply';
 export { JobBoards } from './JobBoards';
 export { ResumeOnboarding } from './ResumeOnboarding';
 export { Tutor } from './Tutor';
+export { TutorMetrics } from './TutorMetrics';
+export { TutorSessionDetail } from './TutorSessionDetail';

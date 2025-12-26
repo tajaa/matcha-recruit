@@ -47,6 +47,9 @@ import type {
   PublicJobDetail,
   JobListResponse,
   ApplicationSubmitResponse,
+  TutorSessionSummary,
+  TutorSessionDetail,
+  TutorMetricsAggregate,
 } from '../types';
 
 const API_BASE = 'http://localhost:8001/api';
@@ -857,6 +860,24 @@ export const tutor = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+};
+
+// Tutor Metrics API (admin only)
+export const tutorMetrics = {
+  listSessions: (filters?: { mode?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (filters?.mode) params.append('mode', filters.mode);
+    if (filters?.limit) params.append('limit', filters.limit.toString());
+    if (filters?.offset) params.append('offset', filters.offset.toString());
+    const query = params.toString();
+    return request<TutorSessionSummary[]>(`/tutor/sessions${query ? `?${query}` : ''}`);
+  },
+
+  getSession: (id: string) =>
+    request<TutorSessionDetail>(`/tutor/sessions/${id}`),
+
+  getAggregateMetrics: () =>
+    request<TutorMetricsAggregate>('/tutor/metrics/aggregate'),
 };
 
 // WebSocket URL helper

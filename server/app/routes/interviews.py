@@ -5,7 +5,16 @@ import json
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from ..database import get_connection
-from ..models.interview import InterviewCreate, InterviewResponse, InterviewStart, ConversationAnalysis, TutorSessionCreate
+from ..models.interview import (
+    InterviewCreate,
+    InterviewResponse,
+    InterviewStart,
+    ConversationAnalysis,
+    TutorSessionCreate,
+    TutorSessionSummary,
+    TutorSessionDetail,
+    TutorMetricsAggregate,
+)
 from ..services.gemini_session import GeminiLiveSession
 from ..services.culture_analyzer import CultureAnalyzer
 from ..services.conversation_analyzer import ConversationAnalyzer
@@ -96,6 +105,222 @@ async def create_tutor_session(request: TutorSessionCreate):
         )
 
 
+# Admin Tutor Metrics Endpoints
+
+@router.get("/tutor/sessions", response_model=list[TutorSessionSummary])
+async def list_tutor_sessions(
+    mode: Optional[str] = None,  # "interview_prep" or "language_test"
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List all tutor sessions (admin only)."""
+    # Map mode to interview_type
+    interview_type_filter = None
+    if mode == "interview_prep":
+        interview_type_filter = "tutor_interview"
+    elif mode == "language_test":
+        interview_type_filter = "tutor_language"
+
+    async with get_connection() as conn:
+        if interview_type_filter:
+            rows = await conn.fetch(
+                """
+                SELECT id, interview_type, interviewer_role as language, status,
+                       tutor_analysis, created_at, completed_at
+                FROM interviews
+                WHERE interview_type = $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+                """,
+                interview_type_filter,
+                limit,
+                offset,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, interview_type, interviewer_role as language, status,
+                       tutor_analysis, created_at, completed_at
+                FROM interviews
+                WHERE interview_type IN ('tutor_interview', 'tutor_language')
+                ORDER BY created_at DESC
+                LIMIT $1 OFFSET $2
+                """,
+                limit,
+                offset,
+            )
+
+        sessions = []
+        for row in rows:
+            # Extract overall score from tutor_analysis
+            overall_score = None
+            if row["tutor_analysis"]:
+                analysis = json.loads(row["tutor_analysis"]) if isinstance(row["tutor_analysis"], str) else row["tutor_analysis"]
+                if row["interview_type"] == "tutor_interview":
+                    # For interview prep, use communication_skills overall_score
+                    overall_score = analysis.get("communication_skills", {}).get("overall_score")
+                else:
+                    # For language test, use fluency_pace overall_score
+                    overall_score = analysis.get("fluency_pace", {}).get("overall_score")
+
+            sessions.append(TutorSessionSummary(
+                id=row["id"],
+                interview_type=row["interview_type"],
+                language=row["language"] if row["interview_type"] == "tutor_language" else None,
+                status=row["status"],
+                overall_score=overall_score,
+                created_at=row["created_at"],
+                completed_at=row["completed_at"],
+            ))
+
+        return sessions
+
+
+@router.get("/tutor/sessions/{session_id}", response_model=TutorSessionDetail)
+async def get_tutor_session(session_id: UUID):
+    """Get a single tutor session with full analysis (admin only)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, interview_type, interviewer_role as language, transcript,
+                   tutor_analysis, status, created_at, completed_at
+            FROM interviews
+            WHERE id = $1 AND interview_type IN ('tutor_interview', 'tutor_language')
+            """,
+            session_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Tutor session not found")
+
+        tutor_analysis = None
+        if row["tutor_analysis"]:
+            tutor_analysis = json.loads(row["tutor_analysis"]) if isinstance(row["tutor_analysis"], str) else row["tutor_analysis"]
+
+        return TutorSessionDetail(
+            id=row["id"],
+            interview_type=row["interview_type"],
+            language=row["language"] if row["interview_type"] == "tutor_language" else None,
+            transcript=row["transcript"],
+            tutor_analysis=tutor_analysis,
+            status=row["status"],
+            created_at=row["created_at"],
+            completed_at=row["completed_at"],
+        )
+
+
+@router.get("/tutor/metrics/aggregate", response_model=TutorMetricsAggregate)
+async def get_tutor_aggregate_metrics():
+    """Get aggregate metrics across all tutor sessions (admin only)."""
+    async with get_connection() as conn:
+        # Get interview prep stats
+        interview_prep_rows = await conn.fetch(
+            """
+            SELECT tutor_analysis, status
+            FROM interviews
+            WHERE interview_type = 'tutor_interview' AND status = 'completed'
+            """
+        )
+
+        interview_prep_stats = {
+            "total_sessions": len(interview_prep_rows),
+            "avg_response_quality": 0,
+            "avg_communication_score": 0,
+            "common_improvement_areas": [],
+        }
+
+        if interview_prep_rows:
+            response_scores = []
+            comm_scores = []
+            improvement_areas: dict[str, int] = {}
+
+            for row in interview_prep_rows:
+                if row["tutor_analysis"]:
+                    analysis = json.loads(row["tutor_analysis"]) if isinstance(row["tutor_analysis"], str) else row["tutor_analysis"]
+                    if "response_quality" in analysis:
+                        response_scores.append(analysis["response_quality"].get("overall_score", 0))
+                    if "communication_skills" in analysis:
+                        comm_scores.append(analysis["communication_skills"].get("overall_score", 0))
+                    for suggestion in analysis.get("improvement_suggestions", []):
+                        area = suggestion.get("area", "Unknown")
+                        improvement_areas[area] = improvement_areas.get(area, 0) + 1
+
+            if response_scores:
+                interview_prep_stats["avg_response_quality"] = round(sum(response_scores) / len(response_scores), 1)
+            if comm_scores:
+                interview_prep_stats["avg_communication_score"] = round(sum(comm_scores) / len(comm_scores), 1)
+
+            # Get top 5 improvement areas
+            sorted_areas = sorted(improvement_areas.items(), key=lambda x: x[1], reverse=True)[:5]
+            interview_prep_stats["common_improvement_areas"] = [{"area": a, "count": c} for a, c in sorted_areas]
+
+        # Get language test stats
+        language_test_rows = await conn.fetch(
+            """
+            SELECT tutor_analysis, interviewer_role as language, status
+            FROM interviews
+            WHERE interview_type = 'tutor_language' AND status = 'completed'
+            """
+        )
+
+        language_test_stats = {
+            "total_sessions": len(language_test_rows),
+            "by_language": {},
+            "avg_fluency_score": 0,
+            "avg_grammar_score": 0,
+            "common_grammar_errors": [],
+        }
+
+        if language_test_rows:
+            fluency_scores = []
+            grammar_scores = []
+            grammar_error_types: dict[str, int] = {}
+            lang_counts: dict[str, dict] = {}
+
+            for row in language_test_rows:
+                lang = row["language"] or "unknown"
+                if lang not in lang_counts:
+                    lang_counts[lang] = {"count": 0, "proficiency_levels": []}
+                lang_counts[lang]["count"] += 1
+
+                if row["tutor_analysis"]:
+                    analysis = json.loads(row["tutor_analysis"]) if isinstance(row["tutor_analysis"], str) else row["tutor_analysis"]
+                    if "fluency_pace" in analysis:
+                        fluency_scores.append(analysis["fluency_pace"].get("overall_score", 0))
+                    if "grammar" in analysis:
+                        grammar_scores.append(analysis["grammar"].get("overall_score", 0))
+                        for error in analysis["grammar"].get("common_errors", []):
+                            error_type = error.get("type", "other")
+                            grammar_error_types[error_type] = grammar_error_types.get(error_type, 0) + 1
+                    if "overall_proficiency" in analysis:
+                        level = analysis["overall_proficiency"].get("level")
+                        if level:
+                            lang_counts[lang]["proficiency_levels"].append(level)
+
+            if fluency_scores:
+                language_test_stats["avg_fluency_score"] = round(sum(fluency_scores) / len(fluency_scores), 1)
+            if grammar_scores:
+                language_test_stats["avg_grammar_score"] = round(sum(grammar_scores) / len(grammar_scores), 1)
+
+            # Calculate average proficiency per language
+            for lang, data in lang_counts.items():
+                levels = data["proficiency_levels"]
+                # Simple mode calculation for most common proficiency level
+                most_common = max(set(levels), key=levels.count) if levels else None
+                language_test_stats["by_language"][lang] = {
+                    "count": data["count"],
+                    "avg_proficiency": most_common,
+                }
+
+            # Get top 5 grammar error types
+            sorted_errors = sorted(grammar_error_types.items(), key=lambda x: x[1], reverse=True)[:5]
+            language_test_stats["common_grammar_errors"] = [{"type": t, "count": c} for t, c in sorted_errors]
+
+        return TutorMetricsAggregate(
+            interview_prep=interview_prep_stats,
+            language_test=language_test_stats,
+        )
+
+
 @router.get("/interviews/{interview_id}", response_model=InterviewResponse)
 async def get_interview(interview_id: UUID):
     """Get an interview by ID."""
@@ -104,7 +329,7 @@ async def get_interview(interview_id: UUID):
             """
             SELECT id, company_id, interviewer_name, interviewer_role, interview_type,
                    transcript, raw_culture_data, conversation_analysis, screening_analysis,
-                   status, created_at, completed_at
+                   tutor_analysis, status, created_at, completed_at
             FROM interviews
             WHERE id = $1
             """,
@@ -125,6 +350,10 @@ async def get_interview(interview_id: UUID):
         if row["screening_analysis"]:
             screening_analysis = json.loads(row["screening_analysis"]) if isinstance(row["screening_analysis"], str) else row["screening_analysis"]
 
+        tutor_analysis = None
+        if row["tutor_analysis"]:
+            tutor_analysis = json.loads(row["tutor_analysis"]) if isinstance(row["tutor_analysis"], str) else row["tutor_analysis"]
+
         return InterviewResponse(
             id=row["id"],
             company_id=row["company_id"],
@@ -135,6 +364,7 @@ async def get_interview(interview_id: UUID):
             raw_culture_data=raw_culture_data,
             conversation_analysis=conversation_analysis,
             screening_analysis=screening_analysis,
+            tutor_analysis=tutor_analysis,
             status=row["status"],
             created_at=row["created_at"],
             completed_at=row["completed_at"],
@@ -533,8 +763,8 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
                     interview_id,
                 )
 
-            # Queue analysis task for Celery worker (skip for tutor sessions)
-            if transcript_text and interview_type not in ("tutor_interview", "tutor_language"):
+            # Queue analysis task for Celery worker
+            if transcript_text:
                 from app.workers.tasks.interview_analysis import analyze_interview_async
 
                 analyze_interview_async.delay(
@@ -543,10 +773,11 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
                     transcript=transcript_text,
                     company_id=str(row["company_id"]) if row["company_id"] else None,
                     culture_profile=culture_profile,
+                    language=tutor_language,  # Pass language for tutor_language sessions
                 )
                 print(f"[Interview {interview_id}] Queued analysis task for background processing")
             else:
-                # No transcript or tutor session, mark as completed without analysis
+                # No transcript, mark as completed without analysis
                 async with get_connection() as conn:
                     await conn.execute(
                         "UPDATE interviews SET status = 'completed' WHERE id = $1",

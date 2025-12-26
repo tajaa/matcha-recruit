@@ -159,6 +159,19 @@ async def init_db():
             END $$;
         """)
 
+        # Add tutor_analysis column if not exists (for tutor session metrics)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'interviews' AND column_name = 'tutor_analysis'
+                ) THEN
+                    ALTER TABLE interviews ADD COLUMN tutor_analysis JSONB;
+                END IF;
+            END $$;
+        """)
+
         # Culture profiles table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS culture_profiles (
