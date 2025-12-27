@@ -73,12 +73,6 @@ export function TutorMetrics() {
     fetchData();
   }, [fetchData]);
 
-  const currentStats = activeTab === 'interview_prep'
-    ? aggregate?.interview_prep
-    : activeTab === 'language_test'
-    ? aggregate?.language_test
-    : null;
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
