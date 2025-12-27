@@ -64,11 +64,12 @@ export function Register() {
           job_title: jobTitle || undefined,
         });
       }
-      // If returnTo exists, go through resume onboarding first
-      if (returnTo) {
-        navigate(`/onboarding/resume?returnTo=${encodeURIComponent(returnTo)}`);
+      // Candidates go through resume onboarding, clients go to app
+      if (type === 'candidate') {
+        const destination = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
+        navigate(`/onboarding/resume${destination}`);
       } else {
-        navigate('/app');
+        navigate(returnTo || '/app');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
