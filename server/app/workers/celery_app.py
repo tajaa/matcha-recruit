@@ -20,6 +20,8 @@ celery_app = Celery(
         "app.workers.tasks.interview_analysis",
         "app.workers.tasks.matching",
         "app.workers.tasks.culture_aggregation",
+        "app.workers.tasks.er_document_processing",
+        "app.workers.tasks.er_analysis",
     ],
 )
 

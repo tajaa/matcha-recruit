@@ -833,3 +833,185 @@ export interface TutorMetricsAggregate {
   interview_prep: TutorInterviewPrepStats;
   language_test: TutorLanguageTestStats;
 }
+
+// ===========================================
+// ER Copilot (Employee Relations) Types
+// ===========================================
+
+export type ERCaseStatus = 'open' | 'in_review' | 'pending_determination' | 'closed';
+export type ERDocumentType = 'transcript' | 'policy' | 'email' | 'other';
+export type ERProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type ERAnalysisType = 'timeline' | 'discrepancies' | 'policy_check' | 'summary' | 'determination';
+export type ConfidenceLevel = 'high' | 'medium' | 'low';
+export type SeverityLevel = 'high' | 'medium' | 'low';
+export type ViolationSeverity = 'major' | 'minor';
+
+// Case types
+export interface ERCase {
+  id: string;
+  case_number: string;
+  title: string;
+  description: string | null;
+  status: ERCaseStatus;
+  created_by: string | null;
+  assigned_to: string | null;
+  document_count: number;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+}
+
+export interface ERCaseCreate {
+  title: string;
+  description?: string;
+}
+
+export interface ERCaseUpdate {
+  title?: string;
+  description?: string;
+  status?: ERCaseStatus;
+  assigned_to?: string;
+}
+
+export interface ERCaseListResponse {
+  cases: ERCase[];
+  total: number;
+}
+
+// Document types
+export interface ERDocument {
+  id: string;
+  case_id: string;
+  document_type: ERDocumentType;
+  filename: string;
+  mime_type: string | null;
+  file_size: number | null;
+  pii_scrubbed: boolean;
+  processing_status: ERProcessingStatus;
+  processing_error: string | null;
+  parsed_at: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export interface ERDocumentUploadResponse {
+  document: ERDocument;
+  task_id: string | null;
+  message: string;
+}
+
+// Timeline Analysis types
+export interface TimelineEvent {
+  date: string;
+  time: string | null;
+  description: string;
+  participants: string[];
+  source_document_id: string;
+  source_location: string;
+  confidence: ConfidenceLevel;
+  evidence_quote: string;
+}
+
+export interface TimelineAnalysis {
+  events: TimelineEvent[];
+  gaps_identified: string[];
+  timeline_summary: string;
+  generated_at: string;
+}
+
+// Discrepancy Analysis types
+export interface DiscrepancyStatement {
+  source_document_id: string;
+  speaker: string;
+  quote: string;
+  location: string;
+}
+
+export interface Discrepancy {
+  type: string;
+  severity: SeverityLevel;
+  description: string;
+  statement_1: DiscrepancyStatement;
+  statement_2: DiscrepancyStatement;
+  analysis: string;
+}
+
+export interface CredibilityNote {
+  witness: string;
+  assessment: string;
+  reasoning: string;
+}
+
+export interface DiscrepancyAnalysis {
+  discrepancies: Discrepancy[];
+  credibility_notes: CredibilityNote[];
+  summary: string;
+  generated_at: string;
+}
+
+// Policy Check types
+export interface PolicyViolationEvidence {
+  source_document_id: string;
+  quote: string;
+  location: string;
+  how_it_violates: string;
+}
+
+export interface PolicyViolation {
+  policy_section: string;
+  policy_text: string;
+  severity: ViolationSeverity;
+  evidence: PolicyViolationEvidence[];
+  analysis: string;
+}
+
+export interface PolicyCheckAnalysis {
+  violations: PolicyViolation[];
+  policies_potentially_applicable: string[];
+  summary: string;
+  generated_at: string;
+}
+
+// Evidence Search types
+export interface EvidenceSearchResult {
+  chunk_id: string;
+  content: string;
+  speaker: string | null;
+  source_file: string;
+  document_type: ERDocumentType;
+  page_number: number | null;
+  line_range: string | null;
+  similarity: number;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface EvidenceSearchResponse {
+  results: EvidenceSearchResult[];
+  query: string;
+  total_chunks: number;
+}
+
+// Task status
+export interface ERTaskStatus {
+  task_id: string;
+  status: string;
+  message: string;
+}
+
+// Audit log
+export interface ERAuditLogEntry {
+  id: string;
+  case_id: string | null;
+  user_id: string | null;
+  action: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  details: Record<string, unknown> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface ERAuditLogResponse {
+  entries: ERAuditLogEntry[];
+  total: number;
+}

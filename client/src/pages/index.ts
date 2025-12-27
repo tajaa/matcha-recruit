@@ -30,3 +30,5 @@ export { ResumeOnboarding } from './ResumeOnboarding';
 export { Tutor } from './Tutor';
 export { TutorMetrics } from './TutorMetrics';
 export { TutorSessionDetail } from './TutorSessionDetail';
+export { ERCopilot } from './ERCopilot';
+export { ERCaseDetail } from './ERCaseDetail';

@@ -50,6 +50,21 @@ import type {
   TutorSessionSummary,
   TutorSessionDetail,
   TutorMetricsAggregate,
+  // ER Copilot types
+  ERCase,
+  ERCaseCreate,
+  ERCaseUpdate,
+  ERCaseListResponse,
+  ERCaseStatus,
+  ERDocument,
+  ERDocumentType,
+  ERDocumentUploadResponse,
+  TimelineAnalysis,
+  DiscrepancyAnalysis,
+  PolicyCheckAnalysis,
+  EvidenceSearchResponse,
+  ERTaskStatus,
+  ERAuditLogResponse,
 } from '../types';
 
 const API_BASE = 'http://localhost:8001/api';
@@ -953,4 +968,123 @@ export const publicJobs = {
     }
     return response.json();
   },
+};
+
+// ER Copilot API
+export const erCopilot = {
+  // Cases
+  listCases: (status?: ERCaseStatus): Promise<ERCaseListResponse> => {
+    const params = status ? `?status=${status}` : '';
+    return request<ERCaseListResponse>(`/er/cases${params}`);
+  },
+
+  getCase: (id: string): Promise<ERCase> => request<ERCase>(`/er/cases/${id}`),
+
+  createCase: (data: ERCaseCreate): Promise<ERCase> =>
+    request<ERCase>('/er/cases', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateCase: (id: string, data: ERCaseUpdate): Promise<ERCase> =>
+    request<ERCase>(`/er/cases/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteCase: (id: string): Promise<{ status: string; case_id: string }> =>
+    request<{ status: string; case_id: string }>(`/er/cases/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Documents
+  uploadDocument: async (
+    caseId: string,
+    file: File,
+    documentType: ERDocumentType
+  ): Promise<ERDocumentUploadResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('document_type', documentType);
+
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/er/cases/${caseId}/documents`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return response.json();
+  },
+
+  listDocuments: (caseId: string): Promise<ERDocument[]> =>
+    request<ERDocument[]>(`/er/cases/${caseId}/documents`),
+
+  getDocument: (caseId: string, docId: string): Promise<ERDocument> =>
+    request<ERDocument>(`/er/cases/${caseId}/documents/${docId}`),
+
+  deleteDocument: (caseId: string, docId: string): Promise<{ status: string; document_id: string }> =>
+    request<{ status: string; document_id: string }>(`/er/cases/${caseId}/documents/${docId}`, {
+      method: 'DELETE',
+    }),
+
+  // Analysis
+  generateTimeline: (caseId: string): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/timeline`, {
+      method: 'POST',
+    }),
+
+  getTimeline: (caseId: string): Promise<{ analysis: TimelineAnalysis; source_documents: string[]; generated_at: string }> =>
+    request<{ analysis: TimelineAnalysis; source_documents: string[]; generated_at: string }>(`/er/cases/${caseId}/analysis/timeline`),
+
+  generateDiscrepancies: (caseId: string): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/discrepancies`, {
+      method: 'POST',
+    }),
+
+  getDiscrepancies: (caseId: string): Promise<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string }> =>
+    request<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string }>(`/er/cases/${caseId}/analysis/discrepancies`),
+
+  runPolicyCheck: (caseId: string, policyDocumentId: string): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/policy-check?policy_document_id=${policyDocumentId}`, {
+      method: 'POST',
+    }),
+
+  getPolicyCheck: (caseId: string): Promise<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string }> =>
+    request<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string }>(`/er/cases/${caseId}/analysis/policy-check`),
+
+  searchEvidence: (caseId: string, query: string, topK: number = 5): Promise<EvidenceSearchResponse> =>
+    request<EvidenceSearchResponse>(`/er/cases/${caseId}/search`, {
+      method: 'POST',
+      body: JSON.stringify({ query, top_k: topK }),
+    }),
+
+  // Reports
+  generateSummary: (caseId: string): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/reports/summary`, {
+      method: 'POST',
+    }),
+
+  generateDetermination: (caseId: string, determination: string): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/reports/determination`, {
+      method: 'POST',
+      body: JSON.stringify({ determination }),
+    }),
+
+  getReport: (caseId: string, reportType: 'summary' | 'determination'): Promise<{ report_type: string; content: string; generated_at: string; source_documents: string[] }> =>
+    request<{ report_type: string; content: string; generated_at: string; source_documents: string[] }>(`/er/cases/${caseId}/reports/${reportType}`),
+
+  // Audit Log
+  getAuditLog: (caseId: string, limit: number = 100, offset: number = 0): Promise<ERAuditLogResponse> =>
+    request<ERAuditLogResponse>(`/er/cases/${caseId}/audit-log?limit=${limit}&offset=${offset}`),
 };

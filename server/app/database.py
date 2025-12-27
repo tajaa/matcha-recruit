@@ -533,6 +533,128 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_job_applications_status ON job_applications(status)
         """)
 
+        # ===========================================
+        # ER Copilot Tables (Employee Relations Investigation)
+        # ===========================================
+
+        # Enable pgvector extension for embeddings
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
+        # ER Cases table (investigation cases)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS er_cases (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                case_number VARCHAR(50) NOT NULL UNIQUE,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                status VARCHAR(50) DEFAULT 'open' CHECK (status IN ('open', 'in_review', 'pending_determination', 'closed')),
+                created_by UUID REFERENCES users(id),
+                assigned_to UUID REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                closed_at TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_cases_status ON er_cases(status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_cases_created_by ON er_cases(created_by)
+        """)
+
+        # ER Case Documents table (uploaded evidence files)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS er_case_documents (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                case_id UUID NOT NULL REFERENCES er_cases(id) ON DELETE CASCADE,
+                document_type VARCHAR(50) NOT NULL CHECK (document_type IN ('transcript', 'policy', 'email', 'other')),
+                filename VARCHAR(255) NOT NULL,
+                file_path VARCHAR(500) NOT NULL,
+                mime_type VARCHAR(100),
+                file_size INTEGER,
+                pii_scrubbed BOOLEAN DEFAULT false,
+                original_text TEXT,
+                scrubbed_text TEXT,
+                processing_status VARCHAR(50) DEFAULT 'pending' CHECK (processing_status IN ('pending', 'processing', 'completed', 'failed')),
+                processing_error TEXT,
+                parsed_at TIMESTAMP,
+                uploaded_by UUID REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_case_documents_case_id ON er_case_documents(case_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_case_documents_type ON er_case_documents(document_type)
+        """)
+
+        # ER Evidence Chunks table (document chunks with vector embeddings)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS er_evidence_chunks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                document_id UUID NOT NULL REFERENCES er_case_documents(id) ON DELETE CASCADE,
+                case_id UUID NOT NULL REFERENCES er_cases(id) ON DELETE CASCADE,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                speaker VARCHAR(255),
+                timestamp_mentioned VARCHAR(100),
+                page_number INTEGER,
+                line_start INTEGER,
+                line_end INTEGER,
+                embedding vector(768),
+                metadata JSONB,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_evidence_chunks_case_id ON er_evidence_chunks(case_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_evidence_chunks_document_id ON er_evidence_chunks(document_id)
+        """)
+
+        # ER Case Analysis table (cached AI analysis results)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS er_case_analysis (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                case_id UUID NOT NULL REFERENCES er_cases(id) ON DELETE CASCADE,
+                analysis_type VARCHAR(50) NOT NULL CHECK (analysis_type IN ('timeline', 'discrepancies', 'policy_check', 'summary', 'determination')),
+                analysis_data JSONB NOT NULL,
+                source_documents JSONB,
+                generated_by UUID REFERENCES users(id),
+                generated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(case_id, analysis_type)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_case_analysis_case_id ON er_case_analysis(case_id)
+        """)
+
+        # ER Audit Log table (immutable compliance trail)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS er_audit_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                case_id UUID REFERENCES er_cases(id) ON DELETE SET NULL,
+                user_id UUID REFERENCES users(id),
+                action VARCHAR(100) NOT NULL,
+                entity_type VARCHAR(50),
+                entity_id UUID,
+                details JSONB,
+                ip_address VARCHAR(50),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_audit_log_case_id ON er_audit_log(case_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_audit_log_user_id ON er_audit_log(user_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_audit_log_action ON er_audit_log(action)
+        """)
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:

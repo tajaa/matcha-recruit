@@ -34,6 +34,8 @@ import {
   Tutor,
   TutorMetrics,
   TutorSessionDetail,
+  ERCopilot,
+  ERCaseDetail,
 } from './pages';
 
 // Redirect component that properly handles the :id parameter
@@ -216,6 +218,22 @@ function App() {
               element={
                 <ProtectedRoute roles={['admin']}>
                   <TutorSessionDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="er-copilot"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <ERCopilot />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="er-copilot/:id"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <ERCaseDetail />
                 </ProtectedRoute>
               }
             />
