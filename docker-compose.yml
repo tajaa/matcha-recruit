@@ -96,6 +96,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      disable: true
 
   matcha-frontend:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-frontend:latest
