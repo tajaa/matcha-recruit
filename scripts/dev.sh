@@ -40,6 +40,28 @@ if ! docker info > /dev/null 2>&1; then
     echo -e "${GREEN}Docker is ready${NC}"
 fi
 
+# Check/Start PostgreSQL
+echo -e "${YELLOW}Checking PostgreSQL...${NC}"
+if docker ps --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
+    echo -e "${GREEN}PostgreSQL is already running${NC}"
+else
+    # Check if container exists but is stopped
+    if docker ps -a --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
+        echo -e "${YELLOW}Starting PostgreSQL...${NC}"
+        docker start matcha-postgres
+    else
+        echo -e "${RED}matcha-postgres container does not exist!${NC}"
+        echo -e "${RED}Please create it first with the shared postgres setup.${NC}"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}Waiting for PostgreSQL to be ready...${NC}"
+    until docker exec matcha-postgres pg_isready -U matcha 2>/dev/null; do
+        sleep 1
+    done
+    echo -e "${GREEN}PostgreSQL started${NC}"
+fi
+
 # Check/Start Redis
 echo -e "${YELLOW}Checking Redis...${NC}"
 if docker ps --format '{{.Names}}' | grep -q '^matcha-redis$'; then
@@ -93,6 +115,7 @@ echo ""
 echo -e "${YELLOW}Services:${NC}"
 echo -e "  - Backend:  http://localhost:8001"
 echo -e "  - Frontend: http://localhost:5174"
+echo -e "  - Postgres: localhost:5432"
 echo -e "  - Redis:    localhost:6380"
 echo ""
 echo -e "${YELLOW}Tmux Controls:${NC}"
