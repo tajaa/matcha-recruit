@@ -392,3 +392,5 @@ export function PublicJobApply() {
     </div>
   );
 }
+
+export default PublicJobApply;

@@ -263,3 +263,5 @@ export function BulkImport() {
     </div>
   );
 }
+
+export default BulkImport;

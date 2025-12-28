@@ -488,3 +488,5 @@ export function TutorSessionDetail() {
     </div>
   );
 }
+
+export default TutorSessionDetail;

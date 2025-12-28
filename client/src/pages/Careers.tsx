@@ -258,3 +258,5 @@ export function Careers() {
     </div>
   );
 }
+
+export default Careers;

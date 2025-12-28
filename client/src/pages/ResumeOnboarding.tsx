@@ -382,3 +382,5 @@ ${formData.skills ? `Skills: ${formData.skills}` : ''}
     </div>
   );
 }
+
+export default ResumeOnboarding;

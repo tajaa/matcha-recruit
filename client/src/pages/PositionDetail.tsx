@@ -312,3 +312,5 @@ export function PositionDetail() {
     </div>
   );
 }
+
+export default PositionDetail;

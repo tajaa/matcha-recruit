@@ -233,3 +233,5 @@ export function ERCopilot() {
     </div>
   );
 }
+
+export default ERCopilot;

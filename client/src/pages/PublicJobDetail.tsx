@@ -17,3 +17,5 @@ export function PublicJobDetail() {
     </div>
   );
 }
+
+export default PublicJobDetail;

@@ -1174,3 +1174,5 @@ export function ProjectDetail() {
     </div>
   );
 }
+
+export default ProjectDetail;

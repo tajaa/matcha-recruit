@@ -241,3 +241,5 @@ export function TutorMetrics() {
     </div>
   );
 }
+
+export default TutorMetrics;

@@ -220,3 +220,5 @@ export function PublicJobs() {
     </div>
   );
 }
+
+export default PublicJobs;

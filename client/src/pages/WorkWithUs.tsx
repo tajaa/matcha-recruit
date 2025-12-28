@@ -177,3 +177,5 @@ export function WorkWithUs() {
     </div>
   );
 }
+
+export default WorkWithUs;

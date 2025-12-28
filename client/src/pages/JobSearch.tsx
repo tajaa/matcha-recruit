@@ -935,3 +935,5 @@ export function JobSearch() {
     </div>
   );
 }
+
+export default JobSearch;

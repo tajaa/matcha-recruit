@@ -477,3 +477,5 @@ function ScoreDisplay({ label, score }: { label: string; score: number }) {
     </div>
   );
 }
+
+export default InterviewAnalysis;

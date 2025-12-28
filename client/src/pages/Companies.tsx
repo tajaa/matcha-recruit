@@ -196,3 +196,5 @@ export function Companies() {
     </div>
   );
 }
+
+export default Companies;

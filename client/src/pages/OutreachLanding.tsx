@@ -216,3 +216,5 @@ export function OutreachLanding() {
     </div>
   );
 }
+
+export default OutreachLanding;

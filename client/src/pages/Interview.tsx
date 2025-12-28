@@ -170,3 +170,5 @@ export function Interview() {
     </div>
   );
 }
+
+export default Interview;

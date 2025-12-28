@@ -178,3 +178,5 @@ export function Positions() {
     </div>
   );
 }
+
+export default Positions;

@@ -340,3 +340,5 @@ export function OutreachScreening() {
     </div>
   );
 }
+
+export default OutreachScreening;

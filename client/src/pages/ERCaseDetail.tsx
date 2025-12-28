@@ -628,3 +628,5 @@ export function ERCaseDetail() {
     </div>
   );
 }
+
+export default ERCaseDetail;

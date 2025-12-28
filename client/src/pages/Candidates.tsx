@@ -394,3 +394,5 @@ export function Candidates() {
     </div>
   );
 }
+
+export default Candidates;

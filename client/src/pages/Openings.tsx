@@ -807,3 +807,5 @@ export function Openings() {
     </div>
   );
 }
+
+export default Openings;

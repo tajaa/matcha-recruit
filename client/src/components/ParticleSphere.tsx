@@ -228,3 +228,5 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     </div>
   );
 }
+
+export default ParticleSphere;

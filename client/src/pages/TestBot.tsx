@@ -482,3 +482,5 @@ export function TestBot() {
     </div>
   );
 }
+
+export default TestBot;

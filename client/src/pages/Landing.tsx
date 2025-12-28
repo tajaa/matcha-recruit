@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Link } from 'react-router-dom';
-import { ParticleSphere } from '../components';
+
+// Lazy load Three.js-heavy component
+const ParticleSphere = lazy(() => import('../components/ParticleSphere'));
 
 export function Landing() {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -118,7 +120,9 @@ export function Landing() {
 
           {/* Center - Sphere */}
           <div className="relative flex items-center justify-center py-12 lg:py-0">
-            <ParticleSphere className="w-full h-[300px] sm:h-[400px] lg:h-[500px]" />
+            <Suspense fallback={<div className="w-full h-[300px] sm:h-[400px] lg:h-[500px] bg-zinc-950" />}>
+              <ParticleSphere className="w-full h-[300px] sm:h-[400px] lg:h-[500px]" />
+            </Suspense>
 
             {/* Coordinates overlay */}
             <div className="absolute bottom-4 left-4 text-[9px] tracking-widest text-zinc-600">
@@ -319,3 +323,4 @@ export function Landing() {
     </div>
   );
 }
+export default Landing;

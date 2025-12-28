@@ -97,3 +97,5 @@ export function ForCandidates() {
     </div>
   );
 }
+
+export default ForCandidates;

@@ -486,3 +486,5 @@ export function ScreeningLanding() {
     </div>
   );
 }
+
+export default ScreeningLanding;
