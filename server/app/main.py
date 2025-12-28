@@ -63,6 +63,7 @@ from .routes import (
     bulk_import_router,
     candidates_router,
     companies_router,
+    contact_router,
     interviews_router,
     job_search_router,
     matching_router,
@@ -86,6 +87,7 @@ app.include_router(openings_router, prefix="/api/openings", tags=["openings"])
 app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
 app.include_router(outreach_router, prefix="/api", tags=["outreach"])
 app.include_router(public_jobs_router, prefix="/api/job-board", tags=["public-jobs"])
+app.include_router(contact_router, prefix="/api/contact", tags=["contact"])
 app.include_router(er_copilot_router, prefix="/api/er/cases", tags=["er-copilot"])
 
 

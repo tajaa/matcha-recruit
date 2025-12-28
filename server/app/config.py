@@ -43,6 +43,7 @@ class Settings:
     mailersend_from_email: str = "outreach@matcha.app"
     mailersend_from_name: str = "Matcha Recruit"
     app_base_url: str = "http://localhost:5173"
+    contact_email: str = "aaron@itsmatcha.net"
 
     # Jina AI Reader API (for job scraping)
     jina_api_key: Optional[str] = None
@@ -110,6 +111,7 @@ def load_settings() -> Settings:
         mailersend_from_email=os.getenv("MAILERSEND_FROM_EMAIL", "outreach@matcha.app"),
         mailersend_from_name=os.getenv("MAILERSEND_FROM_NAME", "Matcha Recruit"),
         app_base_url=os.getenv("APP_BASE_URL", "http://localhost:5173"),
+        contact_email=os.getenv("CONTACT_EMAIL", "aaron@itsmatcha.net"),
         jina_api_key=os.getenv("JINA_API_KEY"),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         celery_broker_url=os.getenv("CELERY_BROKER_URL"),

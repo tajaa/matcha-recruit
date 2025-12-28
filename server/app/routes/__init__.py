@@ -10,6 +10,7 @@ from .openings import router as openings_router
 from .projects import router as projects_router
 from .outreach import router as outreach_router
 from .public_jobs import router as public_jobs_router
+from .contact import router as contact_router
 
 __all__ = [
     "companies_router",
@@ -24,4 +25,5 @@ __all__ = [
     "projects_router",
     "outreach_router",
     "public_jobs_router",
+    "contact_router",
 ]

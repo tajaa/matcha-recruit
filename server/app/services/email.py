@@ -297,6 +297,131 @@ You'll need to log in or create an account to access the interview.
             print(f"[Email] Error sending to {to_email}: {e}")
             return False
 
+    async def send_contact_form_email(
+        self,
+        sender_name: str,
+        sender_email: str,
+        company_name: str,
+        message: str,
+    ) -> bool:
+        """Send a contact form submission to the admin email.
+
+        Returns True if sent successfully, False otherwise.
+        """
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        contact_email = self.settings.contact_email
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .info-card {{ background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .label {{ font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }}
+        .value {{ margin-top: 4px; color: #111; }}
+        .message {{ background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-top: 20px; white-space: pre-wrap; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <h2 style="margin-top: 0;">New Contact Form Submission</h2>
+
+            <div class="info-card">
+                <div style="margin-bottom: 16px;">
+                    <div class="label">Company</div>
+                    <div class="value">{company_name}</div>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <div class="label">Contact Name</div>
+                    <div class="value">{sender_name}</div>
+                </div>
+                <div>
+                    <div class="label">Email</div>
+                    <div class="value"><a href="mailto:{sender_email}">{sender_email}</a></div>
+                </div>
+            </div>
+
+            <div class="label">Message</div>
+            <div class="message">{message}</div>
+        </div>
+        <div class="footer">
+            <p>Sent from Matcha Recruit contact form</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+New Contact Form Submission
+
+Company: {company_name}
+Contact: {sender_name}
+Email: {sender_email}
+
+Message:
+{message}
+
+---
+Sent from Matcha Recruit contact form
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": contact_email,
+                    "name": "Matcha Team",
+                }
+            ],
+            "reply_to": {
+                "email": sender_email,
+                "name": sender_name,
+            },
+            "subject": f"Contact Form: {company_name} - {sender_name}",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent contact form email from {sender_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send contact form: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending contact form: {e}")
+            return False
+
 
 # Singleton instance
 _email_service: Optional[EmailService] = None
