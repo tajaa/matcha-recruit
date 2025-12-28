@@ -103,14 +103,14 @@ async def create_case(
             case_number,
             case.title,
             case.description,
-            current_user["id"],
+            str(current_user.id),
         )
 
         # Log audit
         await log_audit(
             conn,
             str(row["id"]),
-            current_user["id"],
+            str(current_user.id),
             "case_created",
             "case",
             str(row["id"]),
@@ -274,7 +274,7 @@ async def update_case(
         await log_audit(
             conn,
             str(case_id),
-            current_user["id"],
+            str(current_user.id),
             "case_updated",
             "case",
             str(case_id),
@@ -321,7 +321,7 @@ async def delete_case(
         await log_audit(
             conn,
             None,
-            current_user["id"],
+            str(current_user.id),
             "case_deleted",
             "case",
             str(case_id),
@@ -396,14 +396,14 @@ async def upload_document(
             file_path,
             file.content_type,
             file_size,
-            current_user["id"],
+            str(current_user.id),
         )
 
         # Log audit
         await log_audit(
             conn,
             str(case_id),
-            current_user["id"],
+            str(current_user.id),
             "document_uploaded",
             "document",
             str(row["id"]),
@@ -541,7 +541,7 @@ async def delete_document(
         await log_audit(
             conn,
             str(case_id),
-            current_user["id"],
+            str(current_user.id),
             "document_deleted",
             "document",
             str(doc_id),
@@ -579,7 +579,7 @@ async def generate_timeline(
         await log_audit(
             conn,
             str(case_id),
-            current_user["id"],
+            str(current_user.id),
             "analysis_requested",
             "timeline",
             None,
@@ -648,7 +648,7 @@ async def generate_discrepancies(
         await log_audit(
             conn,
             str(case_id),
-            current_user["id"],
+            str(current_user.id),
             "analysis_requested",
             "discrepancies",
             None,
@@ -737,7 +737,7 @@ async def run_policy_check(
         await log_audit(
             conn,
             str(case_id),
-            current_user["id"],
+            str(current_user.id),
             "analysis_requested",
             "policy_check",
             str(policy_document_id),
@@ -851,7 +851,7 @@ async def generate_summary_report(
         await log_audit(
             conn,
             str(case_id),
-            current_user["id"],
+            str(current_user.id),
             "report_requested",
             "summary",
             None,
@@ -861,7 +861,7 @@ async def generate_summary_report(
 
     try:
         from ..workers.tasks.er_analysis import generate_summary_report as generate_summary_task
-        task = generate_summary_task.delay(str(case_id), current_user["id"])
+        task = generate_summary_task.delay(str(case_id), str(current_user.id))
         return TaskStatusResponse(
             task_id=task.id,
             status="queued",
@@ -896,7 +896,7 @@ async def generate_determination_letter(
         await log_audit(
             conn,
             str(case_id),
-            current_user["id"],
+            str(current_user.id),
             "report_requested",
             "determination",
             None,
@@ -909,7 +909,7 @@ async def generate_determination_letter(
         task = generate_determination_task.delay(
             str(case_id),
             report_request.determination,
-            current_user["id"],
+            str(current_user.id),
         )
         return TaskStatusResponse(
             task_id=task.id,
