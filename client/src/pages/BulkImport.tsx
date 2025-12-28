@@ -131,7 +131,7 @@ export function BulkImport() {
                     <li>Education history</li>
                     <li>Work history</li>
                   </ul>
-                  <p className="mt-3 text-matcha-400">
+                  <p className="mt-3 text-white">
                     Tip: Select an entire folder to import many resumes at once.
                   </p>
                 </div>
@@ -194,8 +194,8 @@ export function BulkImport() {
               <div className="space-y-4">
                 {/* Summary */}
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-matcha-500/10 rounded-lg border border-matcha-500/20">
-                    <p className="text-3xl font-bold text-matcha-400">{result.success_count}</p>
+                  <div className="p-4 bg-zinc-800 rounded-lg border border-zinc-700">
+                    <p className="text-3xl font-bold text-white">{result.success_count}</p>
                     <p className="text-sm text-zinc-400">Imported</p>
                   </div>
                   <div className={`p-4 rounded-lg border ${
@@ -240,8 +240,8 @@ export function BulkImport() {
 
                 {/* Success Message */}
                 {result.success_count > 0 && result.error_count === 0 && (
-                  <div className="p-4 bg-matcha-500/10 border border-matcha-500/20 rounded-lg">
-                    <p className="text-matcha-400">
+                  <div className="p-4 bg-zinc-800 border border-zinc-700 rounded-lg">
+                    <p className="text-white">
                       All {result.success_count} {activeTab === 'candidates' ? 'resumes' : activeTab} imported successfully!
                     </p>
                   </div>

@@ -5,7 +5,7 @@ import { companies as companiesApi } from '../api/client';
 import type { Company, CompanyCreate } from '../types';
 
 const inputClasses =
-  'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50 focus:shadow-[0_0_10px_rgba(34,197,94,0.1)] transition-all font-mono';
+  'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-zinc-700 focus: transition-all font-mono';
 
 export function Companies() {
   const navigate = useNavigate();
@@ -89,7 +89,7 @@ export function Companies() {
                 onClick={() => navigate(`/app/companies/${company.id}`)}
               >
                 <div className="flex items-start justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-white group-hover:text-matcha-400 transition-colors tracking-tight">
+                  <h3 className="text-lg font-semibold text-white group-hover:text-white transition-colors tracking-tight">
                     {company.name}
                   </h3>
                   <div className="w-1.5 h-1.5 rounded-full bg-matcha-500 animate-pulse" />
@@ -118,7 +118,7 @@ export function Companies() {
                   {company.culture_profile ? (
                     <div className="flex items-center gap-2">
                       <div className="w-1 h-1 rounded-full bg-matcha-500" />
-                      <span className="text-[9px] tracking-[0.15em] uppercase text-matcha-500">
+                      <span className="text-[9px] tracking-[0.15em] uppercase text-white">
                         Culture Profile Active
                       </span>
                     </div>
@@ -141,7 +141,7 @@ export function Companies() {
         <form onSubmit={handleCreate} className="space-y-5">
           <div>
             <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
-              Company Name <span className="text-matcha-500">*</span>
+              Company Name <span className="text-white">*</span>
             </label>
             <input
               type="text"

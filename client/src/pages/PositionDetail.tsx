@@ -79,7 +79,7 @@ export function PositionDetail() {
   };
 
   const statusColors = {
-    active: 'bg-matcha-500/10 text-matcha-400 border-matcha-500/20',
+    active: 'bg-zinc-800 text-white border-zinc-700',
     closed: 'bg-zinc-700/50 text-zinc-400 border-zinc-600',
     draft: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   };
@@ -87,7 +87,7 @@ export function PositionDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-matcha-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -126,7 +126,7 @@ export function PositionDetail() {
           {position.company_name && (
             <Link
               to={`/companies/${position.company_id}`}
-              className="text-zinc-400 hover:text-matcha-400 transition-colors mt-1 inline-block"
+              className="text-zinc-400 hover:text-white transition-colors mt-1 inline-block"
             >
               {position.company_name}
             </Link>
@@ -165,7 +165,7 @@ export function PositionDetail() {
                 </div>
                 <div>
                   <p className="text-sm text-zinc-500 mb-1">Salary Range</p>
-                  <p className="text-matcha-400 font-medium">
+                  <p className="text-white font-medium">
                     {formatSalary(position.salary_min, position.salary_max, position.salary_currency)}
                   </p>
                 </div>
@@ -203,7 +203,7 @@ export function PositionDetail() {
                       {position.required_skills.map(skill => (
                         <span
                           key={skill}
-                          className="px-2.5 py-1 bg-matcha-500/10 text-matcha-400 rounded-md text-sm border border-matcha-500/20"
+                          className="px-2.5 py-1 bg-zinc-800 text-white rounded-md text-sm border border-zinc-700"
                         >
                           {skill}
                         </span>

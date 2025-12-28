@@ -14,7 +14,7 @@ import type {
 } from '../types';
 
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
-  open: 'bg-matcha-500/20 text-matcha-400',
+  open: 'bg-matcha-500/20 text-white',
   in_review: 'bg-yellow-500/20 text-yellow-400',
   pending_determination: 'bg-orange-500/20 text-orange-400',
   closed: 'bg-zinc-700 text-zinc-300',
@@ -302,7 +302,7 @@ export function ERCaseDetail() {
                             <span className="text-xs text-red-400">Failed</span>
                           )}
                           {doc.pii_scrubbed && (
-                            <span className="text-xs text-matcha-400">PII scrubbed</span>
+                            <span className="text-xs text-white">PII scrubbed</span>
                           )}
                         </div>
                         <p className="text-sm text-white truncate">{doc.filename}</p>
@@ -382,11 +382,11 @@ export function ERCaseDetail() {
                         <div key={i} className="relative pl-6 pb-4 border-l-2 border-zinc-700 last:pb-0">
                           <div className="absolute left-[-5px] top-0 w-2 h-2 rounded-full bg-matcha-500" />
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-medium text-matcha-400">
+                            <span className="text-sm font-medium text-white">
                               {event.date} {event.time && `at ${event.time}`}
                             </span>
                             <span className={`px-1.5 py-0.5 text-xs rounded ${
-                              event.confidence === 'high' ? 'bg-matcha-500/20 text-matcha-400' :
+                              event.confidence === 'high' ? 'bg-matcha-500/20 text-white' :
                               event.confidence === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
                               'bg-red-500/20 text-red-400'
                             }`}>
@@ -550,7 +550,7 @@ export function ERCaseDetail() {
                       onChange={(e) => setSearchQuery(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                       placeholder="Search case evidence..."
-                      className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-matcha-500"
+                      className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-white"
                     />
                     <Button onClick={handleSearch} disabled={searching || !searchQuery.trim()}>
                       {searching ? 'Searching...' : 'Search'}
@@ -566,7 +566,7 @@ export function ERCaseDetail() {
                               {result.document_type}
                             </span>
                             <span className="text-xs text-zinc-500">{result.source_file}</span>
-                            <span className="text-xs text-matcha-400 ml-auto">
+                            <span className="text-xs text-white ml-auto">
                               {(result.similarity * 100).toFixed(0)}% match
                             </span>
                           </div>

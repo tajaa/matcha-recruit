@@ -73,8 +73,8 @@ export function PublicJobs() {
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-6">
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-2 h-2 rounded-full bg-matcha-500 shadow-[0_0_10px_rgba(34,197,94,0.8)] group-hover:scale-125 transition-transform" />
-          <span className="text-xs tracking-[0.3em] uppercase text-matcha-500 font-medium">
+          <div className="w-2 h-2 rounded-full bg-matcha-500  group-hover:scale-125 transition-transform" />
+          <span className="text-xs tracking-[0.3em] uppercase text-white font-medium">
             Matcha
           </span>
         </Link>
@@ -82,13 +82,13 @@ export function PublicJobs() {
         <nav className="flex items-center gap-6">
           <Link
             to="/login"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-matcha-400 transition-colors"
+            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-white transition-colors"
           >
             Login
           </Link>
           <Link
             to="/register"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-400 border border-zinc-700 px-5 py-2 hover:border-matcha-500 hover:text-matcha-400 transition-all"
+            className="text-[10px] tracking-[0.2em] uppercase text-zinc-400 border border-zinc-700 px-5 py-2 hover:border-white hover:text-white transition-all"
           >
             Sign Up
           </Link>
@@ -119,7 +119,7 @@ export function PublicJobs() {
                 value={locationFilter}
                 onChange={(e) => setLocationFilter(e.target.value)}
                 placeholder="e.g., San Francisco, Remote"
-                className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-2.5 text-sm text-white placeholder-zinc-600 focus:border-matcha-500 focus:outline-none transition-colors"
+                className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-2.5 text-sm text-white placeholder-zinc-600 focus:border-white focus:outline-none transition-colors"
               />
             </div>
             <label className="flex items-center gap-2 cursor-pointer">
@@ -127,7 +127,7 @@ export function PublicJobs() {
                 type="checkbox"
                 checked={remoteOnly}
                 onChange={(e) => setRemoteOnly(e.target.checked)}
-                className="w-4 h-4 bg-zinc-900 border-zinc-700 rounded text-matcha-500 focus:ring-matcha-500 focus:ring-offset-zinc-950"
+                className="w-4 h-4 bg-zinc-900 border-zinc-700 rounded text-white focus:ring-white focus:ring-offset-zinc-950"
               />
               <span className="text-sm text-zinc-400">Remote only</span>
             </label>
@@ -142,14 +142,14 @@ export function PublicJobs() {
           {/* Job List */}
           {loading ? (
             <div className="flex justify-center py-20">
-              <div className="w-6 h-6 border-2 border-matcha-500 border-t-transparent rounded-full animate-spin" />
+              <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
             </div>
           ) : error ? (
             <div className="text-center py-20">
               <p className="text-red-400">{error}</p>
               <button
                 onClick={loadJobs}
-                className="mt-4 text-sm text-matcha-500 hover:text-matcha-400"
+                className="mt-4 text-sm text-white hover:text-white"
               >
                 Try again
               </button>
@@ -165,11 +165,11 @@ export function PublicJobs() {
                 <Link
                   key={job.id}
                   to={`/careers/${job.id}`}
-                  className="block border border-zinc-800 bg-zinc-900/30 p-6 hover:border-matcha-500/50 hover:bg-zinc-900/50 transition-all group"
+                  className="block border border-zinc-800 bg-zinc-900/30 p-6 hover:border-zinc-700 hover:bg-zinc-900/50 transition-all group"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                     <div className="space-y-2">
-                      <h2 className="text-lg font-medium text-white group-hover:text-matcha-400 transition-colors">
+                      <h2 className="text-lg font-medium text-white group-hover:text-white transition-colors">
                         {job.title}
                       </h2>
                       <p className="text-zinc-400">{job.company_name}</p>
@@ -178,7 +178,7 @@ export function PublicJobs() {
                           <span className="text-zinc-500">{job.location}</span>
                         )}
                         {job.remote_policy === 'remote' && (
-                          <span className="text-matcha-500">Remote</span>
+                          <span className="text-white">Remote</span>
                         )}
                         {formatEmploymentType(job.employment_type) && (
                           <span className="text-zinc-500">
@@ -189,7 +189,7 @@ export function PublicJobs() {
                     </div>
                     <div className="flex flex-col items-start sm:items-end gap-2">
                       {formatSalary(job.salary_min, job.salary_max, job.salary_currency) && (
-                        <span className="text-matcha-400 font-medium">
+                        <span className="text-white font-medium">
                           {formatSalary(job.salary_min, job.salary_max, job.salary_currency)}
                         </span>
                       )}
@@ -211,8 +211,8 @@ export function PublicJobs() {
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-zinc-600 text-xs">
             <span>&copy; {new Date().getFullYear()} Matcha Recruit</span>
             <div className="flex gap-6">
-              <Link to="/" className="hover:text-matcha-500 transition-colors">Home</Link>
-              <Link to="/for-candidates" className="hover:text-matcha-500 transition-colors">For Candidates</Link>
+              <Link to="/" className="hover:text-white transition-colors">Home</Link>
+              <Link to="/for-candidates" className="hover:text-white transition-colors">For Candidates</Link>
             </div>
           </div>
         </div>

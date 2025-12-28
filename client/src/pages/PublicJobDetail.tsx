@@ -13,7 +13,7 @@ export function PublicJobDetail() {
   // Show loading spinner while redirecting
   return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-      <div className="w-6 h-6 border-2 border-matcha-500 border-t-transparent rounded-full animate-spin" />
+      <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
     </div>
   );
 }

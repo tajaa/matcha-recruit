@@ -18,13 +18,13 @@ export function Button({
 
   const variants = {
     primary:
-      'bg-matcha-500 text-black hover:bg-matcha-400 hover:shadow-[0_0_20px_rgba(34,197,94,0.3)]',
+      'bg-white text-black hover:bg-zinc-200',
     secondary:
-      'bg-zinc-900 text-zinc-400 border border-zinc-700 hover:bg-zinc-800 hover:text-white hover:border-zinc-600',
+      'bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 hover:text-white',
     danger:
-      'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 hover:border-red-500/40',
+      'bg-transparent text-red-400 border border-red-500/50 hover:bg-red-500/10',
     outline:
-      'bg-transparent text-zinc-400 border border-zinc-700 hover:bg-zinc-900 hover:text-white hover:border-zinc-600',
+      'bg-transparent text-zinc-300 border border-zinc-600 hover:bg-zinc-800 hover:text-white',
     ghost:
       'bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-white',
   };

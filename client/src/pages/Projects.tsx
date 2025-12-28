@@ -13,7 +13,7 @@ const STATUS_TABS: { label: string; value: ProjectStatus | 'all' }[] = [
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
   draft: 'bg-zinc-700 text-zinc-300',
-  active: 'bg-matcha-500/20 text-matcha-400',
+  active: 'bg-matcha-500/20 text-white',
   completed: 'bg-blue-500/20 text-blue-400',
   cancelled: 'bg-red-500/20 text-red-400',
 };
@@ -163,7 +163,7 @@ export function Projects() {
           {projects.map((project) => (
             <Card
               key={project.id}
-              className="hover:border-matcha-500/50 transition-colors cursor-pointer group"
+              className="hover:border-zinc-700 transition-colors cursor-pointer group"
               onClick={() => navigate(`/app/projects/${project.id}`)}
             >
               <CardContent>
@@ -178,7 +178,7 @@ export function Projects() {
                         {project.status}
                       </span>
                     </div>
-                    <h3 className="text-lg font-semibold text-zinc-100 group-hover:text-matcha-400 transition-colors truncate">
+                    <h3 className="text-lg font-semibold text-zinc-100 group-hover:text-white transition-colors truncate">
                       {project.name}
                     </h3>
                     <p className="text-sm text-zinc-500 truncate">{project.company_name}</p>
@@ -255,7 +255,7 @@ export function Projects() {
                 value={formData.company_name}
                 onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
                 placeholder="e.g., Urth Caffe"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
               />
             </div>
             <div>
@@ -265,7 +265,7 @@ export function Projects() {
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="e.g., General Manager Search"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
               />
             </div>
           </div>
@@ -278,7 +278,7 @@ export function Projects() {
                 value={formData.position_title || ''}
                 onChange={(e) => setFormData({ ...formData, position_title: e.target.value })}
                 placeholder="e.g., General Manager"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
               />
             </div>
             <div>
@@ -288,7 +288,7 @@ export function Projects() {
                 value={formData.location || ''}
                 onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                 placeholder="e.g., Los Angeles, CA"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
               />
             </div>
           </div>
@@ -301,7 +301,7 @@ export function Projects() {
                 value={formData.salary_min || ''}
                 onChange={(e) => setFormData({ ...formData, salary_min: e.target.value ? parseInt(e.target.value) : undefined })}
                 placeholder="e.g., 80000"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
               />
             </div>
             <div>
@@ -311,7 +311,7 @@ export function Projects() {
                 value={formData.salary_max || ''}
                 onChange={(e) => setFormData({ ...formData, salary_max: e.target.value ? parseInt(e.target.value) : undefined })}
                 placeholder="e.g., 100000"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
               />
             </div>
           </div>
@@ -323,7 +323,7 @@ export function Projects() {
               onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
               placeholder="What the company is looking for..."
               rows={3}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500 resize-none"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
             />
           </div>
 
@@ -334,7 +334,7 @@ export function Projects() {
               onChange={(e) => setFormData({ ...formData, benefits: e.target.value })}
               placeholder="Health insurance, 401k, etc..."
               rows={2}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500 resize-none"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
             />
           </div>
 
@@ -345,7 +345,7 @@ export function Projects() {
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
               placeholder="Internal notes..."
               rows={2}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500 resize-none"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
             />
           </div>
 

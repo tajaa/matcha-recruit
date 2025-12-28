@@ -114,20 +114,20 @@ export function TestBot() {
                   onClick={() => setMode('culture')}
                   className={`p-5 rounded-xl border-2 text-left transition-all ${
                     mode === 'culture'
-                      ? 'border-matcha-500 bg-matcha-500/10'
+                      ? 'border-white bg-zinc-800'
                       : 'border-zinc-800 hover:border-zinc-700 bg-zinc-900/50'
                   }`}
                 >
                   <div className="flex items-center gap-3 mb-3">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      mode === 'culture' ? 'bg-matcha-500/20 text-matcha-400' : 'bg-zinc-800 text-zinc-500'
+                      mode === 'culture' ? 'bg-matcha-500/20 text-white' : 'bg-zinc-800 text-zinc-500'
                     }`}>
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                       </svg>
                     </div>
                     <div>
-                      <h3 className={`font-semibold ${mode === 'culture' ? 'text-matcha-400' : 'text-zinc-300'}`}>
+                      <h3 className={`font-semibold ${mode === 'culture' ? 'text-white' : 'text-zinc-300'}`}>
                         Culture Interview
                       </h3>
                       <p className="text-xs text-zinc-500">Test as HR representative</p>
@@ -203,7 +203,7 @@ export function TestBot() {
                 <select
                   value={selectedCompany}
                   onChange={(e) => setSelectedCompany(e.target.value)}
-                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 focus:ring-2 focus:ring-matcha-500 focus:border-transparent outline-none text-lg font-medium"
+                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 focus:ring-2 focus:ring-white focus:border-transparent outline-none text-lg font-medium"
                 >
                   {companiesList.map((company) => (
                     <option key={company.id} value={company.id}>
@@ -212,7 +212,7 @@ export function TestBot() {
                   ))}
                 </select>
                 {selectedCompanyName && (
-                  <p className="text-sm text-matcha-400 mt-2 font-medium">
+                  <p className="text-sm text-white mt-2 font-medium">
                     Testing with: {selectedCompanyName}
                   </p>
                 )}
@@ -258,13 +258,13 @@ export function TestBot() {
           {/* Mode Description */}
           <div className={`p-5 rounded-xl border ${
             mode === 'culture'
-              ? 'bg-matcha-500/5 border-matcha-500/10'
+              ? 'bg-matcha-500/5 border-zinc-700'
               : mode === 'screening'
               ? 'bg-orange-500/5 border-orange-500/10'
               : 'bg-violet-500/5 border-violet-500/10'
           }`}>
             <h3 className={`font-semibold mb-3 flex items-center gap-2 ${
-              mode === 'culture' ? 'text-matcha-400' : mode === 'screening' ? 'text-orange-400' : 'text-violet-400'
+              mode === 'culture' ? 'text-white' : mode === 'screening' ? 'text-orange-400' : 'text-violet-400'
             }`}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -343,7 +343,7 @@ export function TestBot() {
                 <div className="flex items-center gap-3">
                   <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
                     mode === 'culture'
-                      ? 'bg-matcha-500/15 text-matcha-400'
+                      ? 'bg-matcha-500/15 text-white'
                       : mode === 'screening'
                       ? 'bg-orange-500/15 text-orange-400'
                       : 'bg-violet-500/15 text-violet-400'
@@ -383,7 +383,7 @@ export function TestBot() {
                 <div className="flex items-center gap-3">
                   <div
                     className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] transition-colors ${
-                      isConnected ? 'bg-matcha-500 text-matcha-500' : 'bg-zinc-600 text-zinc-600'
+                      isConnected ? 'bg-matcha-500 text-white' : 'bg-zinc-600 text-zinc-600'
                     }`}
                   />
                   <span className="text-sm font-medium text-zinc-300">
@@ -407,7 +407,7 @@ export function TestBot() {
                 ) : (
                   <>
                     {!isRecording ? (
-                      <Button onClick={startRecording} className="flex-1 py-4 text-lg shadow-[0_0_20px_rgba(34,197,94,0.2)]">
+                      <Button onClick={startRecording} className="flex-1 py-4 text-lg ">
                         <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 24 24">
                           <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
                           <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />

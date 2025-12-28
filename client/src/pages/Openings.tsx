@@ -298,7 +298,7 @@ export function Openings() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-sm tracking-[0.2em] uppercase text-matcha-500 mb-1">Openings</h1>
+          <h1 className="text-sm tracking-[0.2em] uppercase text-white mb-1">Openings</h1>
           <p className="text-[10px] tracking-wide text-zinc-600">
             Track companies and discover jobs from niche sources
           </p>
@@ -310,17 +310,17 @@ export function Openings() {
             onClick={() => setViewMode('tracked')}
             className={`px-3 py-1.5 text-[10px] tracking-[0.1em] uppercase transition-all ${
               viewMode === 'tracked'
-                ? 'text-matcha-400 bg-matcha-500/10 border border-matcha-500/30'
+                ? 'text-white bg-zinc-800 border border-zinc-700'
                 : 'text-zinc-500 border border-zinc-800 hover:border-zinc-700'
             }`}
           >
-            Tracked {totalNewJobs > 0 && <span className="ml-1 text-matcha-400">({totalNewJobs})</span>}
+            Tracked {totalNewJobs > 0 && <span className="ml-1 text-white">({totalNewJobs})</span>}
           </button>
           <button
             onClick={() => setViewMode('discover')}
             className={`px-3 py-1.5 text-[10px] tracking-[0.1em] uppercase transition-all ${
               viewMode === 'discover'
-                ? 'text-matcha-400 bg-matcha-500/10 border border-matcha-500/30'
+                ? 'text-white bg-zinc-800 border border-zinc-700'
                 : 'text-zinc-500 border border-zinc-800 hover:border-zinc-700'
             }`}
           >
@@ -330,7 +330,7 @@ export function Openings() {
             onClick={() => setViewMode('saved')}
             className={`px-3 py-1.5 text-[10px] tracking-[0.1em] uppercase transition-all ${
               viewMode === 'saved'
-                ? 'text-matcha-400 bg-matcha-500/10 border border-matcha-500/30'
+                ? 'text-white bg-zinc-800 border border-zinc-700'
                 : 'text-zinc-500 border border-zinc-800 hover:border-zinc-700'
             }`}
           >
@@ -340,7 +340,7 @@ export function Openings() {
       </div>
 
       {error && (
-        <div className={`text-[10px] tracking-wide ${error.includes('new jobs') ? 'text-matcha-400' : 'text-red-400'}`}>
+        <div className={`text-[10px] tracking-wide ${error.includes('new jobs') ? 'text-white' : 'text-red-400'}`}>
           {error}
         </div>
       )}
@@ -360,14 +360,14 @@ export function Openings() {
                   value={newCompanyName}
                   onChange={(e) => setNewCompanyName(e.target.value)}
                   placeholder="Company name"
-                  className="bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50"
+                  className="bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-zinc-700"
                 />
                 <input
                   type="url"
                   value={newCompanyUrl}
                   onChange={(e) => setNewCompanyUrl(e.target.value)}
                   placeholder="Career page URL (e.g., https://company.com/careers)"
-                  className="bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50"
+                  className="bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-zinc-700"
                 />
                 <Button onClick={handleAddCompany} disabled={addingCompany}>
                   {addingCompany ? 'Adding...' : 'Add Company'}
@@ -418,7 +418,7 @@ export function Openings() {
                   <Card
                     key={company.id}
                     className={`cursor-pointer transition-colors ${
-                      selectedCompany?.id === company.id ? 'border-matcha-500/50' : ''
+                      selectedCompany?.id === company.id ? 'border-zinc-700' : ''
                     }`}
                     onClick={() => handleSelectCompany(company)}
                   >
@@ -428,7 +428,7 @@ export function Openings() {
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-zinc-200">{company.name}</span>
                             {company.new_job_count > 0 && (
-                              <span className="px-1.5 py-0.5 text-[9px] bg-matcha-500/20 text-matcha-400 rounded">
+                              <span className="px-1.5 py-0.5 text-[9px] bg-matcha-500/20 text-white rounded">
                                 {company.new_job_count} new
                               </span>
                             )}
@@ -468,7 +468,7 @@ export function Openings() {
                           href={selectedCompany.career_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[9px] text-matcha-500 hover:text-matcha-400"
+                          className="text-[9px] text-white hover:text-white"
                         >
                           View Career Page →
                         </a>
@@ -488,7 +488,7 @@ export function Openings() {
                                 href={job.apply_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-xs text-zinc-300 hover:text-matcha-400"
+                                className="text-xs text-zinc-300 hover:text-white"
                               >
                                 {job.title}
                               </a>
@@ -528,7 +528,7 @@ export function Openings() {
                     onClick={() => toggleSource(source.id)}
                     className={`px-3 py-1.5 text-[10px] border transition-colors ${
                       selectedSources.has(source.id)
-                        ? 'border-matcha-500/50 bg-matcha-500/10 text-matcha-400'
+                        ? 'border-zinc-700 bg-zinc-800 text-white'
                         : 'border-zinc-800 text-zinc-500 hover:border-zinc-700'
                     }`}
                   >
@@ -544,14 +544,14 @@ export function Openings() {
                   value={discoverQuery}
                   onChange={(e) => setDiscoverQuery(e.target.value)}
                   placeholder="Job title or keywords"
-                  className="bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50"
+                  className="bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-zinc-700"
                 />
                 <input
                   type="text"
                   value={discoverLocation}
                   onChange={(e) => setDiscoverLocation(e.target.value)}
                   placeholder="Location (optional)"
-                  className="bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50"
+                  className="bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-zinc-700"
                 />
                 <Button onClick={handleDiscoverSearch} disabled={searching}>
                   {searching ? 'Searching...' : 'Search'}
@@ -573,7 +573,7 @@ export function Openings() {
           {discoverJobs.length > 0 && (
             <>
               <div className="text-[10px] tracking-wide text-zinc-500">
-                Found <span className="text-matcha-400">{discoverJobs.length}</span> jobs
+                Found <span className="text-white">{discoverJobs.length}</span> jobs
               </div>
               <div className="space-y-2">
                 {discoverJobs.map((job, idx) => {
@@ -587,7 +587,7 @@ export function Openings() {
                               href={job.apply_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-xs text-zinc-300 hover:text-matcha-400 block truncate"
+                              className="text-xs text-zinc-300 hover:text-white block truncate"
                             >
                               {job.title}
                             </a>
@@ -602,7 +602,7 @@ export function Openings() {
                               {job.salary && (
                                 <>
                                   <span>·</span>
-                                  <span className="text-matcha-500">{job.salary}</span>
+                                  <span className="text-white">{job.salary}</span>
                                 </>
                               )}
                               <span className="text-zinc-700">via {job.source_name}</span>
@@ -613,7 +613,7 @@ export function Openings() {
                               onClick={() => handleSaveJob(job)}
                               disabled={isSaved}
                               className={`p-1.5 transition-colors ${
-                                isSaved ? 'text-matcha-500' : 'text-zinc-600 hover:text-matcha-400'
+                                isSaved ? 'text-white' : 'text-zinc-600 hover:text-white'
                               }`}
                             >
                               <svg
@@ -634,7 +634,7 @@ export function Openings() {
                               href={job.apply_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="px-3 py-1 text-[9px] tracking-[0.1em] uppercase text-matcha-500 border border-matcha-500/30 hover:bg-matcha-500/10 transition-colors"
+                              className="px-3 py-1 text-[9px] tracking-[0.1em] uppercase text-white border border-zinc-700 hover:bg-zinc-800 transition-colors"
                             >
                               Apply
                             </a>
@@ -706,12 +706,12 @@ export function Openings() {
                               href={opening.apply_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-xs text-zinc-300 hover:text-matcha-400 block truncate"
+                              className="text-xs text-zinc-300 hover:text-white block truncate"
                             >
                               {opening.title}
                             </a>
                             {isPublished && (
-                              <span className="px-1.5 py-0.5 text-[8px] tracking-wide uppercase bg-matcha-500/20 text-matcha-400 rounded">
+                              <span className="px-1.5 py-0.5 text-[8px] tracking-wide uppercase bg-matcha-500/20 text-white rounded">
                                 Published
                               </span>
                             )}
@@ -739,8 +739,8 @@ export function Openings() {
                             disabled={isTogglingBoard}
                             className={`p-1.5 transition-colors ${
                               isPublished
-                                ? 'text-matcha-400 hover:text-matcha-300'
-                                : 'text-zinc-600 hover:text-matcha-400'
+                                ? 'text-white hover:text-white'
+                                : 'text-zinc-600 hover:text-white'
                             } ${isTogglingBoard ? 'opacity-50 cursor-not-allowed' : ''}`}
                             title={isPublished ? 'Remove from Job Board' : 'Publish to Job Board'}
                           >
@@ -778,7 +778,7 @@ export function Openings() {
                             href={opening.apply_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="px-3 py-1 text-[9px] tracking-[0.1em] uppercase text-matcha-500 border border-matcha-500/30 hover:bg-matcha-500/10 transition-colors"
+                            className="px-3 py-1 text-[9px] tracking-[0.1em] uppercase text-white border border-zinc-700 hover:bg-zinc-800 transition-colors"
                           >
                             Apply
                           </a>

@@ -58,7 +58,7 @@ export function Positions() {
     }
   };
 
-  const selectClass = 'px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-matcha-500 focus:border-transparent';
+  const selectClass = 'px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent';
 
   return (
     <div className="space-y-8">
@@ -81,7 +81,7 @@ export function Positions() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search positions..."
-            className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-matcha-500 focus:border-transparent"
+            className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent"
           />
         </div>
 
@@ -131,7 +131,7 @@ export function Positions() {
       {/* Content */}
       {loading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-2 border-matcha-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
         </div>
       ) : positions.length === 0 ? (
         <div className="text-center py-16">

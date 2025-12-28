@@ -124,7 +124,7 @@ export function JobBoards() {
 
   const sourceBadgeColor = (type: string) => {
     switch (type) {
-      case 'position': return 'bg-matcha-500/10 text-matcha-400 border-matcha-500/20';
+      case 'position': return 'bg-zinc-800 text-white border-zinc-700';
       case 'saved_job': return 'bg-violet-500/10 text-violet-400 border-violet-500/20';
       case 'saved_opening': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
       default: return 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20';
@@ -140,8 +140,8 @@ export function JobBoards() {
           <p className="text-zinc-400 mt-1">Control which jobs appear on your public careers page</p>
         </div>
         <div className="flex items-center gap-4">
-          <div className="px-4 py-2 bg-matcha-500/10 border border-matcha-500/20 rounded-lg">
-            <span className="text-matcha-400 font-medium">{publishedCount}</span>
+          <div className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg">
+            <span className="text-white font-medium">{publishedCount}</span>
             <span className="text-zinc-400 ml-2">published</span>
           </div>
           <a
@@ -193,7 +193,7 @@ export function JobBoards() {
       {/* Content */}
       {loading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-2 border-matcha-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
         </div>
       ) : filteredItems.length === 0 ? (
         <div className="text-center py-16">
@@ -259,15 +259,15 @@ export function JobBoards() {
       {/* Info Box */}
       <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
         <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-matcha-500/10 flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-matcha-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center flex-shrink-0">
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
           <div>
             <h3 className="text-sm font-medium text-zinc-200 mb-1">About the Job Board</h3>
             <p className="text-sm text-zinc-500">
-              Published jobs from all sources appear on your public careers page at <code className="text-matcha-400">/careers</code>.
+              Published jobs from all sources appear on your public careers page at <code className="text-white">/careers</code>.
               They are also included in the Indeed XML feed and have Google Jobs structured data for better search visibility.
             </p>
           </div>

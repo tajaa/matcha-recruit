@@ -6,7 +6,7 @@ import type { TutorSessionDetail as TutorSessionDetailType, TutorInterviewAnalys
 
 function ScoreDisplay({ label, score }: { label: string; score: number }) {
   const getColor = (s: number) => {
-    if (s >= 80) return 'text-matcha-400';
+    if (s >= 80) return 'text-white';
     if (s >= 60) return 'text-yellow-400';
     return 'text-red-400';
   };
@@ -88,7 +88,7 @@ function InterviewPrepAnalysis({ analysis }: { analysis: TutorInterviewAnalysis 
               <h4 className="text-xs uppercase tracking-wider text-zinc-500 mb-2">Topics Covered</h4>
               <div className="flex flex-wrap gap-2">
                 {analysis.content_coverage.topics_covered.map((topic, i) => (
-                  <span key={i} className="px-2 py-1 bg-matcha-500/20 text-matcha-400 rounded text-sm">
+                  <span key={i} className="px-2 py-1 bg-matcha-500/20 text-white rounded text-sm">
                     {topic}
                   </span>
                 ))}
@@ -100,7 +100,7 @@ function InterviewPrepAnalysis({ analysis }: { analysis: TutorInterviewAnalysis 
             <div>
               <h4 className="text-xs uppercase tracking-wider text-zinc-500 mb-2">Follow-up Depth</h4>
               <span className={`px-3 py-1 rounded text-sm ${
-                analysis.content_coverage.follow_up_depth === 'excellent' ? 'bg-matcha-500/20 text-matcha-400' :
+                analysis.content_coverage.follow_up_depth === 'excellent' ? 'bg-matcha-500/20 text-white' :
                 analysis.content_coverage.follow_up_depth === 'good' ? 'bg-yellow-500/20 text-yellow-400' :
                 'bg-red-500/20 text-red-400'
               }`}>
@@ -137,7 +137,7 @@ function InterviewPrepAnalysis({ analysis }: { analysis: TutorInterviewAnalysis 
                     <div className="font-medium text-zinc-300">{item.question}</div>
                     <div className="flex items-center gap-2">
                       <span className={`px-2 py-0.5 rounded text-xs ${
-                        item.quality === 'specific' ? 'bg-matcha-500/20 text-matcha-400' :
+                        item.quality === 'specific' ? 'bg-matcha-500/20 text-white' :
                         item.quality === 'somewhat_specific' ? 'bg-yellow-500/20 text-yellow-400' :
                         'bg-red-500/20 text-red-400'
                       }`}>
@@ -195,7 +195,7 @@ function LanguageTestAnalysis({ analysis }: { analysis: TutorLanguageAnalysis })
         <Card>
           <CardContent className="p-6 text-center">
             <h3 className="text-sm font-medium text-zinc-400 mb-2">Proficiency Level</h3>
-            <div className="text-4xl font-bold text-matcha-400 mb-2">
+            <div className="text-4xl font-bold text-white mb-2">
               {analysis.overall_proficiency.level}
             </div>
             <p className="text-sm text-zinc-500">{analysis.overall_proficiency.level_description}</p>
@@ -226,7 +226,7 @@ function LanguageTestAnalysis({ analysis }: { analysis: TutorLanguageAnalysis })
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-zinc-500">Flow:</span>
                 <span className={`${
-                  analysis.fluency_pace.flow_rating === 'excellent' ? 'text-matcha-400' :
+                  analysis.fluency_pace.flow_rating === 'excellent' ? 'text-white' :
                   analysis.fluency_pace.flow_rating === 'good' ? 'text-yellow-400' :
                   'text-red-400'
                 }`}>
@@ -274,7 +274,7 @@ function LanguageTestAnalysis({ analysis }: { analysis: TutorLanguageAnalysis })
             <div className="space-y-2">
               {analysis.overall_proficiency.strengths.map((strength, i) => (
                 <div key={i} className="flex items-center gap-2 text-zinc-300">
-                  <svg className="w-4 h-4 text-matcha-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                   {strength}
@@ -318,7 +318,7 @@ function LanguageTestAnalysis({ analysis }: { analysis: TutorLanguageAnalysis })
                     <div>
                       <span className="text-red-400 line-through">{error.error}</span>
                       <span className="mx-2 text-zinc-500">→</span>
-                      <span className="text-matcha-400">{error.correction}</span>
+                      <span className="text-white">{error.correction}</span>
                     </div>
                     <span className="px-2 py-0.5 bg-zinc-700 text-zinc-400 rounded text-xs">
                       {error.type}
@@ -384,7 +384,7 @@ export function TutorSessionDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin w-8 h-8 border-2 border-matcha-500 border-t-transparent rounded-full" />
+        <div className="animate-spin w-8 h-8 border-2 border-white border-t-transparent rounded-full" />
       </div>
     );
   }
@@ -437,7 +437,7 @@ export function TutorSessionDetail() {
               {new Date(session.created_at).toLocaleDateString()}
             </span>
             <span className={`px-2 py-0.5 rounded text-xs ${
-              session.status === 'completed' ? 'bg-matcha-500/20 text-matcha-400' :
+              session.status === 'completed' ? 'bg-matcha-500/20 text-white' :
               session.status === 'analyzing' ? 'bg-yellow-500/20 text-yellow-400' :
               'bg-zinc-700 text-zinc-300'
             }`}>

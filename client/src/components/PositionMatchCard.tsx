@@ -10,13 +10,13 @@ export function PositionMatchCard({ match }: PositionMatchCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-matcha-400';
+    if (score >= 80) return 'text-white';
     if (score >= 60) return 'text-amber-400';
     return 'text-red-400';
   };
 
   const getScoreBg = (score: number) => {
-    if (score >= 80) return 'bg-matcha-500/10 border-matcha-500/20';
+    if (score >= 80) return 'bg-zinc-800 border-zinc-700';
     if (score >= 60) return 'bg-amber-500/10 border-amber-500/20';
     return 'bg-red-500/10 border-red-500/20';
   };
@@ -91,7 +91,7 @@ export function PositionMatchCard({ match }: PositionMatchCardProps) {
                   {match.skills_breakdown.matched_required?.length > 0 && (
                     <div>
                       <span className="text-zinc-500">Matched Required: </span>
-                      <span className="text-matcha-400">
+                      <span className="text-white">
                         {match.skills_breakdown.matched_required.join(', ')}
                       </span>
                     </div>
@@ -155,7 +155,7 @@ export function PositionMatchCard({ match }: PositionMatchCardProps) {
                   {match.culture_fit_breakdown.strengths?.length > 0 && (
                     <div>
                       <span className="text-zinc-500">Strengths: </span>
-                      <span className="text-matcha-400">
+                      <span className="text-white">
                         {match.culture_fit_breakdown.strengths.join(', ')}
                       </span>
                     </div>

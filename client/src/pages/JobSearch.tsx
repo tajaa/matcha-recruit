@@ -325,7 +325,7 @@ export function JobSearch() {
             <div className="flex items-start justify-between gap-2">
               <div>
                 <h3 className="text-base font-semibold text-zinc-100 mb-0.5">{job.title}</h3>
-                <div className="text-sm text-matcha-400 font-medium mb-2">{job.company_name}</div>
+                <div className="text-sm text-white font-medium mb-2">{job.company_name}</div>
               </div>
               {/* Save/Unsave Button */}
               <button
@@ -538,8 +538,8 @@ export function JobSearch() {
             disabled={isTogglingBoard}
             className={`p-2 rounded-lg transition-colors ${
               isPublished
-                ? 'text-matcha-400 bg-matcha-500/20 hover:bg-matcha-500/30'
-                : 'text-zinc-500 bg-zinc-800/50 hover:text-matcha-400 hover:bg-matcha-500/10'
+                ? 'text-white bg-matcha-500/20 hover:bg-matcha-500/30'
+                : 'text-zinc-500 bg-zinc-800/50 hover:text-white hover:bg-zinc-800'
             } ${isTogglingBoard ? 'opacity-50 cursor-not-allowed' : ''}`}
             title={isPublished ? 'Remove from Job Board' : 'Publish to Job Board'}
           >
@@ -630,7 +630,7 @@ export function JobSearch() {
                     </svg>
                     <input
                       type="text"
-                      className="w-full pl-10 pr-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-transparent text-zinc-100 outline-none transition-all"
+                      className="w-full pl-10 pr-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-white focus:border-transparent text-zinc-100 outline-none transition-all"
                       placeholder="Job title, keywords..."
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
@@ -643,7 +643,7 @@ export function JobSearch() {
                     </svg>
                     <input
                       type="text"
-                      className="w-full pl-10 pr-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-transparent text-zinc-100 outline-none transition-all"
+                      className="w-full pl-10 pr-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-white focus:border-transparent text-zinc-100 outline-none transition-all"
                       placeholder="Location (optional)"
                       value={location}
                       onChange={(e) => setLocation(e.target.value)}
@@ -660,7 +660,7 @@ export function JobSearch() {
                     Filters:
                   </div>
                   <select
-                    className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-matcha-500"
+                    className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-white"
                     value={datePosted}
                     onChange={(e) => setDatePosted(e.target.value as DatePostedFilter | '')}
                   >
@@ -671,7 +671,7 @@ export function JobSearch() {
                     <option value="month">Past month</option>
                   </select>
                   <select
-                    className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-matcha-500"
+                    className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-white"
                     value={employmentType}
                     onChange={(e) => setEmploymentType(e.target.value as JobEmploymentTypeFilter | '')}
                   >
@@ -771,14 +771,14 @@ export function JobSearch() {
                   <div className="flex gap-3 flex-wrap items-center">
                     <input
                       type="text"
-                      className="flex-1 min-w-[180px] px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-matcha-500"
+                      className="flex-1 min-w-[180px] px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-white"
                       placeholder="Filter by keyword..."
                       value={filterKeyword}
                       onChange={(e) => setFilterKeyword(e.target.value)}
                     />
                     {uniqueCompanies.length > 1 && (
                       <select
-                        className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-matcha-500"
+                        className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-white"
                         value={filterCompany}
                         onChange={(e) => setFilterCompany(e.target.value)}
                       >
@@ -790,7 +790,7 @@ export function JobSearch() {
                     )}
                     {uniqueScheduleTypes.length > 1 && (
                       <select
-                        className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-matcha-500"
+                        className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 text-sm outline-none focus:ring-2 focus:ring-white"
                         value={filterScheduleType}
                         onChange={(e) => setFilterScheduleType(e.target.value)}
                       >

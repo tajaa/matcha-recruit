@@ -57,7 +57,7 @@ export function InterviewAnalysis() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin w-8 h-8 border-2 border-matcha-500 border-t-transparent rounded-full" />
+        <div className="animate-spin w-8 h-8 border-2 border-white border-t-transparent rounded-full" />
       </div>
     );
   }
@@ -97,7 +97,7 @@ export function InterviewAnalysis() {
             <div className="flex items-center gap-2 mt-1">
               <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                 interview.interview_type === 'culture'
-                  ? 'bg-matcha-500/15 text-matcha-400'
+                  ? 'bg-matcha-500/15 text-white'
                   : interview.interview_type === 'screening'
                   ? 'bg-orange-500/15 text-orange-400'
                   : 'bg-violet-500/15 text-violet-400'
@@ -195,7 +195,7 @@ export function InterviewAnalysis() {
                     key={key}
                     className={`p-4 rounded-lg border ${
                       detail.covered && detail.depth === 'deep'
-                        ? 'bg-matcha-500/10 border-matcha-500/30'
+                        ? 'bg-zinc-800 border-zinc-700'
                         : detail.covered && detail.depth === 'shallow'
                         ? 'bg-yellow-500/10 border-yellow-500/30'
                         : 'bg-zinc-800/50 border-zinc-700'
@@ -208,7 +208,7 @@ export function InterviewAnalysis() {
                       {detail.covered ? (
                         <span className={`text-xs px-2 py-0.5 rounded ${
                           detail.depth === 'deep'
-                            ? 'bg-matcha-500/20 text-matcha-400'
+                            ? 'bg-matcha-500/20 text-white'
                             : 'bg-yellow-500/20 text-yellow-400'
                         }`}>
                           {detail.depth}
@@ -265,7 +265,7 @@ export function InterviewAnalysis() {
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span className={`text-xs px-2 py-0.5 rounded ${
                           item.response_quality === 'specific'
-                            ? 'bg-matcha-500/20 text-matcha-400'
+                            ? 'bg-matcha-500/20 text-white'
                             : item.response_quality === 'somewhat_specific' || item.response_quality === 'shallow'
                             ? 'bg-yellow-500/20 text-yellow-400'
                             : 'bg-zinc-700 text-zinc-400'
@@ -346,7 +346,7 @@ export function InterviewAnalysis() {
                           <span className="font-medium">Current: </span>
                           {suggestion.current_behavior}
                         </p>
-                        <p className="text-matcha-400">
+                        <p className="text-white">
                           <span className="font-medium text-zinc-400">Suggestion: </span>
                           {suggestion.suggested_improvement}
                         </p>
@@ -365,14 +365,14 @@ export function InterviewAnalysis() {
 
 function ScreeningAnalysisDisplay({ analysis }: { analysis: ScreeningAnalysis }) {
   const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-matcha-400';
+    if (score >= 80) return 'text-white';
     if (score >= 60) return 'text-yellow-400';
     if (score >= 40) return 'text-orange-400';
     return 'text-red-400';
   };
 
   const getScoreBg = (score: number) => {
-    if (score >= 80) return 'bg-matcha-500/10 border-matcha-500/30';
+    if (score >= 80) return 'bg-zinc-800 border-zinc-700';
     if (score >= 60) return 'bg-yellow-500/10 border-yellow-500/30';
     if (score >= 40) return 'bg-orange-500/10 border-orange-500/30';
     return 'bg-red-500/10 border-red-500/30';
@@ -381,7 +381,7 @@ function ScreeningAnalysisDisplay({ analysis }: { analysis: ScreeningAnalysis })
   const getRecommendationStyle = (rec: string) => {
     switch (rec) {
       case 'strong_pass':
-        return 'bg-matcha-500/20 text-matcha-400';
+        return 'bg-matcha-500/20 text-white';
       case 'pass':
         return 'bg-yellow-500/20 text-yellow-400';
       case 'borderline':
@@ -464,7 +464,7 @@ function ScreeningAnalysisDisplay({ analysis }: { analysis: ScreeningAnalysis })
 
 function ScoreDisplay({ label, score }: { label: string; score: number }) {
   const getColor = (s: number) => {
-    if (s >= 80) return 'text-matcha-400';
+    if (s >= 80) return 'text-white';
     if (s >= 60) return 'text-yellow-400';
     return 'text-red-400';
   };

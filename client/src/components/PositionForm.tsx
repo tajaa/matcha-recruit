@@ -49,8 +49,8 @@ export function PositionForm({
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const inputClass = 'w-full px-4 py-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-matcha-500 focus:border-transparent';
-  const selectClass = 'w-full px-4 py-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 focus:outline-none focus:ring-2 focus:ring-matcha-500 focus:border-transparent';
+  const inputClass = 'w-full px-4 py-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent';
+  const selectClass = 'w-full px-4 py-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent';
   const labelClass = 'block text-sm font-medium text-zinc-400 mb-2';
 
   return (
@@ -282,7 +282,7 @@ export function PositionForm({
               id="visa_sponsorship"
               checked={formData.visa_sponsorship || false}
               onChange={e => updateField('visa_sponsorship', e.target.checked)}
-              className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-matcha-500 focus:ring-matcha-500 focus:ring-offset-zinc-950"
+              className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-white focus:ring-white focus:ring-offset-zinc-950"
             />
             <label htmlFor="visa_sponsorship" className="text-sm text-zinc-300">
               Visa sponsorship available

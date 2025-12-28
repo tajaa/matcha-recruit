@@ -146,7 +146,7 @@ export function PublicJobApply() {
 
         <div className="relative z-10 text-center px-4 max-w-lg">
           <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-matcha-500/20 flex items-center justify-center">
-            <span className="text-3xl text-matcha-500">&#10003;</span>
+            <span className="text-3xl text-white">&#10003;</span>
           </div>
           <h1 className="text-2xl font-bold text-white mb-4">Application Submitted!</h1>
           <p className="text-zinc-400 mb-8">
@@ -156,7 +156,7 @@ export function PublicJobApply() {
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
               to="/careers"
-              className="px-8 py-3 text-xs font-medium tracking-widest uppercase border border-zinc-700 text-zinc-300 hover:border-matcha-500 hover:text-matcha-400 transition-all"
+              className="px-8 py-3 text-xs font-medium tracking-widest uppercase border border-zinc-700 text-zinc-300 hover:border-white hover:text-white transition-all"
             >
               View More Jobs
             </Link>
@@ -192,8 +192,8 @@ export function PublicJobApply() {
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-6">
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-2 h-2 rounded-full bg-matcha-500 shadow-[0_0_10px_rgba(34,197,94,0.8)] group-hover:scale-125 transition-transform" />
-          <span className="text-xs tracking-[0.3em] uppercase text-matcha-500 font-medium">
+          <div className="w-2 h-2 rounded-full bg-matcha-500  group-hover:scale-125 transition-transform" />
+          <span className="text-xs tracking-[0.3em] uppercase text-white font-medium">
             Matcha
           </span>
         </Link>
@@ -201,7 +201,7 @@ export function PublicJobApply() {
         <nav className="flex items-center gap-6">
           <Link
             to="/careers"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-matcha-400 transition-colors"
+            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-white transition-colors"
           >
             All Jobs
           </Link>
@@ -212,14 +212,14 @@ export function PublicJobApply() {
       <main className="relative z-10 container mx-auto px-4 sm:px-8 py-12 max-w-2xl">
         {loading ? (
           <div className="flex justify-center py-20">
-            <div className="w-6 h-6 border-2 border-matcha-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
           </div>
         ) : !job ? (
           <div className="text-center py-20">
             <p className="text-red-400">Job not found</p>
             <button
               onClick={() => navigate('/careers')}
-              className="mt-4 text-sm text-matcha-500 hover:text-matcha-400"
+              className="mt-4 text-sm text-white hover:text-white"
             >
               Back to all jobs
             </button>
@@ -229,7 +229,7 @@ export function PublicJobApply() {
             {/* Back link */}
             <Link
               to={`/careers/${job.id}`}
-              className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-matcha-400 transition-colors"
+              className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-white transition-colors"
             >
               <span>&larr;</span>
               <span>Back to job details</span>
@@ -246,7 +246,7 @@ export function PublicJobApply() {
 
             {/* Application Form */}
             <form onSubmit={handleSubmit} className="space-y-6">
-              <h2 className="text-sm tracking-[0.2em] uppercase text-matcha-500">
+              <h2 className="text-sm tracking-[0.2em] uppercase text-white">
                 Your Information
               </h2>
 
@@ -260,7 +260,7 @@ export function PublicJobApply() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
-                  className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-3 text-white placeholder-zinc-600 focus:border-matcha-500 focus:outline-none transition-colors"
+                  className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-3 text-white placeholder-zinc-600 focus:border-white focus:outline-none transition-colors"
                   placeholder="John Doe"
                 />
               </div>
@@ -275,7 +275,7 @@ export function PublicJobApply() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-3 text-white placeholder-zinc-600 focus:border-matcha-500 focus:outline-none transition-colors"
+                  className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-3 text-white placeholder-zinc-600 focus:border-white focus:outline-none transition-colors"
                   placeholder="john@example.com"
                 />
               </div>
@@ -289,7 +289,7 @@ export function PublicJobApply() {
                   type="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-3 text-white placeholder-zinc-600 focus:border-matcha-500 focus:outline-none transition-colors"
+                  className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-3 text-white placeholder-zinc-600 focus:border-white focus:outline-none transition-colors"
                   placeholder="+1 (555) 123-4567"
                 />
               </div>
@@ -302,9 +302,9 @@ export function PublicJobApply() {
                 <div
                   className={`border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
                     dragActive
-                      ? 'border-matcha-500 bg-matcha-500/10'
+                      ? 'border-white bg-zinc-800'
                       : resumeFile
-                      ? 'border-matcha-500/50 bg-zinc-900/50'
+                      ? 'border-zinc-700 bg-zinc-900/50'
                       : 'border-zinc-700 bg-zinc-900/30 hover:border-zinc-600'
                   }`}
                   onDragEnter={handleDrag}
@@ -322,7 +322,7 @@ export function PublicJobApply() {
                   />
                   {resumeFile ? (
                     <div>
-                      <p className="text-matcha-400 font-medium">{resumeFile.name}</p>
+                      <p className="text-white font-medium">{resumeFile.name}</p>
                       <p className="text-zinc-500 text-sm mt-1">
                         {(resumeFile.size / 1024 / 1024).toFixed(2)} MB
                       </p>
@@ -341,7 +341,7 @@ export function PublicJobApply() {
                     <div>
                       <p className="text-zinc-400">
                         Drag and drop your resume here, or{' '}
-                        <span className="text-matcha-500">browse</span>
+                        <span className="text-white">browse</span>
                       </p>
                       <p className="text-zinc-600 text-sm mt-2">PDF or DOCX, max 10MB</p>
                     </div>
@@ -358,7 +358,7 @@ export function PublicJobApply() {
                   value={coverLetter}
                   onChange={(e) => setCoverLetter(e.target.value)}
                   rows={6}
-                  className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-3 text-white placeholder-zinc-600 focus:border-matcha-500 focus:outline-none transition-colors resize-none"
+                  className="w-full bg-zinc-900/50 border border-zinc-800 px-4 py-3 text-white placeholder-zinc-600 focus:border-white focus:outline-none transition-colors resize-none"
                   placeholder="Tell us why you're interested in this role..."
                 />
               </div>

@@ -26,7 +26,7 @@ export function PositionCard({ position, onClick, showCompany = true }: Position
   const salaryDisplay = formatSalary(position.salary_min, position.salary_max, position.salary_currency);
 
   const statusColors = {
-    active: 'bg-matcha-500/10 text-matcha-400 border-matcha-500/20',
+    active: 'bg-zinc-800 text-white border-zinc-700',
     closed: 'bg-zinc-700/50 text-zinc-400 border-zinc-600',
     draft: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   };
@@ -86,7 +86,7 @@ export function PositionCard({ position, onClick, showCompany = true }: Position
         </div>
 
         {salaryDisplay && (
-          <p className="text-sm font-medium text-matcha-400 mb-3">{salaryDisplay}</p>
+          <p className="text-sm font-medium text-white mb-3">{salaryDisplay}</p>
         )}
 
         {position.required_skills && position.required_skills.length > 0 && (

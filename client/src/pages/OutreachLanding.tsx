@@ -99,8 +99,8 @@ export function OutreachLanding() {
       {/* Header */}
       <header className="border-b border-zinc-800/50 bg-zinc-950/90">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-          <span className="text-xs tracking-[0.25em] uppercase text-matcha-500 font-medium">
+          <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse " />
+          <span className="text-xs tracking-[0.25em] uppercase text-white font-medium">
             Matcha
           </span>
         </div>
@@ -118,7 +118,7 @@ export function OutreachLanding() {
               }`}
             >
               {response.status === 'interested' ? (
-                <svg className="w-8 h-8 text-matcha-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               ) : (
@@ -150,7 +150,7 @@ export function OutreachLanding() {
             <h1 className="text-3xl font-bold text-white mb-2">
               {info.position_title || 'New Opportunity'}
             </h1>
-            <p className="text-xl text-matcha-400 mb-8">{info.company_name}</p>
+            <p className="text-xl text-white mb-8">{info.company_name}</p>
 
             <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 mb-8">
               <div className="grid grid-cols-2 gap-6">

@@ -8,16 +8,11 @@ interface CardProps {
 
 export function Card({ children, className = '', onClick }: CardProps) {
   return (
-    <div className={`relative ${className}`} onClick={onClick}>
-      {/* Corner brackets */}
-      <div className="absolute -top-1.5 -left-1.5 w-3 h-3 border-t border-l border-zinc-700" />
-      <div className="absolute -top-1.5 -right-1.5 w-3 h-3 border-t border-r border-zinc-700" />
-      <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 border-b border-l border-zinc-700" />
-      <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 border-b border-r border-zinc-700" />
-
-      <div className="bg-zinc-900/50 border border-zinc-800 transition-all hover:border-zinc-700">
-        {children}
-      </div>
+    <div
+      className={`bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-colors ${className}`}
+      onClick={onClick}
+    >
+      {children}
     </div>
   );
 }

@@ -18,7 +18,7 @@ const STAGES: { value: CandidateStage; label: string; color: string }[] = [
   { value: 'screening', label: 'Screening', color: 'bg-yellow-500/20 text-yellow-400' },
   { value: 'interview', label: 'Interview', color: 'bg-blue-500/20 text-blue-400' },
   { value: 'finalist', label: 'Finalist', color: 'bg-purple-500/20 text-purple-400' },
-  { value: 'placed', label: 'Placed', color: 'bg-matcha-500/20 text-matcha-400' },
+  { value: 'placed', label: 'Placed', color: 'bg-matcha-500/20 text-white' },
   { value: 'rejected', label: 'Rejected', color: 'bg-red-500/20 text-red-400' },
 ];
 
@@ -490,7 +490,7 @@ export function ProjectDetail() {
                             <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
                               outreach.status === 'screening_complete'
                                 ? outreach.screening_recommendation === 'strong_pass' || outreach.screening_recommendation === 'pass'
-                                  ? 'bg-matcha-500/20 text-matcha-400'
+                                  ? 'bg-matcha-500/20 text-white'
                                   : outreach.screening_recommendation === 'borderline'
                                   ? 'bg-yellow-500/20 text-yellow-400'
                                   : 'bg-red-500/20 text-red-400'
@@ -541,7 +541,7 @@ export function ProjectDetail() {
                         <select
                           value={pc.stage}
                           onChange={(e) => handleStageChange(pc.candidate_id, e.target.value as CandidateStage)}
-                          className="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 focus:outline-none focus:border-matcha-500"
+                          className="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 focus:outline-none focus:border-white"
                         >
                           {STAGES.map((stage) => (
                             <option key={stage.value} value={stage.value}>
@@ -576,7 +576,7 @@ export function ProjectDetail() {
               <select
                 value={project.status}
                 onChange={(e) => handleStatusChange(e.target.value as ProjectStatus)}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
               >
                 {STATUS_OPTIONS.map((status) => (
                   <option key={status} value={status}>
@@ -630,7 +630,7 @@ export function ProjectDetail() {
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-zinc-500">Screened</span>
-                    <span className="text-matcha-400">{outreachStats.screened}</span>
+                    <span className="text-white">{outreachStats.screened}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-zinc-500">Declined</span>
@@ -699,7 +699,7 @@ export function ProjectDetail() {
                     placeholder="Name or email..."
                     value={addSearch}
                     onChange={(e) => setAddSearch(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
                   />
                 </div>
                 <div>
@@ -709,7 +709,7 @@ export function ProjectDetail() {
                     placeholder="python, react..."
                     value={addSkills}
                     onChange={(e) => setAddSkills(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
                   />
                 </div>
               </div>
@@ -721,7 +721,7 @@ export function ProjectDetail() {
                     placeholder="Years"
                     value={addMinExp}
                     onChange={(e) => setAddMinExp(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
                   />
                 </div>
                 <div>
@@ -731,7 +731,7 @@ export function ProjectDetail() {
                     placeholder="Years"
                     value={addMaxExp}
                     onChange={(e) => setAddMaxExp(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
                   />
                 </div>
               </div>
@@ -748,7 +748,7 @@ export function ProjectDetail() {
               <div className="flex gap-2">
                 <button
                   onClick={handleSelectAll}
-                  className="text-xs text-matcha-400 hover:text-matcha-300 transition-colors"
+                  className="text-xs text-white hover:text-white transition-colors"
                 >
                   Select All ({filteredAvailableCandidates.length})
                 </button>
@@ -775,7 +775,7 @@ export function ProjectDetail() {
                     key={c.id}
                     className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
                       selectedCandidateIds.includes(c.id)
-                        ? 'bg-matcha-500/10 border-matcha-500/30'
+                        ? 'bg-zinc-800 border-zinc-700'
                         : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
                     }`}
                   >
@@ -840,7 +840,7 @@ export function ProjectDetail() {
                 type="text"
                 value={editData.company_name || ''}
                 onChange={(e) => setEditData({ ...editData, company_name: e.target.value })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
               />
             </div>
             <div>
@@ -849,7 +849,7 @@ export function ProjectDetail() {
                 type="text"
                 value={editData.name || ''}
                 onChange={(e) => setEditData({ ...editData, name: e.target.value })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
               />
             </div>
           </div>
@@ -861,7 +861,7 @@ export function ProjectDetail() {
                 type="text"
                 value={editData.position_title || ''}
                 onChange={(e) => setEditData({ ...editData, position_title: e.target.value })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
               />
             </div>
             <div>
@@ -870,7 +870,7 @@ export function ProjectDetail() {
                 type="text"
                 value={editData.location || ''}
                 onChange={(e) => setEditData({ ...editData, location: e.target.value })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
               />
             </div>
           </div>
@@ -882,7 +882,7 @@ export function ProjectDetail() {
                 type="number"
                 value={editData.salary_min || ''}
                 onChange={(e) => setEditData({ ...editData, salary_min: e.target.value ? parseInt(e.target.value) : undefined })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
               />
             </div>
             <div>
@@ -891,7 +891,7 @@ export function ProjectDetail() {
                 type="number"
                 value={editData.salary_max || ''}
                 onChange={(e) => setEditData({ ...editData, salary_max: e.target.value ? parseInt(e.target.value) : undefined })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
               />
             </div>
           </div>
@@ -902,7 +902,7 @@ export function ProjectDetail() {
               value={editData.requirements || ''}
               onChange={(e) => setEditData({ ...editData, requirements: e.target.value })}
               rows={3}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500 resize-none"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white resize-none"
             />
           </div>
 
@@ -912,7 +912,7 @@ export function ProjectDetail() {
               value={editData.benefits || ''}
               onChange={(e) => setEditData({ ...editData, benefits: e.target.value })}
               rows={2}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500 resize-none"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white resize-none"
             />
           </div>
 
@@ -922,7 +922,7 @@ export function ProjectDetail() {
               value={editData.notes || ''}
               onChange={(e) => setEditData({ ...editData, notes: e.target.value })}
               rows={2}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500 resize-none"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white resize-none"
             />
           </div>
 
@@ -954,7 +954,7 @@ export function ProjectDetail() {
               <div className="flex gap-2">
                 <button
                   onClick={() => setOutreachCandidateIds(getOutreachEligibleCandidates().map((c) => c.candidate_id))}
-                  className="text-xs text-matcha-400 hover:text-matcha-300 transition-colors"
+                  className="text-xs text-white hover:text-white transition-colors"
                 >
                   Select All
                 </button>
@@ -975,7 +975,7 @@ export function ProjectDetail() {
                   key={pc.candidate_id}
                   className={`flex items-center p-2 rounded cursor-pointer transition-colors ${
                     outreachCandidateIds.includes(pc.candidate_id)
-                      ? 'bg-matcha-500/10'
+                      ? 'bg-zinc-800'
                       : 'hover:bg-zinc-800'
                   }`}
                 >
@@ -1017,7 +1017,7 @@ export function ProjectDetail() {
               onChange={(e) => setCustomMessage(e.target.value)}
               placeholder="Add a personalized note to the email..."
               rows={3}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500 resize-none"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
             />
           </div>
 
@@ -1067,7 +1067,7 @@ export function ProjectDetail() {
               <div className="flex gap-2">
                 <button
                   onClick={() => setScreeningCandidateIds(getScreeningEligibleCandidates().map((c) => c.candidate_id))}
-                  className="text-xs text-matcha-400 hover:text-matcha-300 transition-colors"
+                  className="text-xs text-white hover:text-white transition-colors"
                 >
                   Select All
                 </button>
@@ -1088,7 +1088,7 @@ export function ProjectDetail() {
                   key={pc.candidate_id}
                   className={`flex items-center p-2 rounded cursor-pointer transition-colors ${
                     screeningCandidateIds.includes(pc.candidate_id)
-                      ? 'bg-matcha-500/10'
+                      ? 'bg-zinc-800'
                       : 'hover:bg-zinc-800'
                   }`}
                 >
@@ -1138,7 +1138,7 @@ export function ProjectDetail() {
               onChange={(e) => setScreeningMessage(e.target.value)}
               placeholder="Add a personalized note to the email..."
               rows={3}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500 resize-none"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
             />
           </div>
 
@@ -1152,7 +1152,7 @@ export function ProjectDetail() {
               {(project?.salary_min || project?.salary_max) && (
                 <li>• Salary: {formatSalary(project?.salary_min, project?.salary_max)}</li>
               )}
-              <li className="text-matcha-400">• Direct link to screening interview</li>
+              <li className="text-white">• Direct link to screening interview</li>
             </ul>
           </div>
 

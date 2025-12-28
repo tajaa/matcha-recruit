@@ -128,7 +128,7 @@ export function Candidates() {
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
               />
             </div>
 
@@ -141,7 +141,7 @@ export function Candidates() {
                 value={skillsInput}
                 onChange={(e) => setSkillsInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
               />
             </div>
 
@@ -155,7 +155,7 @@ export function Candidates() {
                   value={minExp}
                   onChange={(e) => setMinExp(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
-                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
                 />
                 <input
                   type="number"
@@ -163,7 +163,7 @@ export function Candidates() {
                   value={maxExp}
                   onChange={(e) => setMaxExp(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
-                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-matcha-500"
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
                 />
               </div>
             </div>
@@ -174,7 +174,7 @@ export function Candidates() {
               <select
                 value={education}
                 onChange={(e) => setEducation(e.target.value)}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-matcha-500"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
               >
                 <option value="">Any</option>
                 <option value="phd">PhD / Doctorate</option>
@@ -251,11 +251,11 @@ export function Candidates() {
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {candidates.map((candidate) => (
-            <Card key={candidate.id} className="hover:border-matcha-500/50 transition-colors group">
+            <Card key={candidate.id} className="hover:border-zinc-700 transition-colors group">
               <CardContent>
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="text-lg font-semibold text-zinc-100 group-hover:text-matcha-400 transition-colors">
+                    <h3 className="text-lg font-semibold text-zinc-100 group-hover:text-white transition-colors">
                       {candidate.name || 'Unknown'}
                     </h3>
                     {candidate.email && (
@@ -353,7 +353,7 @@ export function Candidates() {
                   {selectedCandidate.skills.map((skill) => (
                     <span
                       key={skill}
-                      className="px-2.5 py-1 bg-matcha-500/10 text-matcha-400 border border-matcha-500/20 rounded-md text-xs font-medium"
+                      className="px-2.5 py-1 bg-zinc-800 text-white border border-zinc-700 rounded-md text-xs font-medium"
                     >
                       {skill}
                     </span>

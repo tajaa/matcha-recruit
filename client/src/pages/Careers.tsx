@@ -55,7 +55,7 @@ export function Careers() {
   };
 
   const inputClasses =
-    'px-4 py-2.5 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50 transition-all font-mono';
+    'px-4 py-2.5 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-zinc-700 transition-all font-mono';
 
   return (
     <div>
@@ -174,11 +174,11 @@ export function Careers() {
                     <div className="flex-1">
                       <div className="flex items-start gap-4 mb-3">
                         <div>
-                          <h2 className="text-lg font-semibold text-white group-hover:text-matcha-400 transition-colors">
+                          <h2 className="text-lg font-semibold text-white group-hover:text-white transition-colors">
                             {position.title}
                           </h2>
                           {position.company_name && (
-                            <p className="text-sm text-matcha-500 mt-0.5">{position.company_name}</p>
+                            <p className="text-sm text-white mt-0.5">{position.company_name}</p>
                           )}
                         </div>
                       </div>
@@ -233,11 +233,11 @@ export function Careers() {
 
                     <div className="flex flex-col items-end gap-3">
                       {salary && (
-                        <span className="text-sm font-medium text-matcha-400">{salary}</span>
+                        <span className="text-sm font-medium text-white">{salary}</span>
                       )}
                       <Link
                         to={`/app/positions/${position.id}`}
-                        className="px-4 py-2 bg-matcha-500 text-black text-[10px] tracking-[0.15em] uppercase font-medium hover:bg-matcha-400 transition-all hover:shadow-[0_0_15px_rgba(34,197,94,0.3)]"
+                        className="px-4 py-2 bg-matcha-500 text-black text-[10px] tracking-[0.15em] uppercase font-medium hover:bg-matcha-400 transition-all hover:"
                       >
                         View Details
                       </Link>

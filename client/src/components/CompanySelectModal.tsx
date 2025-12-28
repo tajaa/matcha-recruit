@@ -64,12 +64,12 @@ export function CompanySelectModal({
           placeholder="Search companies..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full px-4 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-matcha-500 focus:border-transparent"
+          className="w-full px-4 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent"
         />
 
         {loading ? (
           <div className="flex items-center justify-center py-8">
-            <div className="w-6 h-6 border-2 border-matcha-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
           </div>
         ) : filteredCompanies.length === 0 ? (
           <div className="text-center py-8 text-zinc-500">
@@ -83,7 +83,7 @@ export function CompanySelectModal({
                 onClick={() => setSelectedId(company.id)}
                 className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${
                   selectedId === company.id
-                    ? 'bg-matcha-500/20 border border-matcha-500/40 text-matcha-400'
+                    ? 'bg-matcha-500/20 border border-zinc-700 text-white'
                     : 'bg-zinc-800/50 border border-transparent hover:bg-zinc-800 text-zinc-300'
                 }`}
               >

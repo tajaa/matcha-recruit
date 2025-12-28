@@ -93,7 +93,7 @@ export function Tutor() {
         <Card>
           <CardContent className="py-12 text-center">
             <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-matcha-500/20 flex items-center justify-center">
-              <svg className="w-8 h-8 text-matcha-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
@@ -141,7 +141,7 @@ export function Tutor() {
               <div className="flex items-center gap-3">
                 <div
                   className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] transition-colors ${
-                    isConnected ? 'bg-matcha-500 text-matcha-500' : 'bg-zinc-600 text-zinc-600'
+                    isConnected ? 'bg-matcha-500 text-white' : 'bg-zinc-600 text-zinc-600'
                   }`}
                 />
                 <span className="text-sm font-medium text-zinc-300">
@@ -164,7 +164,7 @@ export function Tutor() {
               ) : (
                 <>
                   {!isRecording ? (
-                    <Button onClick={startRecording} className="flex-1 py-4 text-lg shadow-[0_0_20px_rgba(34,197,94,0.2)]">
+                    <Button onClick={startRecording} className="flex-1 py-4 text-lg ">
                       <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
                         <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
@@ -257,7 +257,7 @@ export function Tutor() {
           <CardContent className="pt-6">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-matcha-500/20 flex items-center justify-center">
-                <svg className="w-6 h-6 text-matcha-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>

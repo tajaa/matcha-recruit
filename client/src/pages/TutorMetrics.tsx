@@ -13,7 +13,7 @@ const TABS: { label: string; value: TabValue }[] = [
 ];
 
 const STATUS_COLORS: Record<string, string> = {
-  completed: 'bg-matcha-500/20 text-matcha-400',
+  completed: 'bg-matcha-500/20 text-white',
   analyzing: 'bg-yellow-500/20 text-yellow-400',
   in_progress: 'bg-blue-500/20 text-blue-400',
   pending: 'bg-zinc-700 text-zinc-300',
@@ -23,7 +23,7 @@ function ScoreDisplay({ score, label }: { score: number | null; label?: string }
   if (score === null) return <span className="text-zinc-500">-</span>;
 
   const getColor = (s: number) => {
-    if (s >= 80) return 'text-matcha-400';
+    if (s >= 80) return 'text-white';
     if (s >= 60) return 'text-yellow-400';
     return 'text-red-400';
   };

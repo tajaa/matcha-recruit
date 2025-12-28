@@ -79,7 +79,7 @@ export function Register() {
   };
 
   const inputClasses =
-    'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50 focus:shadow-[0_0_10px_rgba(34,197,94,0.1)] transition-all';
+    'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-zinc-700 focus: transition-all';
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white overflow-hidden relative font-mono selection:bg-matcha-500 selection:text-black">
@@ -102,15 +102,15 @@ export function Register() {
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-6">
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.8)]" />
-          <span className="text-xs tracking-[0.3em] uppercase text-matcha-500 font-medium group-hover:text-matcha-400 transition-colors">
+          <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse " />
+          <span className="text-xs tracking-[0.3em] uppercase text-white font-medium group-hover:text-white transition-colors">
             Matcha
           </span>
         </Link>
 
         <Link
           to="/login"
-          className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-matcha-400 transition-colors"
+          className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-white transition-colors"
         >
           Login
         </Link>
@@ -286,7 +286,7 @@ export function Register() {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-3 bg-matcha-500 text-black text-[11px] tracking-[0.2em] uppercase font-medium hover:bg-matcha-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:shadow-[0_0_20px_rgba(34,197,94,0.3)]"
+                  className="w-full py-3 bg-matcha-500 text-black text-[11px] tracking-[0.2em] uppercase font-medium hover:bg-matcha-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:"
                 >
                   {isLoading ? (
                     <span className="flex items-center justify-center gap-2">
@@ -301,7 +301,7 @@ export function Register() {
                 <div className="mt-6 text-center">
                   <span className="text-[10px] tracking-wide text-zinc-600">
                     Already registered?{' '}
-                    <Link to="/login" className="text-matcha-500 hover:text-matcha-400 transition-colors">
+                    <Link to="/login" className="text-white hover:text-white transition-colors">
                       Login
                     </Link>
                   </span>

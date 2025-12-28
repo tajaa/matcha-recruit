@@ -143,7 +143,7 @@ export function FileUpload({
       className={`
         relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200
         ${isDragging
-          ? 'border-matcha-500 bg-matcha-500/10'
+          ? 'border-white bg-zinc-800'
           : 'border-zinc-700 bg-zinc-900/50'
         }
         ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
@@ -173,7 +173,7 @@ export function FileUpload({
       <div className="flex flex-col items-center gap-3">
         <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isDragging ? 'bg-matcha-500/20' : 'bg-zinc-800'}`}>
           <svg
-            className={`w-6 h-6 ${isDragging ? 'text-matcha-500' : 'text-zinc-400'}`}
+            className={`w-6 h-6 ${isDragging ? 'text-white' : 'text-zinc-400'}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"

@@ -30,8 +30,8 @@ function getStrengthLabel(score: number): { label: string; color: string } {
   if (score <= 1) return { label: 'WEAK', color: 'text-red-500' };
   if (score <= 2) return { label: 'FAIR', color: 'text-orange-500' };
   if (score <= 3) return { label: 'GOOD', color: 'text-yellow-500' };
-  if (score <= 4) return { label: 'STRONG', color: 'text-matcha-400' };
-  return { label: 'EXCELLENT', color: 'text-matcha-500' };
+  if (score <= 4) return { label: 'STRONG', color: 'text-white' };
+  return { label: 'EXCELLENT', color: 'text-white' };
 }
 
 export function Settings() {
@@ -57,7 +57,7 @@ export function Settings() {
   const strengthInfo = useMemo(() => getStrengthLabel(passwordStrength.score), [passwordStrength.score]);
 
   const inputClasses =
-    'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50 focus:shadow-[0_0_10px_rgba(34,197,94,0.1)] transition-all font-mono';
+    'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-zinc-700 focus: transition-all font-mono';
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,7 +144,7 @@ export function Settings() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-600">Role</span>
-              <span className="text-sm text-matcha-500 uppercase tracking-wider">{user?.role}</span>
+              <span className="text-sm text-white uppercase tracking-wider">{user?.role}</span>
             </div>
           </div>
         </div>
@@ -170,8 +170,8 @@ export function Settings() {
               </div>
             )}
             {passwordSuccess && (
-              <div className="mb-6 p-3 border border-matcha-500/30 bg-matcha-500/5 text-matcha-400 text-[11px] tracking-wide">
-                <span className="text-matcha-500 mr-2">+</span>
+              <div className="mb-6 p-3 border border-zinc-700 bg-matcha-500/5 text-white text-[11px] tracking-wide">
+                <span className="text-white mr-2">+</span>
                 {passwordSuccess}
               </div>
             )}
@@ -231,23 +231,23 @@ export function Settings() {
 
                   {/* Requirements checklist */}
                   <div className="grid grid-cols-2 gap-2">
-                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.length ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.length ? 'text-white' : 'text-zinc-600'}`}>
                       <span>{passwordStrength.checks.length ? '+' : '-'}</span>
                       <span>8+ Characters</span>
                     </div>
-                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.uppercase ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.uppercase ? 'text-white' : 'text-zinc-600'}`}>
                       <span>{passwordStrength.checks.uppercase ? '+' : '-'}</span>
                       <span>Uppercase</span>
                     </div>
-                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.lowercase ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.lowercase ? 'text-white' : 'text-zinc-600'}`}>
                       <span>{passwordStrength.checks.lowercase ? '+' : '-'}</span>
                       <span>Lowercase</span>
                     </div>
-                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.number ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.number ? 'text-white' : 'text-zinc-600'}`}>
                       <span>{passwordStrength.checks.number ? '+' : '-'}</span>
                       <span>Number</span>
                     </div>
-                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.special ? 'text-matcha-500' : 'text-zinc-600'}`}>
+                    <div className={`flex items-center gap-2 text-[9px] tracking-wide ${passwordStrength.checks.special ? 'text-white' : 'text-zinc-600'}`}>
                       <span>{passwordStrength.checks.special ? '+' : '-'}</span>
                       <span>Special Char</span>
                     </div>
@@ -278,7 +278,7 @@ export function Settings() {
             <button
               type="submit"
               disabled={passwordLoading || passwordStrength.score < 3}
-              className="w-full py-3 bg-matcha-500 text-black text-[11px] tracking-[0.2em] uppercase font-medium hover:bg-matcha-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:shadow-[0_0_20px_rgba(34,197,94,0.3)]"
+              className="w-full py-3 bg-matcha-500 text-black text-[11px] tracking-[0.2em] uppercase font-medium hover:bg-matcha-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:"
             >
               {passwordLoading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -313,8 +313,8 @@ export function Settings() {
               </div>
             )}
             {emailSuccess && (
-              <div className="mb-6 p-3 border border-matcha-500/30 bg-matcha-500/5 text-matcha-400 text-[11px] tracking-wide">
-                <span className="text-matcha-500 mr-2">+</span>
+              <div className="mb-6 p-3 border border-zinc-700 bg-matcha-500/5 text-white text-[11px] tracking-wide">
+                <span className="text-white mr-2">+</span>
                 {emailSuccess}
               </div>
             )}
@@ -350,7 +350,7 @@ export function Settings() {
             <button
               type="submit"
               disabled={emailLoading}
-              className="w-full py-3 bg-matcha-500 text-black text-[11px] tracking-[0.2em] uppercase font-medium hover:bg-matcha-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:shadow-[0_0_20px_rgba(34,197,94,0.3)]"
+              className="w-full py-3 bg-matcha-500 text-black text-[11px] tracking-[0.2em] uppercase font-medium hover:bg-matcha-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:"
             >
               {emailLoading ? (
                 <span className="flex items-center justify-center gap-2">

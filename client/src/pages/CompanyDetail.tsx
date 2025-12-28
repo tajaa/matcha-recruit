@@ -170,7 +170,7 @@ export function CompanyDetail() {
                     <span
                       className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${
                         interview.status === 'completed'
-                          ? 'bg-matcha-500/10 text-matcha-400 border-matcha-500/20'
+                          ? 'bg-zinc-800 text-white border-zinc-700'
                           : interview.status === 'in_progress'
                           ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
                           : 'bg-zinc-700/50 text-zinc-400 border-zinc-700'
@@ -232,7 +232,7 @@ export function CompanyDetail() {
                       {company.culture_profile.values.map((value) => (
                         <span
                           key={value}
-                          className="px-2.5 py-1 bg-matcha-500/10 text-matcha-400 border border-matcha-500/20 rounded-md text-xs font-medium"
+                          className="px-2.5 py-1 bg-zinc-800 text-white border border-zinc-700 rounded-md text-xs font-medium"
                         >
                           {value}
                         </span>
@@ -293,14 +293,14 @@ export function CompanyDetail() {
                       {interview.status === 'completed' && score !== undefined ? (
                         <>
                           <span className={`text-xl font-bold ${
-                            score >= 80 ? 'text-matcha-400' :
+                            score >= 80 ? 'text-white' :
                             score >= 60 ? 'text-yellow-400' :
                             score >= 40 ? 'text-orange-400' : 'text-red-400'
                           }`}>
                             {score}
                           </span>
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                            recommendation === 'strong_pass' ? 'bg-matcha-500/20 text-matcha-400' :
+                            recommendation === 'strong_pass' ? 'bg-matcha-500/20 text-white' :
                             recommendation === 'pass' ? 'bg-yellow-500/20 text-yellow-400' :
                             recommendation === 'borderline' ? 'bg-orange-500/20 text-orange-400' :
                             'bg-red-500/20 text-red-400'
@@ -387,7 +387,7 @@ export function CompanyDetail() {
                       <div
                         className={`text-3xl font-bold ${
                           match.match_score >= 80
-                            ? 'text-matcha-400'
+                            ? 'text-white'
                             : match.match_score >= 60
                             ? 'text-yellow-400'
                             : 'text-red-400'
@@ -422,7 +422,7 @@ export function CompanyDetail() {
               onChange={(e) =>
                 setInterviewForm({ ...interviewForm, interviewer_name: e.target.value })
               }
-              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-transparent text-zinc-100 outline-none transition-all"
+              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-white focus:border-transparent text-zinc-100 outline-none transition-all"
               placeholder="John Smith"
             />
           </div>
@@ -434,7 +434,7 @@ export function CompanyDetail() {
               onChange={(e) =>
                 setInterviewForm({ ...interviewForm, interviewer_role: e.target.value })
               }
-              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-matcha-500 focus:border-transparent text-zinc-100 outline-none transition-all"
+              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-white focus:border-transparent text-zinc-100 outline-none transition-all"
               placeholder="VP of Engineering"
             />
           </div>
@@ -471,7 +471,7 @@ export function CompanyDetail() {
             <div>
               <h4 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-2">Extracted Culture Data</h4>
               <div className="bg-zinc-800/30 rounded-lg p-4 border border-zinc-800">
-                <pre className="text-xs text-matcha-400 overflow-x-auto">
+                <pre className="text-xs text-white overflow-x-auto">
                   {JSON.stringify(selectedInterview.raw_culture_data, null, 2)}
                 </pre>
               </div>

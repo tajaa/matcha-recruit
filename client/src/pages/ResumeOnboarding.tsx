@@ -92,7 +92,7 @@ ${formData.skills ? `Skills: ${formData.skills}` : ''}
   };
 
   const inputClasses =
-    'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-matcha-500/50 focus:shadow-[0_0_10px_rgba(34,197,94,0.1)] transition-all';
+    'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-zinc-700 focus: transition-all';
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white overflow-hidden relative font-mono selection:bg-matcha-500 selection:text-black">
@@ -114,8 +114,8 @@ ${formData.skills ? `Skills: ${formData.skills}` : ''}
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-6">
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.8)]" />
-          <span className="text-xs tracking-[0.3em] uppercase text-matcha-500 font-medium group-hover:text-matcha-400 transition-colors">
+          <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse " />
+          <span className="text-xs tracking-[0.3em] uppercase text-white font-medium group-hover:text-white transition-colors">
             Matcha
           </span>
         </Link>
@@ -156,15 +156,15 @@ ${formData.skills ? `Skills: ${formData.skills}` : ''}
               {/* Upload Option */}
               <button
                 onClick={() => setMode('upload')}
-                className="group relative bg-zinc-900/50 border border-zinc-800 p-8 text-center hover:border-matcha-500/50 transition-all"
+                className="group relative bg-zinc-900/50 border border-zinc-800 p-8 text-center hover:border-zinc-700 transition-all"
               >
-                <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-zinc-700 group-hover:border-matcha-500/50 transition-colors" />
-                <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-zinc-700 group-hover:border-matcha-500/50 transition-colors" />
-                <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-zinc-700 group-hover:border-matcha-500/50 transition-colors" />
-                <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-zinc-700 group-hover:border-matcha-500/50 transition-colors" />
+                <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-zinc-700 group-hover:border-zinc-700 transition-colors" />
+                <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-zinc-700 group-hover:border-zinc-700 transition-colors" />
+                <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-zinc-700 group-hover:border-zinc-700 transition-colors" />
+                <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-zinc-700 group-hover:border-zinc-700 transition-colors" />
 
                 <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-800 flex items-center justify-center group-hover:bg-matcha-500/20 transition-colors">
-                  <svg className="w-6 h-6 text-zinc-400 group-hover:text-matcha-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-6 h-6 text-zinc-400 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                 </div>
@@ -175,15 +175,15 @@ ${formData.skills ? `Skills: ${formData.skills}` : ''}
               {/* Create Option */}
               <button
                 onClick={() => setMode('create')}
-                className="group relative bg-zinc-900/50 border border-zinc-800 p-8 text-center hover:border-matcha-500/50 transition-all"
+                className="group relative bg-zinc-900/50 border border-zinc-800 p-8 text-center hover:border-zinc-700 transition-all"
               >
-                <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-zinc-700 group-hover:border-matcha-500/50 transition-colors" />
-                <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-zinc-700 group-hover:border-matcha-500/50 transition-colors" />
-                <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-zinc-700 group-hover:border-matcha-500/50 transition-colors" />
-                <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-zinc-700 group-hover:border-matcha-500/50 transition-colors" />
+                <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-zinc-700 group-hover:border-zinc-700 transition-colors" />
+                <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-zinc-700 group-hover:border-zinc-700 transition-colors" />
+                <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-zinc-700 group-hover:border-zinc-700 transition-colors" />
+                <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-zinc-700 group-hover:border-zinc-700 transition-colors" />
 
                 <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-800 flex items-center justify-center group-hover:bg-matcha-500/20 transition-colors">
-                  <svg className="w-6 h-6 text-zinc-400 group-hover:text-matcha-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-6 h-6 text-zinc-400 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                 </div>
@@ -211,11 +211,11 @@ ${formData.skills ? `Skills: ${formData.skills}` : ''}
                     handleFileSelect(e.dataTransfer.files);
                   }}
                   className={`border-2 border-dashed p-8 text-center transition-all ${
-                    isDragging ? 'border-matcha-500 bg-matcha-500/10' : 'border-zinc-700'
+                    isDragging ? 'border-white bg-zinc-800' : 'border-zinc-700'
                   }`}
                 >
                   <div className={`w-12 h-12 mx-auto mb-4 rounded-full flex items-center justify-center ${isDragging ? 'bg-matcha-500/20' : 'bg-zinc-800'}`}>
-                    <svg className={`w-6 h-6 ${isDragging ? 'text-matcha-500' : 'text-zinc-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className={`w-6 h-6 ${isDragging ? 'text-white' : 'text-zinc-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
                   </div>

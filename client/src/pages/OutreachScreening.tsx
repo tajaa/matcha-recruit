@@ -113,8 +113,8 @@ export function OutreachScreening() {
       <div className="min-h-screen bg-zinc-950 text-zinc-400 font-mono">
         <header className="border-b border-zinc-800/50 bg-zinc-950/90">
           <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-            <span className="text-xs tracking-[0.25em] uppercase text-matcha-500 font-medium">
+            <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse " />
+            <span className="text-xs tracking-[0.25em] uppercase text-white font-medium">
               Matcha
             </span>
           </div>
@@ -123,7 +123,7 @@ export function OutreachScreening() {
         <main className="max-w-2xl mx-auto px-4 py-12">
           <div className="text-center">
             <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-matcha-500/20 flex items-center justify-center">
-              <svg className="w-8 h-8 text-matcha-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
@@ -154,8 +154,8 @@ export function OutreachScreening() {
       <header className="border-b border-zinc-800/50 bg-zinc-950/90 sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-            <span className="text-xs tracking-[0.25em] uppercase text-matcha-500 font-medium">
+            <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse " />
+            <span className="text-xs tracking-[0.25em] uppercase text-white font-medium">
               Matcha
             </span>
           </div>
@@ -175,7 +175,7 @@ export function OutreachScreening() {
               <h1 className="text-xl font-bold text-white">
                 {info?.position_title || 'Screening Interview'}
               </h1>
-              <p className="text-matcha-400">{info?.company_name}</p>
+              <p className="text-white">{info?.company_name}</p>
             </div>
             {info?.candidate_name && (
               <div className="text-right text-sm">
@@ -203,8 +203,8 @@ export function OutreachScreening() {
               {starting ? 'Starting...' : 'Begin Screening'}
             </Button>
 
-            <div className="mt-8 p-5 bg-matcha-500/5 rounded-xl border border-matcha-500/10 text-left max-w-md mx-auto">
-              <h3 className="font-semibold text-matcha-400 mb-3 flex items-center gap-2">
+            <div className="mt-8 p-5 bg-matcha-500/5 rounded-xl border border-zinc-700 text-left max-w-md mx-auto">
+              <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -240,7 +240,7 @@ export function OutreachScreening() {
                   <div className="flex items-center gap-3">
                     <div
                       className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] transition-colors ${
-                        isConnected ? 'bg-matcha-500 text-matcha-500' : 'bg-zinc-600 text-zinc-600'
+                        isConnected ? 'bg-matcha-500 text-white' : 'bg-zinc-600 text-zinc-600'
                       }`}
                     />
                     <span className="text-sm font-medium text-zinc-300">
@@ -264,7 +264,7 @@ export function OutreachScreening() {
                   ) : (
                     <>
                       {!isRecording ? (
-                        <Button onClick={startRecording} className="flex-1 py-4 text-lg shadow-[0_0_20px_rgba(34,197,94,0.2)]">
+                        <Button onClick={startRecording} className="flex-1 py-4 text-lg ">
                           <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 24 24">
                             <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
                             <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />

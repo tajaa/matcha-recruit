@@ -46,7 +46,7 @@ export function SkillsInput({
       <div
         className={`
           flex flex-wrap gap-2 p-3 bg-zinc-900 border border-zinc-800 rounded-lg
-          focus-within:ring-2 focus-within:ring-matcha-500 focus-within:border-transparent
+          focus-within:ring-2 focus-within:ring-white focus-within:border-transparent
           ${disabled ? 'opacity-50' : ''}
         `}
       >

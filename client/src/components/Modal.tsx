@@ -34,14 +34,8 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
           className="fixed inset-0 bg-black/90 backdrop-blur-sm transition-opacity"
           onClick={onClose}
         />
-        <div className="relative max-w-lg w-full transform transition-all">
-          {/* Corner brackets */}
-          <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-zinc-600" />
-          <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-zinc-600" />
-          <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-zinc-600" />
-          <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-zinc-600" />
-
-          <div className="bg-zinc-900 border border-zinc-800">
+        <div className="relative max-w-lg w-full">
+          <div className="bg-zinc-900 border border-zinc-700">
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
               <h3 className="text-sm tracking-[0.15em] uppercase text-white font-medium">
                 {title}

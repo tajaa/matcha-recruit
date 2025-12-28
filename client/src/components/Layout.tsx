@@ -178,7 +178,7 @@ export function Layout() {
         to={item.path}
         className={`flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${
           isActive
-            ? 'text-matcha-400 bg-matcha-500/10 border-l-2 border-matcha-500'
+            ? 'text-white bg-zinc-800 border-l-2 border-white'
             : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
         }`}
       >
@@ -189,28 +189,15 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-400 font-mono selection:bg-matcha-500 selection:text-black">
-      {/* Subtle grid background */}
-      <div className="fixed inset-0 z-0 pointer-events-none">
-        <div
-          className="absolute inset-0 opacity-[0.02]"
-          style={{
-            backgroundImage: `
-              linear-gradient(to right, #22c55e 1px, transparent 1px),
-              linear-gradient(to bottom, #22c55e 1px, transparent 1px)
-            `,
-            backgroundSize: '60px 60px',
-          }}
-        />
-      </div>
+    <div className="min-h-screen bg-black text-zinc-400 font-mono">
 
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-50 w-48 flex-col bg-zinc-950/95 border-r border-zinc-800/50">
+      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-50 w-48 flex-col bg-zinc-950 border-r border-zinc-800">
         {/* Logo */}
-        <div className="h-14 flex items-center px-4 border-b border-zinc-800/50">
+        <div className="h-14 flex items-center px-4 border-b border-zinc-800">
           <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-            <span className="text-xs tracking-[0.25em] uppercase text-matcha-500 font-medium group-hover:text-matcha-400 transition-colors">
+            <div className="w-2 h-2 rounded-full bg-white" />
+            <span className="text-xs tracking-[0.25em] uppercase text-white font-medium group-hover:text-zinc-300 transition-colors">
               Matcha
             </span>
           </Link>
@@ -226,12 +213,12 @@ export function Layout() {
         </nav>
 
         {/* Bottom section - Settings & User */}
-        <div className="border-t border-zinc-800/50 p-2">
+        <div className="border-t border-zinc-800 p-2">
           <NavLink item={settingsItem} />
           <div className="mt-3 px-3 py-2">
             <div className="text-[9px] text-zinc-600 tracking-wide truncate">{user?.email}</div>
             <div className="flex items-center justify-between mt-1">
-              <span className="px-1.5 py-0.5 text-[8px] bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 tracking-[0.15em] uppercase">
+              <span className="px-1.5 py-0.5 text-[8px] bg-zinc-800 text-zinc-400 border border-zinc-700 tracking-[0.15em] uppercase">
                 {user?.role}
               </span>
               <button
@@ -246,13 +233,13 @@ export function Layout() {
       </aside>
 
       {/* Mobile Header - visible only on mobile */}
-      <nav className="md:hidden fixed top-0 inset-x-0 z-50 bg-zinc-950/90 backdrop-blur-sm border-b border-zinc-800/50">
+      <nav className="md:hidden fixed top-0 inset-x-0 z-50 bg-zinc-950 border-b border-zinc-800">
         <div className="px-4">
           <div className="flex justify-between h-14">
             <div className="flex items-center">
               <Link to="/" className="flex items-center gap-2 group">
-                <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-                <span className="text-xs tracking-[0.25em] uppercase text-matcha-500 font-medium group-hover:text-matcha-400 transition-colors">
+                <div className="w-2 h-2 rounded-full bg-white" />
+                <span className="text-xs tracking-[0.25em] uppercase text-white font-medium group-hover:text-zinc-300 transition-colors">
                   Matcha
                 </span>
               </Link>
@@ -280,7 +267,7 @@ export function Layout() {
 
         {/* Mobile menu dropdown */}
         {mobileMenuOpen && (
-          <div className="border-t border-zinc-800/50 bg-zinc-950/95 backdrop-blur-sm">
+          <div className="border-t border-zinc-800 bg-zinc-950">
             <div className="px-4 py-3 space-y-1">
               {navItems.map((item) => (
                 <Link
@@ -289,7 +276,7 @@ export function Layout() {
                   onClick={() => setMobileMenuOpen(false)}
                   className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
                     location.pathname === item.path
-                      ? 'text-matcha-400 bg-matcha-500/10 border-l-2 border-matcha-500'
+                      ? 'text-white bg-zinc-800 border-l-2 border-white'
                       : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
                   }`}
                 >
@@ -302,17 +289,17 @@ export function Layout() {
                 onClick={() => setMobileMenuOpen(false)}
                 className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
                   location.pathname === '/app/settings'
-                    ? 'text-matcha-400 bg-matcha-500/10 border-l-2 border-matcha-500'
+                    ? 'text-white bg-zinc-800 border-l-2 border-white'
                     : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
                 }`}
               >
                 {settingsItem.icon}
                 <span>Settings</span>
               </Link>
-              <div className="pt-3 mt-3 border-t border-zinc-800/50">
+              <div className="pt-3 mt-3 border-t border-zinc-800">
                 <div className="px-3 py-2 text-[10px] text-zinc-600 tracking-wide">
                   {user?.email}
-                  <span className="ml-2 px-2 py-0.5 bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 tracking-[0.15em] uppercase">
+                  <span className="ml-2 px-2 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 tracking-[0.15em] uppercase">
                     {user?.role}
                   </span>
                 </div>
@@ -339,16 +326,16 @@ export function Layout() {
       </main>
 
       {/* Bottom status bar */}
-      <footer className="fixed bottom-0 left-0 md:left-48 right-0 z-40 border-t border-zinc-800/50 bg-zinc-950/90 backdrop-blur-sm">
+      <footer className="fixed bottom-0 left-0 md:left-48 right-0 z-40 border-t border-zinc-800 bg-zinc-950">
         <div className="px-4 sm:px-6 lg:px-8 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-matcha-500 animate-pulse" />
+            <div className="w-1.5 h-1.5 rounded-full bg-white" />
             <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-600">
-              System Active
+              Active
             </span>
           </div>
           <span className="text-[9px] tracking-[0.15em] uppercase text-zinc-700">
-            Matcha Recruit v1.0
+            v1.0
           </span>
         </div>
       </footer>

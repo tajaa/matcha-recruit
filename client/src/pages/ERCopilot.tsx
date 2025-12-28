@@ -13,7 +13,7 @@ const STATUS_TABS: { label: string; value: ERCaseStatus | 'all' }[] = [
 ];
 
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
-  open: 'bg-matcha-500/20 text-matcha-400',
+  open: 'bg-matcha-500/20 text-white',
   in_review: 'bg-yellow-500/20 text-yellow-400',
   pending_determination: 'bg-orange-500/20 text-orange-400',
   closed: 'bg-zinc-700 text-zinc-300',
@@ -205,7 +205,7 @@ export function ERCopilot() {
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               placeholder="e.g., Harassment Allegation - Sales Team"
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-matcha-500"
+              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-white"
             />
           </div>
 
@@ -216,7 +216,7 @@ export function ERCopilot() {
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               placeholder="Brief summary of the allegation or incident..."
               rows={3}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-matcha-500"
+              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-white"
             />
           </div>
 
