@@ -619,9 +619,18 @@ async def get_timeline(
         if not row:
             raise HTTPException(status_code=404, detail="Timeline analysis not found. Generate it first.")
 
+        # Handle case where JSONB might be returned as string
+        analysis = row["analysis_data"]
+        if isinstance(analysis, str):
+            analysis = json.loads(analysis)
+
+        source_docs = row["source_documents"]
+        if isinstance(source_docs, str):
+            source_docs = json.loads(source_docs)
+
         return {
-            "analysis": row["analysis_data"],
-            "source_documents": row["source_documents"],
+            "analysis": analysis,
+            "source_documents": source_docs,
             "generated_at": row["generated_at"],
         }
 
@@ -687,9 +696,17 @@ async def get_discrepancies(
         if not row:
             raise HTTPException(status_code=404, detail="Discrepancy analysis not found.")
 
+        analysis = row["analysis_data"]
+        if isinstance(analysis, str):
+            analysis = json.loads(analysis)
+
+        source_docs = row["source_documents"]
+        if isinstance(source_docs, str):
+            source_docs = json.loads(source_docs)
+
         return {
-            "analysis": row["analysis_data"],
-            "source_documents": row["source_documents"],
+            "analysis": analysis,
+            "source_documents": source_docs,
             "generated_at": row["generated_at"],
         }
 
@@ -776,9 +793,17 @@ async def get_policy_check(
         if not row:
             raise HTTPException(status_code=404, detail="Policy check not found.")
 
+        analysis = row["analysis_data"]
+        if isinstance(analysis, str):
+            analysis = json.loads(analysis)
+
+        source_docs = row["source_documents"]
+        if isinstance(source_docs, str):
+            source_docs = json.loads(source_docs)
+
         return {
-            "analysis": row["analysis_data"],
-            "source_documents": row["source_documents"],
+            "analysis": analysis,
+            "source_documents": source_docs,
             "generated_at": row["generated_at"],
         }
 
