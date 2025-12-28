@@ -90,7 +90,7 @@ async def _run_timeline_analysis(case_id: str) -> dict[str, Any]:
         api_key=settings.gemini_api_key,
         vertex_project=settings.vertex_project,
         vertex_location=settings.vertex_location,
-        model="gemini-2.5-flash",
+        model="gemini-3.0-flash-preview",
     )
 
     conn = await get_db_connection()
@@ -163,7 +163,7 @@ async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
         api_key=settings.gemini_api_key,
         vertex_project=settings.vertex_project,
         vertex_location=settings.vertex_location,
-        model="gemini-2.5-flash",
+        model="gemini-3.0-flash-preview",
     )
 
     conn = await get_db_connection()
@@ -236,7 +236,7 @@ async def _run_policy_check(case_id: str, policy_document_id: str) -> dict[str, 
         api_key=settings.gemini_api_key,
         vertex_project=settings.vertex_project,
         vertex_location=settings.vertex_location,
-        model="gemini-2.5-flash",
+        model="gemini-3.0-flash-preview",
     )
 
     conn = await get_db_connection()
@@ -328,7 +328,7 @@ async def _generate_summary_report(case_id: str, generated_by: str) -> dict[str,
         api_key=settings.gemini_api_key,
         vertex_project=settings.vertex_project,
         vertex_location=settings.vertex_location,
-        model="gemini-2.5-flash",
+        model="gemini-3.0-flash-preview",
     )
 
     conn = await get_db_connection()
@@ -448,7 +448,7 @@ async def _generate_determination_letter(
         api_key=settings.gemini_api_key,
         vertex_project=settings.vertex_project,
         vertex_location=settings.vertex_location,
-        model="gemini-2.5-flash",
+        model="gemini-3.0-flash-preview",
     )
 
     conn = await get_db_connection()
