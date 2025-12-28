@@ -1265,28 +1265,26 @@ def create_discrepancy_analysis(case_type: str) -> dict:
         "harassment": {
             "discrepancies": [
                 {
-                    "topic": "Nature of comments",
-                    "statements": [
-                        {"speaker": "Michael Torres", "content": "He started making comments about my accent, saying things like 'speak English properly'", "source": "transcript_complainant.txt"},
-                        {"speaker": "David Kim", "content": "Just, you know, playful stuff. Sometimes I'll tease him about his pronunciation", "source": "transcript_accused.txt"}
-                    ],
-                    "analysis": "David Kim minimizes the severity of comments that Michael Torres and witness Jennifer Walsh describe as mocking and offensive.",
-                    "severity": "high"
+                    "type": "Conflicting accounts",
+                    "severity": "high",
+                    "description": "Nature of comments",
+                    "statement_1": {"speaker": "Michael Torres", "quote": "He started making comments about my accent, saying things like 'speak English properly'", "location": "Interview transcript", "source_document_id": ""},
+                    "statement_2": {"speaker": "David Kim", "quote": "Just, you know, playful stuff. Sometimes I'll tease him about his pronunciation", "location": "Interview transcript", "source_document_id": ""},
+                    "analysis": "David Kim minimizes the severity of comments that Michael Torres and witness Jennifer Walsh describe as mocking and offensive."
                 },
                 {
-                    "topic": "Michael's reaction",
-                    "statements": [
-                        {"speaker": "David Kim", "content": "he laughs too. I'm not trying to be mean", "source": "transcript_accused.txt"},
-                        {"speaker": "Jennifer Walsh", "content": "He kind of laughed nervously at first, but you could tell he was uncomfortable", "source": "transcript_witness.txt"}
-                    ],
-                    "analysis": "David interprets nervous laughter as genuine enjoyment; witness clarifies it was discomfort.",
-                    "severity": "medium"
+                    "type": "Interpretation difference",
+                    "severity": "medium",
+                    "description": "Michael's reaction",
+                    "statement_1": {"speaker": "David Kim", "quote": "he laughs too. I'm not trying to be mean", "location": "Interview transcript", "source_document_id": ""},
+                    "statement_2": {"speaker": "Jennifer Walsh", "quote": "He kind of laughed nervously at first, but you could tell he was uncomfortable", "location": "Interview transcript", "source_document_id": ""},
+                    "analysis": "David interprets nervous laughter as genuine enjoyment; witness clarifies it was discomfort."
                 }
             ],
             "credibility_notes": [
-                {"witness": "Michael Torres", "assessment": "Consistent account with documentary evidence (emails). Credible."},
-                {"witness": "David Kim", "assessment": "Minimizes behavior, claims ignorance despite direct email exchange showing awareness."},
-                {"witness": "Jennifer Walsh", "assessment": "Independent witness corroborating complainant's account. No apparent bias."}
+                {"witness": "Michael Torres", "assessment": "Credible", "reasoning": "Consistent account with documentary evidence (emails)."},
+                {"witness": "David Kim", "assessment": "Mixed", "reasoning": "Minimizes behavior, claims ignorance despite direct email exchange showing awareness."},
+                {"witness": "Jennifer Walsh", "assessment": "Credible", "reasoning": "Independent witness corroborating complainant's account. No apparent bias."}
             ],
             "summary": "Significant discrepancies exist between respondent's characterization of events as 'joking' and multiple accounts describing the conduct as harassment."
         },
