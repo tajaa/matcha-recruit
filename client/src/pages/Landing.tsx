@@ -191,7 +191,7 @@ export function Landing() {
             </p>
           </div>
           <div className="grid gap-8">
-            <div className="p-8 border border-zinc-800 bg-zinc-900/20 backdrop-blur-sm hover:border-zinc-700 transition-colors group">
+            <div className="p-8 border border-zinc-800 bg-zinc-900/70 backdrop-blur-xl hover:border-zinc-700 transition-colors group">
               <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center mb-6 group-hover:bg-matcha-500/20 transition-colors">
                 <span className="text-zinc-400 group-hover:text-matcha-500 transition-colors">01</span>
               </div>
@@ -200,7 +200,7 @@ export function Landing() {
                 Hundreds of applications. Hours of reviewing. Most aren't even close to what you need.
               </p>
             </div>
-            <div className="p-8 border border-zinc-800 bg-zinc-900/20 backdrop-blur-sm hover:border-zinc-700 transition-colors group">
+            <div className="p-8 border border-zinc-800 bg-zinc-900/70 backdrop-blur-xl hover:border-zinc-700 transition-colors group">
                <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center mb-6 group-hover:bg-matcha-500/20 transition-colors">
                 <span className="text-zinc-400 group-hover:text-matcha-500 transition-colors">02</span>
               </div>
@@ -209,7 +209,7 @@ export function Landing() {
                 Slow manual screening leads to top talent accepting other offers before you even speak.
               </p>
             </div>
-            <div className="p-8 border border-zinc-800 bg-zinc-900/20 backdrop-blur-sm hover:border-zinc-700 transition-colors group">
+            <div className="p-8 border border-zinc-800 bg-zinc-900/70 backdrop-blur-xl hover:border-zinc-700 transition-colors group">
                <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center mb-6 group-hover:bg-matcha-500/20 transition-colors">
                 <span className="text-zinc-400 group-hover:text-matcha-500 transition-colors">03</span>
               </div>
