@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, CardContent } from '../components';
 import { irIncidents } from '../api/client';
 import type { IRIncident, IRIncidentType, IRSeverity, IRStatus } from '../types';
 
@@ -8,26 +7,9 @@ const STATUS_TABS: { label: string; value: IRStatus | 'all' }[] = [
   { label: 'All', value: 'all' },
   { label: 'Reported', value: 'reported' },
   { label: 'Investigating', value: 'investigating' },
-  { label: 'Action Required', value: 'action_required' },
+  { label: 'Action Req', value: 'action_required' },
   { label: 'Resolved', value: 'resolved' },
   { label: 'Closed', value: 'closed' },
-];
-
-const TYPE_OPTIONS: { label: string; value: IRIncidentType | '' }[] = [
-  { label: 'All Types', value: '' },
-  { label: 'Safety', value: 'safety' },
-  { label: 'Behavioral', value: 'behavioral' },
-  { label: 'Property', value: 'property' },
-  { label: 'Near Miss', value: 'near_miss' },
-  { label: 'Other', value: 'other' },
-];
-
-const SEVERITY_OPTIONS: { label: string; value: IRSeverity | '' }[] = [
-  { label: 'All Severities', value: '' },
-  { label: 'Critical', value: 'critical' },
-  { label: 'High', value: 'high' },
-  { label: 'Medium', value: 'medium' },
-  { label: 'Low', value: 'low' },
 ];
 
 const TYPE_LABELS: Record<string, string> = {
@@ -39,19 +21,11 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  reported: 'bg-blue-500/20 text-blue-400',
-  investigating: 'bg-yellow-500/20 text-yellow-400',
-  action_required: 'bg-orange-500/20 text-orange-400',
-  resolved: 'bg-green-500/20 text-green-400',
-  closed: 'bg-zinc-700 text-zinc-300',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  reported: 'Reported',
-  investigating: 'Investigating',
-  action_required: 'Action Required',
-  resolved: 'Resolved',
-  closed: 'Closed',
+  reported: 'text-blue-400',
+  investigating: 'text-yellow-400',
+  action_required: 'text-orange-400',
+  resolved: 'text-green-400',
+  closed: 'text-zinc-500',
 };
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -67,7 +41,6 @@ export function IRList() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
 
-  // Filters
   const [activeTab, setActiveTab] = useState<IRStatus | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<IRIncidentType | ''>('');
   const [severityFilter, setSeverityFilter] = useState<IRSeverity | ''>('');
@@ -98,7 +71,7 @@ export function IRList() {
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Delete this incident? This action cannot be undone.')) return;
+    if (!confirm('Delete this incident?')) return;
     try {
       await irIncidents.deleteIncident(id);
       fetchIncidents();
@@ -108,38 +81,45 @@ export function IRList() {
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
+    <div className="max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="flex justify-between items-start mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">All Incidents</h1>
-          <p className="text-zinc-400 mt-1">{total} total incidents</p>
+          <h1 className="text-xl font-medium text-white">All Incidents</h1>
+          <p className="text-xs text-zinc-600 mt-1">{total} total</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate('/app/ir')}>
+        <div className="flex gap-3">
+          <button
+            onClick={() => navigate('/app/ir')}
+            className="text-xs text-zinc-500 hover:text-white uppercase tracking-wider"
+          >
             Dashboard
-          </Button>
-          <Button onClick={() => navigate('/app/ir/incidents/new')}>Report Incident</Button>
+          </button>
+          <button
+            onClick={() => navigate('/app/ir/incidents/new')}
+            className="px-3 py-1.5 bg-white text-black text-xs font-medium rounded hover:bg-zinc-200 uppercase tracking-wider"
+          >
+            Report
+          </button>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-4 mb-6">
+      <div className="flex flex-wrap items-center gap-4 mb-8">
         {/* Status Tabs */}
-        <div className="flex gap-1 bg-zinc-900 p-1 rounded-lg">
+        <div className="flex gap-1">
           {STATUS_TABS.map((tab) => (
             <button
               key={tab.value}
               onClick={() => setActiveTab(tab.value)}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                activeTab === tab.value ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'
+              className={`px-2 py-1 text-xs rounded transition-colors ${
+                activeTab === tab.value
+                  ? 'bg-white text-black'
+                  : 'text-zinc-500 hover:text-white'
               }`}
             >
               {tab.label}
@@ -147,132 +127,103 @@ export function IRList() {
           ))}
         </div>
 
-        {/* Type Filter */}
+        <div className="w-px h-4 bg-zinc-800" />
+
+        {/* Type */}
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as IRIncidentType | '')}
-          className="px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-white focus:outline-none focus:border-white"
+          className="px-2 py-1 bg-transparent border-b border-zinc-800 text-xs text-zinc-400 focus:outline-none focus:border-zinc-500 cursor-pointer"
         >
-          {TYPE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
+          <option value="">All Types</option>
+          <option value="safety">Safety</option>
+          <option value="behavioral">Behavioral</option>
+          <option value="property">Property</option>
+          <option value="near_miss">Near Miss</option>
+          <option value="other">Other</option>
         </select>
 
-        {/* Severity Filter */}
+        {/* Severity */}
         <select
           value={severityFilter}
           onChange={(e) => setSeverityFilter(e.target.value as IRSeverity | '')}
-          className="px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-white focus:outline-none focus:border-white"
+          className="px-2 py-1 bg-transparent border-b border-zinc-800 text-xs text-zinc-400 focus:outline-none focus:border-zinc-500 cursor-pointer"
         >
-          {SEVERITY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
+          <option value="">All Severities</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
         </select>
 
         {/* Search */}
-        <div className="flex-1 min-w-[200px]">
+        <div className="flex-1 min-w-[150px]">
           <input
             type="text"
-            placeholder="Search incidents..."
+            placeholder="Search..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white"
+            className="w-full px-2 py-1 bg-transparent border-b border-zinc-800 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
           />
         </div>
       </div>
 
-      {/* Incidents List */}
+      {/* List */}
       {loading ? (
-        <div className="text-center py-12 text-zinc-500">Loading...</div>
+        <div className="text-center py-12 text-xs text-zinc-600 uppercase tracking-wider">Loading...</div>
       ) : incidents.length === 0 ? (
-        <Card>
-          <CardContent className="text-center py-12">
-            <svg className="mx-auto h-12 w-12 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-            <h3 className="mt-4 text-lg font-medium text-white">No incidents found</h3>
-            <p className="mt-2 text-zinc-500">
-              {activeTab !== 'all' || typeFilter || severityFilter || searchQuery
-                ? 'Try adjusting your filters.'
-                : 'Get started by reporting an incident.'}
-            </p>
-            <Button className="mt-4" onClick={() => navigate('/app/ir/incidents/new')}>
-              Report Incident
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="text-center py-16">
+          <div className="text-xs text-zinc-600 mb-4">No incidents found</div>
+          <button
+            onClick={() => navigate('/app/ir/incidents/new')}
+            className="text-xs text-zinc-500 hover:text-white uppercase tracking-wider"
+          >
+            Report Incident
+          </button>
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-1">
+          {/* Header row */}
+          <div className="flex items-center gap-4 py-2 text-[10px] text-zinc-600 uppercase tracking-wider border-b border-zinc-900">
+            <div className="w-3" />
+            <div className="w-24">ID</div>
+            <div className="flex-1">Title</div>
+            <div className="w-20">Type</div>
+            <div className="w-20">Status</div>
+            <div className="w-16 text-right">Date</div>
+            <div className="w-12" />
+          </div>
+
           {incidents.map((incident) => (
-            <Card
+            <div
               key={incident.id}
-              className="cursor-pointer hover:border-zinc-600 transition-colors"
               onClick={() => navigate(`/app/ir/incidents/${incident.id}`)}
+              className="flex items-center gap-4 py-3 cursor-pointer group border-b border-zinc-900/50 hover:bg-zinc-900/30 transition-colors"
             >
-              <CardContent className="py-4">
-                <div className="flex items-start gap-4">
-                  {/* Severity Indicator */}
-                  <div className={`w-3 h-3 rounded-full mt-1.5 ${SEVERITY_COLORS[incident.severity]}`} />
-
-                  {/* Main Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm text-zinc-500 font-mono">{incident.incident_number}</span>
-                      <span className={`px-2 py-0.5 text-xs rounded ${STATUS_COLORS[incident.status]}`}>
-                        {STATUS_LABELS[incident.status]}
-                      </span>
-                      <span className="px-2 py-0.5 text-xs rounded bg-zinc-800 text-zinc-400">
-                        {TYPE_LABELS[incident.incident_type]}
-                      </span>
-                    </div>
-
-                    <h3 className="font-medium text-white mb-1">{incident.title}</h3>
-
-                    {incident.description && (
-                      <p className="text-sm text-zinc-500 mb-2 line-clamp-1">{incident.description}</p>
-                    )}
-
-                    <div className="flex items-center gap-4 text-sm text-zinc-500">
-                      <span>{formatDate(incident.occurred_at)}</span>
-                      {incident.location && <span>{incident.location}</span>}
-                      <span>by {incident.reported_by_name}</span>
-                      {incident.document_count > 0 && (
-                        <span className="flex items-center gap-1">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                            />
-                          </svg>
-                          {incident.document_count}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={(e) => handleDelete(incident.id, e)}
-                      className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1"
-                    >
-                      Delete
-                    </button>
-                  </div>
+              <div className={`w-2 h-2 rounded-full ${SEVERITY_COLORS[incident.severity]}`} />
+              <div className="text-[10px] text-zinc-600 font-mono w-24">{incident.incident_number}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-zinc-300 truncate group-hover:text-white transition-colors">
+                  {incident.title}
                 </div>
-              </CardContent>
-            </Card>
+                {incident.description && (
+                  <div className="text-[10px] text-zinc-600 truncate mt-0.5">{incident.description}</div>
+                )}
+              </div>
+              <div className="text-[10px] text-zinc-500 w-20">{TYPE_LABELS[incident.incident_type]}</div>
+              <div className={`text-[10px] w-20 ${STATUS_COLORS[incident.status]}`}>
+                {incident.status.replace('_', ' ')}
+              </div>
+              <div className="text-[10px] text-zinc-600 w-16 text-right">{formatDate(incident.occurred_at)}</div>
+              <div className="w-12 text-right">
+                <button
+                  onClick={(e) => handleDelete(incident.id, e)}
+                  className="text-[10px] text-zinc-700 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       )}
