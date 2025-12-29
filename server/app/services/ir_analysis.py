@@ -265,7 +265,7 @@ class IRAnalyzer:
         api_key: Optional[str] = None,
         vertex_project: Optional[str] = None,
         vertex_location: str = "us-central1",
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.0-flash-preview",
     ):
         """
         Initialize the IR analyzer.
