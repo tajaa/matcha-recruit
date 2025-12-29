@@ -40,6 +40,10 @@ const TutorMetrics = lazy(() => import('./pages/TutorMetrics'));
 const TutorSessionDetail = lazy(() => import('./pages/TutorSessionDetail'));
 const ERCopilot = lazy(() => import('./pages/ERCopilot'));
 const ERCaseDetail = lazy(() => import('./pages/ERCaseDetail'));
+const IRDashboard = lazy(() => import('./pages/IRDashboard'));
+const IRList = lazy(() => import('./pages/IRList'));
+const IRCreate = lazy(() => import('./pages/IRCreate'));
+const IRDetail = lazy(() => import('./pages/IRDetail'));
 
 // Loading fallback
 function PageLoader() {
@@ -250,6 +254,38 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <ERCaseDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="ir"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <IRDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="ir/incidents"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <IRList />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="ir/incidents/new"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <IRCreate />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="ir/incidents/:id"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <IRDetail />
                   </ProtectedRoute>
                 }
               />

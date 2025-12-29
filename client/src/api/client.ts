@@ -65,6 +65,26 @@ import type {
   EvidenceSearchResponse,
   ERTaskStatus,
   ERAuditLogResponse,
+  // IR (Incident Report) types
+  IRIncident,
+  IRIncidentCreate,
+  IRIncidentUpdate,
+  IRIncidentListResponse,
+  IRIncidentType,
+  IRSeverity,
+  IRStatus,
+  IRDocument,
+  IRDocumentType,
+  IRDocumentUploadResponse,
+  IRAnalyticsSummary,
+  IRTrendsAnalysis,
+  IRLocationAnalysis,
+  IRCategorizationAnalysis,
+  IRSeverityAnalysis,
+  IRRootCauseAnalysis,
+  IRRecommendationsAnalysis,
+  IRSimilarIncidentsAnalysis,
+  IRAuditLogResponse,
 } from '../types';
 
 const API_BASE = 'http://localhost:8001/api';
@@ -1087,4 +1107,135 @@ export const erCopilot = {
   // Audit Log
   getAuditLog: (caseId: string, limit: number = 100, offset: number = 0): Promise<ERAuditLogResponse> =>
     request<ERAuditLogResponse>(`/er/cases/${caseId}/audit-log?limit=${limit}&offset=${offset}`),
+};
+
+// IR (Incident Report) API
+export const irIncidents = {
+  // Incidents CRUD
+  listIncidents: (params?: {
+    status?: IRStatus;
+    incident_type?: IRIncidentType;
+    severity?: IRSeverity;
+    location?: string;
+    from_date?: string;
+    to_date?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<IRIncidentListResponse> => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.append('status', params.status);
+    if (params?.incident_type) searchParams.append('incident_type', params.incident_type);
+    if (params?.severity) searchParams.append('severity', params.severity);
+    if (params?.location) searchParams.append('location', params.location);
+    if (params?.from_date) searchParams.append('from_date', params.from_date);
+    if (params?.to_date) searchParams.append('to_date', params.to_date);
+    if (params?.search) searchParams.append('search', params.search);
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.offset) searchParams.append('offset', params.offset.toString());
+    const query = searchParams.toString();
+    return request<IRIncidentListResponse>(`/ir/incidents${query ? `?${query}` : ''}`);
+  },
+
+  getIncident: (id: string): Promise<IRIncident> => request<IRIncident>(`/ir/incidents/${id}`),
+
+  createIncident: (data: IRIncidentCreate): Promise<IRIncident> =>
+    request<IRIncident>('/ir/incidents', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateIncident: (id: string, data: IRIncidentUpdate): Promise<IRIncident> =>
+    request<IRIncident>(`/ir/incidents/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteIncident: (id: string): Promise<{ message: string }> =>
+    request<{ message: string }>(`/ir/incidents/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Documents
+  uploadDocument: async (
+    incidentId: string,
+    file: File,
+    documentType: IRDocumentType
+  ): Promise<IRDocumentUploadResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('document_type', documentType);
+
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/ir/incidents/${incidentId}/documents`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return response.json();
+  },
+
+  listDocuments: (incidentId: string): Promise<IRDocument[]> =>
+    request<IRDocument[]>(`/ir/incidents/${incidentId}/documents`),
+
+  deleteDocument: (incidentId: string, docId: string): Promise<{ message: string }> =>
+    request<{ message: string }>(`/ir/incidents/${incidentId}/documents/${docId}`, {
+      method: 'DELETE',
+    }),
+
+  // Analytics
+  getAnalyticsSummary: (): Promise<IRAnalyticsSummary> =>
+    request<IRAnalyticsSummary>('/ir/incidents/analytics/summary'),
+
+  getAnalyticsTrends: (period: 'daily' | 'weekly' | 'monthly' = 'daily', days: number = 30): Promise<IRTrendsAnalysis> =>
+    request<IRTrendsAnalysis>(`/ir/incidents/analytics/trends?period=${period}&days=${days}`),
+
+  getAnalyticsLocations: (limit: number = 10): Promise<IRLocationAnalysis> =>
+    request<IRLocationAnalysis>(`/ir/incidents/analytics/locations?limit=${limit}`),
+
+  // AI Analysis
+  analyzeCategorization: (incidentId: string): Promise<IRCategorizationAnalysis> =>
+    request<IRCategorizationAnalysis>(`/ir/incidents/${incidentId}/analyze/categorize`, {
+      method: 'POST',
+    }),
+
+  analyzeSeverity: (incidentId: string): Promise<IRSeverityAnalysis> =>
+    request<IRSeverityAnalysis>(`/ir/incidents/${incidentId}/analyze/severity`, {
+      method: 'POST',
+    }),
+
+  analyzeRootCause: (incidentId: string): Promise<IRRootCauseAnalysis> =>
+    request<IRRootCauseAnalysis>(`/ir/incidents/${incidentId}/analyze/root-cause`, {
+      method: 'POST',
+    }),
+
+  analyzeRecommendations: (incidentId: string): Promise<IRRecommendationsAnalysis> =>
+    request<IRRecommendationsAnalysis>(`/ir/incidents/${incidentId}/analyze/recommendations`, {
+      method: 'POST',
+    }),
+
+  analyzeSimilarIncidents: (incidentId: string): Promise<IRSimilarIncidentsAnalysis> =>
+    request<IRSimilarIncidentsAnalysis>(`/ir/incidents/${incidentId}/analyze/similar`, {
+      method: 'POST',
+    }),
+
+  clearAnalysisCache: (incidentId: string, analysisType: string): Promise<{ message: string }> =>
+    request<{ message: string }>(`/ir/incidents/${incidentId}/analyze/${analysisType}`, {
+      method: 'DELETE',
+    }),
+
+  // Audit Log
+  getAuditLog: (incidentId: string, limit: number = 50, offset: number = 0): Promise<IRAuditLogResponse> =>
+    request<IRAuditLogResponse>(`/ir/incidents/${incidentId}/audit-log?limit=${limit}&offset=${offset}`),
 };

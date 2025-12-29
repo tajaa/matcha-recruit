@@ -655,6 +655,107 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_er_audit_log_action ON er_audit_log(action)
         """)
 
+        # ===========================================
+        # IR (Incident Report) Tables
+        # ===========================================
+
+        # IR Incidents table (main incident records)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_incidents (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                incident_number VARCHAR(50) NOT NULL UNIQUE,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                incident_type VARCHAR(50) NOT NULL CHECK (incident_type IN ('safety', 'behavioral', 'property', 'near_miss', 'other')),
+                severity VARCHAR(20) DEFAULT 'medium' CHECK (severity IN ('critical', 'high', 'medium', 'low')),
+                status VARCHAR(50) DEFAULT 'reported' CHECK (status IN ('reported', 'investigating', 'action_required', 'resolved', 'closed')),
+                occurred_at TIMESTAMP NOT NULL,
+                location VARCHAR(255),
+                reported_by_name VARCHAR(255) NOT NULL,
+                reported_by_email VARCHAR(255),
+                reported_at TIMESTAMP DEFAULT NOW(),
+                assigned_to UUID REFERENCES users(id),
+                witnesses JSONB DEFAULT '[]',
+                category_data JSONB DEFAULT '{}',
+                root_cause TEXT,
+                corrective_actions TEXT,
+                created_by UUID REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                resolved_at TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incidents_status ON ir_incidents(status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incidents_type ON ir_incidents(incident_type)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incidents_severity ON ir_incidents(severity)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incidents_occurred_at ON ir_incidents(occurred_at)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incidents_location ON ir_incidents(location)
+        """)
+
+        # IR Incident Documents table (photos, forms, attachments)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_incident_documents (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                document_type VARCHAR(50) NOT NULL CHECK (document_type IN ('photo', 'form', 'statement', 'other')),
+                filename VARCHAR(255) NOT NULL,
+                file_path VARCHAR(500) NOT NULL,
+                mime_type VARCHAR(100),
+                file_size INTEGER,
+                uploaded_by UUID REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incident_documents_incident_id ON ir_incident_documents(incident_id)
+        """)
+
+        # IR Incident Analysis table (cached AI analysis)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_incident_analysis (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                analysis_type VARCHAR(50) NOT NULL CHECK (analysis_type IN ('categorization', 'severity', 'root_cause', 'recommendations', 'similar')),
+                analysis_data JSONB NOT NULL,
+                generated_by UUID REFERENCES users(id),
+                generated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(incident_id, analysis_type)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incident_analysis_incident_id ON ir_incident_analysis(incident_id)
+        """)
+
+        # IR Audit Log table (compliance trail)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_audit_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                incident_id UUID REFERENCES ir_incidents(id) ON DELETE SET NULL,
+                user_id UUID REFERENCES users(id),
+                action VARCHAR(100) NOT NULL,
+                entity_type VARCHAR(50),
+                entity_id UUID,
+                details JSONB,
+                ip_address VARCHAR(50),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_audit_log_incident_id ON ir_audit_log(incident_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_audit_log_user_id ON ir_audit_log(user_id)
+        """)
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:

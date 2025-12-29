@@ -1015,3 +1015,196 @@ export interface ERAuditLogResponse {
   entries: ERAuditLogEntry[];
   total: number;
 }
+
+// ===========================================
+// IR (Incident Report) Types
+// ===========================================
+
+export type IRIncidentType = 'safety' | 'behavioral' | 'property' | 'near_miss' | 'other';
+export type IRSeverity = 'critical' | 'high' | 'medium' | 'low';
+export type IRStatus = 'reported' | 'investigating' | 'action_required' | 'resolved' | 'closed';
+export type IRDocumentType = 'photo' | 'form' | 'statement' | 'other';
+
+export interface IRWitness {
+  name: string;
+  contact?: string | null;
+  statement?: string | null;
+}
+
+export interface IRIncident {
+  id: string;
+  incident_number: string;
+  title: string;
+  description: string | null;
+  incident_type: IRIncidentType;
+  severity: IRSeverity;
+  status: IRStatus;
+  occurred_at: string;
+  location: string | null;
+  reported_by_name: string;
+  reported_by_email: string | null;
+  reported_at: string;
+  assigned_to: string | null;
+  witnesses: IRWitness[];
+  category_data: Record<string, unknown>;
+  root_cause: string | null;
+  corrective_actions: string | null;
+  document_count: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+}
+
+export interface IRIncidentCreate {
+  title: string;
+  description?: string;
+  incident_type: IRIncidentType;
+  severity?: IRSeverity;
+  occurred_at: string;
+  location?: string;
+  reported_by_name: string;
+  reported_by_email?: string;
+  witnesses?: IRWitness[];
+  category_data?: Record<string, unknown>;
+}
+
+export interface IRIncidentUpdate {
+  title?: string;
+  description?: string;
+  incident_type?: IRIncidentType;
+  severity?: IRSeverity;
+  status?: IRStatus;
+  occurred_at?: string;
+  location?: string;
+  assigned_to?: string;
+  witnesses?: IRWitness[];
+  category_data?: Record<string, unknown>;
+  root_cause?: string;
+  corrective_actions?: string;
+}
+
+export interface IRIncidentListResponse {
+  incidents: IRIncident[];
+  total: number;
+}
+
+export interface IRDocument {
+  id: string;
+  incident_id: string;
+  document_type: IRDocumentType;
+  filename: string;
+  mime_type: string | null;
+  file_size: number | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export interface IRDocumentUploadResponse {
+  document: IRDocument;
+  message: string;
+}
+
+// Analytics types
+export interface IRAnalyticsSummary {
+  total_incidents: number;
+  by_status: Record<string, number>;
+  by_type: Record<string, number>;
+  by_severity: Record<string, number>;
+  recent_count: number;
+  avg_resolution_days: number | null;
+}
+
+export interface IRTrendDataPoint {
+  date: string;
+  count: number;
+  by_type?: Record<string, number>;
+}
+
+export interface IRTrendsAnalysis {
+  data: IRTrendDataPoint[];
+  period: string;
+  start_date: string;
+  end_date: string;
+}
+
+export interface IRLocationHotspot {
+  location: string;
+  count: number;
+  by_type: Record<string, number>;
+  avg_severity_score: number;
+}
+
+export interface IRLocationAnalysis {
+  hotspots: IRLocationHotspot[];
+  total_locations: number;
+}
+
+// AI Analysis types
+export interface IRCategorizationAnalysis {
+  suggested_type: IRIncidentType;
+  confidence: number;
+  reasoning: string;
+  generated_at: string;
+}
+
+export interface IRSeverityAnalysis {
+  suggested_severity: IRSeverity;
+  factors: string[];
+  reasoning: string;
+  generated_at: string;
+}
+
+export interface IRRootCauseAnalysis {
+  primary_cause: string;
+  contributing_factors: string[];
+  prevention_suggestions: string[];
+  reasoning: string;
+  generated_at: string;
+}
+
+export interface IRRecommendationItem {
+  action: string;
+  priority: 'immediate' | 'short_term' | 'long_term';
+  responsible_party?: string;
+  estimated_effort?: string;
+}
+
+export interface IRRecommendationsAnalysis {
+  recommendations: IRRecommendationItem[];
+  summary: string;
+  generated_at: string;
+}
+
+export interface IRSimilarIncident {
+  incident_id: string;
+  incident_number: string;
+  title: string;
+  incident_type: IRIncidentType;
+  similarity_score: number;
+  common_factors: string[];
+}
+
+export interface IRSimilarIncidentsAnalysis {
+  similar_incidents: IRSimilarIncident[];
+  pattern_summary: string | null;
+  generated_at: string;
+}
+
+// Audit log
+export interface IRAuditLogEntry {
+  id: string;
+  incident_id: string | null;
+  user_id: string | null;
+  action: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  details: Record<string, unknown> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface IRAuditLogResponse {
+  entries: IRAuditLogEntry[];
+  total: number;
+}
