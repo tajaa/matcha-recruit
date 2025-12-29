@@ -1,6 +1,32 @@
 version: '3.8'
 
 services:
+  # PostgreSQL with pgvector
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: matcha-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=matcha
+      - POSTGRES_USER=matcha
+      - POSTGRES_PASSWORD=matcha_dev
+    volumes:
+      - matcha_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - matcha-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "matcha"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # Redis for Celery broker, result backend, and caching
   redis:
     image: redis:7-alpine
@@ -36,6 +62,7 @@ services:
     env_file:
       - .env.backend
     environment:
+      - DATABASE_URL=postgresql://matcha:matcha_dev@postgres:5432/matcha
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -44,6 +71,8 @@ services:
       - ./credentials:/app/credentials:ro
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -75,6 +104,7 @@ services:
     env_file:
       - .env.backend
     environment:
+      - DATABASE_URL=postgresql://matcha:matcha_dev@postgres:5432/matcha
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -83,6 +113,8 @@ services:
       - ./credentials:/app/credentials:ro
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -140,3 +172,5 @@ volumes:
     driver: local
   redis_data:
     driver: local
+  matcha_postgres_data:
+    external: true
