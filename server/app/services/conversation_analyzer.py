@@ -253,6 +253,12 @@ TUTOR_INTERVIEW_ANALYSIS_PROMPT = """Analyze this interview practice session tra
 
 Provide feedback to help the user improve their interview skills.
 
+IMPORTANT SCORING GUIDANCE:
+- Score based on the QUALITY of responses given, NOT the number of questions answered
+- A short session with 3 excellent answers should score higher than a longer session with 5 mediocre answers
+- "Missed opportunities" means places where the user COULD HAVE elaborated more on a question they were asked - NOT topics that weren't covered due to time
+- Do NOT penalize for fewer questions being covered - session length varies and that's expected
+
 TRANSCRIPT:
 {transcript}
 
@@ -269,10 +275,10 @@ Evaluate the user's performance across three key areas:
    - Professionalism: Is the tone appropriate for an interview?
    - Engagement: Do they show enthusiasm and interest?
 
-3. CONTENT COVERAGE (What topics did they handle well or miss?)
-   - Topics Covered: What interview topics were addressed?
-   - Missed Opportunities: Where could they have elaborated more?
-   - Follow-up Depth: Did they anticipate and address likely follow-ups?
+3. CONTENT COVERAGE (How thoroughly did they address what was asked?)
+   - Topics Covered: What themes did they address in their responses?
+   - Missed Opportunities: Where could they have added more depth or examples to answers they DID give?
+   - Follow-up Depth: When follow-up questions were asked, did they build on their previous answer?
 
 For each response in the transcript, analyze:
 - What question was asked
@@ -306,11 +312,11 @@ Return ONLY a JSON object with this structure:
         "notes": "overall communication feedback"
     }},
     "content_coverage": {{
-        "topics_covered": ["list of topics discussed well"],
+        "topics_covered": ["list of themes/topics they addressed well in their answers"],
         "missed_opportunities": [
             {{
-                "topic": "what could have been discussed",
-                "suggestion": "how to address it"
+                "topic": "where they could have elaborated MORE on a question they answered",
+                "suggestion": "what additional detail or example would have strengthened their answer"
             }}
         ],
         "follow_up_depth": "excellent/good/shallow"
