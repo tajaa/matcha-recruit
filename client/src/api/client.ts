@@ -884,6 +884,7 @@ export const screening = {
 export interface TutorSessionCreate {
   mode: 'interview_prep' | 'language_test';
   language?: 'en' | 'es';
+  duration_minutes?: 2 | 8;
 }
 
 export interface TutorSessionStart {

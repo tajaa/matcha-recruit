@@ -6,6 +6,7 @@ import { useAudioInterview } from '../hooks/useAudioInterview';
 
 type TutorMode = 'interview_prep' | 'language_test';
 type Language = 'en' | 'es';
+type Duration = 2 | 8;
 
 export function Tutor() {
   const navigate = useNavigate();
@@ -13,7 +14,8 @@ export function Tutor() {
 
   // Mode selection state
   const [selectedMode, setSelectedMode] = useState<TutorMode | null>(null);
-  const [selectedLanguage, setSelectedLanguage] = useState<Language>('en');
+  const [selectedLanguage, setSelectedLanguage] = useState<Language>('es');
+  const [selectedDuration, setSelectedDuration] = useState<Duration>(2);
 
   // Session state
   const [interviewId, setInterviewId] = useState<string | null>(null);
@@ -40,18 +42,20 @@ export function Tutor() {
   }, [messages]);
 
   // Start a tutor session
-  const handleStartSession = async (mode: TutorMode, language?: Language) => {
+  const handleStartSession = async (mode: TutorMode, language?: Language, duration?: Duration) => {
     setStarting(true);
     setError(null);
     try {
       const result = await tutor.createSession({
         mode,
         language: mode === 'language_test' ? language : undefined,
+        duration_minutes: duration,
       });
       setInterviewId(result.interview_id);
       setMaxSessionDurationMs(result.max_session_duration_seconds * 1000);
       setSelectedMode(mode);
       if (language) setSelectedLanguage(language);
+      if (duration) setSelectedDuration(duration);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start session');
     } finally {
@@ -335,7 +339,7 @@ export function Tutor() {
               Get gentle corrections and vocabulary suggestions.
             </p>
 
-            <div className="mb-6">
+            <div className="mb-4">
               <label className="block text-xs text-zinc-500 mb-2">Select Language</label>
               <div className="flex gap-2">
                 <button
@@ -361,13 +365,39 @@ export function Tutor() {
               </div>
             </div>
 
+            <div className="mb-6">
+              <label className="block text-xs text-zinc-500 mb-2">Session Duration</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedDuration(2)}
+                  className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
+                    selectedDuration === 2
+                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
+                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                  }`}
+                >
+                  2 min
+                </button>
+                <button
+                  onClick={() => setSelectedDuration(8)}
+                  className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
+                    selectedDuration === 8
+                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
+                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                  }`}
+                >
+                  8 min
+                </button>
+              </div>
+            </div>
+
             <Button
-              onClick={() => handleStartSession('language_test', selectedLanguage)}
+              onClick={() => handleStartSession('language_test', selectedLanguage, selectedDuration)}
               disabled={starting}
               variant="secondary"
               className="w-full border-blue-500/30 hover:bg-blue-500/10"
             >
-              {starting ? 'Starting...' : `Practice ${selectedLanguage === 'es' ? 'Spanish' : 'English'}`}
+              {starting ? 'Starting...' : `Practice ${selectedLanguage === 'es' ? 'Spanish' : 'English'} (${selectedDuration} min)`}
             </Button>
           </CardContent>
         </Card>
@@ -392,7 +422,7 @@ export function Tutor() {
             </li>
             <li className="flex items-start gap-2">
               <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
-              Sessions are limited to 4 minutes to keep practice focused
+              Choose 2 min for quick practice or 8 min for deeper conversation
             </li>
           </ul>
         </CardContent>
