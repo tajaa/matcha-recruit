@@ -90,22 +90,31 @@ async def create_tutor_session(request: TutorSessionCreate):
     # Map mode to interview type
     interview_type = "tutor_interview" if request.mode == "interview_prep" else "tutor_language"
 
+    # For interview prep, store the role being practiced for in interviewer_name
+    # For language test, store the language in interviewer_role
+    interviewer_name = request.interview_role if request.mode == "interview_prep" else "Tutor"
+    interviewer_role = request.language if request.mode == "language_test" else None
+
     async with get_connection() as conn:
         # Create interview record (company_id is NULL for tutor sessions)
-        # Store language in interviewer_role field
         row = await conn.fetchrow(
             """
             INSERT INTO interviews (company_id, interviewer_name, interviewer_role, interview_type, status)
-            VALUES (NULL, 'Tutor', $1, $2, 'pending')
+            VALUES (NULL, $1, $2, $3, 'pending')
             RETURNING id
             """,
-            request.language,  # Store language in interviewer_role for retrieval
+            interviewer_name,
+            interviewer_role,
             interview_type,
         )
         interview_id = row["id"]
 
-        # Calculate duration in seconds (default 2 minutes)
-        duration_seconds = (request.duration_minutes or 2) * 60
+        # Calculate duration in seconds
+        # Default: 5 min for interview prep, 2 min for language test
+        if request.duration_minutes:
+            duration_seconds = request.duration_minutes * 60
+        else:
+            duration_seconds = 5 * 60 if request.mode == "interview_prep" else 2 * 60
 
         return InterviewStart(
             interview_id=interview_id,
@@ -215,6 +224,30 @@ async def get_tutor_session(session_id: UUID):
             created_at=row["created_at"],
             completed_at=row["completed_at"],
         )
+
+
+@router.delete("/tutor/sessions/{session_id}")
+async def delete_tutor_session(session_id: UUID):
+    """Delete a tutor session (admin only)."""
+    async with get_connection() as conn:
+        # Verify session exists and is a tutor session
+        row = await conn.fetchrow(
+            """
+            SELECT id FROM interviews
+            WHERE id = $1 AND interview_type IN ('tutor_interview', 'tutor_language')
+            """,
+            session_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Tutor session not found")
+
+        # Delete the session
+        await conn.execute(
+            "DELETE FROM interviews WHERE id = $1",
+            session_id,
+        )
+
+        return {"status": "deleted", "session_id": str(session_id)}
 
 
 @router.get("/tutor/metrics/aggregate", response_model=TutorMetricsAggregate)
@@ -850,11 +883,14 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
         interviewer_role = row["interviewer_role"]  # May contain language for tutor sessions
         interview_type = row["interview_type"] or "culture"
 
-        # For tutor_language, interviewer_role contains the language code
+        # For tutor sessions, extract the appropriate fields
         tutor_language = None
+        tutor_interview_role = None
         if interview_type == "tutor_language":
             tutor_language = interviewer_role  # "en" or "es"
             interviewer_role = "Tutor"
+        elif interview_type == "tutor_interview":
+            tutor_interview_role = interviewer_name  # The role being practiced for
 
         # For candidate interviews, fetch the company's culture profile
         culture_profile = None
@@ -896,13 +932,15 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
             interview_type=interview_type,
             culture_profile=culture_profile,
             tutor_language=tutor_language,
+            tutor_interview_role=tutor_interview_role,
         )
 
         await send_message(MessageType.STATUS, "Session started")
 
         # Trigger the model to speak first
         if interview_type == "tutor_interview":
-            await gemini_session.send_text("Please start the coaching session now. Greet them warmly and explain you'll help them practice interview questions.")
+            role_msg = f" for a {tutor_interview_role} position" if tutor_interview_role else ""
+            await gemini_session.send_text(f"Please start the coaching session now. Greet them warmly and explain you'll help them practice interview questions{role_msg}.")
         elif interview_type == "tutor_language":
             if tutor_language == "es":
                 await gemini_session.send_text("Por favor, comienza la sesión de práctica. Saluda calurosamente y pregunta cómo pueden ayudarte a practicar español hoy.")

@@ -6,7 +6,15 @@ import { useAudioInterview } from '../hooks/useAudioInterview';
 
 type TutorMode = 'interview_prep' | 'language_test';
 type Language = 'en' | 'es';
-type Duration = 2 | 8;
+type Duration = 2 | 5 | 8;
+type InterviewRole = 'VP of People' | 'CTO' | 'Head of Marketing' | 'Junior Engineer';
+
+const INTERVIEW_ROLES: { value: InterviewRole; label: string; description: string }[] = [
+  { value: 'Junior Engineer', label: 'Junior Engineer', description: 'Entry-level technical role' },
+  { value: 'CTO', label: 'CTO', description: 'Technical leadership' },
+  { value: 'VP of People', label: 'VP of People', description: 'HR leadership' },
+  { value: 'Head of Marketing', label: 'Head of Marketing', description: 'Marketing leadership' },
+];
 
 export function Tutor() {
   const navigate = useNavigate();
@@ -16,6 +24,8 @@ export function Tutor() {
   const [selectedMode, setSelectedMode] = useState<TutorMode | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<Language>('es');
   const [selectedDuration, setSelectedDuration] = useState<Duration>(2);
+  const [selectedInterviewDuration, setSelectedInterviewDuration] = useState<Duration>(5);
+  const [selectedRole, setSelectedRole] = useState<InterviewRole>('Junior Engineer');
 
   // Session state
   const [interviewId, setInterviewId] = useState<string | null>(null);
@@ -42,7 +52,7 @@ export function Tutor() {
   }, [messages]);
 
   // Start a tutor session
-  const handleStartSession = async (mode: TutorMode, language?: Language, duration?: Duration) => {
+  const handleStartSession = async (mode: TutorMode, language?: Language, duration?: Duration, role?: InterviewRole) => {
     setStarting(true);
     setError(null);
     try {
@@ -50,12 +60,14 @@ export function Tutor() {
         mode,
         language: mode === 'language_test' ? language : undefined,
         duration_minutes: duration,
+        interview_role: mode === 'interview_prep' ? role : undefined,
       });
       setInterviewId(result.interview_id);
       setMaxSessionDurationMs(result.max_session_duration_seconds * 1000);
       setSelectedMode(mode);
       if (language) setSelectedLanguage(language);
       if (duration) setSelectedDuration(duration);
+      if (role) setSelectedRole(role);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start session');
     } finally {
@@ -104,11 +116,11 @@ export function Tutor() {
               </svg>
             </div>
             <h2 className="text-xl font-semibold text-white mb-2">
-              {selectedMode === 'interview_prep' ? 'Interview Practice Complete' : 'Language Practice Complete'}
+              {selectedMode === 'interview_prep' ? `${selectedRole} Interview Practice Complete` : 'Language Practice Complete'}
             </h2>
             <p className="text-zinc-400 mb-6">
               {selectedMode === 'interview_prep'
-                ? 'Keep practicing to build your confidence!'
+                ? `Keep practicing to ace your ${selectedRole} interview!`
                 : `Great job practicing ${selectedLanguage === 'es' ? 'Spanish' : 'English'}!`}
             </p>
             <p className="text-zinc-500 text-sm mb-6">
@@ -144,7 +156,7 @@ export function Tutor() {
             </h1>
             <p className="text-zinc-500 mt-1">
               {selectedMode === 'interview_prep'
-                ? 'Practice answering interview questions'
+                ? `Practicing for ${selectedRole} interview`
                 : `Practicing ${selectedLanguage === 'es' ? 'Spanish' : 'English'} conversation`}
             </p>
           </div>
@@ -284,36 +296,59 @@ export function Tutor() {
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-white">Interview Prep</h3>
-                <p className="text-sm text-zinc-500">Practice common questions</p>
+                <p className="text-sm text-zinc-500">Practice for your target role</p>
               </div>
             </div>
 
-            <p className="text-zinc-400 text-sm mb-6">
-              Practice answering behavioral, situational, and self-presentation questions.
-              Get real-time feedback on your responses.
+            <p className="text-zinc-400 text-sm mb-4">
+              Practice role-specific interview questions with tailored feedback.
             </p>
 
-            <ul className="text-sm text-zinc-500 space-y-2 mb-6">
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-matcha-500" />
-                "Tell me about yourself"
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-matcha-500" />
-                Behavioral questions (STAR method)
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-matcha-500" />
-                Situational problem-solving
-              </li>
-            </ul>
+            <div className="mb-4">
+              <label className="block text-xs text-zinc-500 mb-2">Interviewing for</label>
+              <div className="grid grid-cols-2 gap-2">
+                {INTERVIEW_ROLES.map((role) => (
+                  <button
+                    key={role.value}
+                    onClick={() => setSelectedRole(role.value)}
+                    className={`py-2 px-3 rounded-lg border transition-colors text-left ${
+                      selectedRole === role.value
+                        ? 'bg-matcha-500/20 border-matcha-500 text-matcha-400'
+                        : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                    }`}
+                  >
+                    <div className="text-sm font-medium">{role.label}</div>
+                    <div className="text-xs text-zinc-500">{role.description}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-xs text-zinc-500 mb-2">Session Duration</label>
+              <div className="flex gap-2">
+                {([5, 8] as const).map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setSelectedInterviewDuration(d)}
+                    className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
+                      selectedInterviewDuration === d
+                        ? 'bg-matcha-500/20 border-matcha-500 text-matcha-400'
+                        : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                    }`}
+                  >
+                    {d} min
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <Button
-              onClick={() => handleStartSession('interview_prep')}
+              onClick={() => handleStartSession('interview_prep', undefined, selectedInterviewDuration, selectedRole)}
               disabled={starting}
               className="w-full"
             >
-              {starting ? 'Starting...' : 'Start Practice'}
+              {starting ? 'Starting...' : `Practice ${selectedRole} Interview (${selectedInterviewDuration} min)`}
             </Button>
           </CardContent>
         </Card>

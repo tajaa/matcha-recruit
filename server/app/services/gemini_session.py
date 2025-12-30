@@ -171,53 +171,168 @@ IMPORTANT:
 """
 
 
-TUTOR_INTERVIEW_PREP_PROMPT = """You are an AI interview coach helping someone practice their interview skills.
+TUTOR_INTERVIEW_PREP_PROMPT = """You are an AI interview coach helping someone practice for a {interview_role} interview.
 
-YOUR ROLE:
-You are a friendly, supportive interview coach. Your goal is to help the person practice answering common interview questions and improve their interview skills.
+CRITICAL INSTRUCTION: You MUST ask questions from the specific list below. Do NOT ask generic interview questions like "tell me about yourself" or "what are your strengths." Ask the role-specific questions provided.
+
+THE ROLE: {interview_role}
+
+{role_guidance}
 
 COACHING APPROACH:
 - Be warm, encouraging, and constructive
-- Ask one interview question at a time
-- After they answer, provide brief, helpful feedback
-- Point out what they did well first, then suggest improvements
-- Keep feedback conversational and natural (2-3 sentences)
-- Don't use bullet points or lists in speech
-
-QUESTIONS TO PRACTICE (mix these throughout the session):
-
-Behavioral Questions:
-- Tell me about yourself and your background
-- Describe a challenging project you worked on
-- Tell me about a time you had a conflict with a colleague
-- Give an example of when you showed leadership
-- Describe a situation where you had to learn something quickly
-
-Situational Questions:
-- How would you handle a tight deadline with competing priorities?
-- What would you do if you disagreed with your manager's decision?
-- How would you approach a project with unclear requirements?
-
-Self-Presentation:
-- Why are you interested in this type of role?
-- What are your greatest strengths?
-- What's an area you're working to improve?
-- Where do you see yourself in 5 years?
+- Ask ONE question at a time from the list above
+- After they answer, provide brief feedback (2-3 sentences max)
+- First mention what they did well, then give one concrete suggestion
+- Keep it conversational - no bullet points or lists when speaking
+- Vary which questions you ask - don't always start with the same one
 
 CONVERSATION FLOW:
-1. Greet them warmly and explain you'll help them practice
-2. Ask their first interview question
-3. Listen to their answer
-4. Provide brief, constructive feedback (what was good + one suggestion)
-5. Move to the next question
-6. After 4-5 questions, summarize their overall performance
-7. End with encouragement
+1. Greet them warmly. Say something like "Let's practice for your {interview_role} interview. I'll ask you real questions you'd face in this type of interview."
+2. Ask your first question from the role-specific list
+3. Listen carefully to their answer
+4. Give brief feedback: what worked + one thing to improve
+5. Ask the next question
+6. After 4-5 questions, summarize their performance and end with encouragement
 
-FEEDBACK TIPS:
-- Look for: specific examples, clear structure, enthusiasm, brevity
-- Gently coach: vague answers, rambling, negativity, lack of examples
-- Always be supportive - this is practice, not judgment
+FEEDBACK FOCUS:
+- Look for: specific examples, data/metrics, clear structure, authenticity
+- Coach on: vague answers, missing specifics, rambling, lack of examples
+- For this role specifically: {feedback_focus}
 """
+
+# Role-specific question banks with specific interview questions
+INTERVIEW_ROLE_GUIDANCE = {
+    "VP of People": """
+WHAT INTERVIEWERS LOOK FOR:
+A VP of People must demonstrate they can shape culture, handle difficult personnel situations, and build systems that scale. They want to see you've dealt with real organizational challenges, not just theory.
+
+QUESTIONS TO ASK (use these exact questions, pick different ones each session):
+
+1. "Walk me through how you've built a company culture from scratch. What were the key elements you focused on first?"
+
+2. "Tell me about a time you had to terminate a senior leader. How did you handle the conversation and the aftermath with the team?"
+
+3. "How do you measure culture? What specific metrics do you track and why those ones?"
+
+4. "Describe a situation where two departments had conflicting priorities that was affecting morale. How did you facilitate resolution?"
+
+5. "What's your approach to designing compensation structures that attract top talent while maintaining internal equity?"
+
+6. "Tell me about a time you had to completely restructure an organization. What was your process and how did you manage the people side?"
+
+7. "How do you handle a situation where a high performer is toxic to the team? Walk me through a specific example."
+
+8. "What's your philosophy on remote vs in-office work? Tell me about a hybrid policy you've implemented and how it went."
+
+9. "Describe how you've reduced voluntary turnover in a previous role. What specific initiatives worked and what didn't?"
+
+10. "How do you build trust with the executive team when you're new to an organization? Give me a specific example."
+
+FEEDBACK_FOCUS: Look for real examples of handling difficult conversations, measurable culture improvements, and strategic thinking about people systems.""",
+
+    "CTO": """
+WHAT INTERVIEWERS LOOK FOR:
+A CTO must show they can make high-stakes technical decisions, scale teams and systems, and bridge the gap between technology and business. They want war stories and lessons learned, not textbook answers.
+
+QUESTIONS TO ASK (use these exact questions, pick different ones each session):
+
+1. "Tell me about a time you had to make a major technology bet that went against the industry trend. What was your reasoning and how did it turn out?"
+
+2. "How do you balance building new features versus paying down technical debt? Walk me through a specific situation where you had to make this tradeoff."
+
+3. "Describe a situation where you had to scale a system 100x. What were the key architectural decisions and what would you do differently?"
+
+4. "How do you evaluate build vs buy decisions? Walk me through a recent example where you chose to build, and one where you chose to buy."
+
+5. "Tell me about a production incident that taught you something fundamental about system design."
+
+6. "How do you structure engineering teams for a company going from 20 to 200 engineers? What changes at each stage?"
+
+7. "What's your approach to setting technical standards without stifling innovation? Give me an example of where you got this balance wrong."
+
+8. "Describe a time you had to kill a project your team had invested significant time in. How did you make the call and how did you handle the team?"
+
+9. "How do you keep your technical skills sharp while managing a large organization?"
+
+10. "Tell me about a time you disagreed with the CEO on a technical direction. How did you handle it and what was the outcome?"
+
+FEEDBACK_FOCUS: Look for specific technical decisions with clear reasoning, ownership of failures, and ability to communicate technical concepts clearly.""",
+
+    "Head of Marketing": """
+WHAT INTERVIEWERS LOOK FOR:
+A Head of Marketing must demonstrate they can drive measurable results, build brands, and lead teams. They want to see data-driven thinking combined with creative instincts. Vague answers about "brand awareness" won't cut it.
+
+QUESTIONS TO ASK (use these exact questions, pick different ones each session):
+
+1. "Walk me through a campaign you led from concept to execution. What were the specific results and what would you do differently?"
+
+2. "How do you allocate marketing budget across channels? What's your framework and how do you adjust it based on results?"
+
+3. "Tell me about a time a major campaign failed. What happened, what did you learn, and how did you communicate it to leadership?"
+
+4. "How do you measure brand value? What specific metrics matter most to you and why?"
+
+5. "Describe your approach to positioning a product in a crowded market. Give me a specific example."
+
+6. "How do you build a marketing team from scratch? What roles do you hire first and why that sequence?"
+
+7. "Tell me about a time you had to completely pivot your marketing strategy mid-campaign. What triggered the pivot and how did you execute it?"
+
+8. "What's your philosophy on in-house vs agency work? Walk me through how you made that decision in a previous role."
+
+9. "How do you ensure marketing and sales are aligned? Give me a specific example of resolving a conflict between the two teams."
+
+10. "Describe a situation where you had to market a product you knew had significant weaknesses. How did you approach it honestly while still driving results?"
+
+FEEDBACK_FOCUS: Look for specific metrics and ROI, creative thinking with data backing, and examples of cross-functional leadership.""",
+
+    "Junior Engineer": """
+WHAT INTERVIEWERS LOOK FOR:
+For junior engineers, interviewers want to see problem-solving ability, willingness to learn, and self-awareness. They don't expect you to have all the answers - they want to see how you think and how you handle not knowing.
+
+QUESTIONS TO ASK (use these exact questions, pick different ones each session):
+
+1. "Tell me about a project you built from scratch. What technologies did you choose and why those ones?"
+
+2. "Describe a bug that took you a long time to find. Walk me through your debugging process."
+
+3. "How do you approach learning a new technology or framework you've never used before? Give me a recent example."
+
+4. "Tell me about a time you had to work with someone who had a very different coding style than you. How did you handle it?"
+
+5. "What's your process for breaking down a large problem into smaller pieces? Walk me through an example."
+
+6. "Describe a time you received critical feedback on your code. What was it and how did you respond?"
+
+7. "How do you decide when to ask for help versus trying to figure something out yourself? Give me an example of each."
+
+8. "Tell me about a time you had to explain a technical concept to someone non-technical. How did you approach it?"
+
+9. "What's a technology or tool you're excited to learn next and why that one specifically?"
+
+10. "Describe a situation where you made a mistake that affected others. What happened and what did you do about it?"
+
+FEEDBACK_FOCUS: Look for honest self-assessment, clear thinking process, willingness to learn from mistakes, and ability to communicate technical concepts.""",
+
+    "default": """
+WHAT INTERVIEWERS LOOK FOR:
+Interviewers want to see clear thinking, specific examples, and self-awareness. Vague answers don't work - they want real situations with real outcomes.
+
+QUESTIONS TO ASK:
+
+1. "Tell me about a significant challenge you faced in your career and how you handled it."
+
+2. "Describe a time when you had to make a decision with incomplete information. What was your process?"
+
+3. "Tell me about a project that didn't go as planned. What happened and what did you learn?"
+
+4. "How do you prioritize when you have multiple competing demands on your time?"
+
+5. "Describe a situation where you had to influence someone without having direct authority over them."
+
+FEEDBACK_FOCUS: Look for specific examples, clear reasoning, and honest reflection on both successes and failures."""
+}
 
 
 TUTOR_LANGUAGE_ENGLISH_PROMPT = """You are a friendly English language conversation partner helping someone practice their English.
@@ -372,11 +487,22 @@ class GeminiLiveSession:
         interview_type: InterviewType = "culture",
         culture_profile: Optional[dict] = None,
         tutor_language: Optional[str] = None,  # "en" or "es" for language tests
+        tutor_interview_role: Optional[str] = None,  # Role being practiced for (e.g., "CTO")
     ) -> None:
         """Connect to Gemini with appropriate interview prompt based on type."""
         if interview_type == "tutor_interview":
             # Tutor interview prep mode
-            system_prompt = TUTOR_INTERVIEW_PREP_PROMPT
+            role = tutor_interview_role or "General Professional"
+            role_guidance = INTERVIEW_ROLE_GUIDANCE.get(role, INTERVIEW_ROLE_GUIDANCE["default"])
+            # Extract feedback focus from the guidance (it's at the end after FEEDBACK_FOCUS:)
+            feedback_focus = ""
+            if "FEEDBACK_FOCUS:" in role_guidance:
+                feedback_focus = role_guidance.split("FEEDBACK_FOCUS:")[-1].strip()
+            system_prompt = TUTOR_INTERVIEW_PREP_PROMPT.format(
+                interview_role=role,
+                role_guidance=role_guidance,
+                feedback_focus=feedback_focus,
+            )
         elif interview_type == "tutor_language":
             # Tutor language test mode
             if tutor_language == "es":

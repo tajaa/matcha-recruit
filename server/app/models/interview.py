@@ -236,7 +236,8 @@ class TutorSessionCreate(BaseModel):
     """Request to create a tutor session."""
     mode: Literal["interview_prep", "language_test"]
     language: Optional[Literal["en", "es"]] = None  # Required for language_test mode
-    duration_minutes: Optional[Literal[2, 8]] = 2  # Session duration: 2 or 8 minutes
+    duration_minutes: Optional[Literal[2, 5, 8]] = None  # Session duration: 2, 5, or 8 minutes
+    interview_role: Optional[str] = None  # For interview_prep: role being interviewed for
 
 
 class TutorSessionSummary(BaseModel):

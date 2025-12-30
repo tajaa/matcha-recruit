@@ -884,7 +884,8 @@ export const screening = {
 export interface TutorSessionCreate {
   mode: 'interview_prep' | 'language_test';
   language?: 'en' | 'es';
-  duration_minutes?: 2 | 8;
+  duration_minutes?: 2 | 5 | 8;
+  interview_role?: string;  // For interview_prep: role being practiced for (e.g., "CTO")
 }
 
 export interface TutorSessionStart {
@@ -914,6 +915,11 @@ export const tutorMetrics = {
 
   getSession: (id: string) =>
     request<TutorSessionDetail>(`/tutor/sessions/${id}`),
+
+  deleteSession: (id: string) =>
+    request<{ status: string; session_id: string }>(`/tutor/sessions/${id}`, {
+      method: 'DELETE',
+    }),
 
   getAggregateMetrics: () =>
     request<TutorMetricsAggregate>('/tutor/metrics/aggregate'),
