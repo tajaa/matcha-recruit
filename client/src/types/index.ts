@@ -780,6 +780,69 @@ export interface TutorPracticeSuggestion {
   priority: 'high' | 'medium' | 'low';
 }
 
+// Spanish-specific analysis types
+export interface SpanishConjugationError {
+  verb: string;
+  user_said: string;
+  correct: string;
+  tense: string;
+  person: string;
+}
+
+export interface SpanishConjugation {
+  score: number;
+  regular_verb_accuracy: number;
+  irregular_verb_accuracy: number;
+  tense_appropriateness: number;
+  subjunctive_attempts: number;
+  subjunctive_accuracy: number | null;
+  notable_errors: SpanishConjugationError[];
+  notes: string;
+}
+
+export interface SpanishGenderError {
+  phrase: string;
+  correction: string;
+  rule: string;
+}
+
+export interface SpanishGenderAgreement {
+  score: number;
+  errors: SpanishGenderError[];
+  notes: string;
+}
+
+export interface SpanishSerEstarError {
+  user_said: string;
+  correction: string;
+  explanation: string;
+}
+
+export interface SpanishSerEstar {
+  score: number;
+  errors: SpanishSerEstarError[];
+  notes: string;
+}
+
+export interface SpanishPorParaError {
+  user_said: string;
+  correction: string;
+  explanation: string;
+}
+
+export interface SpanishPorPara {
+  score: number;
+  errors: SpanishPorParaError[];
+  notes: string;
+}
+
+export interface SpanishSpecificAnalysis {
+  conjugation: SpanishConjugation;
+  gender_agreement: SpanishGenderAgreement;
+  ser_estar: SpanishSerEstar;
+  por_para: SpanishPorPara;
+}
+
 export interface TutorLanguageAnalysis {
   fluency_pace: TutorFluencyPace;
   vocabulary: TutorVocabulary;
@@ -789,6 +852,7 @@ export interface TutorLanguageAnalysis {
   session_summary: string;
   analyzed_at: string;
   language: string;
+  spanish_specific?: SpanishSpecificAnalysis;
 }
 
 // Tutor Session types
@@ -832,6 +896,61 @@ export interface TutorLanguageTestStats {
 export interface TutorMetricsAggregate {
   interview_prep: TutorInterviewPrepStats;
   language_test: TutorLanguageTestStats;
+}
+
+// Progress tracking types
+export interface TutorProgressDataPoint {
+  session_id: string;
+  date: string;
+  fluency_score: number | null;
+  grammar_score: number | null;
+  vocabulary_score: number | null;
+  proficiency_level: string | null;
+}
+
+export interface TutorProgressResponse {
+  sessions: TutorProgressDataPoint[];
+  language: string | null;
+}
+
+// Session comparison types
+export interface TutorSessionComparison {
+  current_fluency: number | null;
+  current_grammar: number | null;
+  current_vocabulary: number | null;
+  avg_previous_fluency: number | null;
+  avg_previous_grammar: number | null;
+  avg_previous_vocabulary: number | null;
+  previous_session_count: number;
+  fluency_change: number | null;
+  grammar_change: number | null;
+  vocabulary_change: number | null;
+}
+
+// Vocabulary tracking types
+export interface VocabularyWord {
+  word: string;
+  category: string | null;
+  used_correctly: boolean | null;
+  context: string | null;
+  correction: string | null;
+  difficulty: string | null;
+  times_used: number;
+}
+
+export interface VocabularySuggestion {
+  word: string;
+  meaning: string | null;
+  example: string | null;
+  difficulty: string | null;
+}
+
+export interface TutorVocabularyStats {
+  total_unique_words: number;
+  mastered_words: VocabularyWord[];
+  words_to_review: VocabularyWord[];
+  suggested_vocabulary: VocabularySuggestion[];
+  language: string;
 }
 
 // ===========================================

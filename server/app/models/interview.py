@@ -265,3 +265,61 @@ class TutorMetricsAggregate(BaseModel):
     """Aggregate metrics across tutor sessions."""
     interview_prep: dict[str, Any]  # Stats for tutor_interview
     language_test: dict[str, Any]  # Stats for tutor_language
+
+
+class TutorProgressDataPoint(BaseModel):
+    """A single data point for progress tracking."""
+    session_id: UUID
+    date: datetime
+    fluency_score: Optional[int] = None
+    grammar_score: Optional[int] = None
+    vocabulary_score: Optional[int] = None
+    proficiency_level: Optional[str] = None
+
+
+class TutorProgressResponse(BaseModel):
+    """Progress data over time for charting."""
+    sessions: list[TutorProgressDataPoint]
+    language: Optional[str] = None
+
+
+class TutorSessionComparison(BaseModel):
+    """Comparison of current session to previous sessions."""
+    current_fluency: Optional[int] = None
+    current_grammar: Optional[int] = None
+    current_vocabulary: Optional[int] = None
+    avg_previous_fluency: Optional[float] = None
+    avg_previous_grammar: Optional[float] = None
+    avg_previous_vocabulary: Optional[float] = None
+    previous_session_count: int
+    fluency_change: Optional[float] = None
+    grammar_change: Optional[float] = None
+    vocabulary_change: Optional[float] = None
+
+
+class VocabularyWord(BaseModel):
+    """A vocabulary word used or suggested."""
+    word: str
+    category: Optional[str] = None
+    used_correctly: Optional[bool] = None
+    context: Optional[str] = None
+    correction: Optional[str] = None
+    difficulty: Optional[str] = None
+    times_used: int = 1
+
+
+class VocabularySuggestion(BaseModel):
+    """A suggested vocabulary word to learn."""
+    word: str
+    meaning: Optional[str] = None
+    example: Optional[str] = None
+    difficulty: Optional[str] = None
+
+
+class TutorVocabularyStats(BaseModel):
+    """Vocabulary statistics across sessions."""
+    total_unique_words: int
+    mastered_words: list[VocabularyWord]
+    words_to_review: list[VocabularyWord]
+    suggested_vocabulary: list[VocabularySuggestion]
+    language: str

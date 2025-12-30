@@ -414,6 +414,181 @@ Return ONLY a JSON object with this structure:
 Return ONLY the JSON object, no other text."""
 
 
+TUTOR_SPANISH_ANALYSIS_PROMPT = """Analyze this Spanish language practice session transcript where a user practiced speaking Spanish with an AI conversation partner.
+
+Provide detailed feedback to help the user improve their Spanish speaking skills, with special attention to Spanish-specific challenges.
+
+TRANSCRIPT:
+{transcript}
+
+Evaluate the user's Spanish proficiency across these key areas:
+
+1. FLUENCY & PACE
+   - Speaking Speed: Natural, too fast, or too slow?
+   - Pause Frequency: Hesitations or unnatural pauses?
+   - Filler Words: Spanish fillers (este, pues, o sea, eh) vs English fillers?
+   - Flow: Does the conversation flow naturally?
+
+2. VOCABULARY
+   - Word Variety: Diverse vocabulary or repetitive?
+   - Appropriateness: Suitable word choices for context?
+   - Complexity: Basic/intermediate/advanced vocabulary?
+   - False Cognates: Any confusion with false friends (e.g., embarazada/embarrassed)?
+
+3. GRAMMAR - General
+   - Sentence Structure: Well-formed sentences?
+   - Tense Usage: Correct and consistent verb tenses?
+   - Common Errors: List specific examples with corrections
+
+4. SPANISH-SPECIFIC GRAMMAR
+   - VERB CONJUGATION: Check regular and irregular verb conjugations
+     * Present tense accuracy
+     * Past tenses (preterite vs imperfect usage)
+     * Future and conditional forms
+     * Subjunctive mood (when appropriate)
+   - GENDER & NUMBER AGREEMENT
+     * Noun-adjective agreement (el libro rojo, la casa blanca)
+     * Article usage (el/la/los/las, un/una/unos/unas)
+     * Demonstratives and possessives
+   - SER VS ESTAR: Correct usage for:
+     * Identity/characteristics (ser) vs states/locations (estar)
+     * Common mistakes like "estoy feliz" vs "soy feliz"
+   - POR VS PARA: Correct usage for:
+     * Duration, exchange, cause (por)
+     * Purpose, destination, deadline (para)
+
+Determine overall proficiency level using CEFR scale:
+- A1: Beginner - Basic phrases only
+- A2: Elementary - Simple everyday expressions
+- B1: Intermediate - Can handle most situations
+- B2: Upper Intermediate - Can interact fluently
+- C1: Advanced - Can express fluently and spontaneously
+- C2: Mastery - Near-native command
+
+Return ONLY a JSON object with this structure:
+{{
+    "fluency_pace": {{
+        "overall_score": <0-100>,
+        "speaking_speed": "natural/too_fast/too_slow/varies",
+        "pause_frequency": "rare/occasional/frequent",
+        "filler_word_count": <estimated number>,
+        "filler_words_used": ["list of fillers noted"],
+        "flow_rating": "excellent/good/choppy/poor",
+        "notes": "feedback on fluency"
+    }},
+    "vocabulary": {{
+        "overall_score": <0-100>,
+        "variety_score": <0-100>,
+        "appropriateness_score": <0-100>,
+        "complexity_level": "basic/intermediate/advanced",
+        "notable_good_usage": ["words/phrases used well"],
+        "suggestions": ["vocabulary improvements to focus on"],
+        "false_cognates_noted": ["any false friend mistakes"]
+    }},
+    "grammar": {{
+        "overall_score": <0-100>,
+        "sentence_structure_score": <0-100>,
+        "tense_usage_score": <0-100>,
+        "common_errors": [
+            {{
+                "error": "what the user said",
+                "correction": "correct form",
+                "type": "conjugation/gender/ser_estar/por_para/tense/agreement/word_order/article/preposition/other",
+                "explanation": "brief explanation of the rule"
+            }}
+        ],
+        "notes": "overall grammar feedback"
+    }},
+    "spanish_specific": {{
+        "conjugation": {{
+            "score": <0-100>,
+            "regular_verb_accuracy": <0-100>,
+            "irregular_verb_accuracy": <0-100>,
+            "tense_appropriateness": <0-100>,
+            "subjunctive_attempts": <number of attempts>,
+            "subjunctive_accuracy": <0-100 or null if no attempts>,
+            "notable_errors": [
+                {{
+                    "verb": "infinitive form",
+                    "user_said": "incorrect conjugation",
+                    "correct": "correct conjugation",
+                    "tense": "present/preterite/imperfect/future/conditional/subjunctive",
+                    "person": "yo/tú/él/nosotros/etc"
+                }}
+            ],
+            "notes": "feedback on verb conjugation"
+        }},
+        "gender_agreement": {{
+            "score": <0-100>,
+            "errors": [
+                {{
+                    "phrase": "incorrect phrase",
+                    "correction": "correct phrase",
+                    "rule": "brief explanation (e.g., 'problema is masculine despite -a ending')"
+                }}
+            ],
+            "notes": "feedback on gender/number agreement"
+        }},
+        "ser_estar": {{
+            "score": <0-100>,
+            "errors": [
+                {{
+                    "user_said": "incorrect usage",
+                    "correction": "correct form",
+                    "explanation": "why ser or estar is correct here"
+                }}
+            ],
+            "notes": "feedback on ser/estar usage"
+        }},
+        "por_para": {{
+            "score": <0-100>,
+            "errors": [
+                {{
+                    "user_said": "incorrect usage",
+                    "correction": "correct form",
+                    "explanation": "why por or para is correct here"
+                }}
+            ],
+            "notes": "feedback on por/para usage"
+        }}
+    }},
+    "overall_proficiency": {{
+        "level": "A1/A2/B1/B2/C1/C2",
+        "level_description": "brief description of what this level means",
+        "strengths": ["what they do well"],
+        "areas_to_improve": ["what to focus on next"]
+    }},
+    "practice_suggestions": [
+        {{
+            "skill": "which aspect to practice",
+            "exercise": "specific practice activity",
+            "priority": "high/medium/low"
+        }}
+    ],
+    "session_summary": "2-3 sentence summary of Spanish performance with encouragement and clear next steps",
+    "vocabulary_used": [
+        {{
+            "word": "the Spanish word/phrase",
+            "category": "verb/noun/adjective/adverb/phrase/expression",
+            "used_correctly": true/false,
+            "context": "brief context of how it was used",
+            "correction": "if incorrect, the correct form or usage",
+            "difficulty": "basic/intermediate/advanced"
+        }}
+    ],
+    "vocabulary_suggestions": [
+        {{
+            "word": "suggested Spanish word/phrase to learn",
+            "meaning": "English meaning",
+            "example": "example sentence in Spanish",
+            "difficulty": "basic/intermediate/advanced"
+        }}
+    ]
+}}
+
+Return ONLY the JSON object, no other text."""
+
+
 class ConversationAnalyzer:
     def __init__(
         self,
@@ -630,11 +805,15 @@ class ConversationAnalyzer:
         language: str = "en",
     ) -> dict[str, Any]:
         """Analyze a language practice session for proficiency feedback."""
-        language_name = "English" if language == "en" else "Spanish"
-        prompt = TUTOR_LANGUAGE_ANALYSIS_PROMPT.format(
-            transcript=transcript,
-            language_name=language_name,
-        )
+        # Use Spanish-specific prompt for Spanish sessions
+        if language == "es":
+            prompt = TUTOR_SPANISH_ANALYSIS_PROMPT.format(transcript=transcript)
+        else:
+            language_name = "English"
+            prompt = TUTOR_LANGUAGE_ANALYSIS_PROMPT.format(
+                transcript=transcript,
+                language_name=language_name,
+            )
 
         response = await self.client.aio.models.generate_content(
             model=self.model,

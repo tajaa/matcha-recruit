@@ -14,6 +14,12 @@ from ..models.interview import (
     TutorSessionSummary,
     TutorSessionDetail,
     TutorMetricsAggregate,
+    TutorProgressResponse,
+    TutorProgressDataPoint,
+    TutorSessionComparison,
+    TutorVocabularyStats,
+    VocabularyWord,
+    VocabularySuggestion,
 )
 from ..services.gemini_session import GeminiLiveSession
 from ..services.culture_analyzer import CultureAnalyzer
@@ -318,6 +324,216 @@ async def get_tutor_aggregate_metrics():
         return TutorMetricsAggregate(
             interview_prep=interview_prep_stats,
             language_test=language_test_stats,
+        )
+
+
+@router.get("/tutor/progress", response_model=TutorProgressResponse)
+async def get_tutor_progress(language: Optional[str] = None, limit: int = 20):
+    """Get session scores over time for progress tracking."""
+    async with get_connection() as conn:
+        query = """
+            SELECT id, created_at, tutor_analysis, interviewer_role as language
+            FROM interviews
+            WHERE interview_type = 'tutor_language'
+                AND status = 'completed'
+                AND tutor_analysis IS NOT NULL
+        """
+        params = []
+        if language:
+            query += f" AND interviewer_role = ${len(params) + 1}"
+            params.append(language)
+
+        query += f" ORDER BY created_at DESC LIMIT ${len(params) + 1}"
+        params.append(limit)
+
+        rows = await conn.fetch(query, *params)
+
+        data_points = []
+        for row in rows:
+            analysis = json.loads(row["tutor_analysis"]) if isinstance(row["tutor_analysis"], str) else row["tutor_analysis"]
+            data_points.append(TutorProgressDataPoint(
+                session_id=row["id"],
+                date=row["created_at"],
+                fluency_score=analysis.get("fluency_pace", {}).get("overall_score"),
+                grammar_score=analysis.get("grammar", {}).get("overall_score"),
+                vocabulary_score=analysis.get("vocabulary", {}).get("overall_score"),
+                proficiency_level=analysis.get("overall_proficiency", {}).get("level"),
+            ))
+
+        # Reverse to show oldest to newest for charting
+        return TutorProgressResponse(
+            sessions=list(reversed(data_points)),
+            language=language
+        )
+
+
+@router.get("/tutor/sessions/{session_id}/comparison", response_model=TutorSessionComparison)
+async def get_session_comparison(session_id: UUID):
+    """Get comparison of this session with previous sessions."""
+    async with get_connection() as conn:
+        # Get the current session
+        current = await conn.fetchrow(
+            """
+            SELECT id, created_at, tutor_analysis, interviewer_role as language
+            FROM interviews WHERE id = $1
+            """,
+            session_id
+        )
+        if not current:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        if not current["tutor_analysis"]:
+            return TutorSessionComparison(
+                previous_session_count=0
+            )
+
+        language = current["language"]
+        current_analysis = json.loads(current["tutor_analysis"]) if isinstance(current["tutor_analysis"], str) else current["tutor_analysis"]
+
+        # Get previous sessions for comparison
+        previous = await conn.fetch(
+            """
+            SELECT tutor_analysis
+            FROM interviews
+            WHERE interview_type = 'tutor_language'
+                AND status = 'completed'
+                AND interviewer_role = $1
+                AND created_at < $2
+                AND tutor_analysis IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT 5
+            """,
+            language, current["created_at"]
+        )
+
+        # Extract current scores
+        current_fluency = current_analysis.get("fluency_pace", {}).get("overall_score")
+        current_grammar = current_analysis.get("grammar", {}).get("overall_score")
+        current_vocabulary = current_analysis.get("vocabulary", {}).get("overall_score")
+
+        # Calculate averages from previous sessions
+        if previous:
+            prev_analyses = [json.loads(r["tutor_analysis"]) if isinstance(r["tutor_analysis"], str) else r["tutor_analysis"] for r in previous]
+            prev_fluency = [a.get("fluency_pace", {}).get("overall_score") for a in prev_analyses if a.get("fluency_pace", {}).get("overall_score")]
+            prev_grammar = [a.get("grammar", {}).get("overall_score") for a in prev_analyses if a.get("grammar", {}).get("overall_score")]
+            prev_vocabulary = [a.get("vocabulary", {}).get("overall_score") for a in prev_analyses if a.get("vocabulary", {}).get("overall_score")]
+
+            avg_prev_fluency = round(sum(prev_fluency) / len(prev_fluency), 1) if prev_fluency else None
+            avg_prev_grammar = round(sum(prev_grammar) / len(prev_grammar), 1) if prev_grammar else None
+            avg_prev_vocabulary = round(sum(prev_vocabulary) / len(prev_vocabulary), 1) if prev_vocabulary else None
+        else:
+            avg_prev_fluency = None
+            avg_prev_grammar = None
+            avg_prev_vocabulary = None
+
+        return TutorSessionComparison(
+            current_fluency=current_fluency,
+            current_grammar=current_grammar,
+            current_vocabulary=current_vocabulary,
+            avg_previous_fluency=avg_prev_fluency,
+            avg_previous_grammar=avg_prev_grammar,
+            avg_previous_vocabulary=avg_prev_vocabulary,
+            previous_session_count=len(previous),
+            fluency_change=round(current_fluency - avg_prev_fluency, 1) if current_fluency and avg_prev_fluency else None,
+            grammar_change=round(current_grammar - avg_prev_grammar, 1) if current_grammar and avg_prev_grammar else None,
+            vocabulary_change=round(current_vocabulary - avg_prev_vocabulary, 1) if current_vocabulary and avg_prev_vocabulary else None,
+        )
+
+
+@router.get("/tutor/vocabulary", response_model=TutorVocabularyStats)
+async def get_vocabulary_stats(language: str = "es", limit: int = 10):
+    """Get vocabulary statistics across all language sessions."""
+    async with get_connection() as conn:
+        # Get all completed language sessions for this language
+        rows = await conn.fetch(
+            """
+            SELECT tutor_analysis
+            FROM interviews
+            WHERE interview_type = 'tutor_language'
+                AND status = 'completed'
+                AND interviewer_role = $1
+                AND tutor_analysis IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            language
+        )
+
+        # Aggregate vocabulary from all sessions
+        word_stats: dict[str, dict] = {}
+        all_suggestions: list[dict] = []
+
+        for row in rows:
+            analysis = json.loads(row["tutor_analysis"]) if isinstance(row["tutor_analysis"], str) else row["tutor_analysis"]
+
+            # Extract vocabulary_used
+            for vocab in analysis.get("vocabulary_used", []):
+                word = vocab.get("word", "").lower()
+                if not word:
+                    continue
+
+                if word not in word_stats:
+                    word_stats[word] = {
+                        "word": vocab.get("word"),
+                        "category": vocab.get("category"),
+                        "times_used": 0,
+                        "times_correct": 0,
+                        "context": vocab.get("context"),
+                        "correction": vocab.get("correction"),
+                        "difficulty": vocab.get("difficulty"),
+                    }
+                word_stats[word]["times_used"] += 1
+                if vocab.get("used_correctly"):
+                    word_stats[word]["times_correct"] += 1
+
+            # Collect suggestions
+            for suggestion in analysis.get("vocabulary_suggestions", []):
+                all_suggestions.append(suggestion)
+
+        # Categorize words
+        mastered_words = []
+        words_to_review = []
+
+        for word, stats in word_stats.items():
+            word_obj = VocabularyWord(
+                word=stats["word"],
+                category=stats["category"],
+                used_correctly=stats["times_correct"] / stats["times_used"] >= 0.8 if stats["times_used"] > 0 else None,
+                context=stats["context"],
+                correction=stats["correction"],
+                difficulty=stats["difficulty"],
+                times_used=stats["times_used"],
+            )
+
+            if stats["times_used"] >= 2 and stats["times_correct"] / stats["times_used"] >= 0.8:
+                mastered_words.append(word_obj)
+            elif stats["times_correct"] < stats["times_used"]:
+                words_to_review.append(word_obj)
+
+        # Sort and limit
+        mastered_words.sort(key=lambda w: w.times_used, reverse=True)
+        words_to_review.sort(key=lambda w: w.times_used, reverse=True)
+
+        # Dedupe suggestions
+        seen_suggestions = set()
+        unique_suggestions = []
+        for s in all_suggestions:
+            word = s.get("word", "").lower()
+            if word and word not in seen_suggestions:
+                seen_suggestions.add(word)
+                unique_suggestions.append(VocabularySuggestion(
+                    word=s.get("word"),
+                    meaning=s.get("meaning"),
+                    example=s.get("example"),
+                    difficulty=s.get("difficulty"),
+                ))
+
+        return TutorVocabularyStats(
+            total_unique_words=len(word_stats),
+            mastered_words=mastered_words[:limit],
+            words_to_review=words_to_review[:limit],
+            suggested_vocabulary=unique_suggestions[:limit],
+            language=language,
         )
 
 

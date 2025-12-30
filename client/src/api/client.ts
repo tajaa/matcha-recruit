@@ -50,6 +50,9 @@ import type {
   TutorSessionSummary,
   TutorSessionDetail,
   TutorMetricsAggregate,
+  TutorProgressResponse,
+  TutorSessionComparison,
+  TutorVocabularyStats,
   // ER Copilot types
   ERCase,
   ERCaseCreate,
@@ -913,6 +916,19 @@ export const tutorMetrics = {
 
   getAggregateMetrics: () =>
     request<TutorMetricsAggregate>('/tutor/metrics/aggregate'),
+
+  getProgress: (language?: string, limit: number = 20) => {
+    const params = new URLSearchParams();
+    if (language) params.append('language', language);
+    params.append('limit', limit.toString());
+    return request<TutorProgressResponse>(`/tutor/progress?${params.toString()}`);
+  },
+
+  getSessionComparison: (sessionId: string) =>
+    request<TutorSessionComparison>(`/tutor/sessions/${sessionId}/comparison`),
+
+  getVocabularyStats: (language: string = 'es', limit: number = 10) =>
+    request<TutorVocabularyStats>(`/tutor/vocabulary?language=${language}&limit=${limit}`),
 };
 
 // WebSocket URL helper

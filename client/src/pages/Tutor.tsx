@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { Button, Card, CardContent } from '../components';
 import { tutor } from '../api/client';
 import { useAudioInterview } from '../hooks/useAudioInterview';
@@ -7,6 +8,7 @@ type TutorMode = 'interview_prep' | 'language_test';
 type Language = 'en' | 'es';
 
 export function Tutor() {
+  const navigate = useNavigate();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Mode selection state
@@ -105,7 +107,22 @@ export function Tutor() {
                 ? 'Keep practicing to build your confidence!'
                 : `Great job practicing ${selectedLanguage === 'es' ? 'Spanish' : 'English'}!`}
             </p>
-            <Button onClick={handleReset}>Start Another Session</Button>
+            <p className="text-zinc-500 text-sm mb-6">
+              Your session is being analyzed. View your detailed feedback below.
+            </p>
+            <div className="flex gap-4 justify-center">
+              <Button onClick={() => navigate(`/app/tutor-metrics/${interviewId}`)}>
+                View Your Analysis
+              </Button>
+              <Button variant="secondary" onClick={handleReset}>
+                Start Another Session
+              </Button>
+            </div>
+            <p className="text-zinc-500 text-sm mt-6">
+              <Link to="/app/tutor-metrics" className="text-matcha-400 hover:text-matcha-300 underline">
+                View all your sessions
+              </Link>
+            </p>
           </CardContent>
         </Card>
       </div>

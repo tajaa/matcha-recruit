@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Card, CardContent } from '../components';
 import { tutorMetrics } from '../api/client';
-import type { TutorSessionDetail as TutorSessionDetailType, TutorInterviewAnalysis, TutorLanguageAnalysis } from '../types';
+import type { TutorSessionDetail as TutorSessionDetailType, TutorInterviewAnalysis, TutorLanguageAnalysis, TutorSessionComparison, SpanishSpecificAnalysis } from '../types';
 
 function ScoreDisplay({ label, score }: { label: string; score: number }) {
   const getColor = (s: number) => {
@@ -30,6 +30,196 @@ function PriorityBadge({ priority }: { priority: 'high' | 'medium' | 'low' }) {
     <span className={`px-2 py-0.5 rounded text-xs ${colors[priority]}`}>
       {priority}
     </span>
+  );
+}
+
+function ChangeIndicator({ change }: { change: number | null }) {
+  if (change === null) return <span className="text-zinc-500">-</span>;
+  const isPositive = change >= 0;
+  return (
+    <span className={`text-sm font-medium ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
+      {isPositive ? '+' : ''}{change.toFixed(1)}
+    </span>
+  );
+}
+
+function SessionComparisonCard({ comparison }: { comparison: TutorSessionComparison }) {
+  if (comparison.previous_session_count === 0) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-center">
+          <p className="text-zinc-500">Complete more sessions to see how you compare!</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-6">
+        <h3 className="text-sm font-medium text-zinc-400 mb-4">
+          Compared to Your Last {comparison.previous_session_count} Session{comparison.previous_session_count > 1 ? 's' : ''}
+        </h3>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="text-center">
+            <div className="text-xs text-zinc-500 mb-1">Fluency</div>
+            <div className="text-2xl font-bold text-white">{comparison.current_fluency ?? '-'}</div>
+            <div className="mt-1">
+              <ChangeIndicator change={comparison.fluency_change} />
+              <span className="text-xs text-zinc-500 ml-1">vs avg {comparison.avg_previous_fluency?.toFixed(0)}</span>
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-zinc-500 mb-1">Grammar</div>
+            <div className="text-2xl font-bold text-white">{comparison.current_grammar ?? '-'}</div>
+            <div className="mt-1">
+              <ChangeIndicator change={comparison.grammar_change} />
+              <span className="text-xs text-zinc-500 ml-1">vs avg {comparison.avg_previous_grammar?.toFixed(0)}</span>
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-zinc-500 mb-1">Vocabulary</div>
+            <div className="text-2xl font-bold text-white">{comparison.current_vocabulary ?? '-'}</div>
+            <div className="mt-1">
+              <ChangeIndicator change={comparison.vocabulary_change} />
+              <span className="text-xs text-zinc-500 ml-1">vs avg {comparison.avg_previous_vocabulary?.toFixed(0)}</span>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SpanishSpecificSection({ analysis }: { analysis: SpanishSpecificAnalysis }) {
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold text-white">Spanish-Specific Feedback</h3>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Conjugation */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-zinc-400">Verb Conjugation</h4>
+              <span className={`text-lg font-bold ${analysis.conjugation.score >= 80 ? 'text-white' : analysis.conjugation.score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
+                {analysis.conjugation.score}
+              </span>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Regular verbs:</span>
+                <span className="text-zinc-300">{analysis.conjugation.regular_verb_accuracy}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Irregular verbs:</span>
+                <span className="text-zinc-300">{analysis.conjugation.irregular_verb_accuracy}%</span>
+              </div>
+              {analysis.conjugation.subjunctive_attempts > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Subjunctive:</span>
+                  <span className="text-zinc-300">{analysis.conjugation.subjunctive_accuracy ?? 0}%</span>
+                </div>
+              )}
+            </div>
+            {analysis.conjugation.notable_errors.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-zinc-800">
+                <div className="text-xs text-zinc-500 mb-2">Errors:</div>
+                {analysis.conjugation.notable_errors.slice(0, 3).map((err, i) => (
+                  <div key={i} className="text-xs mb-1">
+                    <span className="text-red-400 line-through">{err.user_said}</span>
+                    <span className="text-zinc-500 mx-1">&rarr;</span>
+                    <span className="text-white">{err.correct}</span>
+                    <span className="text-zinc-600 ml-1">({err.verb}, {err.tense})</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Gender Agreement */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-zinc-400">Gender & Agreement</h4>
+              <span className={`text-lg font-bold ${analysis.gender_agreement.score >= 80 ? 'text-white' : analysis.gender_agreement.score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
+                {analysis.gender_agreement.score}
+              </span>
+            </div>
+            <p className="text-sm text-zinc-400 mb-2">{analysis.gender_agreement.notes}</p>
+            {analysis.gender_agreement.errors.length > 0 && (
+              <div className="mt-2">
+                {analysis.gender_agreement.errors.slice(0, 3).map((err, i) => (
+                  <div key={i} className="text-xs mb-2 p-2 bg-zinc-800/50 rounded">
+                    <div>
+                      <span className="text-red-400 line-through">{err.phrase}</span>
+                      <span className="text-zinc-500 mx-1">&rarr;</span>
+                      <span className="text-white">{err.correction}</span>
+                    </div>
+                    <div className="text-zinc-500 mt-1">{err.rule}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Ser vs Estar */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-zinc-400">Ser vs Estar</h4>
+              <span className={`text-lg font-bold ${analysis.ser_estar.score >= 80 ? 'text-white' : analysis.ser_estar.score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
+                {analysis.ser_estar.score}
+              </span>
+            </div>
+            <p className="text-sm text-zinc-400 mb-2">{analysis.ser_estar.notes}</p>
+            {analysis.ser_estar.errors.length > 0 && (
+              <div className="mt-2">
+                {analysis.ser_estar.errors.slice(0, 3).map((err, i) => (
+                  <div key={i} className="text-xs mb-2 p-2 bg-zinc-800/50 rounded">
+                    <div>
+                      <span className="text-red-400 line-through">{err.user_said}</span>
+                      <span className="text-zinc-500 mx-1">&rarr;</span>
+                      <span className="text-white">{err.correction}</span>
+                    </div>
+                    <div className="text-zinc-500 mt-1">{err.explanation}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Por vs Para */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-zinc-400">Por vs Para</h4>
+              <span className={`text-lg font-bold ${analysis.por_para.score >= 80 ? 'text-white' : analysis.por_para.score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
+                {analysis.por_para.score}
+              </span>
+            </div>
+            <p className="text-sm text-zinc-400 mb-2">{analysis.por_para.notes}</p>
+            {analysis.por_para.errors.length > 0 && (
+              <div className="mt-2">
+                {analysis.por_para.errors.slice(0, 3).map((err, i) => (
+                  <div key={i} className="text-xs mb-2 p-2 bg-zinc-800/50 rounded">
+                    <div>
+                      <span className="text-red-400 line-through">{err.user_said}</span>
+                      <span className="text-zinc-500 mx-1">&rarr;</span>
+                      <span className="text-white">{err.correction}</span>
+                    </div>
+                    <div className="text-zinc-500 mt-1">{err.explanation}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
 
@@ -181,9 +371,12 @@ function InterviewPrepAnalysis({ analysis }: { analysis: TutorInterviewAnalysis 
   );
 }
 
-function LanguageTestAnalysis({ analysis }: { analysis: TutorLanguageAnalysis }) {
+function LanguageTestAnalysis({ analysis, comparison }: { analysis: TutorLanguageAnalysis; comparison: TutorSessionComparison | null }) {
   return (
     <div className="space-y-6">
+      {/* Session Comparison */}
+      {comparison && <SessionComparisonCard comparison={comparison} />}
+
       {/* Summary & Proficiency */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="md:col-span-2">
@@ -331,6 +524,11 @@ function LanguageTestAnalysis({ analysis }: { analysis: TutorLanguageAnalysis })
         </Card>
       )}
 
+      {/* Spanish-Specific Analysis */}
+      {analysis.spanish_specific && (
+        <SpanishSpecificSection analysis={analysis.spanish_specific} />
+      )}
+
       {/* Practice Suggestions */}
       {analysis.practice_suggestions.length > 0 && (
         <Card>
@@ -358,6 +556,7 @@ export function TutorSessionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [session, setSession] = useState<TutorSessionDetailType | null>(null);
+  const [comparison, setComparison] = useState<TutorSessionComparison | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -372,8 +571,12 @@ export function TutorSessionDetail() {
     setLoading(true);
     setError(null);
     try {
-      const data = await tutorMetrics.getSession(id);
-      setSession(data);
+      const [sessionData, comparisonData] = await Promise.all([
+        tutorMetrics.getSession(id),
+        tutorMetrics.getSessionComparison(id).catch(() => null),
+      ]);
+      setSession(sessionData);
+      setComparison(comparisonData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load session');
     } finally {
@@ -469,7 +672,7 @@ export function TutorSessionDetail() {
       ) : isInterviewPrep ? (
         <InterviewPrepAnalysis analysis={session.tutor_analysis as TutorInterviewAnalysis} />
       ) : (
-        <LanguageTestAnalysis analysis={session.tutor_analysis as TutorLanguageAnalysis} />
+        <LanguageTestAnalysis analysis={session.tutor_analysis as TutorLanguageAnalysis} comparison={comparison} />
       )}
 
       {/* Transcript */}

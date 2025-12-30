@@ -172,6 +172,31 @@ async def init_db():
             END $$;
         """)
 
+        # Tutor vocabulary tracking table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tutor_vocabulary (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                session_id UUID NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
+                language VARCHAR(10) NOT NULL,
+                word VARCHAR(255) NOT NULL,
+                usage_context TEXT,
+                used_correctly BOOLEAN,
+                correction TEXT,
+                category VARCHAR(50),
+                difficulty VARCHAR(20),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tutor_vocabulary_session ON tutor_vocabulary(session_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tutor_vocabulary_language ON tutor_vocabulary(language)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tutor_vocabulary_word ON tutor_vocabulary(word)
+        """)
+
         # Culture profiles table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS culture_profiles (
