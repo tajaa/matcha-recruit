@@ -56,6 +56,13 @@ ecr_login() {
     ssh_cmd "aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 }
 
+backup_database() {
+    log_info "Backing up database before deployment..."
+    ssh_cmd "bash ~/backup-postgres.sh >> ~/backup.log 2>&1" && \
+        log_success "Database backup complete!" || \
+        log_warn "Backup may have failed - check ~/backup.log on EC2"
+}
+
 update_matcha() {
     log_info "Updating Matcha-Recruit..."
 
@@ -168,6 +175,7 @@ if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_OCEANECA" = false ]; then
 fi
 
 ecr_login
+backup_database
 
 if [ "$UPDATE_MATCHA" = true ]; then
     update_matcha

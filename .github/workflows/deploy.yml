@@ -69,6 +69,37 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Backup database before deploy
+        env:
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+        run: |
+          # Run backup script before deployment
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["bash ~/backup-postgres.sh >> ~/backup.log 2>&1"]' \
+            --query 'Command.CommandId' \
+            --output text)
+
+          # Wait for backup to complete (timeout 120s)
+          echo "Waiting for backup to complete..."
+          aws ssm wait command-executed \
+            --instance-id "$INSTANCE_ID" \
+            --command-id "$COMMAND_ID" || true
+
+          # Check backup status
+          STATUS=$(aws ssm get-command-invocation \
+            --instance-id "$INSTANCE_ID" \
+            --command-id "$COMMAND_ID" \
+            --query 'Status' \
+            --output text)
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "::warning::Database backup returned status: $STATUS - check ~/backup.log on EC2"
+          else
+            echo "Database backup completed successfully"
+          fi
+
       - name: Deploy to EC2 via SSM
         env:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
