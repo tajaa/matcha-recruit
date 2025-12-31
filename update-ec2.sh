@@ -65,6 +65,11 @@ backup_database() {
 
 pre_cleanup() {
     log_info "Freeing up disk space before pull..."
+    # Stop and remove worker containers (they cycle on/off via scheduler anyway)
+    ssh_cmd "docker stop matcha-worker drooli-worker 2>/dev/null || true"
+    ssh_cmd "docker rm matcha-worker drooli-worker 2>/dev/null || true"
+    # Remove all stopped containers
+    ssh_cmd "docker container prune -f" || true
     # Remove dangling images (untagged, not used by any container)
     ssh_cmd "docker image prune -f" || true
     # Remove build cache
