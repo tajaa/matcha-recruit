@@ -86,8 +86,7 @@ class GoogleJobsScraper(JobSource):
             # Get apply link - try multiple fields
             apply_url = (
                 item.get("apply_link") or
-                item.get("share_link") or
-                item.get("link") or
+                item.get("sharing_link") or
                 ""
             )
 
@@ -98,6 +97,10 @@ class GoogleJobsScraper(JobSource):
             elif item.get("detected_extensions", {}).get("salary"):
                 salary = item["detected_extensions"]["salary"]
 
+            # Get source (e.g., "via Indeed", "via LinkedIn")
+            via = item.get("via", "")
+            source_display = via.replace("via ", "") if via else "Google Jobs"
+
             jobs.append(ScrapedJob(
                 title=title,
                 company_name=company,
@@ -106,7 +109,7 @@ class GoogleJobsScraper(JobSource):
                 salary=salary,
                 apply_url=apply_url,
                 source_url="https://www.google.com/search?q=jobs",
-                source_name="google_jobs",
+                source_name=source_display,
             ))
 
         return jobs
