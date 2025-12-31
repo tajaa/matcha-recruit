@@ -213,7 +213,7 @@ export function ResumeOnboarding() {
                     setIsDragging(false);
                     handleFileSelect(e.dataTransfer.files);
                   }}
-                  className={`border-2 border-dashed p-8 text-center transition-all ${
+                  className={`relative border-2 border-dashed p-8 text-center transition-all ${
                     isDragging ? 'border-white bg-zinc-800' : 'border-zinc-700'
                   }`}
                 >
