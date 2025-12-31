@@ -159,35 +159,53 @@ export function Projects() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => (
-            <Card
-              key={project.id}
-              className="hover:border-zinc-700 transition-colors cursor-pointer group"
-              onClick={() => navigate(`/app/projects/${project.id}`)}
-            >
-              <CardContent>
-                <div className="flex justify-between items-start">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className={`px-2 py-0.5 text-xs font-medium rounded ${
-                          STATUS_COLORS[project.status]
-                        }`}
-                      >
-                        {project.status}
-                      </span>
-                    </div>
-                    <h3 className="text-lg font-semibold text-zinc-100 group-hover:text-white transition-colors truncate">
-                      {project.name}
-                    </h3>
-                    <p className="text-sm text-zinc-500 truncate">{project.company_name}</p>
-                  </div>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+          {/* Table Header */}
+          <div className="grid grid-cols-[1.5fr_1fr_1fr_100px_80px_100px_50px] gap-4 px-4 py-3 bg-zinc-800/50 border-b border-zinc-700 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+            <div>Project</div>
+            <div>Position</div>
+            <div>Location</div>
+            <div>Salary</div>
+            <div>Status</div>
+            <div>Candidates</div>
+            <div></div>
+          </div>
+
+          {/* Table Body */}
+          <div className="divide-y divide-zinc-800">
+            {projects.map((project) => (
+              <div
+                key={project.id}
+                onClick={() => navigate(`/app/projects/${project.id}`)}
+                className="grid grid-cols-[1.5fr_1fr_1fr_100px_80px_100px_50px] gap-4 px-4 py-3 items-center hover:bg-zinc-800/30 transition-colors cursor-pointer"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium text-zinc-100 truncate">{project.name}</div>
+                  <div className="text-sm text-zinc-500 truncate">{project.company_name}</div>
+                </div>
+                <div className="text-zinc-400 text-sm truncate">
+                  {project.position_title || '-'}
+                </div>
+                <div className="text-zinc-400 text-sm truncate">
+                  {project.location || '-'}
+                </div>
+                <div className="text-zinc-400 text-sm">
+                  {formatSalary(project.salary_min, project.salary_max) || '-'}
+                </div>
+                <div>
+                  <span className={`px-2 py-0.5 text-xs font-medium rounded ${STATUS_COLORS[project.status]}`}>
+                    {project.status}
+                  </span>
+                </div>
+                <div className="text-zinc-400 text-sm">
+                  {project.candidate_count}
+                </div>
+                <div className="flex justify-end">
                   <button
                     onClick={(e) => handleDelete(project.id, e)}
-                    className="text-zinc-600 hover:text-red-400 transition-colors ml-2"
+                    className="text-zinc-600 hover:text-red-400 transition-colors p-1"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -197,46 +215,9 @@ export function Projects() {
                     </svg>
                   </button>
                 </div>
-
-                <div className="mt-4 space-y-2">
-                  {project.position_title && (
-                    <p className="text-sm text-zinc-400 flex items-center gap-2">
-                      <svg className="w-4 h-4 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                      {project.position_title}
-                    </p>
-                  )}
-                  {project.location && (
-                    <p className="text-sm text-zinc-400 flex items-center gap-2">
-                      <svg className="w-4 h-4 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                      {project.location}
-                    </p>
-                  )}
-                  {formatSalary(project.salary_min, project.salary_max) && (
-                    <p className="text-sm text-zinc-400 flex items-center gap-2">
-                      <svg className="w-4 h-4 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      {formatSalary(project.salary_min, project.salary_max)}
-                    </p>
-                  )}
-                </div>
-
-                <div className="mt-4 pt-4 border-t border-zinc-800 flex items-center justify-between">
-                  <span className="text-sm text-zinc-500">
-                    {project.candidate_count} candidate{project.candidate_count !== 1 ? 's' : ''}
-                  </span>
-                  <span className="text-xs text-zinc-600">
-                    {new Date(project.updated_at).toLocaleDateString()}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
