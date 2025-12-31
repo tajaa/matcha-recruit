@@ -87,6 +87,19 @@ async def init_db():
             END $$;
         """)
 
+        # Add allowed_interview_roles column to users table (restrict which roles candidates can practice)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'allowed_interview_roles'
+                ) THEN
+                    ALTER TABLE users ADD COLUMN allowed_interview_roles JSONB DEFAULT '[]'::jsonb;
+                END IF;
+            END $$;
+        """)
+
         # Admins table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS admins (

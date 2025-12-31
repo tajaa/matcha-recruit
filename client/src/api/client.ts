@@ -1319,4 +1319,10 @@ export const adminBeta = {
 
   getCandidateSessions: (userId: string): Promise<CandidateSessionSummary[]> =>
     request<CandidateSessionSummary[]>(`/auth/admin/candidates/${userId}/sessions`),
+
+  updateAllowedRoles: (userId: string, roles: string[]): Promise<{ status: string; allowed_interview_roles: string[] }> =>
+    request<{ status: string; allowed_interview_roles: string[] }>(`/auth/admin/candidates/${userId}/roles`, {
+      method: 'PUT',
+      body: JSON.stringify({ roles }),
+    }),
 };

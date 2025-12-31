@@ -3,6 +3,13 @@ import { Button, Card, CardContent, Modal } from '../components';
 import { adminBeta } from '../api/client';
 import type { CandidateBetaInfo, CandidateSessionSummary } from '../types';
 
+const INTERVIEW_ROLES = [
+  { value: 'Junior Engineer', label: 'Jr Eng' },
+  { value: 'CTO', label: 'CTO' },
+  { value: 'VP of People', label: 'VP People' },
+  { value: 'Head of Marketing', label: 'Marketing' },
+];
+
 export function InterviewPrepAdmin() {
   const [candidates, setCandidates] = useState<CandidateBetaInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,6 +80,25 @@ export function InterviewPrepAdmin() {
       console.error('Failed to award tokens:', err);
     } finally {
       setAwarding(false);
+    }
+  };
+
+  const handleToggleRole = async (userId: string, role: string, currentRoles: string[]) => {
+    const newRoles = currentRoles.includes(role)
+      ? currentRoles.filter(r => r !== role)
+      : [...currentRoles, role];
+
+    try {
+      await adminBeta.updateAllowedRoles(userId, newRoles);
+      setCandidates(prev =>
+        prev.map(c =>
+          c.user_id === userId
+            ? { ...c, allowed_interview_roles: newRoles }
+            : c
+        )
+      );
+    } catch (err) {
+      console.error('Failed to update roles:', err);
     }
   };
 
@@ -150,6 +176,9 @@ export function InterviewPrepAdmin() {
                     </th>
                     <th className="text-center px-4 py-3 text-[10px] font-medium text-zinc-500 uppercase tracking-widest">
                       Tokens
+                    </th>
+                    <th className="text-left px-4 py-3 text-[10px] font-medium text-zinc-500 uppercase tracking-widest">
+                      Allowed Roles
                     </th>
                     <th className="text-center px-4 py-3 text-[10px] font-medium text-zinc-500 uppercase tracking-widest">
                       Sessions
@@ -231,6 +260,28 @@ export function InterviewPrepAdmin() {
                             </div>
                           </td>
 
+                          {/* Allowed Roles */}
+                          <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+                            <div className="flex flex-wrap gap-1">
+                              {INTERVIEW_ROLES.map(role => {
+                                const isSelected = candidate.allowed_interview_roles?.includes(role.value);
+                                return (
+                                  <button
+                                    key={role.value}
+                                    onClick={() => handleToggleRole(candidate.user_id, role.value, candidate.allowed_interview_roles || [])}
+                                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                                      isSelected
+                                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                        : 'bg-zinc-800 text-zinc-500 border border-zinc-700 hover:border-zinc-600'
+                                    }`}
+                                  >
+                                    {role.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </td>
+
                           {/* Sessions Count */}
                           <td className="px-4 py-4 text-center">
                             <span className="text-sm text-zinc-300 font-mono">
@@ -256,7 +307,7 @@ export function InterviewPrepAdmin() {
                         {/* Expanded Sessions */}
                         {isExpanded && (
                           <tr key={`${candidate.user_id}-expanded`}>
-                            <td colSpan={6} className="bg-zinc-950/50 border-b border-zinc-800">
+                            <td colSpan={7} className="bg-zinc-950/50 border-b border-zinc-800">
                               <div className="px-5 py-4">
                                 {loadingSessions ? (
                                   <div className="flex items-center gap-2 text-zinc-500 text-sm">

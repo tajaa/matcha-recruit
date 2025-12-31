@@ -12,7 +12,7 @@ from ..models.auth import (
     AdminProfile, ClientProfile, CandidateProfile, CurrentUser,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
-    TokenAwardRequest, CandidateSessionSummary
+    TokenAwardRequest, AllowedRolesRequest, CandidateSessionSummary
 )
 from ..services.auth import (
     hash_password, verify_password,
@@ -329,7 +329,8 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "email": current_user.email,
                     "role": current_user.role,
                     "beta_features": current_user.beta_features,
-                    "interview_prep_tokens": current_user.interview_prep_tokens
+                    "interview_prep_tokens": current_user.interview_prep_tokens,
+                    "allowed_interview_roles": current_user.allowed_interview_roles
                 },
                 "profile": {
                     "id": str(profile["id"]),
@@ -507,6 +508,7 @@ async def list_candidates_beta():
                 c.name,
                 COALESCE(u.beta_features, '{}'::jsonb) as beta_features,
                 COALESCE(u.interview_prep_tokens, 0) as interview_prep_tokens,
+                COALESCE(u.allowed_interview_roles, '[]'::jsonb) as allowed_interview_roles,
                 COUNT(i.id) FILTER (WHERE i.interview_type = 'tutor_interview') as total_sessions,
                 AVG(
                     CASE
@@ -521,7 +523,7 @@ async def list_candidates_beta():
             JOIN candidates c ON c.user_id = u.id
             LEFT JOIN interviews i ON i.interviewer_name = u.email AND i.interview_type = 'tutor_interview'
             WHERE u.role = 'candidate'
-            GROUP BY u.id, u.email, c.name, u.beta_features, u.interview_prep_tokens
+            GROUP BY u.id, u.email, c.name, u.beta_features, u.interview_prep_tokens, u.allowed_interview_roles
             ORDER BY c.name
         """)
 
@@ -531,12 +533,17 @@ async def list_candidates_beta():
             if isinstance(beta_features, str):
                 beta_features = json.loads(beta_features)
 
+            allowed_roles = row["allowed_interview_roles"] if row["allowed_interview_roles"] else []
+            if isinstance(allowed_roles, str):
+                allowed_roles = json.loads(allowed_roles)
+
             candidates.append(CandidateBetaInfo(
                 user_id=row["user_id"],
                 email=row["email"],
                 name=row["name"],
                 beta_features=beta_features,
                 interview_prep_tokens=row["interview_prep_tokens"],
+                allowed_interview_roles=allowed_roles,
                 total_sessions=row["total_sessions"] or 0,
                 avg_score=round(row["avg_score"], 1) if row["avg_score"] else None,
                 last_session_at=row["last_session_at"]
@@ -601,6 +608,28 @@ async def award_tokens(user_id: UUID, request: TokenAwardRequest):
         )
 
         return {"status": "awarded", "new_total": new_total}
+
+
+@router.put("/admin/candidates/{user_id}/roles", dependencies=[Depends(require_admin)])
+async def update_allowed_roles(user_id: UUID, request: AllowedRolesRequest):
+    """Update allowed interview roles for a candidate."""
+    async with get_connection() as conn:
+        # Verify user exists and is a candidate
+        user = await conn.fetchrow(
+            "SELECT id, role FROM users WHERE id = $1",
+            user_id
+        )
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if user["role"] != "candidate":
+            raise HTTPException(status_code=400, detail="User is not a candidate")
+
+        await conn.execute(
+            "UPDATE users SET allowed_interview_roles = $1::jsonb WHERE id = $2",
+            json.dumps(request.roles), user_id
+        )
+
+        return {"status": "updated", "allowed_interview_roles": request.roles}
 
 
 @router.get("/admin/candidates/{user_id}/sessions", response_model=list[CandidateSessionSummary], dependencies=[Depends(require_admin)])

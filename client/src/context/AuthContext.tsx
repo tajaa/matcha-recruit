@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import type { User, CurrentUserResponse, LoginRequest, ClientRegister, CandidateRegister, UserRole } from '../types';
 import { auth, getAccessToken, clearTokens } from '../api/client';
 
@@ -7,6 +7,7 @@ interface AuthContextType {
   profile: CurrentUserResponse['profile'] | null;
   betaFeatures: Record<string, boolean>;
   interviewPrepTokens: number;
+  allowedInterviewRoles: string[];
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (data: LoginRequest) => Promise<User>;
@@ -25,7 +26,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<CurrentUserResponse['profile'] | null>(null);
   const [betaFeatures, setBetaFeatures] = useState<Record<string, boolean>>({});
   const [interviewPrepTokens, setInterviewPrepTokens] = useState(0);
+  const [allowedInterviewRoles, setAllowedInterviewRoles] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const loadingRef = useRef(false);
 
   const loadUser = useCallback(async () => {
     const token = getAccessToken();
@@ -33,6 +36,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
       return;
     }
+
+    // Prevent concurrent loads
+    if (loadingRef.current) return;
+    loadingRef.current = true;
 
     try {
       const data = await auth.me();
@@ -47,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(data.profile);
       setBetaFeatures(data.user.beta_features || {});
       setInterviewPrepTokens(data.user.interview_prep_tokens || 0);
+      setAllowedInterviewRoles(data.user.allowed_interview_roles || []);
     } catch (err) {
       // Only clear tokens for auth errors (401), not network errors
       const isAuthError = err instanceof Error &&
@@ -58,8 +66,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
       setBetaFeatures({});
       setInterviewPrepTokens(0);
+      setAllowedInterviewRoles([]);
     } finally {
       setIsLoading(false);
+      loadingRef.current = false;
     }
   }, []);
 
@@ -124,6 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         betaFeatures,
         interviewPrepTokens,
+        allowedInterviewRoles,
         isLoading,
         isAuthenticated: !!user,
         login,

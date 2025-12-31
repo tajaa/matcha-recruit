@@ -20,8 +20,13 @@ const INTERVIEW_ROLES: { value: InterviewRole; label: string; description: strin
 export function Tutor() {
   const navigate = useNavigate();
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { user, interviewPrepTokens, refreshUser } = useAuth();
+  const { user, interviewPrepTokens, allowedInterviewRoles, refreshUser } = useAuth();
   const isCandidate = user?.role === 'candidate';
+
+  // Filter roles for candidates based on admin-assigned allowed roles
+  const availableRoles = isCandidate
+    ? INTERVIEW_ROLES.filter(role => allowedInterviewRoles.includes(role.value))
+    : INTERVIEW_ROLES;
 
   // Mode selection state
   const [selectedMode, setSelectedMode] = useState<TutorMode | null>(null);
@@ -29,6 +34,13 @@ export function Tutor() {
   const [selectedDuration, setSelectedDuration] = useState<Duration>(2);
   const [selectedInterviewDuration, setSelectedInterviewDuration] = useState<Duration>(5);
   const [selectedRole, setSelectedRole] = useState<InterviewRole>('Junior Engineer');
+
+  // Set default selected role to first available for candidates
+  useEffect(() => {
+    if (isCandidate && availableRoles.length > 0 && !availableRoles.some(r => r.value === selectedRole)) {
+      setSelectedRole(availableRoles[0].value);
+    }
+  }, [isCandidate, availableRoles, selectedRole]);
 
   // Session state
   const [interviewId, setInterviewId] = useState<string | null>(null);
@@ -338,22 +350,29 @@ export function Tutor() {
 
             <div className="mb-4">
               <label className="block text-xs text-zinc-500 mb-2">Interviewing for</label>
-              <div className="grid grid-cols-2 gap-2">
-                {INTERVIEW_ROLES.map((role) => (
-                  <button
-                    key={role.value}
-                    onClick={() => setSelectedRole(role.value)}
-                    className={`py-2 px-3 rounded-lg border transition-colors text-left ${
-                      selectedRole === role.value
-                        ? 'bg-matcha-500/20 border-matcha-500 text-matcha-400'
-                        : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                    }`}
-                  >
-                    <div className="text-sm font-medium">{role.label}</div>
-                    <div className="text-xs text-zinc-500">{role.description}</div>
-                  </button>
-                ))}
-              </div>
+              {availableRoles.length === 0 ? (
+                <div className="py-4 px-3 rounded-lg border border-zinc-700 bg-zinc-900/50 text-center">
+                  <p className="text-sm text-zinc-500">No interview roles assigned yet.</p>
+                  <p className="text-xs text-zinc-600 mt-1">Contact your admin to enable roles.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {availableRoles.map((role) => (
+                    <button
+                      key={role.value}
+                      onClick={() => setSelectedRole(role.value)}
+                      className={`py-2 px-3 rounded-lg border transition-colors text-left ${
+                        selectedRole === role.value
+                          ? 'bg-matcha-500/20 border-matcha-500 text-matcha-400'
+                          : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                      }`}
+                    >
+                      <div className="text-sm font-medium">{role.label}</div>
+                      <div className="text-xs text-zinc-500">{role.description}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="mb-6">
@@ -377,10 +396,10 @@ export function Tutor() {
 
             <Button
               onClick={() => handleStartSession('interview_prep', undefined, selectedInterviewDuration, selectedRole)}
-              disabled={starting || (isCandidate && interviewPrepTokens === 0)}
+              disabled={starting || (isCandidate && interviewPrepTokens === 0) || (isCandidate && availableRoles.length === 0)}
               className="w-full"
             >
-              {starting ? 'Starting...' : `Practice ${selectedRole} Interview (${selectedInterviewDuration} min)`}
+              {starting ? 'Starting...' : availableRoles.length === 0 ? 'No Roles Available' : `Practice ${selectedRole} Interview (${selectedInterviewDuration} min)`}
             </Button>
             {isCandidate && (
               <p className="text-xs text-zinc-500 text-center mt-2">

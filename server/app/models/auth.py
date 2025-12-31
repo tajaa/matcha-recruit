@@ -110,6 +110,7 @@ class CurrentUser(BaseModel):
     profile: Optional[AdminProfile | ClientProfile | CandidateProfile] = None
     beta_features: dict = {}
     interview_prep_tokens: int = 0
+    allowed_interview_roles: list[str] = []
 
 
 class ChangePasswordRequest(BaseModel):
@@ -134,6 +135,7 @@ class CandidateBetaInfo(BaseModel):
     name: Optional[str]
     beta_features: dict
     interview_prep_tokens: int
+    allowed_interview_roles: list[str] = []
     total_sessions: int = 0
     avg_score: Optional[float] = None
     last_session_at: Optional[datetime] = None
@@ -151,6 +153,10 @@ class BetaToggleRequest(BaseModel):
 
 class TokenAwardRequest(BaseModel):
     amount: int
+
+
+class AllowedRolesRequest(BaseModel):
+    roles: list[str]
 
 
 class CandidateSessionSummary(BaseModel):

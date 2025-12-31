@@ -32,7 +32,8 @@ async def get_current_user(
         user_row = await conn.fetchrow(
             """SELECT id, email, role, is_active,
                       COALESCE(beta_features, '{}'::jsonb) as beta_features,
-                      COALESCE(interview_prep_tokens, 0) as interview_prep_tokens
+                      COALESCE(interview_prep_tokens, 0) as interview_prep_tokens,
+                      COALESCE(allowed_interview_roles, '[]'::jsonb) as allowed_interview_roles
                FROM users WHERE id = $1""",
             user_id
         )
@@ -48,13 +49,19 @@ async def get_current_user(
             import json
             beta_features = json.loads(beta_features)
 
+        allowed_roles = user_row["allowed_interview_roles"] if user_row["allowed_interview_roles"] else []
+        if isinstance(allowed_roles, str):
+            import json
+            allowed_roles = json.loads(allowed_roles)
+
         return CurrentUser(
             id=user_row["id"],
             email=user_row["email"],
             role=user_row["role"],
             profile=None,  # Profile loaded on demand
             beta_features=beta_features,
-            interview_prep_tokens=user_row["interview_prep_tokens"]
+            interview_prep_tokens=user_row["interview_prep_tokens"],
+            allowed_interview_roles=allowed_roles
         )
 
 

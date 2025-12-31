@@ -474,6 +474,7 @@ export interface CurrentUserResponse {
     role: UserRole;
     beta_features?: Record<string, boolean>;
     interview_prep_tokens?: number;
+    allowed_interview_roles?: string[];
   };
   profile: AdminProfile | ClientProfile | CandidateAuthProfile | null;
 }
@@ -485,6 +486,7 @@ export interface CandidateBetaInfo {
   name: string | null;
   beta_features: Record<string, boolean>;
   interview_prep_tokens: number;
+  allowed_interview_roles: string[];
   total_sessions: number;
   avg_score: number | null;
   last_session_at: string | null;
