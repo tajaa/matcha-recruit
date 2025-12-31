@@ -67,6 +67,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadUser();
   }, [loadUser]);
 
+  // Refresh user data when tab regains focus to pick up admin changes (like beta access)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && getAccessToken()) {
+        loadUser();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [loadUser]);
+
   const login = async (data: LoginRequest) => {
     const result = await auth.login(data);
     setUser(result.user);
