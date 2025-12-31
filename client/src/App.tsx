@@ -205,7 +205,7 @@ function App() {
               <Route
                 path="test-bot"
                 element={
-                  <ProtectedRoute roles={['admin', 'candidate']}>
+                  <ProtectedRoute roles={['admin']}>
                     <TestBot />
                   </ProtectedRoute>
                 }
@@ -213,7 +213,7 @@ function App() {
               <Route
                 path="test-bot/analysis/:id"
                 element={
-                  <ProtectedRoute roles={['admin', 'candidate']}>
+                  <ProtectedRoute roles={['admin']}>
                     <InterviewAnalysis />
                   </ProtectedRoute>
                 }
