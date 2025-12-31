@@ -351,8 +351,19 @@ async def update_my_resume(
 
         candidate_id = candidate["id"]
 
-        # Compute hash
+        # Compute hash (for tracking, not dedup - user can re-upload same file)
         file_hash = compute_file_hash(file_bytes)
+
+        # Check if this hash belongs to a DIFFERENT candidate (prevent stealing resumes)
+        existing = await conn.fetchrow(
+            "SELECT id FROM candidates WHERE resume_hash = $1 AND id != $2",
+            file_hash, candidate_id
+        )
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail="This resume is already associated with another account"
+            )
 
         # Parse resume
         parser = ResumeParser()
@@ -373,24 +384,23 @@ async def update_my_resume(
             f.write(file_bytes)
 
         # UPDATE existing record (not INSERT)
+        # NOTE: Do NOT update email - user's email comes from their account, not resume
         row = await conn.fetchrow(
             """
             UPDATE candidates
             SET name = COALESCE($1, name),
-                email = COALESCE($2, email),
-                phone = COALESCE($3, phone),
-                resume_text = $4,
-                resume_hash = $5,
-                resume_file_path = $6,
-                skills = $7,
-                experience_years = COALESCE($8, experience_years),
-                education = $9,
-                parsed_data = $10
-            WHERE id = $11
+                phone = COALESCE($2, phone),
+                resume_text = $3,
+                resume_hash = $4,
+                resume_file_path = $5,
+                skills = $6,
+                experience_years = COALESCE($7, experience_years),
+                education = $8,
+                parsed_data = $9
+            WHERE id = $10
             RETURNING id, name, email, phone, skills, experience_years, education, created_at
             """,
             name,
-            email,
             phone,
             resume_text,
             file_hash,
