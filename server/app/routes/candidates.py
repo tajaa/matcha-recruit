@@ -318,63 +318,9 @@ async def list_candidates(
         return results
 
 
-@router.get("/{candidate_id}", response_model=CandidateDetail)
-async def get_candidate(candidate_id: UUID):
-    """Get a candidate's full details."""
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id, name, email, phone, resume_text, skills, experience_years, education, parsed_data, created_at
-            FROM candidates
-            WHERE id = $1
-            """,
-            candidate_id,
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Candidate not found")
-
-        skills_data = json.loads(row["skills"]) if row["skills"] else []
-        education_data = json.loads(row["education"]) if row["education"] else []
-        parsed_data = json.loads(row["parsed_data"]) if row["parsed_data"] else {}
-
-        return CandidateDetail(
-            id=row["id"],
-            name=row["name"],
-            email=row["email"],
-            phone=row["phone"],
-            resume_text=row["resume_text"],
-            skills=skills_data,
-            experience_years=row["experience_years"],
-            education=education_data,
-            parsed_data=parsed_data,
-            created_at=row["created_at"],
-        )
-
-
-@router.delete("/{candidate_id}")
-async def delete_candidate(candidate_id: UUID):
-    """Delete a candidate."""
-    async with get_connection() as conn:
-        # Get file path first
-        row = await conn.fetchrow(
-            "SELECT resume_file_path FROM candidates WHERE id = $1",
-            candidate_id,
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Candidate not found")
-
-        # Delete file if exists
-        if row["resume_file_path"] and os.path.exists(row["resume_file_path"]):
-            os.unlink(row["resume_file_path"])
-
-        # Delete from database
-        await conn.execute("DELETE FROM candidates WHERE id = $1", candidate_id)
-
-        return {"status": "deleted"}
-
-
 # ===========================================
 # Candidate Self-Service Endpoints
+# IMPORTANT: These must be before /{candidate_id} routes
 # ===========================================
 
 @router.post("/me/resume", response_model=CandidateResponse)
@@ -529,3 +475,62 @@ async def update_my_profile(
             education=education_data,
             created_at=row["created_at"],
         )
+
+
+# ===========================================
+# Admin/Client Candidate Management Endpoints
+# ===========================================
+
+@router.get("/{candidate_id}", response_model=CandidateDetail)
+async def get_candidate(candidate_id: UUID):
+    """Get a candidate's full details."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, name, email, phone, resume_text, skills, experience_years, education, parsed_data, created_at
+            FROM candidates
+            WHERE id = $1
+            """,
+            candidate_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        skills_data = json.loads(row["skills"]) if row["skills"] else []
+        education_data = json.loads(row["education"]) if row["education"] else []
+        parsed_data = json.loads(row["parsed_data"]) if row["parsed_data"] else {}
+
+        return CandidateDetail(
+            id=row["id"],
+            name=row["name"],
+            email=row["email"],
+            phone=row["phone"],
+            resume_text=row["resume_text"],
+            skills=skills_data,
+            experience_years=row["experience_years"],
+            education=education_data,
+            parsed_data=parsed_data,
+            created_at=row["created_at"],
+        )
+
+
+@router.delete("/{candidate_id}")
+async def delete_candidate(candidate_id: UUID):
+    """Delete a candidate."""
+    async with get_connection() as conn:
+        # Get file path first
+        row = await conn.fetchrow(
+            "SELECT resume_file_path FROM candidates WHERE id = $1",
+            candidate_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        # Delete file if exists
+        if row["resume_file_path"] and os.path.exists(row["resume_file_path"]):
+            os.unlink(row["resume_file_path"])
+
+        # Delete from database
+        await conn.execute("DELETE FROM candidates WHERE id = $1", candidate_id)
+
+        return {"status": "deleted"}
