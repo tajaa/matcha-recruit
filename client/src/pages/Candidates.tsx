@@ -249,24 +249,57 @@ export function Candidates() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {candidates.map((candidate) => (
-            <Card key={candidate.id} className="hover:border-zinc-700 transition-colors group">
-              <CardContent>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="text-lg font-semibold text-zinc-100 group-hover:text-white transition-colors">
-                      {candidate.name || 'Unknown'}
-                    </h3>
-                    {candidate.email && (
-                      <p className="text-sm text-zinc-500">{candidate.email}</p>
-                    )}
-                  </div>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+          {/* Table Header */}
+          <div className="grid grid-cols-[1fr_1.5fr_100px_1fr_50px] gap-4 px-4 py-3 bg-zinc-800/50 border-b border-zinc-700 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+            <div>Name</div>
+            <div>Email</div>
+            <div>Experience</div>
+            <div>Skills</div>
+            <div></div>
+          </div>
+
+          {/* Table Body */}
+          <div className="divide-y divide-zinc-800">
+            {candidates.map((candidate) => (
+              <div
+                key={candidate.id}
+                onClick={() => handleViewDetail(candidate.id)}
+                className="grid grid-cols-[1fr_1.5fr_100px_1fr_50px] gap-4 px-4 py-3 items-center hover:bg-zinc-800/30 transition-colors cursor-pointer"
+              >
+                <div className="font-medium text-zinc-100 truncate">
+                  {candidate.name || 'Unknown'}
+                </div>
+                <div className="text-zinc-400 text-sm truncate">
+                  {candidate.email || '-'}
+                </div>
+                <div className="text-zinc-400 text-sm">
+                  {candidate.experience_years ? `${candidate.experience_years} yrs` : '-'}
+                </div>
+                <div className="flex flex-wrap gap-1 overflow-hidden">
+                  {candidate.skills?.slice(0, 3).map((skill) => (
+                    <span
+                      key={skill}
+                      className="px-2 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 rounded text-xs whitespace-nowrap"
+                    >
+                      {skill}
+                    </span>
+                  ))}
+                  {candidate.skills && candidate.skills.length > 3 && (
+                    <span className="text-zinc-600 text-xs whitespace-nowrap">
+                      +{candidate.skills.length - 3}
+                    </span>
+                  )}
+                </div>
+                <div className="flex justify-end">
                   <button
-                    onClick={() => handleDelete(candidate.id)}
-                    className="text-zinc-600 hover:text-red-400 transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(candidate.id);
+                    }}
+                    className="text-zinc-600 hover:text-red-400 transition-colors p-1"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -276,44 +309,9 @@ export function Candidates() {
                     </svg>
                   </button>
                 </div>
-
-                <div className="mt-4 space-y-3">
-                  {candidate.experience_years && (
-                    <p className="text-sm text-zinc-400 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-zinc-700"></span>
-                      {candidate.experience_years} years experience
-                    </p>
-                  )}
-                  {candidate.skills && candidate.skills.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {candidate.skills.slice(0, 5).map((skill) => (
-                        <span
-                          key={skill}
-                          className="px-2 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 rounded text-xs"
-                        >
-                          {skill}
-                        </span>
-                      ))}
-                      {candidate.skills.length > 5 && (
-                        <span className="px-2 py-0.5 text-zinc-600 text-xs">
-                          +{candidate.skills.length - 5} more
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="w-full mt-6"
-                  onClick={() => handleViewDetail(candidate.id)}
-                >
-                  View Details
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
