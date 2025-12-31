@@ -374,6 +374,37 @@ export const candidates = {
     request<{ status: string }>(`/candidates/${id}`, {
       method: 'DELETE',
     }),
+
+  // Self-service endpoints for logged-in candidates
+  updateMyResume: async (file: File): Promise<Candidate> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const headers: HeadersInit = {};
+    const token = getAccessToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/candidates/me/resume`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return response.json();
+  },
+
+  updateMyProfile: (data: { name?: string; phone?: string; skills?: string; summary?: string }) =>
+    request<Candidate>('/candidates/me/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 };
 
 // Matching

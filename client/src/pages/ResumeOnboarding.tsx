@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { candidates } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 
 type Mode = 'choose' | 'upload' | 'create';
 
@@ -8,6 +9,7 @@ export function ResumeOnboarding() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('returnTo') || '/app';
+  const { profile } = useAuth();
 
   const [mode, setMode] = useState<Mode>('choose');
   const [isLoading, setIsLoading] = useState(false);
@@ -15,14 +17,24 @@ export function ResumeOnboarding() {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  // Create resume form state
+  // Create resume form state - pre-fill with profile data
   const [formData, setFormData] = useState({
     name: '',
-    email: '',
     phone: '',
     skills: '',
     summary: '',
   });
+
+  // Pre-fill form with existing profile data
+  useEffect(() => {
+    if (profile) {
+      setFormData(prev => ({
+        ...prev,
+        name: profile.name || '',
+        phone: 'phone' in profile ? (profile.phone || '') : '',
+      }));
+    }
+  }, [profile]);
 
   const handleFileSelect = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -46,7 +58,8 @@ export function ResumeOnboarding() {
     setError('');
 
     try {
-      await candidates.upload(selectedFile);
+      // Use the self-service endpoint that updates the existing candidate record
+      await candidates.updateMyResume(selectedFile);
       navigate(returnTo);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
@@ -57,8 +70,8 @@ export function ResumeOnboarding() {
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.email) {
-      setError('Name and email are required');
+    if (!formData.name) {
+      setError('Name is required');
       return;
     }
 
@@ -66,23 +79,13 @@ export function ResumeOnboarding() {
     setError('');
 
     try {
-      // Create a text file as a simple resume
-      const resumeText = `
-Name: ${formData.name}
-Email: ${formData.email}
-${formData.phone ? `Phone: ${formData.phone}` : ''}
-
-${formData.summary ? `Summary:\n${formData.summary}` : ''}
-
-${formData.skills ? `Skills: ${formData.skills}` : ''}
-      `.trim();
-
-      const blob = new Blob([resumeText], { type: 'text/plain' });
-      const file = new File([blob], 'resume.txt', { type: 'text/plain' });
-
-      // For now, we'll use a workaround - create resume via the upload endpoint
-      // The backend will parse and store it
-      await candidates.upload(file);
+      // Use the self-service endpoint that updates the existing candidate record
+      await candidates.updateMyProfile({
+        name: formData.name,
+        phone: formData.phone || undefined,
+        skills: formData.skills || undefined,
+        summary: formData.summary || undefined,
+      });
       navigate(returnTo);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create profile');
@@ -284,20 +287,6 @@ ${formData.skills ? `Skills: ${formData.skills}` : ''}
                       required
                       className={inputClasses}
                       placeholder="Your full name"
-                    />
-                  </div>
-
-                  <div className="mb-5">
-                    <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
-                      Email *
-                    </label>
-                    <input
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      required
-                      className={inputClasses}
-                      placeholder="you@example.com"
                     />
                   </div>
 

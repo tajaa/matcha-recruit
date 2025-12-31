@@ -4,10 +4,12 @@ import json
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 from pydantic import BaseModel
 
 from ..database import get_connection
+from ..dependencies import get_current_user, require_candidate
+from ..models.auth import CurrentUser
 from ..models.candidate import CandidateResponse, CandidateDetail
 from ..services.resume_parser import ResumeParser
 from ..services.storage import get_storage
@@ -29,6 +31,14 @@ class BulkUploadResult(BaseModel):
     error_count: int
     errors: list[dict]
     imported_ids: list[str]
+
+
+class UpdateCandidateProfile(BaseModel):
+    """Request model for manual profile update."""
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    skills: Optional[str] = None  # Comma-separated
+    summary: Optional[str] = None
 
 
 @router.post("/upload", response_model=CandidateResponse)
@@ -361,3 +371,161 @@ async def delete_candidate(candidate_id: UUID):
         await conn.execute("DELETE FROM candidates WHERE id = $1", candidate_id)
 
         return {"status": "deleted"}
+
+
+# ===========================================
+# Candidate Self-Service Endpoints
+# ===========================================
+
+@router.post("/me/resume", response_model=CandidateResponse)
+async def update_my_resume(
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_candidate)
+):
+    """Upload/update resume for the currently logged-in candidate."""
+    # Validate file type
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in [".pdf", ".docx", ".doc"]:
+        raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported")
+
+    # Read file content
+    file_bytes = await file.read()
+
+    # Get existing candidate record
+    async with get_connection() as conn:
+        candidate = await conn.fetchrow(
+            "SELECT id FROM candidates WHERE user_id = $1",
+            current_user.id
+        )
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate profile not found")
+
+        candidate_id = candidate["id"]
+
+        # Compute hash
+        file_hash = compute_file_hash(file_bytes)
+
+        # Parse resume
+        parser = ResumeParser()
+        parsed = parser.parse_resume_file(file_bytes, file.filename)
+
+        # Extract fields
+        name = parsed.get("name")
+        email = parsed.get("email")
+        phone = parsed.get("phone")
+        skills = parsed.get("skills", [])
+        experience_years = parsed.get("experience_years")
+        education = parsed.get("education", [])
+        resume_text = parsed.pop("_resume_text", "")
+
+        # Save file
+        file_path = os.path.join(UPLOAD_DIR, f"{candidate_id}{ext}")
+        with open(file_path, "wb") as f:
+            f.write(file_bytes)
+
+        # UPDATE existing record (not INSERT)
+        row = await conn.fetchrow(
+            """
+            UPDATE candidates
+            SET name = COALESCE($1, name),
+                email = COALESCE($2, email),
+                phone = COALESCE($3, phone),
+                resume_text = $4,
+                resume_hash = $5,
+                resume_file_path = $6,
+                skills = $7,
+                experience_years = COALESCE($8, experience_years),
+                education = $9,
+                parsed_data = $10
+            WHERE id = $11
+            RETURNING id, name, email, phone, skills, experience_years, education, created_at
+            """,
+            name,
+            email,
+            phone,
+            resume_text,
+            file_hash,
+            file_path,
+            json.dumps(skills) if skills else None,
+            experience_years,
+            json.dumps(education) if education else None,
+            json.dumps(parsed),
+            candidate_id,
+        )
+
+        skills_data = json.loads(row["skills"]) if row["skills"] else []
+        education_data = json.loads(row["education"]) if row["education"] else []
+
+        return CandidateResponse(
+            id=row["id"],
+            name=row["name"],
+            email=row["email"],
+            phone=row["phone"],
+            skills=skills_data,
+            experience_years=row["experience_years"],
+            education=education_data,
+            created_at=row["created_at"],
+        )
+
+
+@router.put("/me/profile", response_model=CandidateResponse)
+async def update_my_profile(
+    request: UpdateCandidateProfile,
+    current_user: CurrentUser = Depends(require_candidate)
+):
+    """Update profile for logged-in candidate (manual entry without resume)."""
+    async with get_connection() as conn:
+        # Get existing candidate record
+        candidate = await conn.fetchrow(
+            "SELECT id FROM candidates WHERE user_id = $1",
+            current_user.id
+        )
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate profile not found")
+
+        candidate_id = candidate["id"]
+
+        # Parse skills from comma-separated string
+        skills_list = []
+        if request.skills:
+            skills_list = [s.strip() for s in request.skills.split(",") if s.strip()]
+
+        # Build parsed_data with summary
+        parsed_data = {}
+        if request.summary:
+            parsed_data["summary"] = request.summary
+
+        # Update record
+        row = await conn.fetchrow(
+            """
+            UPDATE candidates
+            SET name = COALESCE(NULLIF($1, ''), name),
+                phone = COALESCE(NULLIF($2, ''), phone),
+                skills = COALESCE($3, skills),
+                parsed_data = COALESCE($4, parsed_data)
+            WHERE id = $5
+            RETURNING id, name, email, phone, skills, experience_years, education, created_at
+            """,
+            request.name,
+            request.phone,
+            json.dumps(skills_list) if skills_list else None,
+            json.dumps(parsed_data) if parsed_data else None,
+            candidate_id,
+        )
+
+        skills_data = json.loads(row["skills"]) if row["skills"] else []
+        education_data = json.loads(row["education"]) if row["education"] else []
+
+        return CandidateResponse(
+            id=row["id"],
+            name=row["name"],
+            email=row["email"],
+            phone=row["phone"],
+            skills=skills_data,
+            experience_years=row["experience_years"],
+            education=education_data,
+            created_at=row["created_at"],
+        )
