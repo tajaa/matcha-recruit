@@ -100,6 +100,7 @@ export function Landing() {
                   15 years in hiring. More than 5,000 people placed. We've built the tool we always wanted.
                 </p>
                 
+                {/* TODO: Uncomment when ready
                 <div className="flex flex-col sm:flex-row gap-4">
                   <Link
                     to="/for-candidates"
@@ -114,6 +115,7 @@ export function Landing() {
                     Work with us
                   </Link>
                 </div>
+                */}
               </div>
             </div>
           </div>
