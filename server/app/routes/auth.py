@@ -324,7 +324,13 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
             )
             skills_data = json.loads(profile["skills"]) if profile and profile["skills"] else []
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
+                "user": {
+                    "id": str(current_user.id),
+                    "email": current_user.email,
+                    "role": current_user.role,
+                    "beta_features": current_user.beta_features,
+                    "interview_prep_tokens": current_user.interview_prep_tokens
+                },
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]) if profile["user_id"] else None,
