@@ -30,7 +30,10 @@ async def get_current_user(
     async with get_connection() as conn:
         # Verify user exists and is active
         user_row = await conn.fetchrow(
-            "SELECT id, email, role, is_active FROM users WHERE id = $1",
+            """SELECT id, email, role, is_active,
+                      COALESCE(beta_features, '{}'::jsonb) as beta_features,
+                      COALESCE(interview_prep_tokens, 0) as interview_prep_tokens
+               FROM users WHERE id = $1""",
             user_id
         )
 
@@ -40,11 +43,18 @@ async def get_current_user(
                 detail="User not found or inactive"
             )
 
+        beta_features = user_row["beta_features"] if user_row["beta_features"] else {}
+        if isinstance(beta_features, str):
+            import json
+            beta_features = json.loads(beta_features)
+
         return CurrentUser(
             id=user_row["id"],
             email=user_row["email"],
             role=user_row["role"],
-            profile=None  # Profile loaded on demand
+            profile=None,  # Profile loaded on demand
+            beta_features=beta_features,
+            interview_prep_tokens=user_row["interview_prep_tokens"]
         )
 
 
@@ -95,3 +105,37 @@ async def get_client_company_id(
             current_user.id
         )
         return company_id
+
+
+async def require_interview_prep_access(
+    current_user: CurrentUser = Depends(get_current_user)
+) -> CurrentUser:
+    """
+    Dependency for interview prep access control.
+    - Admins: always allowed
+    - Candidates: need beta access + at least 1 token
+    """
+    # Admins always have access
+    if current_user.role == "admin":
+        return current_user
+
+    # Candidates need beta access
+    if current_user.role == "candidate":
+        has_beta = current_user.beta_features.get("interview_prep", False)
+        if not has_beta:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to Interview Prep. Contact support for beta access."
+            )
+        if current_user.interview_prep_tokens <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You have no interview prep tokens remaining."
+            )
+        return current_user
+
+    # Other roles (client) don't have access
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Interview prep is not available for your account type."
+    )

@@ -2,7 +2,10 @@ from typing import Optional
 from uuid import UUID
 import json
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
+
+from ..dependencies import get_current_user, require_interview_prep_access
+from ..models.auth import CurrentUser
 
 from ..database import get_connection
 from ..models.interview import (
@@ -81,8 +84,31 @@ async def create_interview(company_id: UUID, interview: InterviewCreate):
 
 
 @router.post("/tutor/sessions", response_model=InterviewStart)
-async def create_tutor_session(request: TutorSessionCreate):
+async def create_tutor_session(
+    request: TutorSessionCreate,
+    current_user: CurrentUser = Depends(get_current_user)
+):
     """Create a new tutor session for interview prep or language practice."""
+    # For candidates: only allow interview_prep mode and require beta + tokens
+    if current_user.role == "candidate":
+        if request.mode == "language_test":
+            raise HTTPException(
+                status_code=403,
+                detail="Language test is not available for your account."
+            )
+        # Check beta access and tokens
+        has_beta = current_user.beta_features.get("interview_prep", False)
+        if not has_beta:
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have access to Interview Prep. Contact support for beta access."
+            )
+        if current_user.interview_prep_tokens <= 0:
+            raise HTTPException(
+                status_code=403,
+                detail="You have no interview prep tokens remaining."
+            )
+
     # Validate language is provided for language test mode
     if request.mode == "language_test" and not request.language:
         raise HTTPException(status_code=400, detail="Language must be specified for language test mode")
@@ -92,10 +118,22 @@ async def create_tutor_session(request: TutorSessionCreate):
 
     # For interview prep, store the role being practiced for in interviewer_name
     # For language test, store the language in interviewer_role
-    interviewer_name = request.interview_role if request.mode == "interview_prep" else "Tutor"
-    interviewer_role = request.language if request.mode == "language_test" else None
+    # Also store user email in interviewer_name for tracking
+    if request.mode == "interview_prep":
+        interviewer_name = current_user.email  # Store user email for session tracking
+        interviewer_role = request.interview_role  # Store the role being practiced
+    else:
+        interviewer_name = current_user.email
+        interviewer_role = request.language
 
     async with get_connection() as conn:
+        # For candidates using interview prep, consume a token
+        if current_user.role == "candidate" and request.mode == "interview_prep":
+            await conn.execute(
+                "UPDATE users SET interview_prep_tokens = interview_prep_tokens - 1 WHERE id = $1",
+                current_user.id
+            )
+
         # Create interview record (company_id is NULL for tutor sessions)
         row = await conn.fetchrow(
             """

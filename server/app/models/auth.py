@@ -108,6 +108,8 @@ class CurrentUser(BaseModel):
     email: str
     role: UserRole
     profile: Optional[AdminProfile | ClientProfile | CandidateProfile] = None
+    beta_features: dict = {}
+    interview_prep_tokens: int = 0
 
 
 class ChangePasswordRequest(BaseModel):
@@ -123,3 +125,39 @@ class ChangeEmailRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
+
+
+# Beta access management models
+class CandidateBetaInfo(BaseModel):
+    user_id: UUID
+    email: str
+    name: Optional[str]
+    beta_features: dict
+    interview_prep_tokens: int
+    total_sessions: int = 0
+    avg_score: Optional[float] = None
+    last_session_at: Optional[datetime] = None
+
+
+class CandidateBetaListResponse(BaseModel):
+    candidates: list[CandidateBetaInfo]
+    total: int
+
+
+class BetaToggleRequest(BaseModel):
+    feature: str
+    enabled: bool
+
+
+class TokenAwardRequest(BaseModel):
+    amount: int
+
+
+class CandidateSessionSummary(BaseModel):
+    session_id: UUID
+    interview_role: Optional[str]
+    duration_minutes: int
+    status: str
+    created_at: datetime
+    response_quality_score: Optional[float] = None
+    communication_score: Optional[float] = None

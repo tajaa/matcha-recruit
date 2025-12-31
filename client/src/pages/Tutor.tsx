@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Button, Card, CardContent } from '../components';
 import { tutor } from '../api/client';
 import { useAudioInterview } from '../hooks/useAudioInterview';
+import { useAuth } from '../context/AuthContext';
 
 type TutorMode = 'interview_prep' | 'language_test';
 type Language = 'en' | 'es';
@@ -19,6 +20,8 @@ const INTERVIEW_ROLES: { value: InterviewRole; label: string; description: strin
 export function Tutor() {
   const navigate = useNavigate();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { user, interviewPrepTokens, refreshUser } = useAuth();
+  const isCandidate = user?.role === 'candidate';
 
   // Mode selection state
   const [selectedMode, setSelectedMode] = useState<TutorMode | null>(null);
@@ -68,6 +71,10 @@ export function Tutor() {
       if (language) setSelectedLanguage(language);
       if (duration) setSelectedDuration(duration);
       if (role) setSelectedRole(role);
+      // Refresh user to update token count
+      if (isCandidate) {
+        refreshUser();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start session');
     } finally {
@@ -272,9 +279,23 @@ export function Tutor() {
   // Mode selection
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-white tracking-tight">Tutor</h1>
-        <p className="text-zinc-500 mt-1">Practice your interview skills or language proficiency</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">
+            {isCandidate ? 'Interview Prep' : 'Tutor'}
+          </h1>
+          <p className="text-zinc-500 mt-1">
+            {isCandidate ? 'Practice your interview skills' : 'Practice your interview skills or language proficiency'}
+          </p>
+        </div>
+        {isCandidate && (
+          <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+            <span className="text-xs text-zinc-500 uppercase tracking-wide">Tokens:</span>
+            <span className={`text-lg font-mono font-bold ${interviewPrepTokens > 0 ? 'text-white' : 'text-red-400'}`}>
+              {interviewPrepTokens}
+            </span>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -283,7 +304,18 @@ export function Tutor() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {isCandidate && interviewPrepTokens === 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 text-amber-400">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>You have no tokens remaining. Contact support to get more tokens.</span>
+          </div>
+        </div>
+      )}
+
+      <div className={`grid gap-6 ${isCandidate ? 'grid-cols-1 max-w-xl' : 'grid-cols-1 md:grid-cols-2'}`}>
         {/* Interview Prep Card */}
         <Card className="overflow-hidden">
           <div className="h-2 bg-gradient-to-r from-matcha-500 to-matcha-400" />
@@ -345,15 +377,21 @@ export function Tutor() {
 
             <Button
               onClick={() => handleStartSession('interview_prep', undefined, selectedInterviewDuration, selectedRole)}
-              disabled={starting}
+              disabled={starting || (isCandidate && interviewPrepTokens === 0)}
               className="w-full"
             >
               {starting ? 'Starting...' : `Practice ${selectedRole} Interview (${selectedInterviewDuration} min)`}
             </Button>
+            {isCandidate && (
+              <p className="text-xs text-zinc-500 text-center mt-2">
+                This will use 1 token
+              </p>
+            )}
           </CardContent>
         </Card>
 
-        {/* Language Test Card */}
+        {/* Language Test Card - Admin only */}
+        {!isCandidate && (
         <Card className="overflow-hidden">
           <div className="h-2 bg-gradient-to-r from-blue-500 to-blue-400" />
           <CardContent className="pt-6">
@@ -436,6 +474,7 @@ export function Tutor() {
             </Button>
           </CardContent>
         </Card>
+        )}
       </div>
 
       {/* Tips */}

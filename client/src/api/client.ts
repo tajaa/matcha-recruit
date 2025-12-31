@@ -53,6 +53,9 @@ import type {
   TutorProgressResponse,
   TutorSessionComparison,
   TutorVocabularyStats,
+  // Beta access types
+  CandidateBetaListResponse,
+  CandidateSessionSummary,
   // ER Copilot types
   ERCase,
   ERCaseCreate,
@@ -1261,4 +1264,25 @@ export const irIncidents = {
   // Audit Log
   getAuditLog: (incidentId: string, limit: number = 50, offset: number = 0): Promise<IRAuditLogResponse> =>
     request<IRAuditLogResponse>(`/ir/incidents/${incidentId}/audit-log?limit=${limit}&offset=${offset}`),
+};
+
+// Admin Beta Access API
+export const adminBeta = {
+  listCandidates: (): Promise<CandidateBetaListResponse> =>
+    request<CandidateBetaListResponse>('/auth/admin/candidates/beta'),
+
+  toggleBetaAccess: (userId: string, feature: string, enabled: boolean): Promise<{ status: string; beta_features: Record<string, boolean> }> =>
+    request<{ status: string; beta_features: Record<string, boolean> }>(`/auth/admin/candidates/${userId}/beta`, {
+      method: 'PATCH',
+      body: JSON.stringify({ feature, enabled }),
+    }),
+
+  awardTokens: (userId: string, amount: number): Promise<{ status: string; new_total: number }> =>
+    request<{ status: string; new_total: number }>(`/auth/admin/candidates/${userId}/tokens`, {
+      method: 'POST',
+      body: JSON.stringify({ amount }),
+    }),
+
+  getCandidateSessions: (userId: string): Promise<CandidateSessionSummary[]> =>
+    request<CandidateSessionSummary[]>(`/auth/admin/candidates/${userId}/sessions`),
 };

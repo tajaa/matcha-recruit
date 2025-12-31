@@ -5,6 +5,8 @@ import { auth, getAccessToken, clearTokens } from '../api/client';
 interface AuthContextType {
   user: User | null;
   profile: CurrentUserResponse['profile'] | null;
+  betaFeatures: Record<string, boolean>;
+  interviewPrepTokens: number;
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (data: LoginRequest) => Promise<void>;
@@ -12,6 +14,7 @@ interface AuthContextType {
   registerClient: (data: ClientRegister) => Promise<void>;
   registerCandidate: (data: CandidateRegister) => Promise<void>;
   hasRole: (...roles: UserRole[]) => boolean;
+  hasBetaFeature: (feature: string) => boolean;
   refreshUser: () => Promise<void>;
 }
 
@@ -20,6 +23,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<CurrentUserResponse['profile'] | null>(null);
+  const [betaFeatures, setBetaFeatures] = useState<Record<string, boolean>>({});
+  const [interviewPrepTokens, setInterviewPrepTokens] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadUser = useCallback(async () => {
@@ -40,10 +45,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         last_login: null,
       });
       setProfile(data.profile);
+      setBetaFeatures(data.user.beta_features || {});
+      setInterviewPrepTokens(data.user.interview_prep_tokens || 0);
     } catch {
       clearTokens();
       setUser(null);
       setProfile(null);
+      setBetaFeatures({});
+      setInterviewPrepTokens(0);
     } finally {
       setIsLoading(false);
     }
@@ -82,6 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return roles.includes(user.role);
   };
 
+  const hasBetaFeature = (feature: string) => {
+    return betaFeatures[feature] === true;
+  };
+
   const refreshUser = useCallback(async () => {
     await loadUser();
   }, [loadUser]);
@@ -91,6 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         profile,
+        betaFeatures,
+        interviewPrepTokens,
         isLoading,
         isAuthenticated: !!user,
         login,
@@ -98,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         registerClient,
         registerCandidate,
         hasRole,
+        hasBetaFeature,
         refreshUser,
       }}
     >

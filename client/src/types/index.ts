@@ -472,8 +472,37 @@ export interface CurrentUserResponse {
     id: string;
     email: string;
     role: UserRole;
+    beta_features?: Record<string, boolean>;
+    interview_prep_tokens?: number;
   };
   profile: AdminProfile | ClientProfile | CandidateAuthProfile | null;
+}
+
+// Beta access management types
+export interface CandidateBetaInfo {
+  user_id: string;
+  email: string;
+  name: string | null;
+  beta_features: Record<string, boolean>;
+  interview_prep_tokens: number;
+  total_sessions: number;
+  avg_score: number | null;
+  last_session_at: string | null;
+}
+
+export interface CandidateBetaListResponse {
+  candidates: CandidateBetaInfo[];
+  total: number;
+}
+
+export interface CandidateSessionSummary {
+  session_id: string;
+  interview_role: string | null;
+  duration_minutes: number;
+  status: string;
+  created_at: string;
+  response_quality_score: number | null;
+  communication_score: number | null;
 }
 
 // Project types

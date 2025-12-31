@@ -61,6 +61,32 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)
         """)
 
+        # Add beta_features column to users table (for beta access control)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'beta_features'
+                ) THEN
+                    ALTER TABLE users ADD COLUMN beta_features JSONB DEFAULT '{}'::jsonb;
+                END IF;
+            END $$;
+        """)
+
+        # Add interview_prep_tokens column to users table (token system for interview prep)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'interview_prep_tokens'
+                ) THEN
+                    ALTER TABLE users ADD COLUMN interview_prep_tokens INTEGER DEFAULT 0;
+                END IF;
+            END $$;
+        """)
+
         # Admins table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS admins (

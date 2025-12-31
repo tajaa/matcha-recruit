@@ -8,6 +8,7 @@ interface NavItem {
   label: string;
   roles: UserRole[];
   icon: React.ReactNode;
+  betaFeature?: string; // If set, candidates with this beta feature can also see this item
 }
 
 interface NavSection {
@@ -116,8 +117,9 @@ const navSections: NavSection[] = [
     items: [
       {
         path: '/app/tutor',
-        label: 'Tutor',
+        label: 'Interview Prep',
         roles: ['admin'],
+        betaFeature: 'interview_prep',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 14l9-5-9-5-9 5 9 5z" />
@@ -182,6 +184,16 @@ const navSections: NavSection[] = [
           </svg>
         ),
       },
+      {
+        path: '/app/admin/interview-prep',
+        label: 'Interview Prep Beta',
+        roles: ['admin'],
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+        ),
+      },
     ],
   },
 ];
@@ -204,11 +216,22 @@ const settingsItem: NavItem = {
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, hasRole } = useAuth();
+  const { user, logout, hasRole, hasBetaFeature } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Filter nav items based on user role
-  const navItems = allNavItems.filter((item) => hasRole(...item.roles));
+  // Check if user can see a nav item (role-based or beta feature access)
+  const canSeeItem = (item: NavItem) => {
+    // If user has the required role, they can see it
+    if (hasRole(...item.roles)) return true;
+    // If item has a beta feature requirement and user is a candidate with that feature
+    if (item.betaFeature && user?.role === 'candidate' && hasBetaFeature(item.betaFeature)) {
+      return true;
+    }
+    return false;
+  };
+
+  // Filter nav items based on user role or beta access
+  const navItems = allNavItems.filter(canSeeItem);
 
   const handleLogout = async () => {
     await logout();
@@ -251,9 +274,9 @@ export function Layout() {
         <nav className="flex-1 py-4 overflow-y-auto">
           <div className="space-y-4 px-2">
             {navSections
-              .filter((section) => hasRole(...section.roles))
+              .filter((section) => hasRole(...section.roles) || section.items.some(canSeeItem))
               .map((section) => {
-                const visibleItems = section.items.filter((item) => hasRole(...item.roles));
+                const visibleItems = section.items.filter(canSeeItem);
                 if (visibleItems.length === 0) return null;
                 return (
                   <div key={section.title}>
