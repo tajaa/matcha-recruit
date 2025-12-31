@@ -95,7 +95,7 @@ def load_settings() -> Settings:
         vertex_location=os.getenv("VERTEX_LOCATION", "us-central1"),
         use_vertex=use_vertex,
         live_model=os.getenv("GEMINI_LIVE_MODEL", "gemini-live-2.5-flash-native-audio"),
-        analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-2.5-flash-lite"),
+        analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-3-flash-preview"),
         voice=os.getenv("GEMINI_VOICE", "Kore"),
         port=int(os.getenv("PORT", "8002")),
         search_api_key=os.getenv("SEARCH_API_KEY"),

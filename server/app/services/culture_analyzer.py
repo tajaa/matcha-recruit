@@ -49,7 +49,7 @@ class CultureAnalyzer:
         api_key: Optional[str] = None,
         vertex_project: Optional[str] = None,
         vertex_location: str = "us-central1",
-        model: str = "gemini-2.5-flash-lite",
+        model: str = "gemini-3-flash-preview",
     ):
         self.model = model
 

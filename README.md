@@ -249,7 +249,7 @@ The backend automatically creates tables on first startup. Required tables:
 | `VERTEX_PROJECT` | Google Cloud project ID | Yes* |
 | `VERTEX_LOCATION` | Vertex AI region (default: us-central1) | No |
 | `GEMINI_LIVE_MODEL` | Voice model (default: gemini-live-2.5-flash-native-audio) | No |
-| `GEMINI_ANALYSIS_MODEL` | Text model (default: gemini-2.5-flash-lite) | No |
+| `GEMINI_ANALYSIS_MODEL` | Text model (default: gemini-3-flash-preview) | No |
 | `GEMINI_VOICE` | Voice name (default: Kore) | No |
 | `PORT` | Server port (default: 8000) | No |
 
