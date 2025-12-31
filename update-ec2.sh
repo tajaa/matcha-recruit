@@ -63,6 +63,16 @@ backup_database() {
         log_warn "Backup may have failed - check ~/backup.log on EC2"
 }
 
+pre_cleanup() {
+    log_info "Freeing up disk space before pull..."
+    # Remove dangling images (untagged, not used by any container)
+    ssh_cmd "docker image prune -f" || true
+    # Remove build cache
+    ssh_cmd "docker builder prune -f" || true
+    # Show available space
+    ssh_cmd "df -h / | tail -1 | awk '{print \"Available disk space: \" \$4}'"
+}
+
 update_matcha() {
     log_info "Updating Matcha-Recruit..."
 
@@ -176,6 +186,7 @@ fi
 
 ecr_login
 backup_database
+pre_cleanup
 
 if [ "$UPDATE_MATCHA" = true ]; then
     update_matcha
