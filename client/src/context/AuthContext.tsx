@@ -47,8 +47,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(data.profile);
       setBetaFeatures(data.user.beta_features || {});
       setInterviewPrepTokens(data.user.interview_prep_tokens || 0);
-    } catch {
-      clearTokens();
+    } catch (err) {
+      // Only clear tokens for auth errors (401), not network errors
+      const isAuthError = err instanceof Error &&
+        (err.message.includes('401') || err.message.includes('Unauthorized') || err.message.includes('expired'));
+      if (isAuthError) {
+        clearTokens();
+      }
       setUser(null);
       setProfile(null);
       setBetaFeatures({});
