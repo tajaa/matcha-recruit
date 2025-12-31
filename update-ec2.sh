@@ -71,8 +71,8 @@ pre_cleanup() {
     ssh_cmd "docker rm matcha-worker drooli-worker 2>/dev/null || true"
     # Remove all stopped containers
     ssh_cmd "docker container prune -f" || true
-    # Remove dangling images (untagged, not used by any container)
-    ssh_cmd "docker image prune -f" || true
+    # Remove ALL unused images (not just dangling) - running containers keep their images
+    ssh_cmd "docker image prune -a -f" || true
     # Remove build cache
     ssh_cmd "docker builder prune -f" || true
     # Show available space
