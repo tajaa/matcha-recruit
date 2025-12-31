@@ -12,7 +12,19 @@ export function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = (location.state as { from?: Location })?.from?.pathname || '/app';
+  const from = (location.state as { from?: Location })?.from?.pathname;
+
+  // Get default landing page based on role
+  const getDefaultRoute = (role: string) => {
+    switch (role) {
+      case 'candidate':
+        return '/app/jobs';
+      case 'admin':
+      case 'client':
+      default:
+        return '/app';
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,8 +32,10 @@ export function Login() {
     setIsLoading(true);
 
     try {
-      await login({ email, password });
-      navigate(from, { replace: true });
+      const loggedInUser = await login({ email, password });
+      // Navigate based on role - use 'from' path only if user can access it
+      const destination = from || getDefaultRoute(loggedInUser.role);
+      navigate(destination, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {

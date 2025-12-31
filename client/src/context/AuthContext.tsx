@@ -9,7 +9,7 @@ interface AuthContextType {
   interviewPrepTokens: number;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (data: LoginRequest) => Promise<void>;
+  login: (data: LoginRequest) => Promise<User>;
   logout: () => Promise<void>;
   registerClient: (data: ClientRegister) => Promise<void>;
   registerCandidate: (data: CandidateRegister) => Promise<void>;
@@ -71,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await auth.login(data);
     setUser(result.user);
     await loadUser(); // Load full profile
+    return result.user; // Return user for immediate use
   };
 
   const logout = async () => {

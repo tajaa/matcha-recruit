@@ -91,18 +91,24 @@ tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 # Create new tmux session with backend pane
 echo -e "${YELLOW}Creating tmux session...${NC}"
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "source venv/bin/activate && python run.py"
+    "source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited. Press Enter to close.${NC}'; read"
 
 # Rename the first window
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
+# Small delay to let first pane initialize
+sleep 0.5
+
 # Split for Celery worker
 tmux split-window -t "$SESSION_NAME:dev" -v -c "$PROJECT_ROOT/server" \
-    "source venv/bin/activate && celery -A app.workers.celery_app worker --loglevel=info"
+    "source venv/bin/activate && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited. Press Enter to close.${NC}'; read"
+
+# Small delay
+sleep 0.5
 
 # Split for frontend
 tmux split-window -t "$SESSION_NAME:dev" -v -c "$PROJECT_ROOT/client" \
-    "npm run dev"
+    "npm run dev; echo -e '\n${RED}Frontend exited. Press Enter to close.${NC}'; read"
 
 # Even out the panes
 tmux select-layout -t "$SESSION_NAME:dev" even-vertical
