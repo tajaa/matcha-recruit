@@ -382,8 +382,11 @@ export const candidates = {
 
     const headers: HeadersInit = {};
     const token = getAccessToken();
+
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
+    } else {
+      throw new Error('Not logged in. Please refresh the page and try again.');
     }
 
     const response = await fetch(`${API_BASE}/candidates/me/resume`, {

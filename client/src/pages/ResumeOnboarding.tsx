@@ -8,7 +8,7 @@ type Mode = 'choose' | 'upload' | 'create';
 export function ResumeOnboarding() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const returnTo = searchParams.get('returnTo') || '/app';
+  const returnTo = searchParams.get('returnTo') || '/app/jobs';
   const { profile } = useAuth();
 
   const [mode, setMode] = useState<Mode>('choose');
@@ -58,7 +58,6 @@ export function ResumeOnboarding() {
     setError('');
 
     try {
-      // Use the self-service endpoint that updates the existing candidate record
       await candidates.updateMyResume(selectedFile);
       navigate(returnTo);
     } catch (err) {
