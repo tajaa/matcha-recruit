@@ -1380,7 +1380,7 @@ export interface PolicyCreate {
   title: string;
   description: string | null;
   content: string;
-  file_url: string | null;
+  file_url?: string | null;
   version?: string;
   status?: PolicyStatus;
 }

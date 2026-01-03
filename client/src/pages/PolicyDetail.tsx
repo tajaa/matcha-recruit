@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { policies } from '../api/client';
-import type { Policy, PolicySignature, SignatureRequest, SignerType } from '../types';
+import type { Policy, PolicySignature, SignatureRequest } from '../types';
 
 export function PolicyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -29,6 +29,11 @@ export function PolicyDetail() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadPolicy();
+    loadSignatures();
+  }, [id]);
 
   const loadSignatures = async () => {
     try {
@@ -62,9 +67,9 @@ export function PolicyDetail() {
   };
 
   const handleSignerChange = (index: number, field: 'name' | 'email' | 'type', value: string) => {
-    const newSigners = [...signers];
-    newSigners[index][field] = value;
-    setSigners(newSigners);
+    const newSigners = [...signers] as { name: string; email: string; type: string }[];
+    (newSigners[index] as any)[field] = value;
+    setSigners(newSigners as SignatureRequest[]);
   };
 
   const handleSendSignatures = async () => {

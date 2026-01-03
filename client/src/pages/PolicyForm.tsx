@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { policies } from '../api/client';
-import type { Policy, PolicyCreate as PolicyCreateType, PolicyUpdate } from '../types';
+import type { PolicyCreate as PolicyCreateType, PolicyUpdate, PolicyStatus } from '../types';
 
 export function PolicyForm() {
   const { id } = useParams<{ id?: string }>();
@@ -13,10 +13,15 @@ export function PolicyForm() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [content, setContent] = useState('');
-  const [file, setFile] = useState<File | null>(null);
   const [version, setVersion] = useState('1.0');
-  const [status, setStatus] = useState<'draft' | 'active'>('draft');
+  const [status, setStatus] = useState<PolicyStatus>('draft');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (isEditing) {
+      loadPolicy(id!);
+    }
+  }, [id, isEditing]);
 
   const loadPolicy = async (policyId: string) => {
     try {
