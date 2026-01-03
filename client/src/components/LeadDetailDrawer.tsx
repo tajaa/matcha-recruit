@@ -383,7 +383,30 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
 
                                 {activeSubTab === 'emails' && (
                                     <div className="space-y-6 animate-in fade-in duration-300">
-                                        <h3 className="text-[10px] uppercase tracking-[0.2em] text-white">Email Drafts</h3>
+                                        <div className="flex items-center justify-between">
+                                            <h3 className="text-[10px] uppercase tracking-[0.2em] text-white">Email Drafts</h3>
+                                            <button
+                                                onClick={() => {
+                                                    const primaryContact = lead.contacts.find(c => c.is_primary);
+                                                    if (primaryContact) {
+                                                        draftEmail(primaryContact.id);
+                                                    } else if (lead.contacts.length > 0) {
+                                                        // Fallback to first contact if no primary
+                                                        draftEmail(lead.contacts[0].id);
+                                                    } else {
+                                                        alert("No contacts available to email. Please find contacts first.");
+                                                        setActiveSubTab('contacts');
+                                                    }
+                                                }}
+                                                disabled={isProcessing}
+                                                className="text-[10px] uppercase tracking-widest text-emerald-500 hover:text-emerald-400 disabled:opacity-50 flex items-center gap-2"
+                                            >
+                                                {isProcessing ? 'Drafting...' : 'Auto Draft'}
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                                </svg>
+                                            </button>
+                                        </div>
                                         <div className="space-y-4">
                                             {lead.emails.map(email => (
                                                 <div key={email.id} className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
