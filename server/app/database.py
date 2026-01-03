@@ -1002,6 +1002,61 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_company_enrichment_domain ON company_enrichment_cache(domain)
         """)
 
+        # ===========================================
+        # Policy Management Tables
+        # ===========================================
+
+        # Policies table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS policies (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                title VARCHAR(500) NOT NULL,
+                description TEXT,
+                content TEXT NOT NULL DEFAULT '',
+                file_url VARCHAR(500),
+                version VARCHAR(50) NOT NULL DEFAULT '1.0',
+                status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'archived')),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                created_by UUID REFERENCES users(id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_policies_company_id ON policies(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_policies_status ON policies(status)
+        """)
+
+        # Policy signatures table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS policy_signatures (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                policy_id UUID NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+                signer_type VARCHAR(20) NOT NULL CHECK (signer_type IN ('candidate', 'employee', 'external')),
+                signer_id UUID,
+                signer_name VARCHAR(500) NOT NULL,
+                signer_email VARCHAR(500) NOT NULL,
+                token VARCHAR(500) NOT NULL UNIQUE,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'signed', 'declined', 'expired')),
+                signed_at TIMESTAMP,
+                signature_data TEXT,
+                ip_address VARCHAR(100),
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_policy_signatures_policy_id ON policy_signatures(policy_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_policy_signatures_token ON policy_signatures(token)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_policy_signatures_status ON policy_signatures(status)
+        """)
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:
@@ -1010,9 +1065,9 @@ async def init_db():
             default_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme123")
             user_row = await conn.fetchrow(
                 """
-                INSERT INTO users (email, password_hash, role)
-                VALUES ('admin@matcha.local', $1, 'admin')
-                RETURNING id
+                    INSERT INTO users (email, password_hash, role)
+                    VALUES ('admin@matcha.local', $1, 'admin')
+                    RETURNING id
                 """,
                 hash_password(default_password)
             )

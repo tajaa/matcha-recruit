@@ -41,6 +41,9 @@ const TutorSessionDetail = lazy(() => import('./pages/TutorSessionDetail'));
 const ERCopilot = lazy(() => import('./pages/ERCopilot'));
 const ERCaseDetail = lazy(() => import('./pages/ERCaseDetail'));
 const OfferLetters = lazy(() => import('./pages/OfferLetters'));
+const Policies = lazy(() => import('./pages/Policies'));
+const PolicyDetail = lazy(() => import('./pages/PolicyDetail'));
+const PolicyForm = lazy(() => import('./pages/PolicyForm'));
 const IRDashboard = lazy(() => import('./pages/IRDashboard'));
 const IRList = lazy(() => import('./pages/IRList'));
 const IRCreate = lazy(() => import('./pages/IRCreate'));
@@ -145,6 +148,30 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <OfferLetters />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="policies"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <Policies />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="policies/new"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <PolicyForm />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="policies/:id"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <PolicyDetail />
                   </ProtectedRoute>
                 }
               />

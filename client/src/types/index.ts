@@ -1354,6 +1354,76 @@ export interface IRAuditLogEntry {
   created_at: string;
 }
 
+export type PolicyStatus = 'draft' | 'active' | 'archived';
+export type SignatureStatus = 'pending' | 'signed' | 'declined' | 'expired';
+export type SignerType = 'candidate' | 'employee' | 'external';
+
+export interface Policy {
+  id: string;
+  company_id: string;
+  company_name: string | null;
+  title: string;
+  description: string | null;
+  content: string;
+  file_url: string | null;
+  version: string;
+  status: PolicyStatus;
+  signature_count: number | null;
+  pending_signatures: number | null;
+  signed_count: number | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+export interface PolicyCreate {
+  title: string;
+  description: string | null;
+  content: string;
+  file_url: string | null;
+  version?: string;
+  status?: PolicyStatus;
+}
+
+export interface PolicyUpdate {
+  title?: string;
+  description?: string | null;
+  content?: string;
+  file_url?: string | null;
+  version?: string;
+  status?: PolicyStatus;
+}
+
+export interface PolicySignature {
+  id: string;
+  policy_id: string;
+  policy_title: string | null;
+  signer_type: SignerType;
+  signer_id: string | null;
+  signer_name: string;
+  signer_email: string;
+  status: SignatureStatus;
+  signed_at: string | null;
+  signature_data: string | null;
+  ip_address: string | null;
+  token: string;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface SignatureRequest {
+  name: string;
+  email: string;
+  type: SignerType;
+  id?: string;
+}
+
+export interface SignatureSubmit {
+  signature_data: string | null;
+  accepted: boolean;
+}
+
+
 export interface IRAuditLogResponse {
   entries: IRAuditLogEntry[];
   total: number;

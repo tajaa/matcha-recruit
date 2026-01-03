@@ -48,6 +48,13 @@ import type {
   JobListResponse,
   ApplicationSubmitResponse,
   TutorSessionSummary,
+  Policy,
+  PolicyCreate,
+  PolicyUpdate,
+  PolicySignature,
+  SignatureRequest,
+  SignatureSubmit,
+}
   TutorSessionDetail,
   TutorMetricsAggregate,
   TutorProgressResponse,
@@ -1345,6 +1352,7 @@ export const adminBeta = {
 // LEADS AGENT API
 // =============================================================================
 
+export const policies = policies;
 export const leadsAgent = {
   search: (params: SearchRequest & { preview?: boolean }) => {
     const preview = params.preview ? '?preview=true' : '';
@@ -1438,4 +1446,52 @@ export const leadsAgent = {
     request<LeadEmail>(`/leads-agent/emails/${id}/send`, {
       method: 'POST',
     }),
+
+  policies: {
+    list: (status?: string) => {
+      const params = new URLSearchParams();
+      if (status) params.append('status', status);
+      const query = params.toString();
+      return request<Policy[]>(`/policies${query ? `?${query}` : ''}`);
+    },
+
+    create: (data: PolicyCreate) =>
+      request<Policy>(`/policies`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    get: (id: string) =>
+      request<Policy>(`/policies/${id}`),
+
+    update: (id: string, data: PolicyUpdate) =>
+      request<Policy>(`/policies/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+
+    delete: (id: string) =>
+      request(`/policies/${id}`, {
+        method: 'DELETE',
+      }),
+
+    sendSignatures: (policyId: string, requests: SignatureRequest[]) =>
+      request<{message: string, signatures: number}>(`/policies/${policyId}/signatures`, {
+        method: 'POST',
+        body: JSON.stringify(requests),
+      }),
+
+    listSignatures: (policyId: string) =>
+      request<PolicySignature[]>(`/policies/${policyId}/signatures`),
+
+    cancelSignature: (signatureId: string) =>
+      request(`/policies/signatures/${signatureId}`, {
+        method: 'DELETE',
+      }),
+
+    resendSignature: (signatureId: string) =>
+      request<{message: string}>(`/policies/signatures/${signatureId}/resend`, {
+        method: 'POST',
+      }),
+  },
 };

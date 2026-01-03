@@ -33,3 +33,6 @@ export { TutorSessionDetail } from './TutorSessionDetail';
 export { ERCopilot } from './ERCopilot';
 export { ERCaseDetail } from './ERCaseDetail';
 export { OfferLetters } from './OfferLetters';
+export { Policies } from './Policies';
+export { PolicyDetail } from './PolicyDetail';
+export { PolicyForm } from './PolicyForm';

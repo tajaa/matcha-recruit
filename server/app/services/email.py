@@ -422,6 +422,143 @@ Sent from Matcha Recruit contact form
             print(f"[Email] Error sending contact form: {e}")
             return False
 
+    async def send_policy_signature_email(
+        self,
+        to_email: str,
+        to_name: str,
+        policy_title: str,
+        policy_version: str,
+        token: str,
+        expires_at,
+        company_name: Optional[str] = None,
+    ) -> bool:
+        """Send a policy signature request email.
+
+        Returns True if sent successfully, False otherwise.
+        """
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        signature_url = f"{app_base_url}/sign/{token}"
+
+        company_section = f"<p><strong>From:</strong> {company_name}</p>" if company_name else ""
+        version_section = f"<p><strong>Version:</strong> {policy_version}</p>" if policy_version else ""
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .policy-card {{ background: #f8f9fa; border-left: 4px solid #22c55e; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; margin: 20px 0; text-align: center; }}
+        .btn:hover {{ background: #16a34a; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>You have been asked to sign the following policy document:</p>
+
+            <div class="policy-card">
+                <h2 style="margin-top: 0; color: #111;">{policy_title}</h2>
+                {company_section}
+                {version_section}
+            </div>
+
+            <p>Please review the policy and click the button below to sign it electronically.</p>
+
+            <p>
+                <a href="{signature_url}" class="btn">Sign Policy</a>
+            </p>
+
+            <p style="color: #6b7280; font-size: 14px;">
+                This link will expire on {expires_at.strftime('%B %d, %Y at %I:%M %p')}.
+            </p>
+
+            <p style="color: #6b7280; font-size: 14px;">
+                If you have questions about this policy, please contact your administrator.
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+You have been asked to sign the following policy document:
+
+{policy_title}
+{company_name if company_name else ''}
+{('Version: ' + policy_version) if policy_version else ''}
+
+Please review the policy and sign it using the link below:
+
+{signature_url}
+
+This link will expire on {expires_at.strftime('%B %d, %Y at %I:%M %p')}.
+
+If you have questions, please contact your administrator.
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_name,
+                }
+            ],
+            "subject": f"Action Required: Please sign {policy_title}",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent policy signature email to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
 
 # Singleton instance
 _email_service: Optional[EmailService] = None
