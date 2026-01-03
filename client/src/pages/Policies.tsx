@@ -9,6 +9,7 @@ export function Policies() {
   const [policiesList, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<PolicyStatus | ''>('');
+  const [showHelp, setShowHelp] = useState(false);
 
   const loadPolicies = async (status: PolicyStatus | '' = '') => {
     try {
@@ -71,10 +72,80 @@ export function Policies() {
           <h1 className="text-2xl font-bold tracking-tight text-white">Policies</h1>
           <p className="text-sm text-zinc-500 mt-1">Manage company policies and collect signatures</p>
         </div>
-        <Button onClick={() => window.location.href = '/app/policies/new'}>
-          Create Policy
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => setShowHelp(!showHelp)}
+          >
+            {showHelp ? 'Hide Help' : 'Show Help'}
+          </Button>
+          <Button onClick={() => window.location.href = '/app/policies/new'}>
+            Create Policy
+          </Button>
+        </div>
       </div>
+
+      {showHelp && (
+        <Card>
+          <div className="p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-white mb-4">How to Use Policy Management</h2>
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-base font-medium text-white mb-2">📝 Creating Policies</h3>
+                <p className="text-sm text-zinc-300">
+                  Click "Create Policy" to add a new company policy. Include the title, description,
+                  and full policy content. You can also upload a document file (PDF, DOC, etc.) that
+                  will be stored securely and accessible to signers.
+                </p>
+              </div>
+
+              <div>
+                <h3 className="text-base font-medium text-white mb-2">📤 Sending Signature Requests</h3>
+                <p className="text-sm text-zinc-300">
+                  Click on any policy to view details, then click "Send Signatures". You can:
+                </p>
+                <ul className="text-sm text-zinc-400 mt-2 space-y-1 ml-4">
+                  <li>• Select from existing candidates using the "Select from Candidates" button</li>
+                  <li>• Manually add external signers (employees, contractors, etc.)</li>
+                  <li>• Add multiple signers at once</li>
+                </ul>
+              </div>
+
+              <div>
+                <h3 className="text-base font-medium text-white mb-2">📊 Tracking Signatures</h3>
+                <p className="text-sm text-zinc-300">
+                  Monitor signature status in the policy details view. Each signer receives an
+                  email with a secure link to review and sign the policy. Signatures are
+                  timestamped and IP-addressed for compliance.
+                </p>
+              </div>
+
+              <div>
+                <h3 className="text-base font-medium text-white mb-2">🔄 Managing Policies</h3>
+                <p className="text-sm text-zinc-300">
+                  Use the status filter to view draft, active, or archived policies. Click on
+                  any policy to edit, send signatures, or delete it. Version numbers help track
+                  policy updates.
+                </p>
+              </div>
+
+              <div>
+                <h3 className="text-base font-medium text-white mb-2">📋 Signature Workflow</h3>
+                <div className="bg-zinc-900 p-4 rounded-lg text-sm">
+                  <ol className="text-zinc-300 space-y-2">
+                    <li><strong>1. Create Policy:</strong> Write or upload your policy document</li>
+                    <li><strong>2. Send Requests:</strong> Select signers and send email invitations</li>
+                    <li><strong>3. Signers Review:</strong> Recipients click email link to view policy</li>
+                    <li><strong>4. Collect Signatures:</strong> Signers draw signature or accept/decline</li>
+                    <li><strong>5. Track Progress:</strong> Monitor completion in policy dashboard</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <Card>
         <div className="p-4 border-b border-zinc-800">
