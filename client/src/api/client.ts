@@ -1378,15 +1378,16 @@ export const leadsAgent = {
 
   getPipeline: () => request<Record<string, Lead[]>>('/leads-agent/pipeline'),
 
-  findContacts: (id: string) =>
-    request<Contact[]>(`/leads-agent/leads/${id}/find-contacts`, {
-      method: 'POST',
-    }),
+    findContacts: async (leadId: string) => {
+        const response = await api.post<Contact[]>(`/leads-agent/leads/${leadId}/find-contacts`);
+        return response.data;
+    },
+    researchContact: async (leadId: string) => {
+        const response = await api.post<Contact | null>(`/leads-agent/leads/${leadId}/research-contact`);
+        return response.data;
+    },
+    rankContacts: async (leadId: string) => {
 
-  rankContacts: (id: string) =>
-    request<Contact>(`/leads-agent/leads/${id}/rank-contacts`, {
-      method: 'POST',
-    }),
 
   addContact: (leadId: string, data: ContactCreate) =>
     request<Contact>(`/leads-agent/leads/${leadId}/contacts`, {

@@ -84,6 +84,20 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
         }
     };
 
+    const researchContact = async () => {
+        if (!lead) return;
+        setIsProcessing(true);
+        try {
+            await leadsAgent.researchContact(lead.id);
+            await fetchLeadDetail();
+        } catch (error) {
+            console.error('Research contact failed:', error);
+            alert('Could not find specific contact via web search.');
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     const draftEmail = async (contactId: string) => {
         if (!lead) return;
         setIsProcessing(true);
@@ -224,13 +238,25 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
                                     <div className="space-y-6 animate-in fade-in duration-300">
                                         <div className="flex items-center justify-between">
                                             <h3 className="text-[10px] uppercase tracking-[0.2em] text-white">Found Contacts</h3>
-                                            <button
-                                                onClick={findContacts}
-                                                disabled={isProcessing}
-                                                className="text-[10px] uppercase tracking-widest text-emerald-500 hover:text-emerald-400 disabled:opacity-50"
-                                            >
-                                                {isProcessing ? 'Searching...' : 'Search Contacts'}
-                                            </button>
+                                            <div className="flex gap-4">
+                                                <button
+                                                    onClick={researchContact}
+                                                    disabled={isProcessing}
+                                                    className="text-[10px] uppercase tracking-widest text-amber-500 hover:text-amber-400 disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {isProcessing ? 'Researching...' : 'Research Web'}
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                                    </svg>
+                                                </button>
+                                                <button
+                                                    onClick={findContacts}
+                                                    disabled={isProcessing}
+                                                    className="text-[10px] uppercase tracking-widest text-emerald-500 hover:text-emerald-400 disabled:opacity-50"
+                                                >
+                                                    {isProcessing ? 'Searching...' : 'Search Contacts'}
+                                                </button>
+                                            </div>
                                         </div>
 
                                         <div className="space-y-3">

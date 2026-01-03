@@ -12,6 +12,7 @@ Main orchestrator for the executive lead generation workflow:
 """
 
 import json
+import httpx
 from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
@@ -452,6 +453,79 @@ class LeadsAgentService:
                 saved_contacts.append(self._row_to_contact(row))
         
         return saved_contacts
+
+    async def research_decision_maker(self, lead_id: UUID) -> Optional[Contact]:
+        """
+        Use Google Search + Gemini to identify the decision maker from the web.
+        Does NOT find email (unless visible), but finds Name/Title for targeted search.
+        """
+        lead = await self.get_lead(lead_id)
+        if not lead:
+            return None
+
+        # 1. Run Google Search for leadership team
+        query = f"{lead.company_name} leadership team executive {lead.title}"
+        print(f"[LeadsAgent] Researching decision maker: {query}")
+        
+        search_results_text = ""
+        try:
+            params = {
+                "engine": "google",
+                "q": query,
+                "api_key": self.settings.search_api_key,
+                "num": 5
+            }
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get("https://www.searchapi.io/api/v1/search", params=params)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    snippets = []
+                    for item in data.get("organic_results", []):
+                        snippets.append(f"Title: {item.get('title')}\nSnippet: {item.get('snippet')}\nLink: {item.get('link')}\n")
+                    search_results_text = "\n".join(snippets)
+        except Exception as e:
+            print(f"[LeadsAgent] Search API failed: {e}")
+            return None
+            
+        if not search_results_text:
+            return None
+
+        # 2. Ask Gemini to extract the person
+        person = await self.gemini.find_decision_maker_from_search(
+            company_name=lead.company_name,
+            role_title=lead.title,
+            search_results=search_results_text,
+        )
+        
+        if not person:
+            return None
+            
+        # 3. Save as a 'manual' contact (so it doesn't imply verified email)
+        # We store it so the user can see it and then run a specific lookup
+        async with get_connection() as conn:
+            # Check for duplicate by name
+            existing = await conn.fetchrow(
+                "SELECT id FROM lead_contacts WHERE lead_id = $1 AND name = $2",
+                lead_id, person["name"]
+            )
+            if existing:
+                row = await conn.fetchrow("SELECT * FROM lead_contacts WHERE id = $1", existing["id"])
+                return self._row_to_contact(row)
+            
+            row = await conn.fetchrow(
+                """
+                INSERT INTO lead_contacts (
+                    lead_id, name, title, source, gemini_ranking_reason, is_primary
+                ) VALUES ($1, $2, $3, 'ai_research', $4, false)
+                RETURNING *
+                """,
+                lead_id,
+                person["name"],
+                person.get("title"),
+                f"AI Research: {person.get('reasoning')}",
+            )
+            return self._row_to_contact(row)
+
     
     async def rank_contacts_for_lead(self, lead_id: UUID) -> Optional[Contact]:
         """

@@ -146,6 +146,19 @@ async def find_contacts(
     return contacts
 
 
+@router.post("/leads/{lead_id}/research-contact", response_model=Optional[Contact])
+async def research_contact(
+    lead_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+    service: LeadsAgentService = Depends(get_leads_agent),
+):
+    """Use AI to research the decision maker from the web."""
+    contact = await service.research_decision_maker(lead_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Could not identify decision maker from web search")
+    return contact
+
+
 @router.post("/leads/{lead_id}/rank-contacts", response_model=Contact)
 async def rank_contacts(
     lead_id: UUID,

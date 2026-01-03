@@ -367,6 +367,64 @@ Best regards,
             return subject, body
 
 
+    async def find_decision_maker_from_search(
+        self,
+        company_name: str,
+        role_title: str,
+        search_results: str,
+    ) -> Optional[dict]:
+        """
+        Identify the likely decision maker from search results.
+        
+        Returns dict with {name, title, reason} or None.
+        """
+        prompt = f"""You are an executive recruiter researcher. We are trying to find the hiring manager for a specific role.
+
+## Target Company
+Company: {company_name}
+Open Role: {role_title}
+
+## Web Search Results (Leadership Team)
+{search_results[:3000]}
+
+## Instructions
+Identify the most likely person to be the hiring manager or key decision-maker for this role.
+- For C-level roles (e.g. CTO), look for the CEO or Founder.
+- For VP roles (e.g. VP Sales), look for the C-level equivalent (e.g. CRO or CEO).
+- For Director roles, look for the VP.
+
+Respond with a JSON object:
+{{
+    "name": "<Name of the person>",
+    "title": "<Their Title>",
+    "reasoning": "<Why you picked them based on the search results>"
+}}
+
+If you cannot find a specific person's name in the results, return null.
+
+Respond ONLY with the JSON object."""
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.settings.analysis_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=200,
+                ),
+            )
+            
+            text = self._clean_json_text(response.text)
+            if not text or text == "null":
+                return None
+            
+            return json.loads(text)
+            
+        except Exception as e:
+            print(f"[Gemini] Error finding decision maker: {e}")
+            return None
+
+
 # Singleton instance
 _gemini_leads: Optional[GeminiLeadsService] = None
 
