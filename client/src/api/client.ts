@@ -1388,6 +1388,11 @@ export const leadsAgent = {
       method: 'POST',
     }),
 
+  reanalyze: (leadId: string) =>
+    request<Lead>(`/leads-agent/leads/${leadId}/analyze`, {
+      method: 'POST',
+    }),
+
   rankContacts: (leadId: string) =>
     request<Contact>(`/leads-agent/leads/${leadId}/rank-contacts`, {
       method: 'POST',

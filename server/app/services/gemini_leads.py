@@ -163,7 +163,7 @@ Respond ONLY with the JSON object, no other text."""
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.2,
-                    max_output_tokens=500,
+                    max_output_tokens=1000,
                 ),
             )
             
@@ -193,11 +193,11 @@ Respond ONLY with the JSON object, no other text."""
             )
         except Exception as e:
             # Fallback: Save the lead anyway so the user can see it, rather than blocking on AI errors
-            raw_text = response.text[:200] if 'response' in locals() and hasattr(response, 'text') else 'N/A'
+            raw_text = response.text[:1000] if 'response' in locals() and hasattr(response, 'text') else 'N/A'
             return GeminiAnalysis(
                 relevance_score=5,
                 is_qualified=True,  # Default to True on error so we don't lose the lead
-                reasoning=f"Auto-saved. AI Analysis failed: {str(e)}. Raw: {raw_text}...",
+                reasoning=f"Auto-saved. AI Analysis failed: {str(e)}. Raw: {raw_text}",
                 extracted_seniority=None,
                 extracted_salary_min=None,
                 extracted_salary_max=None,

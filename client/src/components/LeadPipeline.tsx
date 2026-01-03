@@ -149,11 +149,23 @@ export default function LeadPipeline({ onSelectLead, refreshTrigger }: LeadPipel
                                         )}
 
                                         {status === 'new' && (
-                                            <div className="text-[9px] text-zinc-500 flex items-center gap-1">
-                                                <span>Review Lead</span>
-                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                                                </svg>
+                                            <div className="flex items-center gap-2 w-full justify-end">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        leadsAgent.reanalyze(lead.id).then(() => fetchPipeline());
+                                                    }}
+                                                    className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-[9px] text-zinc-400 hover:text-white uppercase font-bold rounded border border-zinc-700 transition-colors"
+                                                    title="Re-run AI Analysis"
+                                                >
+                                                    Re-Analyze
+                                                </button>
+                                                <div className="text-[9px] text-zinc-500 flex items-center gap-1">
+                                                    <span>Review Lead</span>
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                                    </svg>
+                                                </div>
                                             </div>
                                         )}
                                     </div>

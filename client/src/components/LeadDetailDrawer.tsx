@@ -106,6 +106,26 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
         }
     };
 
+    const reAnalyze = async () => {
+        if (!lead) return;
+        setIsProcessing(true);
+        setMessage(null);
+        try {
+            await leadsAgent.reanalyze(lead.id);
+            await fetchLeadDetail();
+            setMessage({ type: 'success', text: 'Analysis updated!' });
+            setTimeout(() => setMessage(null), 3000);
+        } catch (error: any) {
+            console.error('Re-analyze failed:', error);
+            setMessage({ 
+                type: 'error', 
+                text: `Error: ${error.response?.data?.detail || error.message || 'Unknown error'}` 
+            });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     const setPrimary = async (contactId: string) => {
         if (!lead) return;
         try {
@@ -234,9 +254,20 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
                                         </section>
 
                                         {lead.gemini_analysis && (
-                                            <section className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl">
-                                                <h3 className="text-[10px] uppercase tracking-[0.2em] text-emerald-400/70 mb-2">Gemini Analysis</h3>
-                                                <p className="text-xs text-zinc-300">{lead.gemini_analysis.reasoning}</p>
+                                            <section className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl relative group">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <h3 className="text-[10px] uppercase tracking-[0.2em] text-emerald-400/70">Gemini Analysis</h3>
+                                                    <button
+                                                        onClick={reAnalyze}
+                                                        disabled={isProcessing}
+                                                        className="opacity-0 group-hover:opacity-100 transition-opacity text-[9px] uppercase font-bold text-emerald-500 hover:text-emerald-400 disabled:opacity-50"
+                                                    >
+                                                        {isProcessing ? 'Analyzing...' : 'Re-Run Analysis'}
+                                                    </button>
+                                                </div>
+                                                <div className="max-h-60 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-emerald-500/20 scrollbar-track-transparent">
+                                                    <p className="text-xs text-zinc-300 whitespace-pre-wrap font-mono">{lead.gemini_analysis.reasoning}</p>
+                                                </div>
                                                 <div className="grid grid-cols-2 gap-4 mt-4 text-[10px]">
                                                     <div>
                                                         <span className="text-zinc-600 uppercase block mb-1">Seniority</span>

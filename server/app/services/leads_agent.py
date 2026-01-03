@@ -258,6 +258,63 @@ class LeadsAgentService:
                 print(f"    - SAVE ERROR: {str(e)}")
                 return False, False
     
+    async def reanalyze_lead(self, lead_id: UUID) -> Optional[Lead]:
+        """
+        Re-run Gemini analysis for a specific lead.
+        Useful for debugging analysis errors or updating scoring.
+        """
+        lead = await self.get_lead(lead_id)
+        if not lead:
+            return None
+
+        # Create dummy criteria for analysis context
+        # In a real scenario, we might want to store the original search criteria
+        # For now, we'll infer basic criteria from the lead itself or use defaults
+        criteria = SearchRequest(
+            role_types=[lead.title], # Use the lead's title as the role type context
+            locations=[lead.location] if lead.location else [],
+            salary_min=lead.salary_min,
+            salary_max=lead.salary_max
+        )
+
+        analysis = await self.gemini.analyze_position(
+            title=lead.title,
+            company_name=lead.company_name,
+            location=lead.location,
+            description=lead.job_description,
+            salary_text=lead.salary_text,
+            criteria=criteria
+        )
+
+        # Update the lead with new analysis
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE executive_leads
+                SET 
+                    relevance_score = $1,
+                    gemini_analysis = $2,
+                    seniority_level = $3,
+                    company_domain = $4,
+                    salary_min = $5,
+                    salary_max = $6,
+                    updated_at = NOW()
+                WHERE id = $7
+                RETURNING *
+                """,
+                analysis.relevance_score,
+                json.dumps(analysis.model_dump()),
+                analysis.extracted_seniority,
+                analysis.extracted_domain,
+                analysis.extracted_salary_min,
+                analysis.extracted_salary_max,
+                lead_id
+            )
+            
+            if not row:
+                return None
+            return self._row_to_lead(row)
+
     # ===========================================
     # Lead Management
     # ===========================================

@@ -146,6 +146,19 @@ async def find_contacts(
     return contacts
 
 
+@router.post("/leads/{lead_id}/analyze", response_model=Lead)
+async def reanalyze_lead(
+    lead_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+    service: LeadsAgentService = Depends(get_leads_agent),
+):
+    """Manually re-run Gemini analysis for a lead."""
+    lead = await service.reanalyze_lead(lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return lead
+
+
 @router.post("/leads/{lead_id}/research-contact", response_model=Optional[Contact])
 async def research_contact(
     lead_id: UUID,
