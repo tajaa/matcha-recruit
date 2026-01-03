@@ -158,14 +158,16 @@ class LeadsAgentService:
                 description=job.description,
             )
             
-            # Analyze with Gemini
-            analysis = await self.gemini.analyze_position(
-                title=job.title,
-                company_name=job.company_name,
-                location=job.location,
-                description=job.description,
-                salary_text=item.salary_text,
-                criteria=criteria,
+            # SKIP Gemini Analysis for speed/reliability
+            # We assume if it was found by search, it's worth saving for manual review.
+            analysis = GeminiAnalysis(
+                relevance_score=5,
+                is_qualified=True,
+                reasoning="Pending AI Analysis (Skipped during search)",
+                extracted_seniority=None,
+                extracted_salary_min=None,
+                extracted_salary_max=None,
+                extracted_domain=None,
             )
             item.gemini_analysis = analysis
             items.append(item)
