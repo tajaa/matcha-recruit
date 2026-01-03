@@ -35,6 +35,7 @@ export interface Lead {
     status: LeadStatus;
     priority: LeadPriority;
     notes?: string;
+    contacts_count: number;
     created_at: string;
     updated_at: string;
     last_activity_at?: string;

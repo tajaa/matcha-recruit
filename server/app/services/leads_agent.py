@@ -288,7 +288,9 @@ class LeadsAgentService:
             
             rows = await conn.fetch(
                 f"""
-                SELECT * FROM executive_leads
+                SELECT el.*, 
+                       (SELECT COUNT(*) FROM lead_contacts lc WHERE lc.lead_id = el.id) as contacts_count
+                FROM executive_leads el
                 WHERE {where_clause}
                 ORDER BY 
                     CASE priority 
@@ -751,6 +753,7 @@ class LeadsAgentService:
             status=LeadStatus(row["status"]) if row["status"] else LeadStatus.NEW,
             priority=LeadPriority(row["priority"]) if row["priority"] else LeadPriority.MEDIUM,
             notes=row["notes"],
+            contacts_count=row.get("contacts_count", 0),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             last_activity_at=row["last_activity_at"],

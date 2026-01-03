@@ -148,6 +148,7 @@ class Lead(BaseModel):
     status: LeadStatus = LeadStatus.NEW
     priority: LeadPriority = LeadPriority.MEDIUM
     notes: Optional[str] = None
+    contacts_count: int = 0
     
     created_at: datetime
     updated_at: datetime
