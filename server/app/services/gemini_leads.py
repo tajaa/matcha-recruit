@@ -288,7 +288,7 @@ Respond ONLY with the JSON object."""
     async def generate_outreach_email(
         self,
         lead: Lead,
-        contact: Contact,
+        contact: Optional[Contact] = None,
         sender_name: str = "Aaron",
         sender_company: str = "Matcha Recruit",
     ) -> tuple[str, str]:
@@ -297,6 +297,9 @@ Respond ONLY with the JSON object."""
         
         Returns (subject, body) tuple.
         """
+        contact_name = contact.name if contact else "[Hiring Manager]"
+        contact_title = contact.title if contact else "Executive"
+        
         prompt = f"""You are an executive recruiter writing a cold outreach email. Write a professional, personalized email.
 
 ## About the Open Position
@@ -306,8 +309,8 @@ Location: {lead.location or 'Not specified'}
 Description: {(lead.job_description or 'Executive leadership role')[:500]}
 
 ## Recipient
-Name: {contact.name}
-Title: {contact.title or 'Executive'}
+Name: {contact_name}
+Title: {contact_title}
 
 ## Sender
 Name: {sender_name}
@@ -344,8 +347,6 @@ Respond ONLY with the JSON object."""
             text = self._clean_json_text(response.text)
             
             data = json.loads(text)
-            selected_index = data.get("selected_index", 1) - 1  # Convert to 0-based
-            reasoning = data.get("reasoning", "Selected as best match")
             subject = data.get("subject", f"Executive Search Partnership - {lead.title}")
             body = data.get("body", "").replace("\\n", "\n")
             
@@ -354,7 +355,9 @@ Respond ONLY with the JSON object."""
         except Exception as e:
             # Return a basic template on error
             subject = f"Executive Search Partnership - {lead.title} at {lead.company_name}"
-            body = f"""Hi {contact.first_name or contact.name.split()[0]},
+            recipient_first_name = contact.first_name if contact and contact.first_name else contact_name.split()[0] if contact else "[Hiring Manager]"
+            
+            body = f"""Hi {recipient_first_name},
 
 I noticed your team is hiring a {lead.title}. At {sender_company}, we specialize in executive search with AI-powered culture matching that helps find leaders who truly fit.
 

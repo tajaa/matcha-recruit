@@ -665,22 +665,23 @@ class LeadsAgentService:
     async def generate_email_draft(
         self,
         lead_id: UUID,
-        contact_id: UUID,
+        contact_id: Optional[UUID] = None,
     ) -> Optional[LeadEmail]:
         """Generate an email draft using Gemini."""
         lead = await self.get_lead(lead_id)
         if not lead:
             return None
         
-        # Get contact
-        async with get_connection() as conn:
-            contact_row = await conn.fetchrow(
-                "SELECT * FROM lead_contacts WHERE id = $1 AND lead_id = $2",
-                contact_id, lead_id
-            )
-            if not contact_row:
-                return None
-            contact = self._row_to_contact(contact_row)
+        # Get contact if provided
+        contact = None
+        if contact_id:
+            async with get_connection() as conn:
+                contact_row = await conn.fetchrow(
+                    "SELECT * FROM lead_contacts WHERE id = $1 AND lead_id = $2",
+                    contact_id, lead_id
+                )
+                if contact_row:
+                    contact = self._row_to_contact(contact_row)
         
         # Generate email with Gemini
         subject, body = await self.gemini.generate_outreach_email(lead, contact)

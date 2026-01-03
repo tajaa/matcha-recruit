@@ -14,6 +14,8 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
     const [isProcessing, setIsProcessing] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [activeSubTab, setActiveSubTab] = useState<'info' | 'contacts' | 'emails'>('info');
+    const [isAddingContact, setIsAddingContact] = useState(false);
+    const [newContact, setNewContact] = useState({ name: '', title: '', email: '', linkedin_url: '' });
 
     const fetchLeadDetail = async () => {
         if (!leadId) return;
@@ -136,7 +138,7 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
         }
     };
 
-    const draftEmail = async (contactId: string) => {
+    const draftEmail = async (contactId?: string) => {
         if (!lead) return;
         setIsProcessing(true);
         try {
@@ -145,6 +147,25 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
             setActiveSubTab('emails');
         } catch (error) {
             console.error('Draft email failed:', error);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleAddManualContact = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!lead || !newContact.name) return;
+        setIsProcessing(true);
+        try {
+            await leadsAgent.addContact(lead.id, {
+                ...newContact,
+                is_primary: lead.contacts.length === 0 // Set as primary if it's the first one
+            });
+            setNewContact({ name: '', title: '', email: '', linkedin_url: '' });
+            setIsAddingContact(false);
+            await fetchLeadDetail();
+        } catch (error) {
+            console.error('Add contact failed:', error);
         } finally {
             setIsProcessing(false);
         }
@@ -296,6 +317,12 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
                                             </div>
                                             <div className="flex gap-4">
                                                 <button
+                                                    onClick={() => setIsAddingContact(!isAddingContact)}
+                                                    className="text-[10px] uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
+                                                >
+                                                    {isAddingContact ? 'Cancel' : 'Add Manual'}
+                                                </button>
+                                                <button
                                                     onClick={researchContact}
                                                     disabled={isProcessing}
                                                     className="text-[10px] uppercase tracking-widest text-amber-500 hover:text-amber-400 disabled:opacity-50 flex items-center gap-2"
@@ -314,6 +341,70 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
                                                 </button>
                                             </div>
                                         </div>
+
+                                        {isAddingContact && (
+                                            <form onSubmit={handleAddManualContact} className="p-4 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-1">
+                                                        <label className="text-[9px] uppercase tracking-widest text-zinc-600">Name</label>
+                                                        <input
+                                                            autoFocus
+                                                            value={newContact.name}
+                                                            onChange={e => setNewContact({...newContact, name: e.target.value})}
+                                                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                                                            placeholder="John Doe"
+                                                            required
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[9px] uppercase tracking-widest text-zinc-600">Title</label>
+                                                        <input
+                                                            value={newContact.title}
+                                                            onChange={e => setNewContact({...newContact, title: e.target.value})}
+                                                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                                                            placeholder="CTO"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-1">
+                                                        <label className="text-[9px] uppercase tracking-widest text-zinc-600">Email</label>
+                                                        <input
+                                                            type="email"
+                                                            value={newContact.email}
+                                                            onChange={e => setNewContact({...newContact, email: e.target.value})}
+                                                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                                                            placeholder="john@company.com"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[9px] uppercase tracking-widest text-zinc-600">LinkedIn</label>
+                                                        <input
+                                                            value={newContact.linkedin_url}
+                                                            onChange={e => setNewContact({...newContact, linkedin_url: e.target.value})}
+                                                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                                                            placeholder="linkedin.com/in/..."
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="flex justify-end gap-3 pt-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIsAddingContact(false)}
+                                                        className="text-[10px] uppercase font-bold text-zinc-600 hover:text-zinc-400"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                    <button
+                                                        type="submit"
+                                                        disabled={isProcessing}
+                                                        className="px-3 py-1 bg-white text-black text-[10px] font-bold uppercase rounded hover:bg-zinc-200 disabled:opacity-50"
+                                                    >
+                                                        {isProcessing ? 'Adding...' : 'Add Contact'}
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        )}
 
                                         <div className="space-y-3">
                                             {lead.contacts.map(contact => (
@@ -394,8 +485,8 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
                                                         // Fallback to first contact if no primary
                                                         draftEmail(lead.contacts[0].id);
                                                     } else {
-                                                        alert("No contacts available to email. Please find contacts first.");
-                                                        setActiveSubTab('contacts');
+                                                        // Draft without a contact (use placeholders)
+                                                        draftEmail(undefined);
                                                     }
                                                 }}
                                                 disabled={isProcessing}

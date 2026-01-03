@@ -220,7 +220,7 @@ class Contact(BaseModel):
 
 class EmailDraftCreate(BaseModel):
     """Request to generate an email draft."""
-    contact_id: UUID
+    contact_id: Optional[UUID] = None
 
 
 class EmailUpdate(BaseModel):
@@ -233,7 +233,7 @@ class LeadEmail(BaseModel):
     """Email draft or sent email for a lead."""
     id: UUID
     lead_id: UUID
-    contact_id: UUID
+    contact_id: Optional[UUID] = None
     
     subject: str
     body: str
