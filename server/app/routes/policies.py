@@ -16,7 +16,7 @@ from ..models.policy import (
     SignerType,
 )
 from ..services.policy_service import PolicyService, SignatureService
-from ..services.email import send_policy_signature_email
+from ..services.email import get_email_service
 from ..models.auth import CurrentUser
 from uuid import UUID
 
@@ -125,8 +125,9 @@ async def send_signature_requests(
 
     signatures = await SignatureService.create_batch_signature_requests(policy_id, requests)
 
+    email_service = get_email_service()
     for sig in signatures:
-        await send_policy_signature_email(
+        await email_service.send_policy_signature_email(
             to_email=sig.signer_email,
             to_name=sig.signer_name,
             policy_title=policy.title,
@@ -201,7 +202,8 @@ async def resend_signature_request(
     if not signature:
         raise HTTPException(status_code=400, detail="Cannot resend this signature request")
 
-    await send_policy_signature_email(
+    email_service = get_email_service()
+    await email_service.send_policy_signature_email(
         to_email=signature.signer_email,
         to_name=signature.signer_name,
         policy_title=signature.policy_title,
