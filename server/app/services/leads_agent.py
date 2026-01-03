@@ -105,8 +105,10 @@ class LeadsAgentService:
             query_parts.append("(CEO OR CTO OR CFO OR VP OR Director)")
         
         # Add industries if specified
-        if criteria.industries:
-            query_parts.append(f"({' OR '.join(criteria.industries)})")
+        # NOTE: We skip adding industries to the search query to avoid over-filtering.
+        # Gemini will filter for industry match during analysis.
+        # if criteria.industries:
+        #     query_parts.append(f"({' OR '.join(criteria.industries)})")
         
         query = " ".join(query_parts)
         

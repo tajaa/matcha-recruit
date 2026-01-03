@@ -11,10 +11,10 @@ const INDUSTRY_OPTIONS = [
 const SALARY_STEPS = Array.from({ length: 22 }, (_, i) => 80000 + (i * 20000));
 
 export default function LeadSearch({ onSearchComplete }: { onSearchComplete: () => void }) {
-    const [roleTypes, setRoleTypes] = useState<string[]>(['Chief Executive Officer', 'VP Engineering', 'CTO', 'Head of Sales']);
-    const [locations, setLocations] = useState<string[]>(['San Francisco', 'New York', 'Remote']);
+    const [roleTypes, setRoleTypes] = useState<string[]>(['VP of People', 'CHRO', 'Head of HR']);
+    const [locations, setLocations] = useState<string[]>(['United States']);
     const [industries, setIndustries] = useState<string[]>(['Technology']);
-    const [salaryMin, setSalaryMin] = useState<number>(200000);
+    const [salaryMin, setSalaryMin] = useState<number>(100000);
     const [isSearching, setIsSearching] = useState(false);
     const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
 

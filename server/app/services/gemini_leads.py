@@ -8,6 +8,8 @@ AI-powered analysis for the Leads Agent workflow:
 """
 
 import json
+import os
+import re
 from typing import Optional, List
 
 from google import genai
@@ -40,7 +42,12 @@ class GeminiLeadsService:
     def client(self) -> genai.Client:
         """Get or create Gemini client."""
         if self._client is None:
-            if self.settings.use_vertex:
+            # Check for specific API key for this service first
+            api_key = os.getenv("GEMINI_API_KEY")
+            
+            if api_key:
+                self._client = genai.Client(api_key=api_key)
+            elif self.settings.use_vertex:
                 self._client = genai.Client(
                     vertexai=True,
                     project=self.settings.vertex_project,
@@ -50,6 +57,37 @@ class GeminiLeadsService:
                 self._client = genai.Client(api_key=self.settings.gemini_api_key)
         return self._client
     
+    def _clean_json_text(self, text: str) -> str:
+        """Clean JSON text by removing markdown and finding the JSON object."""
+        text = text.strip()
+        
+        # Remove markdown code blocks if present
+        if "```" in text:
+            # Try to find the content between first ``` and last ```
+            parts = text.split("```")
+            for part in parts:
+                if "{" in part and "}" in part:
+                    # found a candidate
+                    text = part
+                    if text.startswith("json"):
+                        text = text[4:]
+                    break
+        
+        # Find the first '{' and last '}'
+        start = text.find('{')
+        end = text.rfind('}')
+        
+        if start != -1 and end != -1:
+            text = text[start:end+1]
+            
+        # Fix common LLM JSON errors (Python booleans/None)
+        # Use regex to avoid replacing inside strings (mostly)
+        text = re.sub(r':\s*True\b', ': true', text)
+        text = re.sub(r':\s*False\b', ': false', text)
+        text = re.sub(r':\s*None\b', ': null', text)
+            
+        return text
+
     async def analyze_position(
         self,
         title: str,
@@ -131,13 +169,13 @@ Respond ONLY with the JSON object, no other text."""
             )
             
             # Parse JSON response
-            text = response.text.strip()
-            # Remove markdown code blocks if present
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            text = text.strip()
+            text = self._clean_json_text(response.text)
+            if not text:
+                return GeminiAnalysis(
+                    relevance_score=5,
+                    is_qualified=False,
+                    reasoning="Model returned empty response (likely filtered or safety block).",
+                )
             
             data = json.loads(text)
             
@@ -155,11 +193,16 @@ Respond ONLY with the JSON object, no other text."""
                 extracted_domain=data.get("extracted_domain"),
             )
         except Exception as e:
-            # Return a conservative default on error
+            # Fallback: Save the lead anyway so the user can see it, rather than blocking on AI errors
+            raw_text = response.text[:200] if 'response' in locals() and hasattr(response, 'text') else 'N/A'
             return GeminiAnalysis(
                 relevance_score=5,
-                is_qualified=False,
-                reasoning=f"Analysis error: {str(e)}",
+                is_qualified=True,  # Default to True on error so we don't lose the lead
+                reasoning=f"Auto-saved. AI Analysis failed: {str(e)}. Raw: {raw_text}...",
+                extracted_seniority=None,
+                extracted_salary_min=None,
+                extracted_salary_max=None,
+                extracted_domain=None,
             )
     
     async def rank_contacts(
@@ -226,14 +269,11 @@ Respond ONLY with the JSON object."""
                 ),
             )
             
-            text = response.text.strip()
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            text = text.strip()
+            text = self._clean_json_text(response.text)
             
             data = json.loads(text)
+            selected_index = data.get("selected_index", 1) - 1  # Convert to 0-based
+            reasoning = data.get("reasoning", "Selected as best match")
             selected_index = data.get("selected_index", 1) - 1  # Convert to 0-based
             reasoning = data.get("reasoning", "Selected as best match")
             
@@ -302,14 +342,11 @@ Respond ONLY with the JSON object."""
                 ),
             )
             
-            text = response.text.strip()
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            text = text.strip()
+            text = self._clean_json_text(response.text)
             
             data = json.loads(text)
+            selected_index = data.get("selected_index", 1) - 1  # Convert to 0-based
+            reasoning = data.get("reasoning", "Selected as best match")
             subject = data.get("subject", f"Executive Search Partnership - {lead.title}")
             body = data.get("body", "").replace("\\n", "\n")
             
