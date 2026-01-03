@@ -27,7 +27,6 @@ const IRList = lazy(() => import('./pages/IRList'));
 const IRCreate = lazy(() => import('./pages/IRCreate'));
 const IRDetail = lazy(() => import('./pages/IRDetail'));
 const InterviewPrepAdmin = lazy(() => import('./pages/InterviewPrepAdmin'));
-const LeadsAgent = lazy(() => import('./pages/LeadsAgent'));
 
 // Loading fallback
 function PageLoader() {
@@ -105,22 +104,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="companies/:id"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <CompanyDetail />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="candidates"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <Candidates />
-                  </ProtectedRoute>
-                }
-              />
+
               <Route
                 path="offer-letters"
                 element={
@@ -153,14 +137,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="positions"
-                element={
-                  <ProtectedRoute roles={['admin', 'client', 'candidate']}>
-                    <Positions />
-                  </ProtectedRoute>
-                }
-              />
+
               <Route
                 path="positions/:id"
                 element={
@@ -177,14 +154,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="jobs"
-                element={
-                  <ProtectedRoute roles={['admin', 'candidate']}>
-                    <JobSearch />
-                  </ProtectedRoute>
-                }
-              />
+
               <Route
                 path="openings"
                 element={
@@ -201,38 +171,8 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="projects"
-                element={
-                  <ProtectedRoute roles={['admin']}>
-                    <Projects />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="projects/:id"
-                element={
-                  <ProtectedRoute roles={['admin']}>
-                    <ProjectDetail />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="test-bot"
-                element={
-                  <ProtectedRoute roles={['admin']}>
-                    <TestBot />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="test-bot/analysis/:id"
-                element={
-                  <ProtectedRoute roles={['admin']}>
-                    <InterviewAnalysis />
-                  </ProtectedRoute>
-                }
-              />
+
+
               <Route
                 path="tutor"
                 element={
@@ -249,14 +189,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="leads-agent"
-                element={
-                  <ProtectedRoute roles={['admin']}>
-                    <LeadsAgent />
-                  </ProtectedRoute>
-                }
-              />
+
               <Route
                 path="tutor-metrics"
                 element={
@@ -337,14 +270,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="careers"
-                element={
-                  <ProtectedRoute>
-                    <Careers />
-                  </ProtectedRoute>
-                }
-              />
+
             </Route>
           </Routes>
         </Suspense>
