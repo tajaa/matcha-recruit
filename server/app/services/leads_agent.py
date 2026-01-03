@@ -90,6 +90,9 @@ class LeadsAgentService:
             "vp": "VP OR Vice President",
             "director": "Director",
             "senior": "Senior Manager OR Head of",
+            "cho": "CHRO OR Chief People Officer OR Chief Human Resources Officer",
+            "hr": "VP of HR OR Director of Human Resources OR Head of HR",
+            "people": "VP of People OR Head of People OR People Operations",
         }
         
         if criteria.role_types:
@@ -114,12 +117,15 @@ class LeadsAgentService:
         request = JobSearchRequest(
             query=query,
             location=location,
-            employment_type="FULLTIME",
         )
+        
+        # Log the search for debugging
+        print(f"[LeadsAgent] Executing search: query='{query}', location='{location}'")
         
         try:
             search_response = await search_jobs(request)
             jobs = search_response.jobs
+            print(f"[LeadsAgent] Search found {len(jobs)} jobs")
         except Exception as e:
             return SearchResult(
                 jobs_found=0,
@@ -164,14 +170,19 @@ class LeadsAgentService:
             
             if analysis.is_qualified:
                 qualified_count += 1
+                print(f"  - Qualified: {item.title} at {item.company_name} (Score: {analysis.relevance_score})")
                 
                 # Save to database if requested
                 if save_results:
                     created, deduped = await self._save_lead_from_search(item, analysis)
                     if created:
                         created_count += 1
+                        print(f"    - SAVED")
                     if deduped:
                         deduped_count += 1
+                        print(f"    - SKIPPED (Duplicate)")
+            else:
+                print(f"  - NOT Qualified: {item.title} at {item.company_name} (Score: {analysis.relevance_score})")
         
         return SearchResult(
             jobs_found=len(jobs),
@@ -238,9 +249,9 @@ class LeadsAgentService:
                     LeadPriority.MEDIUM.value,
                 )
                 return True, False
-            except Exception:
-                # Likely a unique constraint violation
-                return False, True
+            except Exception as e:
+                print(f"    - SAVE ERROR: {str(e)}")
+                return False, False
     
     # ===========================================
     # Lead Management
@@ -288,6 +299,7 @@ class LeadsAgentService:
                 *params, limit, offset
             )
             
+            print(f"[LeadsAgent] Fetched {len(rows)} leads for pipeline (limit={limit}, offset={offset})")
             return [self._row_to_lead(row) for row in rows]
     
     async def get_lead(self, lead_id: UUID) -> Optional[Lead]:

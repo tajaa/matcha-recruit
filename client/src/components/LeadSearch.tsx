@@ -2,8 +2,16 @@ import { useState } from 'react';
 import { leadsAgent } from '../api/client';
 import type { SearchRequest, SearchResult } from '../types/leads';
 
+const INDUSTRY_OPTIONS = [
+    'Technology', 'Finance', 'Healthcare', 'Manufacturing', 'Retail',
+    'Energy', 'Real Estate', 'Transportation', 'Entertainment', 'Education',
+    'AI/ML', 'SaaS', 'Fintech', 'Healthtech', 'Sustainability', 'Logistics'
+];
+
+const SALARY_STEPS = Array.from({ length: 22 }, (_, i) => 80000 + (i * 20000));
+
 export default function LeadSearch({ onSearchComplete }: { onSearchComplete: () => void }) {
-    const [roleTypes, setRoleTypes] = useState<string[]>(['CEO', 'CFO', 'CTO', 'VP']);
+    const [roleTypes, setRoleTypes] = useState<string[]>(['Chief Executive Officer', 'VP Engineering', 'CTO', 'Head of Sales']);
     const [locations, setLocations] = useState<string[]>(['San Francisco', 'New York', 'Remote']);
     const [industries, setIndustries] = useState<string[]>(['Technology']);
     const [salaryMin, setSalaryMin] = useState<number>(200000);
@@ -13,6 +21,12 @@ export default function LeadSearch({ onSearchComplete }: { onSearchComplete: () 
     const toggleRole = (role: string) => {
         setRoleTypes(prev =>
             prev.includes(role) ? prev.filter(r => r !== role) : [...prev, role]
+        );
+    };
+
+    const toggleIndustry = (industry: string) => {
+        setIndustries(prev =>
+            prev.includes(industry) ? prev.filter(i => i !== industry) : [...prev, industry]
         );
     };
 
@@ -48,7 +62,7 @@ export default function LeadSearch({ onSearchComplete }: { onSearchComplete: () 
                     <section>
                         <h3 className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-4 px-1">Target Roles</h3>
                         <div className="flex flex-wrap gap-2">
-                            {['CEO', 'CFO', 'CTO', 'CMO', 'COO', 'CRO', 'VP Sales', 'VP Engineering', 'Director'].map(role => (
+                            {['Chief Executive Officer', 'CTO', 'CFO', 'CMO', 'COO', 'VP Engineering', 'VP Sales', 'VP of People', 'CHRO', 'Head of HR', 'Director'].map(role => (
                                 <button
                                     key={role}
                                     onClick={() => toggleRole(role)}
@@ -93,39 +107,37 @@ export default function LeadSearch({ onSearchComplete }: { onSearchComplete: () 
 
                 <div className="space-y-6">
                     <section>
-                        <h3 className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-4 px-1">Min Salary ($)</h3>
-                        <input
-                            type="number"
-                            value={salaryMin}
-                            onChange={(e) => setSalaryMin(parseInt(e.target.value))}
-                            placeholder="e.g. 200000"
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-xs text-zinc-300 focus:outline-none focus:border-zinc-700 transition-colors"
-                        />
+                        <h3 className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-4 px-1">Industries</h3>
+                        <div className="flex flex-wrap gap-2">
+                            {INDUSTRY_OPTIONS.map(industry => (
+                                <button
+                                    key={industry}
+                                    onClick={() => toggleIndustry(industry)}
+                                    className={`px-3 py-1.5 rounded text-[10px] uppercase tracking-wider border transition-all ${industries.includes(industry)
+                                        ? 'bg-zinc-100 text-black border-zinc-100'
+                                        : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-700'
+                                        }`}
+                                >
+                                    {industry}
+                                </button>
+                            ))}
+                        </div>
                     </section>
 
                     <section>
-                        <h3 className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-4 px-1">Industries</h3>
-                        <input
-                            type="text"
-                            placeholder="Add industry..."
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && e.currentTarget.value) {
-                                    setIndustries([...industries, e.currentTarget.value]);
-                                    e.currentTarget.value = '';
-                                }
-                            }}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-700 transition-colors"
-                        />
-                        <div className="flex flex-wrap gap-2 mt-3">
-                            {industries.map(ind => (
-                                <span key={ind} className="flex items-center gap-2 px-2 py-1 bg-zinc-800/50 border border-zinc-700 rounded text-[10px] text-zinc-400">
-                                    {ind}
-                                    <button onClick={() => setIndustries(industries.filter(i => i !== ind))} className="hover:text-white transition-colors">
-                                        ×
-                                    </button>
-                                </span>
+                        <h3 className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-4 px-1">Min Salary ($)</h3>
+                        <select
+                            value={salaryMin}
+                            onChange={(e) => setSalaryMin(parseInt(e.target.value))}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-xs text-zinc-300 focus:outline-none focus:border-zinc-700 transition-colors appearance-none cursor-pointer"
+                        >
+                            {SALARY_STEPS.map(step => (
+                                <option key={step} value={step}>
+                                    ${step.toLocaleString()}
+                                </option>
                             ))}
-                        </div>
+                            <option value={500000}>$500,000+</option>
+                        </select>
                     </section>
 
                     <div className="flex items-center gap-4 pt-4">
