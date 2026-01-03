@@ -157,18 +157,28 @@ export function PolicyForm() {
               <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
                 Policy Document (Optional)
               </label>
-              <input
-                type="file"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                accept=".pdf,.doc,.docx,.txt"
-                className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-              />
-              <p className="text-[10px] text-zinc-600 mt-1">
+              <div className="flex items-center gap-4">
+                <label className="cursor-pointer px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm rounded-md hover:bg-zinc-700 hover:text-white transition-colors">
+                  <span>Choose File</span>
+                  <input
+                    type="file"
+                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    accept=".pdf,.doc,.docx,.txt"
+                    className="hidden"
+                  />
+                </label>
+                {file ? (
+                  <span className="text-sm text-zinc-300">{file.name}</span>
+                ) : (
+                  <span className="text-sm text-zinc-500">No file selected</span>
+                )}
+              </div>
+              <p className="text-[10px] text-zinc-600 mt-2">
                 Upload PDF, DOC, DOCX, or TXT file. This will be stored and accessible to signers.
               </p>
               {file && (
-                <p className="text-xs text-zinc-400 mt-2">
-                  Selected: {file.name} ({(file.size / 1024).toFixed(1)} KB)
+                <p className="text-xs text-zinc-400 mt-1">
+                  Size: {(file.size / 1024).toFixed(1)} KB
                 </p>
               )}
             </div>
