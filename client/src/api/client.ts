@@ -92,6 +92,20 @@ import type {
   IRSimilarIncidentsAnalysis,
   IRAuditLogResponse,
 } from '../types';
+import type {
+  Lead,
+  LeadWithContacts,
+  LeadUpdate,
+  Contact,
+  ContactCreate,
+  LeadEmail,
+  EmailStatus,
+  EmailUpdate,
+  LeadStatus,
+  LeadPriority,
+  SearchRequest,
+  SearchResult,
+} from '../types/leads';
 
 const API_BASE = 'http://localhost:8001/api';
 
@@ -1324,5 +1338,89 @@ export const adminBeta = {
     request<{ status: string; allowed_interview_roles: string[] }>(`/auth/admin/candidates/${userId}/roles`, {
       method: 'PUT',
       body: JSON.stringify({ roles }),
+    }),
+};
+
+// =============================================================================
+// LEADS AGENT API
+// =============================================================================
+
+export const leadsAgent = {
+  search: (params: SearchRequest & { preview?: boolean }) => {
+    const preview = params.preview ? '?preview=true' : '';
+    const { preview: _, ...body } = params as any;
+    return request<SearchResult>(`/leads-agent/search${preview}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  list: (status?: LeadStatus, priority?: LeadPriority) => {
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    if (priority) params.append('priority', priority);
+    const query = params.toString();
+    return request<Lead[]>(`/leads-agent/leads${query ? `?${query}` : ''}`);
+  },
+
+  get: (id: string) => request<LeadWithContacts>(`/leads-agent/leads/${id}`),
+
+  update: (id: string, data: LeadUpdate) =>
+    request<Lead>(`/leads-agent/leads/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    request<{ status: string }>(`/leads-agent/leads/${id}`, {
+      method: 'DELETE',
+    }),
+
+  getPipeline: () => request<Record<string, Lead[]>>('/leads-agent/pipeline'),
+
+  findContacts: (id: string) =>
+    request<Contact[]>(`/leads-agent/leads/${id}/find-contacts`, {
+      method: 'POST',
+    }),
+
+  rankContacts: (id: string) =>
+    request<Contact>(`/leads-agent/leads/${id}/rank-contacts`, {
+      method: 'POST',
+    }),
+
+  addContact: (leadId: string, data: ContactCreate) =>
+    request<Contact>(`/leads-agent/leads/${leadId}/contacts`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  draftEmail: (leadId: string, contactId: string) =>
+    request<LeadEmail>(`/leads-agent/leads/${leadId}/draft-email`, {
+      method: 'POST',
+      body: JSON.stringify({ contact_id: contactId }),
+    }),
+
+  listEmails: (status?: EmailStatus, leadId?: string) => {
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    if (leadId) params.append('lead_id', leadId);
+    const query = params.toString();
+    return request<LeadEmail[]>(`/leads-agent/emails${query ? `?${query}` : ''}`);
+  },
+
+  updateEmail: (id: string, data: EmailUpdate) =>
+    request<LeadEmail>(`/leads-agent/emails/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  approveEmail: (id: string) =>
+    request<LeadEmail>(`/leads-agent/emails/${id}/approve`, {
+      method: 'POST',
+    }),
+
+  sendEmail: (id: string) =>
+    request<LeadEmail>(`/leads-agent/emails/${id}/send`, {
+      method: 'POST',
     }),
 };

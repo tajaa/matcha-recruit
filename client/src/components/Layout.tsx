@@ -109,6 +109,16 @@ const navSections: NavSection[] = [
           </svg>
         ),
       },
+      {
+        path: '/app/leads-agent',
+        label: 'Leads Agent',
+        roles: ['admin'],
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        ),
+      },
     ],
   },
   {
@@ -243,11 +253,10 @@ export function Layout() {
     return (
       <Link
         to={item.path}
-        className={`flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${
-          isActive
+        className={`flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
             ? 'text-white bg-zinc-800 border-l-2 border-white'
             : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
-        }`}
+          }`}
       >
         {item.icon}
         <span>{item.label}</span>
@@ -356,11 +365,10 @@ export function Layout() {
                   key={item.path}
                   to={item.path}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
-                    location.pathname === item.path
+                  className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${location.pathname === item.path
                       ? 'text-white bg-zinc-800 border-l-2 border-white'
                       : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
-                  }`}
+                    }`}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -369,11 +377,10 @@ export function Layout() {
               <Link
                 to="/app/settings"
                 onClick={() => setMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${
-                  location.pathname === '/app/settings'
+                className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${location.pathname === '/app/settings'
                     ? 'text-white bg-zinc-800 border-l-2 border-white'
                     : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
-                }`}
+                  }`}
               >
                 {settingsItem.icon}
                 <span>Settings</span>

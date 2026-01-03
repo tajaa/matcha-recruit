@@ -48,6 +48,11 @@ class Settings:
     # Jina AI Reader API (for job scraping)
     jina_api_key: Optional[str] = None
 
+    # Contact Finder APIs (for Leads Agent)
+    hunter_api_key: Optional[str] = None      # Hunter.io - email finder
+    apollo_api_key: Optional[str] = None      # Apollo.io - contact database
+    clearbit_api_key: Optional[str] = None    # Clearbit - company enrichment
+
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: Optional[str] = None  # Falls back to redis_url
@@ -113,6 +118,9 @@ def load_settings() -> Settings:
         app_base_url=os.getenv("APP_BASE_URL", "http://localhost:5173"),
         contact_email=os.getenv("CONTACT_EMAIL", "aaron@itsmatcha.net"),
         jina_api_key=os.getenv("JINA_API_KEY"),
+        hunter_api_key=os.getenv("HUNTER_API_KEY"),
+        apollo_api_key=os.getenv("APOLLO_API_KEY"),
+        clearbit_api_key=os.getenv("CLEARBIT_API_KEY"),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         celery_broker_url=os.getenv("CELERY_BROKER_URL"),
         celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),

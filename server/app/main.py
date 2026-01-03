@@ -76,6 +76,7 @@ from .routes import (
     projects_router,
     public_jobs_router,
 )
+from .routes.leads_agent import router as leads_agent_router
 from .routes.er_copilot import router as er_copilot_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
@@ -93,6 +94,7 @@ app.include_router(public_jobs_router, prefix="/api/job-board", tags=["public-jo
 app.include_router(contact_router, prefix="/api/contact", tags=["contact"])
 app.include_router(er_copilot_router, prefix="/api/er/cases", tags=["er-copilot"])
 app.include_router(ir_incidents_router, prefix="/api/ir/incidents", tags=["ir-incidents"])
+app.include_router(leads_agent_router, prefix="/api", tags=["leads-agent"])
 
 
 @app.get("/health")

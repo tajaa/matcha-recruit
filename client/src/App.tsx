@@ -45,6 +45,7 @@ const IRList = lazy(() => import('./pages/IRList'));
 const IRCreate = lazy(() => import('./pages/IRCreate'));
 const IRDetail = lazy(() => import('./pages/IRDetail'));
 const InterviewPrepAdmin = lazy(() => import('./pages/InterviewPrepAdmin'));
+const LeadsAgent = lazy(() => import('./pages/LeadsAgent'));
 
 // Loading fallback
 function PageLoader() {
@@ -231,6 +232,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <InterviewPrepAdmin />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="leads-agent"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <LeadsAgent />
                   </ProtectedRoute>
                 }
               />
