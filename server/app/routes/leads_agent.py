@@ -172,6 +172,20 @@ async def rank_contacts(
     return contact
 
 
+@router.post("/leads/{lead_id}/contacts/{contact_id}/set-primary", response_model=Contact)
+async def set_primary_contact(
+    lead_id: UUID,
+    contact_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+    service: LeadsAgentService = Depends(get_leads_agent),
+):
+    """Manually set a contact as primary."""
+    contact = await service.set_primary_contact(lead_id, contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return contact
+
+
 @router.post("/leads/{lead_id}/contacts", response_model=Contact)
 async def add_contact(
     lead_id: UUID,

@@ -1393,6 +1393,11 @@ export const leadsAgent = {
       method: 'POST',
     }),
 
+  setPrimaryContact: (leadId: string, contactId: string) =>
+    request<Contact>(`/leads-agent/leads/${leadId}/contacts/${contactId}/set-primary`, {
+      method: 'POST',
+    }),
+
   addContact: (leadId: string, data: ContactCreate) =>
     request<Contact>(`/leads-agent/leads/${leadId}/contacts`, {
       method: 'POST',

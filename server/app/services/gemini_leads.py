@@ -61,17 +61,16 @@ class GeminiLeadsService:
         """Clean JSON text by removing markdown and finding the JSON object."""
         text = text.strip()
         
-        # Remove markdown code blocks if present
-        if "```" in text:
-            # Try to find the content between first ``` and last ```
-            parts = text.split("```")
-            for part in parts:
-                if "{" in part and "}" in part:
-                    # found a candidate
-                    text = part
-                    if text.startswith("json"):
-                        text = text[4:]
-                    break
+        # Simple markdown strip (handles unclosed blocks better than split)
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+            
+        if text.endswith("```"):
+            text = text[:-3]
+            
+        text = text.strip()
         
         # Find the first '{' and last '}'
         start = text.find('{')
@@ -395,13 +394,12 @@ Identify the most likely person to be the hiring manager or key decision-maker f
 
 Respond with a JSON object:
 {{
-    "name": "<Name of the person>",
-    "title": "<Their Title>",
-    "reasoning": "<Why you picked them based on the search results>"
-}}
-
-        If you cannot find a specific person's name in the results, return null.
-
+        "name": "<Name of the person>",
+        "title": "<Their Title>",
+        "reasoning": "<Max 1 sentence explanation>"
+    }}
+    
+    If you cannot find a specific person's name in the results, return null.
         Respond ONLY with the JSON object."""
 
         try:

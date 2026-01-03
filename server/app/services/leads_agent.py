@@ -544,23 +544,26 @@ class LeadsAgentService:
         best_contact, reason = await self.gemini.rank_contacts(lead, contacts)
         
         if best_contact:
-            # Update the selected contact as primary
-            async with get_connection() as conn:
-                # Clear any existing primary
-                await conn.execute(
-                    "UPDATE lead_contacts SET is_primary = false WHERE lead_id = $1",
-                    lead_id
-                )
-                # Set new primary
-                await conn.execute(
-                    "UPDATE lead_contacts SET is_primary = true, gemini_ranking_reason = $1 WHERE id = $2",
-                    reason, best_contact.id
-                )
-            
-            best_contact.is_primary = True
-            best_contact.gemini_ranking_reason = reason
+            return await self.set_primary_contact(lead_id, best_contact.id, reason)
         
-        return best_contact
+        return None
+
+    async def set_primary_contact(self, lead_id: UUID, contact_id: UUID, reason: str = "Manually selected") -> Optional[Contact]:
+        """Set a specific contact as the primary one for a lead."""
+        async with get_connection() as conn:
+            # Clear any existing primary
+            await conn.execute(
+                "UPDATE lead_contacts SET is_primary = false WHERE lead_id = $1",
+                lead_id
+            )
+            # Set new primary
+            row = await conn.fetchrow(
+                "UPDATE lead_contacts SET is_primary = true, gemini_ranking_reason = $1 WHERE id = $2 RETURNING *",
+                reason, contact_id
+            )
+            if row:
+                return self._row_to_contact(row)
+            return None
     
     async def get_contacts_for_lead(self, lead_id: UUID) -> List[Contact]:
         """Get all contacts for a lead."""

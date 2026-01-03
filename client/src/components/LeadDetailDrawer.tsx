@@ -106,6 +106,16 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
         }
     };
 
+    const setPrimary = async (contactId: string) => {
+        if (!lead) return;
+        try {
+            await leadsAgent.setPrimaryContact(lead.id, contactId);
+            await fetchLeadDetail();
+        } catch (error) {
+            console.error('Set primary failed:', error);
+        }
+    };
+
     const draftEmail = async (contactId: string) => {
         if (!lead) return;
         setIsProcessing(true);
@@ -281,12 +291,20 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
                                                         <div className="space-y-1">
                                                             <div className="flex items-center gap-2">
                                                                 <span className="text-xs font-bold text-white">{contact.name}</span>
-                                                                {contact.is_primary && (
+                                                                {contact.is_primary ? (
                                                                     <span className="text-[8px] bg-emerald-500/10 text-emerald-500 px-1 py-0.5 rounded border border-emerald-500/20 font-bold uppercase">Primary</span>
+                                                                ) : (
+                                                                    <span className={`text-[8px] px-1 py-0.5 rounded border font-bold uppercase ${
+                                                                        contact.source === 'ai_research' 
+                                                                            ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' 
+                                                                            : 'bg-zinc-800 text-zinc-500 border-zinc-700'
+                                                                    }`}>
+                                                                        {contact.source || 'Manual'}
+                                                                    </span>
                                                                 )}
                                                             </div>
                                                             <div className="text-[10px] text-zinc-500">{contact.title || 'Executive'}</div>
-                                                            <div className="text-[10px] text-zinc-400 mt-1">{contact.email}</div>
+                                                            <div className="text-[10px] text-zinc-400 mt-1">{contact.email || '(No email found yet)'}</div>
                                                             {contact.email_confidence && (
                                                                 <div className="flex items-center gap-2 mt-2">
                                                                     <div className="flex-1 max-w-[60px] h-1 bg-zinc-800 rounded-full overflow-hidden">
@@ -297,12 +315,22 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
                                                             )}
                                                         </div>
                                                         <div className="flex flex-col gap-2">
-                                                            <button
-                                                                onClick={() => draftEmail(contact.id)}
-                                                                className="px-3 py-1 bg-white text-black text-[9px] font-bold uppercase rounded hover:bg-zinc-200 transition-colors"
-                                                            >
-                                                                Draft Email
-                                                            </button>
+                                                            {!contact.is_primary && (
+                                                                <button
+                                                                    onClick={() => setPrimary(contact.id)}
+                                                                    className="px-3 py-1 bg-zinc-800 text-zinc-300 text-[9px] font-bold uppercase rounded hover:bg-zinc-700 border border-zinc-700 transition-colors"
+                                                                >
+                                                                    Set Primary
+                                                                </button>
+                                                            )}
+                                                            {contact.email && (
+                                                                <button
+                                                                    onClick={() => draftEmail(contact.id)}
+                                                                    className="px-3 py-1 bg-white text-black text-[9px] font-bold uppercase rounded hover:bg-zinc-200 transition-colors"
+                                                                >
+                                                                    Draft Email
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </div>
                                                     {contact.is_primary && contact.gemini_ranking_reason && (
