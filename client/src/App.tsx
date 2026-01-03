@@ -123,7 +123,7 @@ function App() {
                 index
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
-                    <Companies />
+                    <OfferLetters />
                   </ProtectedRoute>
                 }
               />
