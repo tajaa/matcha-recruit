@@ -99,10 +99,10 @@ Analyze this position and respond with a JSON object containing:
 
 1. "relevance_score": Integer 1-10 where:
    - 1-3: Poor match (wrong level, wrong location, etc.)
-   - 4-6: Partial match (some criteria met)
+   - 4-6: Partial match (meets some criteria, e.g., role matches but salary/industry is ambiguous)
    - 7-10: Strong match (meets most/all criteria)
 
-2. "is_qualified": Boolean - true if score >= 6
+2. "is_qualified": Boolean - true if score >= 5. Note: If salary is not mentioned in the posting, do NOT penalize the score for it. Focus on Role and Location first.
 
 3. "reasoning": Brief explanation of your scoring (2-3 sentences)
 
@@ -141,9 +141,13 @@ Respond ONLY with the JSON object, no other text."""
             
             data = json.loads(text)
             
+            # Enforce qualification threshold in code (safeguard against model inconsistency)
+            score = data.get("relevance_score", 5)
+            is_qualified = score >= 5
+            
             return GeminiAnalysis(
-                relevance_score=data.get("relevance_score", 5),
-                is_qualified=data.get("is_qualified", False),
+                relevance_score=score,
+                is_qualified=is_qualified,
                 reasoning=data.get("reasoning", "Analysis completed"),
                 extracted_seniority=data.get("extracted_seniority"),
                 extracted_salary_min=data.get("extracted_salary_min"),

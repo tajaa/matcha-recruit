@@ -182,6 +182,15 @@ export default function LeadSearch({ onSearchComplete }: { onSearchComplete: () 
                     </div>
 
                     <div className="grid grid-cols-1 gap-4">
+                        {searchResult.jobs_found > 0 && searchResult.jobs_qualified === 0 && (
+                            <div className="p-8 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/20 text-center">
+                                <p className="text-xs text-zinc-500">
+                                    Jobs were found, but none met the minimum qualification threshold (5/10) to be saved as leads.
+                                    <br />
+                                    <span className="text-[10px] opacity-60 mt-1 block">Try broadening your role types or reducing the minimum salary.</span>
+                                </p>
+                            </div>
+                        )}
                         {searchResult.items.map((item, idx) => (
                             <div
                                 key={idx}

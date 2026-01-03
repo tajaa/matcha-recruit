@@ -13,7 +13,6 @@ export default function LeadsAgent() {
 
     const handleSearchComplete = () => {
         setRefreshKey(prev => prev + 1);
-        setActiveTab('pipeline');
     };
 
     const handleUpdate = () => {
