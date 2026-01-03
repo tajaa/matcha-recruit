@@ -3,8 +3,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
-import { policies } from '../api/client';
+import { policies, candidates } from '../api/client';
 import type { Policy, PolicySignature, SignatureRequest } from '../types';
+
+interface CandidateOption {
+  id: string;
+  name: string;
+  email: string;
+}
 
 export function PolicyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -14,8 +20,10 @@ export function PolicyDetail() {
   const [loading, setLoading] = useState(true);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [signers, setSigners] = useState<SignatureRequest[]>([
-    { name: '', email: '', type: 'external' }
+    { name: '', email: '', type: 'candidate' as const }
   ]);
+  const [candidates, setCandidates] = useState<CandidateOption[]>([]);
+  const [showCandidateSelector, setShowCandidateSelector] = useState(false);
 
   const loadPolicy = async () => {
     try {
@@ -30,11 +38,6 @@ export function PolicyDetail() {
     }
   };
 
-  useEffect(() => {
-    loadPolicy();
-    loadSignatures();
-  }, [id]);
-
   const loadSignatures = async () => {
     try {
       const data = await policies.listSignatures(id!);
@@ -43,6 +46,20 @@ export function PolicyDetail() {
       console.error('Failed to load signatures:', error);
     }
   };
+
+  const loadCandidates = async () => {
+    try {
+      const data = await candidates.listForCompany();
+      setCandidates(data);
+    } catch (error) {
+      console.error('Failed to load candidates:', error);
+    }
+  };
+
+  useEffect(() => {
+    loadPolicy();
+    loadSignatures();
+  }, [id]);
 
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this policy?')) return;
@@ -57,7 +74,7 @@ export function PolicyDetail() {
   };
 
   const handleAddSigner = () => {
-    setSigners([...signers, { name: '', email: '', type: 'external' }]);
+    setSigners([...signers, { name: '', email: '', type: 'candidate' as const }]);
   };
 
   const handleRemoveSigner = (index: number) => {
@@ -72,6 +89,19 @@ export function PolicyDetail() {
     setSigners(newSigners as SignatureRequest[]);
   };
 
+  const handleCandidateSelect = (candidate: CandidateOption) => {
+    const exists = signers.some(s => s.email === candidate.email);
+    if (!exists) {
+      setSigners([...signers, { 
+        name: candidate.name, 
+        email: candidate.email, 
+        type: 'candidate' as const,
+        id: candidate.id 
+      }]);
+    }
+    setShowCandidateSelector(false);
+  };
+
   const handleSendSignatures = async () => {
     const validSigners = signers.filter(s => s.name.trim() && s.email.trim());
 
@@ -83,7 +113,7 @@ export function PolicyDetail() {
     try {
       await policies.sendSignatures(id!, validSigners);
       setShowSignatureModal(false);
-      setSigners([{ name: '', email: '', type: 'external' }]);
+      setSigners([{ name: '', email: '', type: 'candidate' as const }]);
       loadSignatures();
       alert(`Sent ${validSigners.length} signature requests`);
     } catch (error) {
@@ -140,7 +170,7 @@ export function PolicyDetail() {
           <Button variant="secondary" onClick={() => navigate('/app/policies')}>
             Back
           </Button>
-          <Button onClick={() => setShowSignatureModal(true)}>
+          <Button onClick={() => { loadCandidates(); setShowSignatureModal(true); }}>
             Send Signatures
           </Button>
           <Button variant="secondary" onClick={handleDelete}>
@@ -206,7 +236,7 @@ export function PolicyDetail() {
           {signatures.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-sm text-zinc-500 mb-4">No signature requests sent yet</p>
-              <Button onClick={() => setShowSignatureModal(true)}>Send Signatures</Button>
+              <Button onClick={() => { loadCandidates(); setShowSignatureModal(true); }}>Send Signatures</Button>
             </div>
           ) : (
             <div className="space-y-3">
@@ -263,6 +293,49 @@ export function PolicyDetail() {
           title="Send Signature Requests"
         >
           <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowCandidateSelector(!showCandidateSelector)}
+              >
+                {showCandidateSelector ? 'Hide Candidates' : 'Select from Candidates'}
+              </Button>
+              <span className="text-xs text-zinc-500">
+                {signers.filter(s => s.name && s.email).length} selected
+              </span>
+            </div>
+
+            {showCandidateSelector && (
+              <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg max-h-48 overflow-y-auto">
+                {candidates.length === 0 ? (
+                  <p className="text-sm text-zinc-500 text-center py-4">No candidates found</p>
+                ) : (
+                  <div className="space-y-1">
+                    {candidates.map((candidate) => {
+                      const isSelected = signers.some(s => s.email === candidate.email);
+                      return (
+                        <button
+                          key={candidate.id}
+                          onClick={() => handleCandidateSelect(candidate)}
+                          disabled={isSelected}
+                          className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+                            isSelected 
+                              ? 'bg-green-900/20 text-green-400 cursor-default' 
+                              : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                          }`}
+                        >
+                          <span className="font-medium">{candidate.name}</span>
+                          <span className="text-zinc-500 ml-2">{candidate.email}</span>
+                          {isSelected && <span className="float-right">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {signers.map((signer, index) => (
               <div key={index} className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
                 <div className="flex items-center justify-between mb-4">

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 from pydantic import BaseModel
 
 from ..database import get_connection
-from ..dependencies import get_current_user, require_candidate
+from ..dependencies import get_current_user, require_candidate, require_admin_or_client, get_client_company_id
 from ..models.auth import CurrentUser
 from ..models.candidate import CandidateResponse, CandidateDetail
 from ..services.resume_parser import ResumeParser
@@ -18,6 +18,7 @@ from ..services.storage import get_storage
 def compute_file_hash(file_bytes: bytes) -> str:
     """Compute SHA-256 hash of file contents."""
     return hashlib.sha256(file_bytes).hexdigest()
+
 
 router = APIRouter()
 
@@ -39,6 +40,37 @@ class UpdateCandidateProfile(BaseModel):
     phone: Optional[str] = None
     skills: Optional[str] = None  # Comma-separated
     summary: Optional[str] = None
+
+
+class CandidateMinimal(BaseModel):
+    """Minimal candidate info for dropdowns."""
+    id: str
+    name: str
+    email: str
+
+
+@router.get("/company", response_model=list[CandidateMinimal])
+async def get_company_candidates(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get all candidates for the current user's company (for policy signatures, etc.)."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
+    
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (c.id) c.id, c.name, c.email
+            FROM candidates c
+            LEFT JOIN job_applications ja ON ja.candidate_id = c.id
+            LEFT JOIN positions p ON p.id = ja.position_id
+            WHERE p.company_id = $1 OR c.user_id IS NOT NULL
+            ORDER BY c.id, c.created_at DESC
+            """,
+            company_id,
+        )
+        return [CandidateMinimal(**dict(row)) for row in rows]
 
 
 @router.post("/upload", response_model=CandidateResponse)

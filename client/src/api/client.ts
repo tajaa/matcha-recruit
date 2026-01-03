@@ -1396,6 +1396,11 @@ export const policies = {
     }),
 };
 
+export const candidates = {
+  listForCompany: () =>
+    request<{id: string, name: string, email: string}[]>(`/candidates/company`),
+};
+
 // =============================================================================
 // LEADS AGENT API
 // =============================================================================

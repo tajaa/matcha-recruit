@@ -84,8 +84,9 @@ from .routes.public_signatures import router as public_signatures_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(companies_router, prefix="/api/companies", tags=["companies"])
-app.include_router(interviews_router, prefix="/api", tags=["interviews"])
 app.include_router(candidates_router, prefix="/api/candidates", tags=["candidates"])
+app.include_router(interviews_router, prefix="/api", tags=["interviews"])
+app.include_router(candidates_router, prefix="/api", tags=["candidates"])  # /api/company for company candidates
 app.include_router(matching_router, prefix="/api", tags=["matching"])
 app.include_router(positions_router, prefix="/api/positions", tags=["positions"])
 app.include_router(bulk_import_router, prefix="/api/bulk", tags=["bulk-import"])
