@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { policies } from '../api/client';
-import type { PolicyCreate as PolicyCreateType, PolicyUpdate, PolicyStatus } from '../types';
+import type { PolicyUpdate, PolicyStatus } from '../types';
 
 export function PolicyForm() {
   const { id } = useParams<{ id?: string }>();
