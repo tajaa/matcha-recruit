@@ -12,6 +12,7 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
     const [lead, setLead] = useState<LeadWithContacts | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [activeSubTab, setActiveSubTab] = useState<'info' | 'contacts' | 'emails'>('info');
 
     const fetchLeadDetail = async () => {
@@ -87,12 +88,19 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
     const researchContact = async () => {
         if (!lead) return;
         setIsProcessing(true);
+        setMessage(null);
         try {
             await leadsAgent.researchContact(lead.id);
             await fetchLeadDetail();
-        } catch (error) {
+            setMessage({ type: 'success', text: 'Contact found via web research!' });
+            // Clear success message after 3 seconds
+            setTimeout(() => setMessage(null), 3000);
+        } catch (error: any) {
             console.error('Research contact failed:', error);
-            alert('Could not find specific contact via web search.');
+            setMessage({ 
+                type: 'error', 
+                text: `Error: ${error.response?.data?.detail || error.message || 'Unknown error'}` 
+            });
         } finally {
             setIsProcessing(false);
         }
@@ -237,7 +245,14 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
                                 {activeSubTab === 'contacts' && (
                                     <div className="space-y-6 animate-in fade-in duration-300">
                                         <div className="flex items-center justify-between">
-                                            <h3 className="text-[10px] uppercase tracking-[0.2em] text-white">Found Contacts</h3>
+                                            <div className="flex flex-col">
+                                                <h3 className="text-[10px] uppercase tracking-[0.2em] text-white">Found Contacts</h3>
+                                                {message && (
+                                                    <span className={`text-[10px] ${message.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                        {message.text}
+                                                    </span>
+                                                )}
+                                            </div>
                                             <div className="flex gap-4">
                                                 <button
                                                     onClick={researchContact}

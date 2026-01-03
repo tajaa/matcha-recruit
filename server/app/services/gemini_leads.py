@@ -400,9 +400,9 @@ Respond with a JSON object:
     "reasoning": "<Why you picked them based on the search results>"
 }}
 
-If you cannot find a specific person's name in the results, return null.
+        If you cannot find a specific person's name in the results, return null.
 
-Respond ONLY with the JSON object."""
+        Respond ONLY with the JSON object."""
 
         try:
             response = await self.client.aio.models.generate_content(
@@ -410,10 +410,9 @@ Respond ONLY with the JSON object."""
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.2,
-                    max_output_tokens=200,
+                    max_output_tokens=2000,
                 ),
-            )
-            
+            )            
             text = self._clean_json_text(response.text)
             if not text or text == "null":
                 return None
@@ -421,7 +420,8 @@ Respond ONLY with the JSON object."""
             return json.loads(text)
             
         except Exception as e:
-            print(f"[Gemini] Error finding decision maker: {e}")
+            raw = response.text if 'response' in locals() and hasattr(response, 'text') else 'N/A'
+            print(f"[Gemini] Error finding decision maker: {e}. Raw: {raw}")
             return None
 
 

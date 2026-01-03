@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
     await init_pool(settings.database_url)
     await init_db()
 
+
     # Initialize Redis notification manager (for worker task notifications)
     await init_notification_manager(settings.redis_url)
     print(f"[Matcha] Redis notification manager connected to {settings.redis_url}")
@@ -94,7 +95,7 @@ app.include_router(public_jobs_router, prefix="/api/job-board", tags=["public-jo
 app.include_router(contact_router, prefix="/api/contact", tags=["contact"])
 app.include_router(er_copilot_router, prefix="/api/er/cases", tags=["er-copilot"])
 app.include_router(ir_incidents_router, prefix="/api/ir/incidents", tags=["ir-incidents"])
-app.include_router(leads_agent_router, prefix="/api", tags=["leads-agent"])
+app.include_router(leads_agent_router, prefix="/api/leads-agent", tags=["leads-agent"])
 
 
 @app.get("/health")

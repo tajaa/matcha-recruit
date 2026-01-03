@@ -27,7 +27,7 @@ from ..models.leads_agent import (
 from ..services.leads_agent import get_leads_agent, LeadsAgentService
 
 
-router = APIRouter(prefix="/leads-agent", tags=["leads-agent"])
+router = APIRouter()
 
 
 # ===========================================
