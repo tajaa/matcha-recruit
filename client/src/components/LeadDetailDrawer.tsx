@@ -178,6 +178,22 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
                             <div className="min-h-[300px]">
                                 {activeSubTab === 'info' && (
                                     <div className="space-y-6 animate-in fade-in duration-300">
+                                        <div className="flex justify-end">
+                                            {lead.source_url && (
+                                                <a
+                                                    href={lead.source_url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-emerald-500 hover:text-emerald-400 transition-colors"
+                                                >
+                                                    View Original Post
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                    </svg>
+                                                </a>
+                                            )}
+                                        </div>
+
                                         <section>
                                             <h3 className="text-[10px] uppercase tracking-[0.2em] text-white mb-2">Job Description</h3>
                                             <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap line-clamp-[15] italic">
