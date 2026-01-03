@@ -32,3 +32,4 @@ export { TutorMetrics } from './TutorMetrics';
 export { TutorSessionDetail } from './TutorSessionDetail';
 export { ERCopilot } from './ERCopilot';
 export { ERCaseDetail } from './ERCaseDetail';
+export { OfferLetters } from './OfferLetters';

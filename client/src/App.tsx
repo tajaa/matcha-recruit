@@ -40,6 +40,7 @@ const TutorMetrics = lazy(() => import('./pages/TutorMetrics'));
 const TutorSessionDetail = lazy(() => import('./pages/TutorSessionDetail'));
 const ERCopilot = lazy(() => import('./pages/ERCopilot'));
 const ERCaseDetail = lazy(() => import('./pages/ERCaseDetail'));
+const OfferLetters = lazy(() => import('./pages/OfferLetters'));
 const IRDashboard = lazy(() => import('./pages/IRDashboard'));
 const IRList = lazy(() => import('./pages/IRList'));
 const IRCreate = lazy(() => import('./pages/IRCreate'));
@@ -136,6 +137,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <Candidates />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="offer-letters"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <OfferLetters />
                   </ProtectedRoute>
                 }
               />
