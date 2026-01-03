@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 
-from ..dependencies import get_current_user, get_client_user
+from ..dependencies import require_client
+from ..dependencies import get_client_company_id
 from ..models.policy import (
     Policy,
     PolicyCreate,
@@ -16,6 +17,8 @@ from ..models.policy import (
 )
 from ..services.policy_service import PolicyService, SignatureService
 from ..services.email import send_policy_signature_email
+from ..models.auth import CurrentUser
+from uuid import UUID
 
 router = APIRouter(prefix="/api/policies", tags=["policies"])
 
@@ -23,26 +26,38 @@ router = APIRouter(prefix="/api/policies", tags=["policies"])
 @router.get("", response_model=List[PolicyResponse])
 async def list_policies(
     status: Optional[PolicyStatus] = None,
-    current_user = Depends(get_client_user),
+    current_user: CurrentUser = Depends(require_client),
 ):
-    policies = await PolicyService.get_policies(current_user.company_id, status)
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
+    
+    policies = await PolicyService.get_policies(str(company_id), status)
     return policies
 
 
 @router.post("", response_model=PolicyResponse)
 async def create_policy(
     data: PolicyCreate,
-    current_user = Depends(get_client_user),
+    current_user: CurrentUser = Depends(require_client),
 ):
-    policy = await PolicyService.create_policy(current_user.company_id, data, str(current_user.id))
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+    
+    policy = await PolicyService.create_policy(str(company_id), data, str(current_user.id))
     return policy
 
 
 @router.get("/{policy_id}", response_model=PolicyResponse)
 async def get_policy(
     policy_id: str,
-    current_user = Depends(get_client_user),
+    current_user: CurrentUser = Depends(require_client),
 ):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     policy = await PolicyService.get_policy_by_id(policy_id)
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
@@ -58,7 +73,7 @@ async def get_policy(
 async def update_policy(
     policy_id: str,
     data: PolicyUpdate,
-    current_user = Depends(get_client_user),
+    current_user: CurrentUser = Depends(require_client),
 ):
     can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
     if not can_access:
@@ -74,7 +89,7 @@ async def update_policy(
 @router.delete("/{policy_id}")
 async def delete_policy(
     policy_id: str,
-    current_user = Depends(get_client_user),
+    current_user: CurrentUser = Depends(require_client),
 ):
     can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
     if not can_access:
@@ -91,8 +106,12 @@ async def delete_policy(
 async def send_signature_requests(
     policy_id: str,
     requests: List[SignatureRequest],
-    current_user = Depends(get_client_user),
+    current_user: CurrentUser = Depends(require_client),
 ):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
     if not can_access:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -123,8 +142,12 @@ async def send_signature_requests(
 @router.get("/{policy_id}/signatures", response_model=List[PolicySignatureResponse])
 async def list_policy_signatures(
     policy_id: str,
-    current_user = Depends(get_client_user),
+    current_user: CurrentUser = Depends(require_client),
 ):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
     if not can_access:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -136,8 +159,12 @@ async def list_policy_signatures(
 @router.delete("/signatures/{signature_id}")
 async def cancel_signature_request(
     signature_id: str,
-    current_user = Depends(get_client_user),
+    current_user: CurrentUser = Depends(require_client),
 ):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     signature = await SignatureService.get_signature_by_id(signature_id)
     if not signature:
         raise HTTPException(status_code=404, detail="Signature request not found")
@@ -156,8 +183,12 @@ async def cancel_signature_request(
 @router.post("/signatures/{signature_id}/resend")
 async def resend_signature_request(
     signature_id: str,
-    current_user = Depends(get_client_user),
+    current_user: CurrentUser = Depends(require_client),
 ):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     signature = await SignatureService.get_signature_by_id(signature_id)
     if not signature:
         raise HTTPException(status_code=404, detail="Signature request not found")

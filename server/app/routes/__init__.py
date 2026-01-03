@@ -12,6 +12,8 @@ from .outreach import router as outreach_router
 from .public_jobs import router as public_jobs_router
 from .contact import router as contact_router
 from .ir_incidents import router as ir_incidents_router
+from .policies import router as policies_router
+from .public_signatures import router as public_signatures_router
 
 __all__ = [
     "companies_router",
@@ -28,4 +30,6 @@ __all__ = [
     "public_jobs_router",
     "contact_router",
     "ir_incidents_router",
+    "policies_router",
+    "public_signatures_router",
 ]
