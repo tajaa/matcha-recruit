@@ -16,6 +16,7 @@ export function PolicyForm() {
   const [version, setVersion] = useState('1.0');
   const [status, setStatus] = useState<PolicyStatus>('draft');
   const [loading, setLoading] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
 
   useEffect(() => {
     if (isEditing) {
@@ -60,14 +61,25 @@ export function PolicyForm() {
         };
         await policies.update(id!, updateData);
       } else {
-        const createData: PolicyCreateType = {
-          title,
-          description: description || null,
-          content,
-          version,
-          status,
-        };
-        await policies.create(createData);
+        const formData = new FormData();
+        formData.append('title', title);
+        formData.append('description', description);
+        formData.append('content', content);
+        formData.append('version', version);
+        formData.append('status', status);
+        if (file) {
+          formData.append('file', file);
+        }
+        
+        const response = await fetch('/api/policies', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+          body: formData,
+        });
+        const result = await response.json();
+        console.log('Created policy:', result);
       }
 
       navigate('/app/policies');
@@ -80,7 +92,6 @@ export function PolicyForm() {
   };
 
   if (isEditing && !title) {
-    loadPolicy(id!);
     return null;
   }
 
@@ -142,6 +153,26 @@ export function PolicyForm() {
               </p>
             </div>
 
+            <div>
+              <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
+                Policy Document (Optional)
+              </label>
+              <input
+                type="file"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                accept=".pdf,.doc,.docx,.txt"
+                className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">
+                Upload PDF, DOC, DOCX, or TXT file. This will be stored and accessible to signers.
+              </p>
+              {file && (
+                <p className="text-xs text-zinc-400 mt-2">
+                  Selected: {file.name} ({(file.size / 1024).toFixed(1)} KB)
+                </p>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
@@ -162,7 +193,7 @@ export function PolicyForm() {
                 </label>
                 <select
                   value={status}
-                  onChange={(e) => setStatus(e.target.value as 'draft' | 'active')}
+                  onChange={(e) => setStatus(e.target.value as PolicyStatus)}
                   className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
                 >
                   <option value="draft">Draft</option>

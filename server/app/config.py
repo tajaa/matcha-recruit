@@ -37,6 +37,7 @@ class Settings:
     s3_region: str = "us-east-1"
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
+    cloudfront_domain: Optional[str] = None
 
     # Email (MailerSend)
     mailersend_api_key: Optional[str] = None

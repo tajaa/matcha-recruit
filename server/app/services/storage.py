@@ -15,6 +15,7 @@ class StorageService:
         settings = get_settings()
         self.bucket = settings.s3_bucket
         self.region = settings.s3_region
+        self.cloudfront_domain = settings.cloudfront_domain
 
         if self.bucket:
             self.s3_client = boto3.client(
@@ -39,6 +40,12 @@ class StorageService:
         unique_id = uuid4().hex
         return f"{prefix}/{unique_id}{ext}"
 
+    def _get_cloudfront_url(self, key: str) -> str:
+        """Generate CloudFront URL from S3 key."""
+        if self.cloudfront_domain:
+            return f"https://{self.cloudfront_domain}/{key}"
+        return f"s3://{self.bucket}/{key}"
+
     async def upload_file(
         self,
         file_bytes: bytes,
@@ -46,10 +53,10 @@ class StorageService:
         prefix: str = "resumes",
         content_type: Optional[str] = None,
     ) -> str:
-        """Upload a file and return the storage path/URL.
+        """Upload a file and return storage path/URL.
 
         Returns:
-            S3 URI (s3://bucket/key) or local file path
+            CloudFront URL (if configured) or S3 URI (s3://bucket/key) or local file path
         """
         if self.s3_client and self.bucket:
             key = self._generate_key(filename, prefix)
@@ -65,7 +72,7 @@ class StorageService:
                     Body=file_bytes,
                     **extra_args,
                 )
-                return f"s3://{self.bucket}/{key}"
+                return self._get_cloudfront_url(key)
             except ClientError as e:
                 raise RuntimeError(f"Failed to upload to S3: {e}")
         else:
