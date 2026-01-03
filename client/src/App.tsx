@@ -8,6 +8,12 @@ import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Unauthorized } from './pages/Unauthorized';
+import { ForCandidates } from './pages/ForCandidates';
+import { WorkWithUs } from './pages/WorkWithUs';
+import { ResumeOnboarding } from './pages/ResumeOnboarding';
+import { OutreachLanding } from './pages/OutreachLanding';
+import { OutreachScreening } from './pages/OutreachScreening';
+import { ScreeningLanding } from './pages/ScreeningLanding';
 
 // Lazy load all other pages
 const Interview = lazy(() => import('./pages/Interview'));
@@ -143,22 +149,7 @@ function App() {
 
 
 
-              <Route
-                path="openings"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <Openings />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="job-boards"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <JobBoards />
-                  </ProtectedRoute>
-                }
-              />
+
 
 
               <Route
