@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { FileText, ListChecks, BarChart3, Target, Send } from 'lucide-react';
 
 interface OfferLetter {
   id: string;
@@ -51,7 +52,10 @@ export function OfferLetters() {
 
             <div className="space-y-4">
               <div>
-                <h3 className="text-base font-medium text-white mb-2">📝 Creating Offer Letters</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-400" />
+                  Creating Offer Letters
+                </h3>
                 <p className="text-sm text-zinc-300">
                   Click "Create Offer Letter" to generate a new offer letter for a candidate.
                   Fill in candidate details, select a position, and specify compensation and
@@ -60,7 +64,10 @@ export function OfferLetters() {
               </div>
 
               <div>
-                <h3 className="text-base font-medium text-white mb-2">📋 Required Information</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <ListChecks className="w-4 h-4 text-yellow-400" />
+                  Required Information
+                </h3>
                 <p className="text-sm text-zinc-300">
                   You'll need to provide:
                 </p>
@@ -74,7 +81,10 @@ export function OfferLetters() {
               </div>
 
               <div>
-                <h3 className="text-base font-medium text-white mb-2">📊 Managing Offers</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-purple-400" />
+                  Managing Offers
+                </h3>
                 <p className="text-sm text-zinc-300">
                   Track the status of your offer letters in the dashboard. Status indicators show
                   whether offers are drafts, sent, accepted, rejected, or expired. Use this to
@@ -83,7 +93,10 @@ export function OfferLetters() {
               </div>
 
               <div>
-                <h3 className="text-base font-medium text-white mb-2">🎯 Best Practices</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <Target className="w-4 h-4 text-red-400" />
+                  Best Practices
+                </h3>
                 <div className="bg-zinc-900 p-4 rounded-lg text-sm">
                   <ul className="text-zinc-300 space-y-2">
                     <li><strong>Accuracy:</strong> Double-check all compensation and benefit details</li>
@@ -95,7 +108,10 @@ export function OfferLetters() {
               </div>
 
               <div>
-                <h3 className="text-base font-medium text-white mb-2">📤 Offer Letter Workflow</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <Send className="w-4 h-4 text-emerald-400" />
+                  Offer Letter Workflow
+                </h3>
                 <div className="bg-zinc-900 p-4 rounded-lg text-sm">
                   <ol className="text-zinc-300 space-y-2">
                     <li><strong>1. Gather Information:</strong> Collect candidate and position details</li>

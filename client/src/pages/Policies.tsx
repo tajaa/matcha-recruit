@@ -4,6 +4,7 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { policies } from '../api/client';
 import type { Policy, PolicyStatus } from '../types';
+import { FileText, Send, BarChart3, RotateCcw, ListChecks } from 'lucide-react';
 
 export function Policies() {
   const [policiesList, setPolicies] = useState<Policy[]>([]);
@@ -92,7 +93,10 @@ export function Policies() {
 
             <div className="space-y-4">
               <div>
-                <h3 className="text-base font-medium text-white mb-2">📝 Creating Policies</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-400" />
+                  Creating Policies
+                </h3>
                 <p className="text-sm text-zinc-300">
                   Click "Create Policy" to add a new company policy. Include the title, description,
                   and full policy content. You can also upload a document file (PDF, DOC, etc.) that
@@ -101,7 +105,10 @@ export function Policies() {
               </div>
 
               <div>
-                <h3 className="text-base font-medium text-white mb-2">📤 Sending Signature Requests</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <Send className="w-4 h-4 text-green-400" />
+                  Sending Signature Requests
+                </h3>
                 <p className="text-sm text-zinc-300">
                   Click on any policy to view details, then click "Send Signatures". You can:
                 </p>
@@ -113,7 +120,10 @@ export function Policies() {
               </div>
 
               <div>
-                <h3 className="text-base font-medium text-white mb-2">📊 Tracking Signatures</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-purple-400" />
+                  Tracking Signatures
+                </h3>
                 <p className="text-sm text-zinc-300">
                   Monitor signature status in the policy details view. Each signer receives an
                   email with a secure link to review and sign the policy. Signatures are
@@ -122,7 +132,10 @@ export function Policies() {
               </div>
 
               <div>
-                <h3 className="text-base font-medium text-white mb-2">🔄 Managing Policies</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-orange-400" />
+                  Managing Policies
+                </h3>
                 <p className="text-sm text-zinc-300">
                   Use the status filter to view draft, active, or archived policies. Click on
                   any policy to edit, send signatures, or delete it. Version numbers help track
@@ -131,7 +144,10 @@ export function Policies() {
               </div>
 
               <div>
-                <h3 className="text-base font-medium text-white mb-2">📋 Signature Workflow</h3>
+                <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
+                  <ListChecks className="w-4 h-4 text-emerald-400" />
+                  Signature Workflow
+                </h3>
                 <div className="bg-zinc-900 p-4 rounded-lg text-sm">
                   <ol className="text-zinc-300 space-y-2">
                     <li><strong>1. Create Policy:</strong> Write or upload your policy document</li>
