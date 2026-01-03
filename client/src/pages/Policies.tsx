@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -21,6 +21,10 @@ export function Policies() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadPolicies(filterStatus);
+  }, []);
 
   const handleFilterChange = (status: string) => {
     const newStatus = status as PolicyStatus | '';
