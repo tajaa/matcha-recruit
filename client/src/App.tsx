@@ -27,6 +27,9 @@ const IRList = lazy(() => import('./pages/IRList'));
 const IRCreate = lazy(() => import('./pages/IRCreate'));
 const IRDetail = lazy(() => import('./pages/IRDetail'));
 const InterviewPrepAdmin = lazy(() => import('./pages/InterviewPrepAdmin'));
+const PublicJobs = lazy(() => import('./pages/PublicJobs'));
+const PublicJobDetail = lazy(() => import('./pages/PublicJobDetail'));
+const PublicJobApply = lazy(() => import('./pages/PublicJobApply'));
 
 // Loading fallback
 function PageLoader() {
@@ -138,22 +141,7 @@ function App() {
                 }
               />
 
-              <Route
-                path="positions/:id"
-                element={
-                  <ProtectedRoute roles={['admin', 'client', 'candidate']}>
-                    <PositionDetail />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="import"
-                element={
-                  <ProtectedRoute roles={['admin']}>
-                    <BulkImport />
-                  </ProtectedRoute>
-                }
-              />
+
 
               <Route
                 path="openings"
