@@ -429,6 +429,9 @@ export const candidates = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+
+  listForCompany: () =>
+    request<{id: string, name: string, email: string}[]>(`/candidates/company`),
 };
 
 // Matching
@@ -1390,15 +1393,10 @@ export const policies = {
       method: 'DELETE',
     }),
 
-  resendSignature: (signatureId: string) =>
-    request<{message: string}>(`/policies/signatures/${signatureId}/resend`, {
-      method: 'POST',
-    }),
-};
-
-export const candidates = {
-  listForCompany: () =>
-    request<{id: string, name: string, email: string}[]>(`/candidates/company`),
+    resendSignature: (signatureId: string) =>
+      request<{message: string}>(`/policies/signatures/${signatureId}/resend`, {
+        method: 'POST',
+      }),
 };
 
 // =============================================================================

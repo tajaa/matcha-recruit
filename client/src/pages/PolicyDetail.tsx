@@ -18,12 +18,12 @@ export function PolicyDetail() {
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [signatures, setSignatures] = useState<PolicySignature[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [signers, setSigners] = useState<SignatureRequest[]>([
     { name: '', email: '', type: 'candidate' as const }
   ]);
-  const [candidates, setCandidates] = useState<CandidateOption[]>([]);
+  const [candidateList, setCandidateList] = useState<CandidateOption[]>([]);
   const [showCandidateSelector, setShowCandidateSelector] = useState(false);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
 
   const loadPolicy = async () => {
     try {
@@ -50,7 +50,7 @@ export function PolicyDetail() {
   const loadCandidates = async () => {
     try {
       const data = await candidates.listForCompany();
-      setCandidates(data);
+      setCandidateList(data);
     } catch (error) {
       console.error('Failed to load candidates:', error);
     }
@@ -308,11 +308,11 @@ export function PolicyDetail() {
 
             {showCandidateSelector && (
               <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg max-h-48 overflow-y-auto">
-                {candidates.length === 0 ? (
+                {candidateList.length === 0 ? (
                   <p className="text-sm text-zinc-500 text-center py-4">No candidates found</p>
                 ) : (
                   <div className="space-y-1">
-                    {candidates.map((candidate) => {
+                    {candidateList.map((candidate) => {
                       const isSelected = signers.some(s => s.email === candidate.email);
                       return (
                         <button
