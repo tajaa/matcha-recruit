@@ -151,6 +151,38 @@ interface CandidateOption {
   email: string;
 }
 
+// Helper to parse recipients from various formats
+const parseRecipient = (text: string): { name: string; email: string } | null => {
+  const line = text.trim();
+  if (!line) return null;
+
+  // 1. Format: Name <email>
+  const bracketMatch = line.match(/^(.*?)\s*<(.+@.+)>$/);
+  if (bracketMatch) {
+    return { name: bracketMatch[1].trim() || bracketMatch[2].split('@')[0], email: bracketMatch[2].trim() };
+  }
+
+  // 2. Format: CSV (Name, Email or Email, Name)
+  if (line.includes(',')) {
+    const parts = line.split(',').map(s => s.trim());
+    const emailIndex = parts.findIndex(p => p.includes('@'));
+    
+    if (emailIndex !== -1) {
+      const email = parts[emailIndex];
+      // Join all other parts as the name
+      const name = parts.filter((_, i) => i !== emailIndex).join(' ').trim();
+      return { name: name || email.split('@')[0], email };
+    }
+  }
+
+  // 3. Format: Just Email
+  if (line.includes('@') && !line.includes(' ')) {
+    return { name: line.split('@')[0], email: line };
+  }
+
+  return null;
+};
+
 export function PolicyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -481,19 +513,21 @@ export function PolicyDetail() {
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onload = (event) => {
-                            const text = event.target?.result as string;
-                            const lines = text.split('\n');
-                            const newSigners: SignatureRequest[] = [];
-                            lines.forEach(line => {
-                              const [email, name] = line.split(',').map(s => s.trim());
-                              if (email && email.includes('@')) {
-                                newSigners.push({ name: name || email.split('@')[0], email: email, type: 'external' });
-                              }
-                            });
-                            if (newSigners.length > 0) {
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              const text = event.target?.result as string;
+                              const lines = text.split(/[\r\n]+/);
+                              const newSigners: SignatureRequest[] = [];
+                              
+                              lines.forEach(line => {
+                                const parsed = parseRecipient(line);
+                                if (parsed) {
+                                  newSigners.push({ ...parsed, type: 'external' });
+                                }
+                              });
+
+                              if (newSigners.length > 0) {
                               const uniqueNewSigners = newSigners.filter(ns => !signers.some(existing => existing.email === ns.email));
                               if (uniqueNewSigners.length > 0) {
                                 if (signers.length === 1 && !signers[0].email) { setSigners(uniqueNewSigners); }
@@ -542,13 +576,18 @@ export function PolicyDetail() {
                 onBlur={(e) => {
                   const text = e.target.value;
                   if (!text.trim()) return;
-                  const emails = text.split(/[\n,]+/).map(s => s.trim()).filter(s => s.includes('@'));
+                  
+                  // Split by newlines first
+                  const lines = text.split(/[\r\n]+/);
                   const newSigners: SignatureRequest[] = [];
-                  emails.forEach(email => {
-                    if (!signers.some(s => s.email === email)) {
-                      newSigners.push({ name: email.split('@')[0], email: email, type: 'external' });
+                  
+                  lines.forEach(line => {
+                    const parsed = parseRecipient(line);
+                    if (parsed && !signers.some(s => s.email === parsed.email)) {
+                      newSigners.push({ ...parsed, type: 'external' });
                     }
                   });
+
                   if (newSigners.length > 0) {
                     if (signers.length === 1 && !signers[0].email) { setSigners(newSigners); }
                     else { setSigners([...signers, ...newSigners]); }
@@ -556,6 +595,9 @@ export function PolicyDetail() {
                   e.target.value = '';
                 }}
               />
+              <p className="text-[10px] text-zinc-500 mt-2 font-mono">
+                Supports: "email@co.com", "Name, email@co.com", or "Name &lt;email@co.com&gt;"
+              </p>
             </div>
 
             {/* Individual Signer Entries */}
