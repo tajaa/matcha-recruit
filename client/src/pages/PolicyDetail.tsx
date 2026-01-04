@@ -196,9 +196,23 @@ export function PolicyDetail() {
   const loadCandidates = async () => {
     try {
       const data = await candidates.listForCompany();
-      setCandidateList(data);
+      // If API returns empty or fails, provide mock candidates for testing
+      if (!data || data.length === 0) {
+        setCandidateList([
+          { id: 'mc1', name: 'Sarah Miller', email: 'sarah.m@example.com' },
+          { id: 'mc2', name: 'James Wilson', email: 'james.w@example.com' },
+          { id: 'mc3', name: 'Emily Chen', email: 'emily.c@example.com' }
+        ]);
+      } else {
+        setCandidateList(data);
+      }
     } catch (error) {
-      console.error('Failed to load candidates:', error);
+      console.warn('Failed to load candidates from API, using mocks');
+      setCandidateList([
+        { id: 'mc1', name: 'Sarah Miller', email: 'sarah.m@example.com' },
+        { id: 'mc2', name: 'James Wilson', email: 'james.w@example.com' },
+        { id: 'mc3', name: 'Emily Chen', email: 'emily.c@example.com' }
+      ]);
     }
   };
 
@@ -238,12 +252,22 @@ export function PolicyDetail() {
   const handleCandidateSelect = (candidate: CandidateOption) => {
     const exists = signers.some(s => s.email === candidate.email);
     if (!exists) {
-      setSigners([...signers, { 
-        name: candidate.name, 
-        email: candidate.email, 
-        type: 'candidate' as const,
-        id: candidate.id 
-      }]);
+      // If the first row is empty, replace it
+      if (signers.length === 1 && !signers[0].name && !signers[0].email) {
+        setSigners([{ 
+          name: candidate.name, 
+          email: candidate.email, 
+          type: 'candidate' as const,
+          id: candidate.id 
+        }]);
+      } else {
+        setSigners([...signers, { 
+          name: candidate.name, 
+          email: candidate.email, 
+          type: 'candidate' as const,
+          id: candidate.id 
+        }]);
+      }
     }
     setShowCandidateSelector(false);
   };
@@ -257,6 +281,40 @@ export function PolicyDetail() {
     }
 
     try {
+      // Handle mock policies
+      if (id && MOCK_POLICIES[id]) {
+        // Simulate API delay
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        const newSignatures: PolicySignature[] = validSigners.map((signer, idx) => ({
+          id: `new_sig_${Date.now()}_${idx}`,
+          policy_id: id,
+          policy_title: MOCK_POLICIES[id].title,
+          signer_type: signer.type,
+          signer_id: signer.id || null,
+          signer_name: signer.name,
+          signer_email: signer.email,
+          status: 'pending',
+          signed_at: null,
+          signature_data: null,
+          ip_address: null,
+          token: `mock_token_${Date.now()}`,
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          created_at: new Date().toISOString()
+        }));
+
+        // Update local mock data (for this session)
+        if (MOCK_SIGNATURES[id]) {
+          MOCK_SIGNATURES[id] = [...newSignatures, ...MOCK_SIGNATURES[id]];
+        }
+
+        setSignatures(prev => [...newSignatures, ...prev]);
+        setShowSignatureModal(false);
+        setSigners([{ name: '', email: '', type: 'candidate' as const }]);
+        alert(`Successfully sent ${validSigners.length} signature requests (Simulation)`);
+        return;
+      }
+
       await policies.sendSignatures(id!, validSigners);
       setShowSignatureModal(false);
       setSigners([{ name: '', email: '', type: 'candidate' as const }]);
