@@ -282,7 +282,7 @@ export function Policies() {
                       View
                     </Link>
                     <Link
-                      to={`/app/policies/${policy.id}/signatures`}
+                      to={`/app/policies/${policy.id}`}
                       className="text-xs text-zinc-400 hover:text-white transition-colors px-2 py-1"
                     >
                       Signatures
