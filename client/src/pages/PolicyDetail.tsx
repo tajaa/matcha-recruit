@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Card } from '../components/Card';
+import { GlassCard } from '../components/GlassCard';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { policies, candidates } from '../api/client';
 import type { Policy, PolicySignature, SignatureRequest } from '../types';
+import { ArrowLeft, Upload, Trash2, Mail } from 'lucide-react';
 
-// Mock data for test policies
+// Mock data for test policies (Preserved from previous implementation)
 const MOCK_POLICIES: Record<string, Policy> = {
   'p1': {
     id: 'p1',
@@ -174,7 +175,6 @@ export function PolicyDetail() {
       setPolicy(data);
     } catch (error) {
       console.error('Failed to load policy:', error);
-      alert('Failed to load policy');
     } finally {
       setLoading(false);
     }
@@ -196,7 +196,6 @@ export function PolicyDetail() {
   const loadCandidates = async () => {
     try {
       const data = await candidates.listForCompany();
-      // If API returns empty or fails, provide mock candidates for testing
       if (!data || data.length === 0) {
         setCandidateList([
           { id: 'mc1', name: 'Sarah Miller', email: 'sarah.m@example.com' },
@@ -207,7 +206,6 @@ export function PolicyDetail() {
         setCandidateList(data);
       }
     } catch (error) {
-      console.warn('Failed to load candidates from API, using mocks');
       setCandidateList([
         { id: 'mc1', name: 'Sarah Miller', email: 'sarah.m@example.com' },
         { id: 'mc2', name: 'James Wilson', email: 'james.w@example.com' },
@@ -223,13 +221,13 @@ export function PolicyDetail() {
 
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this policy?')) return;
-
     try {
-      await policies.delete(id!);
+      if (id && !MOCK_POLICIES[id]) {
+        await policies.delete(id!);
+      }
       navigate('/app/policies');
     } catch (error) {
       console.error('Failed to delete policy:', error);
-      alert('Failed to delete policy');
     }
   };
 
@@ -244,29 +242,18 @@ export function PolicyDetail() {
   };
 
   const handleSignerChange = (index: number, field: 'name' | 'email' | 'type', value: string) => {
-    const newSigners = [...signers] as { name: string; email: string; type: string }[];
+    const newSigners = [...signers];
     (newSigners[index] as any)[field] = value;
-    setSigners(newSigners as SignatureRequest[]);
+    setSigners(newSigners);
   };
 
   const handleCandidateSelect = (candidate: CandidateOption) => {
     const exists = signers.some(s => s.email === candidate.email);
     if (!exists) {
-      // If the first row is empty, replace it
       if (signers.length === 1 && !signers[0].name && !signers[0].email) {
-        setSigners([{ 
-          name: candidate.name, 
-          email: candidate.email, 
-          type: 'candidate' as const,
-          id: candidate.id 
-        }]);
+        setSigners([{ name: candidate.name, email: candidate.email, type: 'candidate' as const, id: candidate.id }]);
       } else {
-        setSigners([...signers, { 
-          name: candidate.name, 
-          email: candidate.email, 
-          type: 'candidate' as const,
-          id: candidate.id 
-        }]);
+        setSigners([...signers, { name: candidate.name, email: candidate.email, type: 'candidate' as const, id: candidate.id }]);
       }
     }
     setShowCandidateSelector(false);
@@ -274,18 +261,11 @@ export function PolicyDetail() {
 
   const handleSendSignatures = async () => {
     const validSigners = signers.filter(s => s.name.trim() && s.email.trim());
-
-    if (validSigners.length === 0) {
-      alert('Please add at least one signer with a valid name and email');
-      return;
-    }
+    if (validSigners.length === 0) return;
 
     try {
-      // Handle mock policies
       if (id && MOCK_POLICIES[id]) {
-        // Simulate API delay
         await new Promise(resolve => setTimeout(resolve, 800));
-        
         const newSignatures: PolicySignature[] = validSigners.map((signer, idx) => ({
           id: `new_sig_${Date.now()}_${idx}`,
           policy_id: id,
@@ -302,193 +282,184 @@ export function PolicyDetail() {
           expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
           created_at: new Date().toISOString()
         }));
-
-        // Update local mock data (for this session)
         if (MOCK_SIGNATURES[id]) {
           MOCK_SIGNATURES[id] = [...newSignatures, ...MOCK_SIGNATURES[id]];
         }
-
         setSignatures(prev => [...newSignatures, ...prev]);
         setShowSignatureModal(false);
         setSigners([{ name: '', email: '', type: 'candidate' as const }]);
         alert(`Successfully sent ${validSigners.length} signature requests (Simulation)`);
         return;
       }
-
       await policies.sendSignatures(id!, validSigners);
       setShowSignatureModal(false);
       setSigners([{ name: '', email: '', type: 'candidate' as const }]);
       loadSignatures();
-      alert(`Sent ${validSigners.length} signature requests`);
     } catch (error) {
       console.error('Failed to send signature requests:', error);
-      alert('Failed to send signature requests');
     }
   };
 
   const handleCancelSignature = async (signatureId: string) => {
     if (!confirm('Cancel this signature request?')) return;
-
     try {
-      await policies.cancelSignature(signatureId);
-      loadSignatures();
+      if (!signatureId.startsWith('new_sig_')) {
+        await policies.cancelSignature(signatureId);
+      }
+      setSignatures(signatures.filter(s => s.id !== signatureId));
     } catch (error) {
       console.error('Failed to cancel signature:', error);
-      alert('Failed to cancel signature');
     }
   };
 
   const handleResendSignature = async (signatureId: string) => {
     try {
-      await policies.resendSignature(signatureId);
+      if (!signatureId.startsWith('new_sig_')) {
+        await policies.resendSignature(signatureId);
+      }
       alert('Signature request resent');
     } catch (error) {
       console.error('Failed to resend signature:', error);
-      alert('Failed to resend signature');
     }
   };
 
   const statusColors = {
-    pending: 'bg-yellow-900/30 text-yellow-400',
-    signed: 'bg-green-900/30 text-green-400',
-    declined: 'bg-red-900/30 text-red-400',
-    expired: 'bg-zinc-700 text-zinc-400',
+    pending: 'bg-amber-900/20 text-amber-400 border-amber-900/50',
+    signed: 'bg-emerald-900/20 text-emerald-400 border-emerald-900/50',
+    declined: 'bg-rose-900/20 text-rose-400 border-rose-900/50',
+    expired: 'bg-zinc-800/80 text-zinc-500 border-zinc-700',
   };
 
   if (loading || !policy) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-zinc-500">Loading...</div>
+        <div className="w-2 h-2 rounded-full bg-white animate-ping" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">{policy.title}</h1>
-          <p className="text-sm text-zinc-500 mt-1">Version {policy.version}</p>
+    <div className="space-y-8 animate-in fade-in duration-500">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div className="space-y-4">
+          <button 
+            onClick={() => navigate('/app/policies')}
+            className="flex items-center gap-2 text-zinc-500 hover:text-zinc-300 transition-colors text-xs font-mono uppercase tracking-widest"
+          >
+            <ArrowLeft className="w-3 h-3" /> Back to Policies
+          </button>
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-light tracking-tight text-white">{policy.title}</h1>
+              <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-tighter bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
+                v{policy.version}
+              </span>
+            </div>
+            <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">Policy Details & Distribution</p>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => navigate('/app/policies')}>
-            Back
+        <div className="flex gap-3">
+          <Button variant="secondary" onClick={handleDelete}>
+            Delete
           </Button>
           <Button onClick={() => { loadCandidates(); setShowSignatureModal(true); }}>
             Send Signatures
           </Button>
-          <Button variant="secondary" onClick={handleDelete}>
-            Delete
-          </Button>
         </div>
       </div>
 
-      <Card>
-        <div className="p-6 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-white mb-4">Policy Details</h2>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-zinc-500">Status</span>
-              <div className="text-white mt-1">
-                <span className={`px-2 py-0.5 rounded text-[10px] tracking-wider uppercase ${
-                  policy.status === 'active' ? 'bg-green-900/30 text-green-400' :
-                  policy.status === 'draft' ? 'bg-zinc-700 text-zinc-300' :
-                  'bg-zinc-700 text-zinc-400'
-                }`}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Policy Content */}
+        <div className="lg:col-span-2 space-y-6">
+          <GlassCard className="p-8">
+            <div className="flex items-center justify-between mb-8 pb-4 border-b border-white/5">
+               <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-widest">Policy Content</h2>
+               <span className={`px-2.5 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-medium border ${policy.status === 'active' ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/50' : 'bg-zinc-800/80 text-zinc-400 border-zinc-700'}`}>
                   {policy.status}
-                </span>
-              </div>
+               </span>
             </div>
-            <div>
-              <span className="text-zinc-500">Signatures</span>
-              <div className="text-white mt-1">
-                {signatures.length} total ({signatures.filter(s => s.status === 'signed').length} signed)
-              </div>
+            
+            <div className="prose prose-invert max-w-none">
+               <div className="bg-zinc-950/50 border border-zinc-800 rounded-lg p-6 text-zinc-300 text-sm font-serif leading-relaxed whitespace-pre-wrap min-h-[400px]">
+                  {policy.content}
+               </div>
             </div>
-            <div>
-              <span className="text-zinc-500">Created</span>
-              <div className="text-white mt-1">{new Date(policy.created_at).toLocaleDateString()}</div>
-            </div>
-            <div>
-              <span className="text-zinc-500">Updated</span>
-              <div className="text-white mt-1">{new Date(policy.updated_at).toLocaleDateString()}</div>
-            </div>
-          </div>
+          </GlassCard>
         </div>
 
-        {policy.description && (
-          <div className="p-6 border-b border-zinc-800">
-            <h3 className="text-sm font-medium text-zinc-500 mb-2">Description</h3>
-            <p className="text-white">{policy.description}</p>
-          </div>
-        )}
-
-        <div className="p-6">
-          <h3 className="text-sm font-medium text-zinc-500 mb-4">Policy Content</h3>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 text-white text-sm whitespace-pre-wrap leading-relaxed max-h-[600px] overflow-y-auto">
-            {policy.content}
-          </div>
-        </div>
-      </Card>
-
-      <Card>
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">Signatures</h2>
-          </div>
-
-          {signatures.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-sm text-zinc-500 mb-4">No signature requests sent yet</p>
-              <Button onClick={() => { loadCandidates(); setShowSignatureModal(true); }}>Send Signatures</Button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {signatures.map((sig) => (
-                <div key={sig.id} className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-base font-medium text-white">{sig.signer_name}</h3>
-                        <span className={`px-2 py-0.5 rounded text-[10px] tracking-wider uppercase ${statusColors[sig.status as keyof typeof statusColors]}`}>
-                          {sig.status}
-                        </span>
-                      </div>
-                      <p className="text-sm text-zinc-400 mb-1">{sig.signer_email}</p>
-                      <div className="text-xs text-zinc-500 space-x-4">
-                        <span>Expires: {new Date(sig.expires_at).toLocaleDateString()}</span>
-                        {sig.signed_at && (
-                          <span>Signed: {new Date(sig.signed_at).toLocaleDateString()}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {sig.status === 'pending' && (
-                        <>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleResendSignature(sig.id)}
-                          >
-                            Resend
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleCancelSignature(sig.id)}
-                          >
-                            Cancel
-                          </Button>
-                        </>
-                      )}
-                    </div>
+        {/* Sidebar Info & Signatures */}
+        <div className="space-y-8">
+          <GlassCard className="p-6 space-y-6">
+            <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-widest border-b border-white/5 pb-4">Overview</h2>
+            <div className="space-y-4">
+               <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Company</label>
+                  <p className="text-sm text-white">{policy.company_name}</p>
+               </div>
+               <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Created</label>
+                    <p className="text-xs text-zinc-300 font-mono">{new Date(policy.created_at).toLocaleDateString()}</p>
                   </div>
-                </div>
-              ))}
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Updated</label>
+                    <p className="text-xs text-zinc-300 font-mono">{new Date(policy.updated_at).toLocaleDateString()}</p>
+                  </div>
+               </div>
+               {policy.description && (
+                 <div className="pt-4 border-t border-white/5">
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Description</label>
+                    <p className="text-xs text-zinc-400 leading-relaxed italic">{policy.description}</p>
+                 </div>
+               )}
             </div>
-          )}
+          </GlassCard>
+
+          <GlassCard className="flex flex-col">
+            <div className="p-6 border-b border-white/5 flex items-center justify-between">
+               <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-widest">Signatures</h2>
+               <div className="text-[10px] font-mono text-zinc-500">{signatures.length} TOTAL</div>
+            </div>
+            
+            <div className="max-h-[500px] overflow-y-auto divide-y divide-white/5">
+               {signatures.length === 0 ? (
+                 <div className="p-12 text-center">
+                    <Mail className="w-8 h-8 text-zinc-800 mx-auto mb-3" />
+                    <p className="text-xs text-zinc-600 uppercase tracking-widest">No requests sent</p>
+                 </div>
+               ) : (
+                 signatures.map((sig) => (
+                   <div key={sig.id} className="p-4 hover:bg-white/5 transition-colors group">
+                      <div className="flex items-start justify-between mb-2">
+                         <div>
+                            <div className="text-sm font-medium text-zinc-200">{sig.signer_name}</div>
+                            <div className="text-[10px] text-zinc-500 font-mono">{sig.signer_email}</div>
+                         </div>
+                         <span className={`px-2 py-0.5 rounded text-[9px] uppercase tracking-wider font-medium border ${statusColors[sig.status as keyof typeof statusColors]}`}>
+                            {sig.status}
+                         </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <div className="text-[9px] text-zinc-600 uppercase tracking-tighter">
+                            {sig.signed_at ? `Signed ${new Date(sig.signed_at).toLocaleDateString()}` : `Expires ${new Date(sig.expires_at).toLocaleDateString()}`}
+                         </div>
+                         <div className="flex gap-2">
+                            {sig.status === 'pending' && (
+                              <>
+                                <button onClick={() => handleResendSignature(sig.id)} className="text-[9px] text-zinc-400 hover:text-white uppercase tracking-widest font-bold">Resend</button>
+                                <button onClick={() => handleCancelSignature(sig.id)} className="text-[9px] text-zinc-600 hover:text-rose-400 uppercase tracking-widest font-bold">Cancel</button>
+                              </>
+                            )}
+                         </div>
+                      </div>
+                   </div>
+                 ))
+               )}
+            </div>
+          </GlassCard>
         </div>
-      </Card>
+      </div>
 
       {showSignatureModal && (
         <Modal
@@ -496,213 +467,146 @@ export function PolicyDetail() {
           onClose={() => setShowSignatureModal(false)}
           title="Send Signature Requests"
         >
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowCandidateSelector(!showCandidateSelector)}
-              >
-                {showCandidateSelector ? 'Hide Candidates' : 'Select from Candidates'}
-              </Button>
-              <span className="text-xs text-zinc-500">
-                {signers.filter(s => s.name && s.email).length} selected
-              </span>
-            </div>
-
-            {showCandidateSelector && (
-              <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg max-h-48 overflow-y-auto">
-                {candidateList.length === 0 ? (
-                  <p className="text-sm text-zinc-500 text-center py-4">No candidates found</p>
-                ) : (
-                  <div className="space-y-1">
-                    {candidateList.map((candidate) => {
-                      const isSelected = signers.some(s => s.email === candidate.email);
-                      return (
-                        <button
-                          key={candidate.id}
-                          onClick={() => handleCandidateSelect(candidate)}
-                          disabled={isSelected}
-                          className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
-                            isSelected 
-                              ? 'bg-green-900/20 text-green-400 cursor-default' 
-                              : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                          }`}
-                        >
-                          <span className="font-medium">{candidate.name}</span>
-                          <span className="text-zinc-500 ml-2">{candidate.email}</span>
-                          {isSelected && <span className="float-right">✓</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                 <div className="flex items-center justify-between mb-2">
-                    <label className="block text-xs tracking-wider uppercase text-zinc-500">
-                      Bulk Add Emails
-                    </label>
-                    <label className="text-xs text-blue-400 hover:text-blue-300 cursor-pointer flex items-center gap-1">
-                      <input
-                        type="file"
-                        accept=".csv"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onload = (event) => {
-                              const text = event.target?.result as string;
-                              const lines = text.split('\n');
-                              const newSigners: SignatureRequest[] = [];
-                              
-                              lines.forEach(line => {
-                                const [email, name] = line.split(',').map(s => s.trim());
-                                if (email && email.includes('@')) {
-                                  newSigners.push({
-                                    name: name || email.split('@')[0],
-                                    email: email,
-                                    type: 'external' // Default to external for CSV imports
-                                  });
-                                }
-                              });
-
-                              if (newSigners.length > 0) {
-                                // Filter out duplicates based on email
-                                const uniqueNewSigners = newSigners.filter(ns => 
-                                  !signers.some(existing => existing.email === ns.email)
-                                );
-                                
-                                if (uniqueNewSigners.length > 0) {
-                                  // If the current list has only one empty entry, replace it
-                                  if (signers.length === 1 && !signers[0].email) {
-                                     setSigners(uniqueNewSigners);
-                                  } else {
-                                     setSigners([...signers, ...uniqueNewSigners]);
-                                  }
-                                  alert(`Added ${uniqueNewSigners.length} signers from CSV`);
-                                } else {
-                                  alert('No new unique emails found in CSV');
-                                }
+          <div className="space-y-6">
+            {/* CSV & Bulk Section */}
+            <div className="grid grid-cols-1 gap-4">
+               <div className="flex items-center justify-between">
+                  <Button variant="secondary" size="sm" onClick={() => setShowCandidateSelector(!showCandidateSelector)}>
+                    {showCandidateSelector ? 'Hide Candidates' : 'Select from Candidates'}
+                  </Button>
+                  <label className="text-[10px] text-blue-400 hover:text-blue-300 cursor-pointer flex items-center gap-1 uppercase tracking-widest font-bold">
+                    <input
+                      type="file"
+                      accept=".csv"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            const text = event.target?.result as string;
+                            const lines = text.split('\n');
+                            const newSigners: SignatureRequest[] = [];
+                            lines.forEach(line => {
+                              const [email, name] = line.split(',').map(s => s.trim());
+                              if (email && email.includes('@')) {
+                                newSigners.push({ name: name || email.split('@')[0], email: email, type: 'external' });
                               }
-                            };
-                            reader.readAsText(file);
-                          }
-                          // Reset input
-                          e.target.value = '';
-                        }}
-                      />
-                      <span>Upload CSV</span>
-                    </label>
-                 </div>
-                 <textarea 
-                    className="w-full px-4 py-2 bg-zinc-950 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md h-24 placeholder:text-zinc-600"
-                    placeholder="Paste emails here (one per line or comma separated)..."
-                    onBlur={(e) => {
-                      const text = e.target.value;
-                      if (!text.trim()) return;
-
-                      // Split by newlines or commas
-                      const emails = text.split(/[\n,]+/).map(s => s.trim()).filter(s => s.includes('@'));
-                      
-                      const newSigners: SignatureRequest[] = [];
-                      emails.forEach(email => {
-                         if (!signers.some(s => s.email === email)) {
-                            newSigners.push({
-                              name: email.split('@')[0], // Default name from email
-                              email: email,
-                              type: 'external'
                             });
-                         }
-                      });
+                            if (newSigners.length > 0) {
+                              const uniqueNewSigners = newSigners.filter(ns => !signers.some(existing => existing.email === ns.email));
+                              if (uniqueNewSigners.length > 0) {
+                                if (signers.length === 1 && !signers[0].email) { setSigners(uniqueNewSigners); }
+                                else { setSigners([...signers, ...uniqueNewSigners]); }
+                              }
+                            }
+                          };
+                          reader.readAsText(file);
+                        }
+                        e.target.value = '';
+                      }}
+                    />
+                    <Upload className="w-3 h-3" /> Upload CSV
+                  </label>
+               </div>
 
-                      if (newSigners.length > 0) {
-                         if (signers.length === 1 && !signers[0].email) {
-                            setSigners(newSigners);
-                         } else {
-                            setSigners([...signers, ...newSigners]);
-                         }
-                      }
-                      
-                      // Clear textarea
-                      e.target.value = '';
-                    }}
-                 />
-                 <p className="text-[10px] text-zinc-500 mt-1">
-                   Format: Email only, or "Email, Name" per line for CSV
-                 </p>
-              </div>
-            </div>
-
-            <div className="border-t border-zinc-800 pt-4 space-y-4 max-h-60 overflow-y-auto">
-            {signers.map((signer, index) => (
-              <div key={index} className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-base font-medium text-white">Signer {index + 1}</h3>
-                  {signers.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveSigner(index)}
-                      className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
-                    >
-                      Remove
-                    </button>
+               {showCandidateSelector && (
+                <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg max-h-48 overflow-y-auto shadow-inner">
+                  {candidateList.length === 0 ? (
+                    <p className="text-xs text-zinc-600 text-center py-4 font-mono">NO CANDIDATES FOUND</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {candidateList.map((candidate) => {
+                        const isSelected = signers.some(s => s.email === candidate.email);
+                        return (
+                          <button
+                            key={candidate.id}
+                            onClick={() => handleCandidateSelect(candidate)}
+                            disabled={isSelected}
+                            className={`w-full text-left px-3 py-2 rounded text-xs transition-colors font-mono ${isSelected ? 'bg-emerald-900/10 text-emerald-500 cursor-default' : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800'}`}
+                          >
+                            <span>{candidate.name}</span>
+                            <span className="text-zinc-600 ml-2">[{candidate.email}]</span>
+                            {isSelected && <span className="float-right">SELECTED</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
+              )}
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                      Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={signer.name}
-                      onChange={(e) => handleSignerChange(index, 'name', e.target.value)}
-                      className="w-full px-4 py-2 bg-zinc-950 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                      placeholder="Full name"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                      Email *
-                    </label>
-                    <input
-                      type="email"
-                      value={signer.email}
-                      onChange={(e) => handleSignerChange(index, 'email', e.target.value)}
-                      className="w-full px-4 py-2 bg-zinc-950 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                      placeholder="email@example.com"
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
+              <textarea 
+                className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-xs font-mono focus:outline-none focus:border-zinc-600 rounded-md h-24 placeholder:text-zinc-700"
+                placeholder="Paste emails (newline or comma separated)..."
+                onBlur={(e) => {
+                  const text = e.target.value;
+                  if (!text.trim()) return;
+                  const emails = text.split(/[\n,]+/).map(s => s.trim()).filter(s => s.includes('@'));
+                  const newSigners: SignatureRequest[] = [];
+                  emails.forEach(email => {
+                    if (!signers.some(s => s.email === email)) {
+                      newSigners.push({ name: email.split('@')[0], email: email, type: 'external' });
+                    }
+                  });
+                  if (newSigners.length > 0) {
+                    if (signers.length === 1 && !signers[0].email) { setSigners(newSigners); }
+                    else { setSigners([...signers, ...newSigners]); }
+                  }
+                  e.target.value = '';
+                }}
+              />
             </div>
 
-            <Button
-              variant="secondary"
-              onClick={handleAddSigner}
-              className="w-full"
-            >
-              Add Another Signer
-            </Button>
+            {/* Individual Signer Entries */}
+            <div className="border-t border-white/5 pt-6 space-y-4 max-h-[300px] overflow-y-auto pr-2">
+              <h3 className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Review Recipients ({signers.filter(s => s.email).length})</h3>
+              {signers.map((signer, index) => (
+                <div key={index} className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg relative group">
+                  <button
+                    onClick={() => handleRemoveSigner(index)}
+                    className="absolute top-2 right-2 p-1 text-zinc-700 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase tracking-widest text-zinc-600">Full Name</label>
+                      <input
+                        type="text"
+                        value={signer.name}
+                        onChange={(e) => handleSignerChange(index, 'name', e.target.value)}
+                        className="w-full bg-transparent border-b border-zinc-800 text-xs text-white focus:outline-none focus:border-zinc-600 pb-1"
+                        placeholder="John Doe"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase tracking-widest text-zinc-600">Email Address</label>
+                      <input
+                        type="email"
+                        value={signer.email}
+                        onChange={(e) => handleSignerChange(index, 'email', e.target.value)}
+                        className="w-full bg-transparent border-b border-zinc-800 text-xs text-white focus:outline-none focus:border-zinc-600 pb-1"
+                        placeholder="john@example.com"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-zinc-800">
-              <Button
-                variant="secondary"
-                onClick={() => setShowSignatureModal(false)}
-              >
-                Cancel
+            <div className="flex flex-col gap-3 pt-4 border-t border-white/5">
+              <Button variant="secondary" onClick={handleAddSigner} className="w-full">
+                Add Another Signer
               </Button>
-              <Button onClick={handleSendSignatures}>
-                Send Signature Requests
-              </Button>
+              <div className="flex gap-3 mt-2">
+                <Button variant="outline" onClick={() => setShowSignatureModal(false)} className="flex-1">
+                  Cancel
+                </Button>
+                <Button onClick={handleSendSignatures} className="flex-1">
+                  Send Requests
+                </Button>
+              </div>
             </div>
           </div>
         </Modal>
