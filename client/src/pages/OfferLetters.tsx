@@ -24,6 +24,7 @@ export function OfferLetters() {
       created_at: new Date().toISOString(),
     }
   ]);
+  const [selectedLetter, setSelectedLetter] = useState<OfferLetter | null>(null);
   const [isLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -58,7 +59,7 @@ export function OfferLetters() {
         <Card>
           <div className="p-6 space-y-4">
             <h2 className="text-lg font-semibold text-white mb-4">How to Use Offer Letters</h2>
-
+            {/* ... help content ... */}
             <div className="space-y-4">
               <div>
                 <h3 className="text-base font-medium text-white mb-2 flex items-center gap-2">
@@ -152,7 +153,11 @@ export function OfferLetters() {
       {offerLetters.length > 0 && (
         <div className="space-y-3">
           {offerLetters.map((letter) => (
-            <Card key={letter.id} className="p-4 hover:border-zinc-700 transition-colors">
+            <Card 
+              key={letter.id} 
+              className="p-4 hover:border-zinc-700 transition-colors cursor-pointer"
+              onClick={() => setSelectedLetter(letter)}
+            >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
@@ -172,6 +177,58 @@ export function OfferLetters() {
               </div>
             </Card>
           ))}
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {selectedLetter && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <Card className="w-full max-w-2xl p-6 relative">
+            <button
+              onClick={() => setSelectedLetter(null)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            <div className="space-y-6">
+              <div className="flex items-center justify-between pr-8">
+                <div>
+                  <h2 className="text-xl font-bold text-white">{selectedLetter.candidate_name}</h2>
+                  <p className="text-sm text-zinc-500">{selectedLetter.position_title}</p>
+                </div>
+                <span className={`px-2 py-0.5 rounded text-[10px] tracking-wider uppercase ${statusColors[selectedLetter.status]}`}>
+                  {selectedLetter.status}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="text-xs text-zinc-500 uppercase tracking-wider block mb-1">Company</label>
+                  <p className="text-sm text-white">{selectedLetter.company_name}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-500 uppercase tracking-wider block mb-1">Created Date</label>
+                  <p className="text-sm text-white">{new Date(selectedLetter.created_at).toLocaleDateString()}</p>
+                </div>
+              </div>
+
+              <div className="bg-zinc-900/50 rounded-lg p-4 border border-zinc-800">
+                <p className="text-sm text-zinc-400 italic text-center">
+                  Preview functionality coming soon
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-zinc-800">
+                <Button variant="secondary" onClick={() => setSelectedLetter(null)}>Close</Button>
+                {selectedLetter.status === 'draft' && (
+                  <Button>Edit Offer</Button>
+                )}
+              </div>
+            </div>
+          </Card>
         </div>
       )}
 
