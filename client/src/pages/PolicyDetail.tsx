@@ -540,6 +540,105 @@ export function PolicyDetail() {
               </div>
             )}
 
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                 <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs tracking-wider uppercase text-zinc-500">
+                      Bulk Add Emails
+                    </label>
+                    <label className="text-xs text-blue-400 hover:text-blue-300 cursor-pointer flex items-center gap-1">
+                      <input
+                        type="file"
+                        accept=".csv"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              const text = event.target?.result as string;
+                              const lines = text.split('\n');
+                              const newSigners: SignatureRequest[] = [];
+                              
+                              lines.forEach(line => {
+                                const [email, name] = line.split(',').map(s => s.trim());
+                                if (email && email.includes('@')) {
+                                  newSigners.push({
+                                    name: name || email.split('@')[0],
+                                    email: email,
+                                    type: 'external' // Default to external for CSV imports
+                                  });
+                                }
+                              });
+
+                              if (newSigners.length > 0) {
+                                // Filter out duplicates based on email
+                                const uniqueNewSigners = newSigners.filter(ns => 
+                                  !signers.some(existing => existing.email === ns.email)
+                                );
+                                
+                                if (uniqueNewSigners.length > 0) {
+                                  // If the current list has only one empty entry, replace it
+                                  if (signers.length === 1 && !signers[0].email) {
+                                     setSigners(uniqueNewSigners);
+                                  } else {
+                                     setSigners([...signers, ...uniqueNewSigners]);
+                                  }
+                                  alert(`Added ${uniqueNewSigners.length} signers from CSV`);
+                                } else {
+                                  alert('No new unique emails found in CSV');
+                                }
+                              }
+                            };
+                            reader.readAsText(file);
+                          }
+                          // Reset input
+                          e.target.value = '';
+                        }}
+                      />
+                      <span>Upload CSV</span>
+                    </label>
+                 </div>
+                 <textarea 
+                    className="w-full px-4 py-2 bg-zinc-950 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md h-24 placeholder:text-zinc-600"
+                    placeholder="Paste emails here (one per line or comma separated)..."
+                    onBlur={(e) => {
+                      const text = e.target.value;
+                      if (!text.trim()) return;
+
+                      // Split by newlines or commas
+                      const emails = text.split(/[\n,]+/).map(s => s.trim()).filter(s => s.includes('@'));
+                      
+                      const newSigners: SignatureRequest[] = [];
+                      emails.forEach(email => {
+                         if (!signers.some(s => s.email === email)) {
+                            newSigners.push({
+                              name: email.split('@')[0], // Default name from email
+                              email: email,
+                              type: 'external'
+                            });
+                         }
+                      });
+
+                      if (newSigners.length > 0) {
+                         if (signers.length === 1 && !signers[0].email) {
+                            setSigners(newSigners);
+                         } else {
+                            setSigners([...signers, ...newSigners]);
+                         }
+                      }
+                      
+                      // Clear textarea
+                      e.target.value = '';
+                    }}
+                 />
+                 <p className="text-[10px] text-zinc-500 mt-1">
+                   Format: Email only, or "Email, Name" per line for CSV
+                 </p>
+              </div>
+            </div>
+
+            <div className="border-t border-zinc-800 pt-4 space-y-4 max-h-60 overflow-y-auto">
             {signers.map((signer, index) => (
               <div key={index} className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
                 <div className="flex items-center justify-between mb-4">
