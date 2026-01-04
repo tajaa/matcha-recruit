@@ -683,6 +683,7 @@ export function PolicyDetail() {
                 </div>
               </div>
             ))}
+            </div>
 
             <Button
               variant="secondary"
