@@ -14,7 +14,16 @@ interface OfferLetter {
 }
 
 export function OfferLetters() {
-  const [offerLetters] = useState<OfferLetter[]>([]);
+  const [offerLetters] = useState<OfferLetter[]>([
+    {
+      id: '1',
+      candidate_name: 'John Doe',
+      position_title: 'Software Engineer',
+      company_name: 'Acme Corp',
+      status: 'draft',
+      created_at: new Date().toISOString(),
+    }
+  ]);
   const [isLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showHelp, setShowHelp] = useState(false);

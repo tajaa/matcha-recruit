@@ -74,19 +74,6 @@ export default function LeadDetailDrawer({ leadId, onClose, onUpdate }: LeadDeta
         }
     };
 
-    const rankContacts = async () => {
-        if (!lead) return;
-        setIsProcessing(true);
-        try {
-            await leadsAgent.rankContacts(lead.id);
-            await fetchLeadDetail();
-        } catch (error) {
-            console.error('Rank contacts failed:', error);
-        } finally {
-            setIsProcessing(false);
-        }
-    };
-
     const researchContact = async () => {
         if (!lead) return;
         setIsProcessing(true);

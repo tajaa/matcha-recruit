@@ -25,6 +25,7 @@ const TutorSessionDetail = lazy(() => import('./pages/TutorSessionDetail'));
 const ERCopilot = lazy(() => import('./pages/ERCopilot'));
 const ERCaseDetail = lazy(() => import('./pages/ERCaseDetail'));
 const OfferLetters = lazy(() => import('./pages/OfferLetters'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Policies = lazy(() => import('./pages/Policies'));
 const PolicyDetail = lazy(() => import('./pages/PolicyDetail'));
 const PolicyForm = lazy(() => import('./pages/PolicyForm'));
@@ -109,7 +110,7 @@ function App() {
                 index
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
-                    <OfferLetters />
+                    <Dashboard />
                   </ProtectedRoute>
                 }
               />

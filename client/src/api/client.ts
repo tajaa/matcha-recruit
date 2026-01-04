@@ -1467,7 +1467,7 @@ export const leadsAgent = {
       body: JSON.stringify(data),
     }),
 
-  draftEmail: (leadId: string, contactId: string) =>
+  draftEmail: (leadId: string, contactId?: string) =>
     request<LeadEmail>(`/leads-agent/leads/${leadId}/draft-email`, {
       method: 'POST',
       body: JSON.stringify({ contact_id: contactId }),
