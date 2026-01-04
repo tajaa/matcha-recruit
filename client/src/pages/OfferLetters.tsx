@@ -11,25 +11,37 @@ interface OfferLetter {
   status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
   created_at: string;
   sent_at?: string;
+  expiration_date?: string;
   salary?: string;
+  bonus?: string;
+  stock_options?: string;
   start_date?: string;
   employment_type?: string;
+  location?: string;
   benefits?: string;
+  manager_name?: string;
+  manager_title?: string;
 }
 
 export function OfferLetters() {
   const [offerLetters] = useState<OfferLetter[]>([
     {
       id: '1',
-      candidate_name: 'John Doe',
-      position_title: 'Software Engineer',
-      company_name: 'Acme Corp',
+      candidate_name: 'Sarah Anderson',
+      position_title: 'Senior Software Engineer',
+      company_name: 'Matcha Tech, Inc.',
       status: 'draft',
       created_at: new Date().toISOString(),
-      salary: '$125,000',
-      start_date: '2026-02-01',
+      expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
+      salary: '$165,000',
+      bonus: '15% Annual Performance Bonus',
+      stock_options: '5,000 RSUs (vesting over 4 years)',
+      start_date: '2026-02-15',
       employment_type: 'Full-time',
-      benefits: 'Health, Dental, Vision, 401k matching, Unlimited PTO',
+      location: 'Remote (San Francisco HQ)',
+      benefits: 'Comprehensive Health, Dental, Vision, 401k with 4% match, Unlimited PTO, $2,000 Home Office Stipend',
+      manager_name: 'David Chen',
+      manager_title: 'VP of Engineering',
     }
   ]);
   const [selectedLetter, setSelectedLetter] = useState<OfferLetter | null>(null);
@@ -223,63 +235,98 @@ export function OfferLetters() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-lg p-8 border border-zinc-200 text-zinc-900 font-serif shadow-inner max-h-[400px] overflow-y-auto">
-                <div className="space-y-6 text-[13px] leading-relaxed">
-                  <div className="flex justify-between items-start border-b border-zinc-100 pb-4 mb-8">
+              <div className="bg-white rounded-lg p-8 border border-zinc-200 text-zinc-900 font-serif shadow-inner max-h-[600px] overflow-y-auto">
+                <div className="space-y-8 text-[13px] leading-relaxed">
+                  {/* Header */}
+                  <div className="flex justify-between items-start border-b border-zinc-100 pb-6">
                     <div>
-                      <h3 className="font-bold text-lg uppercase tracking-tight">{selectedLetter.company_name}</h3>
-                      <p className="text-zinc-500 font-sans text-[10px] uppercase tracking-widest">Official Offer Letter</p>
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-6 h-6 bg-zinc-900 rounded-full"></div>
+                        <h3 className="font-bold text-xl tracking-tight">{selectedLetter.company_name}</h3>
+                      </div>
+                      <p className="text-zinc-500 font-sans text-[10px] uppercase tracking-widest">Official Offer of Employment</p>
                     </div>
-                    <div className="text-right">
-                      <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest">Date</p>
-                      <p className="font-bold">{new Date(selectedLetter.created_at).toLocaleDateString()}</p>
+                    <div className="text-right space-y-1">
+                      <div>
+                        <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest">Date</p>
+                        <p className="font-bold">{new Date(selectedLetter.created_at).toLocaleDateString()}</p>
+                      </div>
+                      {selectedLetter.expiration_date && (
+                        <div>
+                          <p className="font-sans text-[10px] text-rose-400 uppercase tracking-widest">Expires</p>
+                          <p className="font-bold text-rose-600">{new Date(selectedLetter.expiration_date).toLocaleDateString()}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
+                  {/* Body */}
                   <div className="space-y-4">
                     <p>Dear <span className="font-bold">{selectedLetter.candidate_name}</span>,</p>
                     
                     <p>
-                      We are pleased to offer you the position of <span className="font-bold">{selectedLetter.position_title}</span> at 
-                      <span className="font-bold"> {selectedLetter.company_name}</span>. We were very impressed with your background and 
-                      believe you will be a valuable addition to our team.
+                      We are pleased to offer you the position of <span className="font-bold">{selectedLetter.position_title}</span> at <span className="font-bold">{selectedLetter.company_name}</span>. 
+                      We were very impressed with your background and believe your skills and experience will be a valuable addition to our team.
                     </p>
 
-                    <div className="bg-zinc-50 p-4 rounded border border-zinc-100 space-y-3 font-sans">
-                      <h4 className="font-bold text-[11px] uppercase tracking-widest text-zinc-500">Employment Terms</h4>
-                      <div className="grid grid-cols-2 gap-4">
+                    <p>
+                      Should you accept this offer, you will report to <span className="font-bold">{selectedLetter.manager_name || 'the Hiring Manager'}</span>
+                      {selectedLetter.manager_title && <span>, {selectedLetter.manager_title}</span>}.
+                    </p>
+
+                    {/* Terms Grid */}
+                    <div className="bg-zinc-50 p-6 rounded-lg border border-zinc-100 space-y-4 font-sans mt-6 mb-6">
+                      <h4 className="font-bold text-[11px] uppercase tracking-widest text-zinc-500 border-b border-zinc-200 pb-2">Compensation & Terms</h4>
+                      <div className="grid grid-cols-2 gap-y-6 gap-x-4">
                         <div>
-                          <p className="text-[10px] text-zinc-400 uppercase">Annual Salary</p>
-                          <p className="font-bold text-zinc-800">{selectedLetter.salary || 'Not specified'}</p>
+                          <p className="text-[10px] text-zinc-400 uppercase mb-1">Annual Salary</p>
+                          <p className="font-bold text-zinc-800 text-sm">{selectedLetter.salary || 'TBD'}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-zinc-400 uppercase">Start Date</p>
-                          <p className="font-bold text-zinc-800">{selectedLetter.start_date ? new Date(selectedLetter.start_date).toLocaleDateString() : 'Not specified'}</p>
+                          <p className="text-[10px] text-zinc-400 uppercase mb-1">Start Date</p>
+                          <p className="font-bold text-zinc-800 text-sm">{selectedLetter.start_date ? new Date(selectedLetter.start_date).toLocaleDateString() : 'TBD'}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-zinc-400 uppercase">Employment Type</p>
-                          <p className="font-bold text-zinc-800">{selectedLetter.employment_type || 'Full-time'}</p>
+                          <p className="text-[10px] text-zinc-400 uppercase mb-1">Bonus Potential</p>
+                          <p className="font-bold text-zinc-800 text-sm">{selectedLetter.bonus || 'N/A'}</p>
+                        </div>
+                         <div>
+                          <p className="text-[10px] text-zinc-400 uppercase mb-1">Equity / Stock Options</p>
+                          <p className="font-bold text-zinc-800 text-sm">{selectedLetter.stock_options || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-zinc-400 uppercase mb-1">Employment Type</p>
+                          <p className="font-bold text-zinc-800 text-sm">{selectedLetter.employment_type || 'Full-time'}</p>
+                        </div>
+                         <div>
+                          <p className="text-[10px] text-zinc-400 uppercase mb-1">Location</p>
+                          <p className="font-bold text-zinc-800 text-sm">{selectedLetter.location || 'Remote'}</p>
                         </div>
                       </div>
                     </div>
 
                     <div className="space-y-2">
-                      <h4 className="font-bold text-[11px] uppercase tracking-widest text-zinc-500 font-sans">Benefits</h4>
-                      <p className="text-zinc-700">{selectedLetter.benefits || 'Standard company benefit package.'}</p>
+                      <h4 className="font-bold text-[11px] uppercase tracking-widest text-zinc-500 font-sans">Benefits Package</h4>
+                      <p className="text-zinc-700 bg-white p-3 border border-zinc-100 rounded">
+                        {selectedLetter.benefits || 'Standard company benefit package including health, dental, and vision insurance.'}
+                      </p>
                     </div>
 
                     <p className="pt-4 border-t border-zinc-100">
-                      We look forward to having you join us. Please review these terms and let us know if you have any questions.
+                      We look forward to having you join us. This offer is contingent upon the successful completion of standard background checks.
                     </p>
                   </div>
 
-                  <div className="mt-8 pt-8 border-t border-zinc-100 flex justify-between items-end">
+                  {/* Signature Section */}
+                  <div className="mt-12 pt-8 border-t border-zinc-100 flex justify-between items-end">
                     <div>
-                      <div className="w-32 h-px bg-zinc-300 mb-2"></div>
-                      <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest">Hiring Manager Signature</p>
+                      <div className="w-48 h-px bg-zinc-300 mb-2"></div>
+                      <p className="font-bold text-zinc-900">{selectedLetter.manager_name || 'Hiring Manager'}</p>
+                      <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest">Authorized Signature</p>
                     </div>
-                    <div className="text-right italic text-zinc-400 font-sans">
-                      Matcha Recruit Systems
+                    <div className="text-right">
+                       <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Candidate Acceptance</p>
+                       <div className="w-48 h-10 border-b border-dashed border-zinc-300 mb-1"></div>
                     </div>
                   </div>
                 </div>
