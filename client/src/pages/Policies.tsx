@@ -7,8 +7,60 @@ import type { Policy, PolicyStatus } from '../types';
 import { FileText, Send, BarChart3, RotateCcw, ListChecks } from 'lucide-react';
 
 export function Policies() {
-  const [policiesList, setPolicies] = useState<Policy[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [policiesList, setPolicies] = useState<Policy[]>([
+    {
+      id: 'p1',
+      company_id: 'c1',
+      company_name: 'Matcha Recruit',
+      title: 'Remote Work Policy',
+      description: 'Guidelines and requirements for employees working remotely or in a hybrid capacity.',
+      content: 'Sample content for remote work policy...',
+      file_url: null,
+      version: '1.2',
+      status: 'active',
+      signature_count: 45,
+      signed_count: 42,
+      pending_signatures: 3,
+      created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      created_by: 'admin1'
+    },
+    {
+      id: 'p2',
+      company_id: 'c1',
+      company_name: 'Matcha Recruit',
+      title: 'Code of Conduct',
+      description: 'Expected behavior and professional standards for all members of the organization.',
+      content: 'Sample content for code of conduct...',
+      file_url: null,
+      version: '2.0',
+      status: 'active',
+      signature_count: 120,
+      signed_count: 118,
+      pending_signatures: 2,
+      created_at: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString(),
+      created_by: 'admin1'
+    },
+    {
+      id: 'p3',
+      company_id: 'c1',
+      company_name: 'Matcha Recruit',
+      title: '2026 Bonus Structure',
+      description: 'Proposed annual performance bonus criteria and payout schedules for the upcoming year.',
+      content: 'Sample content for bonus structure...',
+      file_url: null,
+      version: '0.1',
+      status: 'draft',
+      signature_count: 0,
+      signed_count: 0,
+      pending_signatures: 0,
+      created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      created_by: 'admin1'
+    }
+  ]);
+  const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState<PolicyStatus | ''>('');
   const [showHelp, setShowHelp] = useState(false);
 
