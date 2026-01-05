@@ -7,7 +7,7 @@ import {
     JURISDICTION_LEVEL_LABELS
 } from '../api/compliance';
 import {
-    Shield, MapPin, Plus, RefreshCw, Trash2, Edit2, X,
+    Shield, MapPin, Plus, Trash2, Edit2, X,
     ChevronDown, ChevronRight, AlertTriangle, Bell, CheckCircle,
     ExternalLink, Clock, Building2
 } from 'lucide-react';
@@ -587,7 +587,7 @@ export function Compliance() {
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             className="bg-[#111] border border-white/10 rounded-2xl p-6 w-full max-w-md"
-                            onClick={e => e.stopPropagation()}
+                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         >
                             <div className="flex items-center justify-between mb-6">
                                 <h2 className="text-lg font-medium text-white">
