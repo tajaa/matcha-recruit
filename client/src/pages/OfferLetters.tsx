@@ -1,53 +1,89 @@
-import { useState } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { Button } from '../components/Button';
 import { GlassCard } from '../components/GlassCard';
 import { FileText, BarChart3, ChevronRight } from 'lucide-react';
-
-interface OfferLetter {
-  id: string;
-  candidate_name: string;
-  position_title: string;
-  company_name: string;
-  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
-  created_at: string;
-  sent_at?: string;
-  expiration_date?: string;
-  salary?: string;
-  bonus?: string;
-  stock_options?: string;
-  start_date?: string;
-  employment_type?: string;
-  location?: string;
-  benefits?: string;
-  manager_name?: string;
-  manager_title?: string;
-}
+import { offerLetters as offerLettersApi } from '../api/client';
+import type { OfferLetter, OfferLetterCreate } from '../types';
 
 export function OfferLetters() {
-  const [offerLetters] = useState<OfferLetter[]>([
-    {
-      id: '1',
-      candidate_name: 'Sarah Anderson',
-      position_title: 'Senior Software Engineer',
-      company_name: 'Matcha Tech, Inc.',
-      status: 'draft',
-      created_at: new Date().toISOString(),
-      expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
-      salary: '$165,000',
-      bonus: '15% Annual Performance Bonus',
-      stock_options: '5,000 RSUs (vesting over 4 years)',
-      start_date: '2026-02-15',
-      employment_type: 'Full-time',
-      location: 'Remote (San Francisco HQ)',
-      benefits: 'Comprehensive Health, Dental, Vision, 401k with 4% match, Unlimited PTO, $2,000 Home Office Stipend',
-      manager_name: 'David Chen',
-      manager_title: 'VP of Engineering',
-    }
-  ]);
+  const [offerLetters, setOfferLetters] = useState<OfferLetter[]>([]);
   const [selectedLetter, setSelectedLetter] = useState<OfferLetter | null>(null);
-  const [isLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+
+  // Form state
+  const [formData, setFormData] = useState<OfferLetterCreate>({
+    candidate_name: '',
+    position_title: '',
+    company_name: 'Matcha Tech, Inc.',
+    start_date: '',
+    salary: '',
+    bonus: '',
+    stock_options: '',
+    employment_type: 'Full-time',
+    location: '',
+    benefits: '',
+    manager_name: '',
+    manager_title: '',
+    expiration_date: '',
+  });
+
+  useEffect(() => {
+    loadOfferLetters();
+  }, []);
+
+  async function loadOfferLetters() {
+    try {
+      setIsLoading(true);
+      const data = await offerLettersApi.list();
+      setOfferLetters(data);
+    } catch (error) {
+      console.error('Failed to load offer letters:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleCreate(e: FormEvent) {
+    e.preventDefault();
+    if (isSubmitting) return;
+
+    try {
+      setIsSubmitting(true);
+      // Clean up date fields (empty string -> undefined/null)
+      const payload = {
+        ...formData,
+        start_date: formData.start_date || undefined,
+        expiration_date: formData.expiration_date || undefined,
+      };
+      
+      await offerLettersApi.create(payload);
+      await loadOfferLetters();
+      setShowCreateForm(false);
+      // Reset form
+      setFormData({
+        candidate_name: '',
+        position_title: '',
+        company_name: 'Matcha Tech, Inc.',
+        start_date: '',
+        salary: '',
+        bonus: '',
+        stock_options: '',
+        employment_type: 'Full-time',
+        location: '',
+        benefits: '',
+        manager_name: '',
+        manager_title: '',
+        expiration_date: '',
+      });
+    } catch (error) {
+      console.error('Failed to create offer letter:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   const statusColors = {
     draft: 'bg-zinc-800/80 text-zinc-300 border-zinc-700',
@@ -319,25 +355,157 @@ export function OfferLetters() {
                   </button>
                </div>
                
-               <form className="space-y-6">
-                  <div>
-                    <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Candidate Name</label>
-                    <input type="text" className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" placeholder="Enter full name" />
-                  </div>
-                   <div className="grid grid-cols-2 gap-6">
-                     <div>
+               <form className="space-y-6" onSubmit={handleCreate}>
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-medium text-white border-b border-white/10 pb-2">Candidate & Role</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Candidate Name</label>
+                        <input 
+                          type="text" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
+                          placeholder="Enter full name"
+                          value={formData.candidate_name}
+                          onChange={(e) => setFormData({...formData, candidate_name: e.target.value})}
+                          required
+                        />
+                      </div>
+                      <div>
                         <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Role Title</label>
-                        <input type="text" className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" placeholder="e.g. Senior Engineer" />
-                     </div>
+                        <input 
+                          type="text" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
+                          placeholder="e.g. Senior Engineer"
+                          value={formData.position_title}
+                          onChange={(e) => setFormData({...formData, position_title: e.target.value})}
+                          required
+                        />
+                      </div>
                       <div>
                         <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Start Date</label>
-                        <input type="date" className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" />
+                        <input 
+                          type="date" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors"
+                          value={formData.start_date ? new Date(formData.start_date).toISOString().split('T')[0] : ''}
+                          onChange={(e) => setFormData({...formData, start_date: e.target.value})}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Expiration Date</label>
+                        <input 
+                          type="date" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors"
+                          value={formData.expiration_date ? new Date(formData.expiration_date).toISOString().split('T')[0] : ''}
+                          onChange={(e) => setFormData({...formData, expiration_date: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-medium text-white border-b border-white/10 pb-2">Compensation</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Annual Salary</label>
+                        <input 
+                          type="text" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
+                          placeholder="e.g. $150,000"
+                          value={formData.salary || ''}
+                          onChange={(e) => setFormData({...formData, salary: e.target.value})}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Bonus Potential</label>
+                        <input 
+                          type="text" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
+                          placeholder="e.g. 15% Annual"
+                          value={formData.bonus || ''}
+                          onChange={(e) => setFormData({...formData, bonus: e.target.value})}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Equity / Options</label>
+                        <input 
+                          type="text" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
+                          placeholder="e.g. 5,000 RSUs"
+                          value={formData.stock_options || ''}
+                          onChange={(e) => setFormData({...formData, stock_options: e.target.value})}
+                        />
+                      </div>
+                      <div>
+                         <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Employment Type</label>
+                         <select 
+                            className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors"
+                            value={formData.employment_type || 'Full-time'}
+                            onChange={(e) => setFormData({...formData, employment_type: e.target.value})}
+                         >
+                            <option value="Full-time">Full-time</option>
+                            <option value="Part-time">Part-time</option>
+                            <option value="Contract">Contract</option>
+                            <option value="Internship">Internship</option>
+                         </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-medium text-white border-b border-white/10 pb-2">Reporting & Location</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Manager Name</label>
+                        <input 
+                          type="text" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
+                          placeholder="e.g. David Chen"
+                          value={formData.manager_name || ''}
+                          onChange={(e) => setFormData({...formData, manager_name: e.target.value})}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Manager Title</label>
+                        <input 
+                          type="text" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
+                          placeholder="e.g. VP of Engineering"
+                          value={formData.manager_title || ''}
+                          onChange={(e) => setFormData({...formData, manager_title: e.target.value})}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Location</label>
+                        <input 
+                          type="text" 
+                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
+                          placeholder="e.g. San Francisco, CA (Hybrid)"
+                          value={formData.location || ''}
+                          onChange={(e) => setFormData({...formData, location: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                     <h3 className="text-sm font-medium text-white border-b border-white/10 pb-2">Benefits & Details</h3>
+                     <div>
+                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Benefits Summary</label>
+                        <textarea 
+                           className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors h-24 resize-none"
+                           placeholder="Describe benefits package..."
+                           value={formData.benefits || ''}
+                           onChange={(e) => setFormData({...formData, benefits: e.target.value})}
+                        />
                      </div>
-                   </div>
+                  </div>
 
                    <div className="flex items-center justify-end gap-3 pt-6 border-t border-white/5">
-                      <Button variant="secondary" onClick={() => setShowCreateForm(false)}>Cancel</Button>
-                      <Button>Generate Draft</Button>
+                      <Button variant="secondary" type="button" onClick={() => setShowCreateForm(false)}>Cancel</Button>
+                      <Button type="submit" disabled={isSubmitting}>
+                        {isSubmitting ? 'Generating...' : 'Generate Offer'}
+                      </Button>
                    </div>
                </form>
             </GlassCard>

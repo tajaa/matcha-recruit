@@ -1428,3 +1428,60 @@ export interface IRAuditLogResponse {
   entries: IRAuditLogEntry[];
   total: number;
 }
+
+// Offer Letter types
+export type OfferLetterStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+
+export interface OfferLetter {
+  id: string;
+  candidate_name: string;
+  position_title: string;
+  company_name: string;
+  status: OfferLetterStatus;
+  salary: string | null;
+  bonus: string | null;
+  stock_options: string | null;
+  start_date: string | null;
+  employment_type: string | null;
+  location: string | null;
+  benefits: string | null;
+  manager_name: string | null;
+  manager_title: string | null;
+  expiration_date: string | null;
+  created_at: string;
+  updated_at: string;
+  sent_at: string | null;
+}
+
+export interface OfferLetterCreate {
+  candidate_name: string;
+  position_title: string;
+  company_name: string;
+  salary?: string;
+  bonus?: string;
+  stock_options?: string;
+  start_date?: string;
+  employment_type?: string;
+  location?: string;
+  benefits?: string;
+  manager_name?: string;
+  manager_title?: string;
+  expiration_date?: string;
+}
+
+export interface OfferLetterUpdate {
+  candidate_name?: string;
+  position_title?: string;
+  company_name?: string;
+  status?: OfferLetterStatus;
+  salary?: string;
+  bonus?: string;
+  stock_options?: string;
+  start_date?: string;
+  employment_type?: string;
+  location?: string;
+  benefits?: string;
+  manager_name?: string;
+  manager_title?: string;
+  expiration_date?: string;
+}

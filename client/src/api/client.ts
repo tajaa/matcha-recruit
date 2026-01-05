@@ -97,6 +97,9 @@ import type {
   PolicyUpdate,
   PolicySignature,
   SignatureRequest,
+  OfferLetter,
+  OfferLetterCreate,
+  OfferLetterUpdate,
 
 } from '../types';
 import type {
@@ -1397,6 +1400,25 @@ export const policies = {
       request<{message: string}>(`/policies/signatures/${signatureId}/resend`, {
         method: 'POST',
       }),
+};
+
+// Offer Letters API
+export const offerLetters = {
+  list: () => request<OfferLetter[]>('/offer-letters'),
+
+  get: (id: string) => request<OfferLetter>(`/offer-letters/${id}`),
+
+  create: (data: OfferLetterCreate) =>
+    request<OfferLetter>('/offer-letters', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (id: string, data: OfferLetterUpdate) =>
+    request<OfferLetter>(`/offer-letters/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 };
 
 // =============================================================================

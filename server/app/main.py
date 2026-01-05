@@ -24,6 +24,7 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_pool(settings.database_url)
     await init_db()
+    print("[Matcha] Database initialized")
 
 
     # Initialize Redis notification manager (for worker task notifications)
@@ -76,6 +77,7 @@ from .routes import (
     positions_router,
     projects_router,
     public_jobs_router,
+    offer_letters_router,
 )
 from .routes.leads_agent import router as leads_agent_router
 from .routes.er_copilot import router as er_copilot_router
@@ -86,7 +88,6 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(companies_router, prefix="/api/companies", tags=["companies"])
 app.include_router(candidates_router, prefix="/api/candidates", tags=["candidates"])
 app.include_router(interviews_router, prefix="/api", tags=["interviews"])
-app.include_router(candidates_router, prefix="/api", tags=["candidates"])  # /api/company for company candidates
 app.include_router(matching_router, prefix="/api", tags=["matching"])
 app.include_router(positions_router, prefix="/api/positions", tags=["positions"])
 app.include_router(bulk_import_router, prefix="/api/bulk", tags=["bulk-import"])
@@ -101,6 +102,7 @@ app.include_router(ir_incidents_router, prefix="/api/ir/incidents", tags=["ir-in
 app.include_router(leads_agent_router, prefix="/api/leads-agent", tags=["leads-agent"])
 app.include_router(policies_router, prefix="/api", tags=["policies"])
 app.include_router(public_signatures_router, prefix="/api", tags=["public-signatures"])
+app.include_router(offer_letters_router, prefix="/api/offer-letters", tags=["offer-letters"])
 
 
 @app.get("/health")

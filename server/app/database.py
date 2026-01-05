@@ -472,6 +472,33 @@ async def init_db():
             END $$;
         """)
 
+        # Offer Letters table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS offer_letters (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                candidate_name VARCHAR(255) NOT NULL,
+                position_title VARCHAR(255) NOT NULL,
+                company_name VARCHAR(255) NOT NULL,
+                status VARCHAR(50) DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'accepted', 'rejected', 'expired')),
+                salary VARCHAR(255),
+                bonus VARCHAR(255),
+                stock_options VARCHAR(255),
+                start_date TIMESTAMP,
+                employment_type VARCHAR(100),
+                location VARCHAR(255),
+                benefits TEXT,
+                manager_name VARCHAR(255),
+                manager_title VARCHAR(255),
+                expiration_date TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                sent_at TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_offer_letters_status ON offer_letters(status)
+        """)
+
         # Tracked companies table (company watchlist)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS tracked_companies (
