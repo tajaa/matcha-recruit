@@ -189,7 +189,7 @@ function App() {
               <Route
                 path="er-copilot"
                 element={
-                  <ProtectedRoute roles={['admin']}>
+                  <ProtectedRoute roles={['admin', 'client']}>
                     <ERCopilot />
                   </ProtectedRoute>
                 }
@@ -197,7 +197,7 @@ function App() {
               <Route
                 path="er-copilot/:id"
                 element={
-                  <ProtectedRoute roles={['admin']}>
+                  <ProtectedRoute roles={['admin', 'client']}>
                     <ERCaseDetail />
                   </ProtectedRoute>
                 }
@@ -205,7 +205,7 @@ function App() {
               <Route
                 path="ir"
                 element={
-                  <ProtectedRoute roles={['admin']}>
+                  <ProtectedRoute roles={['admin', 'client']}>
                     <IRDashboard />
                   </ProtectedRoute>
                 }
@@ -213,7 +213,7 @@ function App() {
               <Route
                 path="ir/incidents"
                 element={
-                  <ProtectedRoute roles={['admin']}>
+                  <ProtectedRoute roles={['admin', 'client']}>
                     <IRList />
                   </ProtectedRoute>
                 }
@@ -221,7 +221,7 @@ function App() {
               <Route
                 path="ir/incidents/new"
                 element={
-                  <ProtectedRoute roles={['admin']}>
+                  <ProtectedRoute roles={['admin', 'client']}>
                     <IRCreate />
                   </ProtectedRoute>
                 }
@@ -229,7 +229,7 @@ function App() {
               <Route
                 path="ir/incidents/:id"
                 element={
-                  <ProtectedRoute roles={['admin']}>
+                  <ProtectedRoute roles={['admin', 'client']}>
                     <IRDetail />
                   </ProtectedRoute>
                 }

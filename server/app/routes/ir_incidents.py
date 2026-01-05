@@ -16,7 +16,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request, Query
 
 from ..database import get_connection
-from ..dependencies import require_admin
+from ..dependencies import require_admin, require_admin_or_client
 from ..config import get_settings
 from ..services.storage import get_storage
 from ..models.ir_incident import (
@@ -129,7 +129,7 @@ def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:
 async def create_incident(
     incident: IRIncidentCreate,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Create a new incident report."""
     incident_number = generate_incident_number()
@@ -185,7 +185,7 @@ async def list_incidents(
     search: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """List incidents with filters."""
     async with get_connection() as conn:
@@ -258,7 +258,7 @@ async def list_incidents(
 @router.get("/{incident_id}", response_model=IRIncidentResponse)
 async def get_incident(
     incident_id: UUID,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get a single incident by ID."""
     async with get_connection() as conn:
@@ -284,7 +284,7 @@ async def update_incident(
     incident_id: UUID,
     incident: IRIncidentUpdate,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Update an incident report."""
     async with get_connection() as conn:
@@ -414,7 +414,7 @@ async def update_incident(
 async def delete_incident(
     incident_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Delete an incident and all related data."""
     async with get_connection() as conn:
@@ -457,7 +457,7 @@ async def upload_document(
     request: Request,
     file: UploadFile = File(...),
     document_type: str = Form("other"),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Upload a document to an incident."""
     # Validate incident exists
@@ -542,7 +542,7 @@ async def upload_document(
 @router.get("/{incident_id}/documents", response_model=list[IRDocumentResponse])
 async def list_documents(
     incident_id: UUID,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """List all documents for an incident."""
     async with get_connection() as conn:
@@ -583,7 +583,7 @@ async def delete_document(
     incident_id: UUID,
     document_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Delete a document from an incident."""
     async with get_connection() as conn:
@@ -629,7 +629,7 @@ async def delete_document(
 
 @router.get("/analytics/summary", response_model=AnalyticsSummary)
 async def get_analytics_summary(
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get summary analytics for the dashboard."""
     async with get_connection() as conn:
@@ -684,7 +684,7 @@ async def get_analytics_summary(
 async def get_analytics_trends(
     period: str = Query("daily", enum=["daily", "weekly", "monthly"]),
     days: int = Query(30, ge=7, le=365),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get incident trends over time."""
     async with get_connection() as conn:
@@ -736,7 +736,7 @@ async def get_analytics_trends(
 @router.get("/analytics/locations", response_model=LocationAnalysis)
 async def get_analytics_locations(
     limit: int = Query(10, ge=1, le=50),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get incident hotspots by location."""
     async with get_connection() as conn:
@@ -797,7 +797,7 @@ async def get_audit_log(
     incident_id: UUID,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get the audit log for an incident."""
     async with get_connection() as conn:
@@ -852,7 +852,7 @@ async def get_audit_log(
 async def analyze_categorization(
     incident_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Auto-categorize an incident using AI."""
     from ..services.ir_analysis import get_ir_analyzer
@@ -868,7 +868,7 @@ async def analyze_categorization(
         # Check for cached analysis
         cached = await conn.fetchrow(
             """
-            SELECT result FROM ir_incident_analysis
+            SELECT analysis_data FROM ir_incident_analysis
             WHERE incident_id = $1 AND analysis_type = 'categorization'
             ORDER BY created_at DESC LIMIT 1
             """,
@@ -876,7 +876,7 @@ async def analyze_categorization(
         )
 
         if cached:
-            result = json.loads(cached["result"]) if isinstance(cached["result"], str) else cached["result"]
+            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
             return CategorizationAnalysis(
                 suggested_type=result["suggested_type"],
                 confidence=result["confidence"],
@@ -896,7 +896,7 @@ async def analyze_categorization(
         # Cache the result
         await conn.execute(
             """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, result)
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
             VALUES ($1, 'categorization', $2)
             """,
             str(incident_id),
@@ -927,7 +927,7 @@ async def analyze_categorization(
 async def analyze_severity(
     incident_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Assess incident severity using AI."""
     from ..services.ir_analysis import get_ir_analyzer
@@ -943,7 +943,7 @@ async def analyze_severity(
         # Check for cached analysis
         cached = await conn.fetchrow(
             """
-            SELECT result FROM ir_incident_analysis
+            SELECT analysis_data FROM ir_incident_analysis
             WHERE incident_id = $1 AND analysis_type = 'severity'
             ORDER BY created_at DESC LIMIT 1
             """,
@@ -951,7 +951,7 @@ async def analyze_severity(
         )
 
         if cached:
-            result = json.loads(cached["result"]) if isinstance(cached["result"], str) else cached["result"]
+            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
             return SeverityAnalysis(
                 suggested_severity=result["suggested_severity"],
                 factors=result["factors"],
@@ -974,7 +974,7 @@ async def analyze_severity(
         # Cache the result
         await conn.execute(
             """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, result)
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
             VALUES ($1, 'severity', $2)
             """,
             str(incident_id),
@@ -1005,7 +1005,7 @@ async def analyze_severity(
 async def analyze_root_cause(
     incident_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Perform root cause analysis using AI."""
     from ..services.ir_analysis import get_ir_analyzer
@@ -1021,7 +1021,7 @@ async def analyze_root_cause(
         # Check for cached analysis
         cached = await conn.fetchrow(
             """
-            SELECT result FROM ir_incident_analysis
+            SELECT analysis_data FROM ir_incident_analysis
             WHERE incident_id = $1 AND analysis_type = 'root_cause'
             ORDER BY created_at DESC LIMIT 1
             """,
@@ -1029,7 +1029,7 @@ async def analyze_root_cause(
         )
 
         if cached:
-            result = json.loads(cached["result"]) if isinstance(cached["result"], str) else cached["result"]
+            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
             return RootCauseAnalysis(
                 primary_cause=result["primary_cause"],
                 contributing_factors=result["contributing_factors"],
@@ -1056,7 +1056,7 @@ async def analyze_root_cause(
         # Cache the result
         await conn.execute(
             """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, result)
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
             VALUES ($1, 'root_cause', $2)
             """,
             str(incident_id),
@@ -1088,7 +1088,7 @@ async def analyze_root_cause(
 async def analyze_recommendations(
     incident_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Generate corrective action recommendations using AI."""
     from ..services.ir_analysis import get_ir_analyzer
@@ -1104,7 +1104,7 @@ async def analyze_recommendations(
         # Check for cached analysis
         cached = await conn.fetchrow(
             """
-            SELECT result FROM ir_incident_analysis
+            SELECT analysis_data FROM ir_incident_analysis
             WHERE incident_id = $1 AND analysis_type = 'recommendations'
             ORDER BY created_at DESC LIMIT 1
             """,
@@ -1112,7 +1112,7 @@ async def analyze_recommendations(
         )
 
         if cached:
-            result = json.loads(cached["result"]) if isinstance(cached["result"], str) else cached["result"]
+            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
             from ..models.ir_incident import RecommendationItem
             return RecommendationsAnalysis(
                 recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
@@ -1133,7 +1133,7 @@ async def analyze_recommendations(
         # Cache the result
         await conn.execute(
             """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, result)
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
             VALUES ($1, 'recommendations', $2)
             """,
             str(incident_id),
@@ -1164,7 +1164,7 @@ async def analyze_recommendations(
 async def analyze_similar_incidents(
     incident_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Find similar historical incidents using AI."""
     from ..services.ir_analysis import get_ir_analyzer
@@ -1218,7 +1218,7 @@ async def analyze_similar_incidents(
         # Cache the result
         await conn.execute(
             """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, result)
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
             VALUES ($1, 'similar', $2)
             """,
             str(incident_id),
@@ -1264,7 +1264,7 @@ async def clear_analysis_cache(
     incident_id: UUID,
     analysis_type: str,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Clear cached analysis to force re-analysis."""
     valid_types = ["categorization", "severity", "root_cause", "recommendations", "similar"]

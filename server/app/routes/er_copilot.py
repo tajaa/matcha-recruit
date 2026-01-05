@@ -17,7 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 
 from ..database import get_connection
-from ..dependencies import require_admin
+from ..dependencies import require_admin, require_admin_or_client
 from ..config import get_settings
 from ..services.storage import get_storage
 from ..models.er_case import (
@@ -88,7 +88,7 @@ async def log_audit(
 async def create_case(
     case: ERCaseCreate,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Create a new ER investigation case."""
     case_number = generate_case_number()
@@ -136,7 +136,7 @@ async def create_case(
 @router.get("", response_model=ERCaseListResponse)
 async def list_cases(
     status: Optional[str] = None,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """List all ER cases with optional status filter."""
     async with get_connection() as conn:
@@ -176,7 +176,7 @@ async def list_cases(
 @router.get("/{case_id}", response_model=ERCaseResponse)
 async def get_case(
     case_id: UUID,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get a case by ID."""
     async with get_connection() as conn:
@@ -214,7 +214,7 @@ async def update_case(
     case_id: UUID,
     case: ERCaseUpdate,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Update a case."""
     async with get_connection() as conn:
@@ -301,7 +301,7 @@ async def update_case(
 async def delete_case(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Delete a case and all associated data."""
     async with get_connection() as conn:
@@ -342,7 +342,7 @@ async def upload_document(
     request: Request,
     file: UploadFile = File(...),
     document_type: str = Form("transcript"),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Upload a document to a case. Triggers async processing."""
     # Validate case exists
@@ -446,7 +446,7 @@ async def upload_document(
 @router.get("/{case_id}/documents", response_model=list[ERDocumentResponse])
 async def list_documents(
     case_id: UUID,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """List all documents in a case."""
     async with get_connection() as conn:
@@ -484,7 +484,7 @@ async def list_documents(
 async def get_document(
     case_id: UUID,
     doc_id: UUID,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get document details."""
     async with get_connection() as conn:
@@ -523,7 +523,7 @@ async def delete_document(
     case_id: UUID,
     doc_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Delete a document and its chunks."""
     async with get_connection() as conn:
@@ -560,7 +560,7 @@ async def delete_document(
 async def generate_timeline(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Generate timeline analysis. Queues async task."""
     async with get_connection() as conn:
@@ -603,7 +603,7 @@ async def generate_timeline(
 @router.get("/{case_id}/analysis/timeline")
 async def get_timeline(
     case_id: UUID,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get cached timeline analysis."""
     async with get_connection() as conn:
@@ -639,7 +639,7 @@ async def get_timeline(
 async def generate_discrepancies(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Generate discrepancy analysis. Queues async task."""
     async with get_connection() as conn:
@@ -680,7 +680,7 @@ async def generate_discrepancies(
 @router.get("/{case_id}/analysis/discrepancies")
 async def get_discrepancies(
     case_id: UUID,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get cached discrepancy analysis."""
     async with get_connection() as conn:
@@ -716,7 +716,7 @@ async def run_policy_check(
     case_id: UUID,
     policy_document_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Run policy violation check. Queues async task."""
     async with get_connection() as conn:
@@ -777,7 +777,7 @@ async def run_policy_check(
 @router.get("/{case_id}/analysis/policy-check")
 async def get_policy_check(
     case_id: UUID,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get cached policy check analysis."""
     async with get_connection() as conn:
@@ -816,7 +816,7 @@ async def get_policy_check(
 async def search_evidence(
     case_id: UUID,
     search: EvidenceSearchRequest,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Search case evidence using semantic similarity."""
     settings = get_settings()
@@ -869,7 +869,7 @@ async def search_evidence(
 async def generate_summary_report(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Generate investigation summary report."""
     async with get_connection() as conn:
@@ -901,7 +901,7 @@ async def generate_determination_letter(
     case_id: UUID,
     report_request: ReportGenerateRequest,
     request: Request,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Generate determination letter."""
     if not report_request.determination:
@@ -949,7 +949,7 @@ async def generate_determination_letter(
 async def get_report(
     case_id: UUID,
     report_type: str,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get generated report."""
     valid_types = ["summary", "determination"]
@@ -990,7 +990,7 @@ async def get_audit_log(
     case_id: UUID,
     limit: int = 100,
     offset: int = 0,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_client),
 ):
     """Get audit log for a case."""
     async with get_connection() as conn:
