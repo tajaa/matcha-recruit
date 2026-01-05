@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { Button } from '../components/Button';
 import { GlassCard } from '../components/GlassCard';
 import { FileText, BarChart3, ChevronRight } from 'lucide-react';
