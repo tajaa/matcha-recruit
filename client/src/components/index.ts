@@ -10,3 +10,4 @@ export { PositionMatchCard } from './PositionMatchCard';
 export { ProtectedRoute } from './ProtectedRoute';
 export { ParticleSphere } from './ParticleSphere';
 export { CompanySelectModal } from './CompanySelectModal';
+export { ComplianceWidget } from './ComplianceWidget';

@@ -83,6 +83,7 @@ from .routes.leads_agent import router as leads_agent_router
 from .routes.er_copilot import router as er_copilot_router
 from .routes.policies import router as policies_router
 from .routes.public_signatures import router as public_signatures_router
+from .routes.compliance import router as compliance_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(companies_router, prefix="/api/companies", tags=["companies"])
@@ -103,6 +104,7 @@ app.include_router(leads_agent_router, prefix="/api/leads-agent", tags=["leads-a
 app.include_router(policies_router, prefix="/api", tags=["policies"])
 app.include_router(public_signatures_router, prefix="/api", tags=["public-signatures"])
 app.include_router(offer_letters_router, prefix="/api/offer-letters", tags=["offer-letters"])
+app.include_router(compliance_router, prefix="/api/compliance", tags=["compliance"])
 
 
 @app.get("/health")

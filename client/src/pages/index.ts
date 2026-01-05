@@ -36,3 +36,4 @@ export { OfferLetters } from './OfferLetters';
 export { Policies } from './Policies';
 export { PolicyDetail } from './PolicyDetail';
 export { PolicyForm } from './PolicyForm';
+export { Compliance } from './Compliance';

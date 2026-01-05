@@ -1,5 +1,6 @@
 import { GlassCard } from '../components/GlassCard';
 import { Button } from '../components/Button';
+import { ComplianceWidget } from '../components/ComplianceWidget';
 import { ArrowUpRight, Users, FileText, CheckCircle2, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -79,37 +80,12 @@ export function Dashboard() {
           </GlassCard>
         </div>
 
-        <div className="space-y-6">
+<div className="space-y-6">
            <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-widest">System Status</h2>
-          </div>
-          <GlassCard className="p-6 space-y-4">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-400">API Status</span>
-              <span className="flex items-center gap-2 text-emerald-400 font-mono text-xs">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                OPERATIONAL
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-400">Email Service</span>
-              <span className="text-emerald-400 font-mono text-xs">OPERATIONAL</span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-400">Signature Vault</span>
-              <span className="text-emerald-400 font-mono text-xs">SECURE</span>
-            </div>
-            
-            <div className="pt-4 mt-4 border-t border-white/5">
-              <p className="text-[10px] text-zinc-500 leading-relaxed">
-                System backup completed successfully at 04:00 UTC. Next backup scheduled in 12 hours.
-              </p>
-            </div>
-          </GlassCard>
-        </div>
+             <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-widest">Compliance</h2>
+           </div>
+           <ComplianceWidget />
+         </div>
       </div>
     </div>
   );

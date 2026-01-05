@@ -1084,6 +1084,89 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_policy_signatures_status ON policy_signatures(status)
         """)
 
+        # ===========================================
+        # Compliance Tracking Tables
+        # ===========================================
+
+        # Business locations table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS business_locations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                name VARCHAR(255),
+                address VARCHAR(500),
+                city VARCHAR(100) NOT NULL,
+                state VARCHAR(2) NOT NULL,
+                county VARCHAR(100),
+                zipcode VARCHAR(10) NOT NULL,
+                is_active BOOLEAN DEFAULT true,
+                last_compliance_check TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_business_locations_company_id ON business_locations(company_id)
+        """)
+
+        # Compliance requirements table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS compliance_requirements (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                location_id UUID NOT NULL REFERENCES business_locations(id) ON DELETE CASCADE,
+                category VARCHAR(50) NOT NULL,
+                jurisdiction_level VARCHAR(20) NOT NULL,
+                jurisdiction_name VARCHAR(100) NOT NULL,
+                title VARCHAR(500) NOT NULL,
+                description TEXT,
+                current_value VARCHAR(100),
+                numeric_value DECIMAL(10, 4),
+                source_url VARCHAR(500),
+                source_name VARCHAR(100),
+                effective_date DATE,
+                expiration_date DATE,
+                previous_value VARCHAR(100),
+                last_changed_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_requirements_location_id ON compliance_requirements(location_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_requirements_category ON compliance_requirements(category)
+        """)
+
+        # Compliance alerts table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS compliance_alerts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                location_id UUID NOT NULL REFERENCES business_locations(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                requirement_id UUID REFERENCES compliance_requirements(id) ON DELETE SET NULL,
+                title VARCHAR(500) NOT NULL,
+                message TEXT NOT NULL,
+                severity VARCHAR(20) NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'warning', 'critical')),
+                status VARCHAR(20) NOT NULL DEFAULT 'unread' CHECK (status IN ('unread', 'read', 'dismissed', 'actioned')),
+                category VARCHAR(50),
+                action_required TEXT,
+                deadline DATE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                read_at TIMESTAMP,
+                dismissed_at TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_alerts_company_id ON compliance_alerts(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_alerts_location_id ON compliance_alerts(location_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_alerts_status ON compliance_alerts(status)
+        """)
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:

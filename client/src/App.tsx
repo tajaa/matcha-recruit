@@ -29,6 +29,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Policies = lazy(() => import('./pages/Policies'));
 const PolicyDetail = lazy(() => import('./pages/PolicyDetail'));
 const PolicyForm = lazy(() => import('./pages/PolicyForm'));
+const Compliance = lazy(() => import('./pages/Compliance'));
 const IRDashboard = lazy(() => import('./pages/IRDashboard'));
 const IRList = lazy(() => import('./pages/IRList'));
 const IRCreate = lazy(() => import('./pages/IRCreate'));
@@ -144,6 +145,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <PolicyDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="compliance"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <Compliance />
                   </ProtectedRoute>
                 }
               />

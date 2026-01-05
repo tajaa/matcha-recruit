@@ -15,6 +15,7 @@ from .ir_incidents import router as ir_incidents_router
 from .policies import router as policies_router
 from .public_signatures import router as public_signatures_router
 from .offer_letters import router as offer_letters_router
+from .compliance import router as compliance_router
 
 __all__ = [
     "companies_router",
@@ -34,4 +35,5 @@ __all__ = [
     "policies_router",
     "public_signatures_router",
     "offer_letters_router",
+    "compliance_router",
 ]
