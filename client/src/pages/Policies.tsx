@@ -79,8 +79,7 @@ export function Policies() {
   };
 
   useEffect(() => {
-    // Only load if we have no test data or want to refresh
-    // loadPolicies(filterStatus);
+    loadPolicies(filterStatus);
   }, []);
 
   const handleFilterChange = (status: string) => {
