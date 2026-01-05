@@ -50,9 +50,15 @@ else
         echo -e "${YELLOW}Starting PostgreSQL...${NC}"
         docker start matcha-postgres
     else
-        echo -e "${RED}matcha-postgres container does not exist!${NC}"
-        echo -e "${RED}Please create it first with the shared postgres setup.${NC}"
-        exit 1
+        echo -e "${YELLOW}Creating PostgreSQL container...${NC}"
+        docker run -d \
+            --name matcha-postgres \
+            -p 5432:5432 \
+            -e POSTGRES_DB=matcha \
+            -e POSTGRES_USER=matcha \
+            -e POSTGRES_PASSWORD=matcha_dev \
+            -v matcha_postgres_data:/var/lib/postgresql/data \
+            pgvector/pgvector:pg15
     fi
 
     echo -e "${YELLOW}Waiting for PostgreSQL to be ready...${NC}"
