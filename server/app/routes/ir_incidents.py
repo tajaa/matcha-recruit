@@ -134,6 +134,11 @@ async def create_incident(
     """Create a new incident report."""
     incident_number = generate_incident_number()
 
+    # Ensure occurred_at is naive UTC for TIMESTAMP column
+    occurred_at = incident.occurred_at
+    if occurred_at.tzinfo:
+        occurred_at = occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
+
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -150,7 +155,7 @@ async def create_incident(
             incident.description,
             incident.incident_type,
             incident.severity,
-            incident.occurred_at,
+            occurred_at,
             incident.location,
             incident.reported_by_name,
             incident.reported_by_email,
@@ -338,7 +343,11 @@ async def update_incident(
 
         if incident.occurred_at is not None:
             updates.append(f"occurred_at = ${param_idx}")
-            params.append(incident.occurred_at)
+            # Ensure occurred_at is naive UTC for TIMESTAMP column
+            occurred_at = incident.occurred_at
+            if occurred_at.tzinfo:
+                occurred_at = occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
+            params.append(occurred_at)
             param_idx += 1
 
         if incident.location is not None:
