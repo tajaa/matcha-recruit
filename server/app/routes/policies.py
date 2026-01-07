@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from typing import List, Optional
 
 from ..dependencies import require_client
@@ -39,10 +39,22 @@ async def list_policies(
 
 @router.post("", response_model=PolicyResponse)
 async def create_policy(
-    data: PolicyCreate,
+    title: str = Form(...),
+    description: Optional[str] = Form(None),
+    content: str = Form(""),
+    version: str = Form("1.0"),
+    status: PolicyStatus = Form("draft"),
     file: Optional[UploadFile] = File(None),
     current_user: CurrentUser = Depends(require_client),
 ):
+    data = PolicyCreate(
+        title=title,
+        description=description,
+        content=content,
+        version=version,
+        status=status
+    )
+
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")

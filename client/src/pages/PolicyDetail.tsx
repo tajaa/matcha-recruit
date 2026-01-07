@@ -7,128 +7,6 @@ import { policies, candidates } from '../api/client';
 import type { Policy, PolicySignature, SignatureRequest } from '../types';
 import { ArrowLeft, Upload, Trash2, Mail } from 'lucide-react';
 
-// Mock data for test policies (Preserved)
-const MOCK_POLICIES: Record<string, Policy> = {
-  'p1': {
-    id: 'p1',
-    company_id: 'c1',
-    company_name: 'Matcha Recruit',
-    title: 'Remote Work Policy',
-    description: 'Guidelines and requirements for employees working remotely or in a hybrid capacity.',
-    content: `REMOTE WORK POLICY
-
-1. PURPOSE
-This policy establishes guidelines for employees who work from a location other than our primary offices.
-
-2. ELIGIBILITY
-Remote work is available to employees whose duties can be fulfilled effectively from a remote location.
-
-3. WORKSPACE
-Employees must have a designated workspace that is quiet, safe, and free from distractions.
-
-4. HOURS OF WORK
-Remote employees are expected to work their standard scheduled hours unless approved otherwise.
-
-5. COMMUNICATION
-Regular communication via Slack, Email, and Video calls is required.`,
-    file_url: null,
-    version: '1.2',
-    status: 'active',
-    signature_count: 45,
-    signed_count: 42,
-    pending_signatures: 3,
-    created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    created_by: 'admin1'
-  },
-  'p2': {
-    id: 'p2',
-    company_id: 'c1',
-    company_name: 'Matcha Recruit',
-    title: 'Code of Conduct',
-    description: 'Expected behavior and professional standards for all members of the organization.',
-    content: `CODE OF CONDUCT
-
-1. PROFESSIONALISM
-Treat all colleagues, clients, and partners with respect and dignity.
-
-2. INTEGRITY
-Act with honesty and transparency in all business dealings.
-
-3. CONFIDENTIALITY
-Protect sensitive company and client information.
-
-4. DIVERSITY & INCLUSION
-We are committed to maintaining a diverse and inclusive workplace free from discrimination.`,
-    file_url: null,
-    version: '2.0',
-    status: 'active',
-    signature_count: 120,
-    signed_count: 118,
-    pending_signatures: 2,
-    created_at: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString(),
-    created_by: 'admin1'
-  },
-  'p3': {
-    id: 'p3',
-    company_id: 'c1',
-    company_name: 'Matcha Recruit',
-    title: '2026 Bonus Structure',
-    description: 'Proposed annual performance bonus criteria and payout schedules for the upcoming year.',
-    content: 'CONFIDENTIAL: 2026 BONUS STRUCTURE DRAFT...',
-    file_url: null,
-    version: '0.1',
-    status: 'draft',
-    signature_count: 0,
-    signed_count: 0,
-    pending_signatures: 0,
-    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    created_by: 'admin1'
-  }
-};
-
-const MOCK_SIGNATURES: Record<string, PolicySignature[]> = {
-  'p1': [
-    {
-      id: 's1',
-      policy_id: 'p1',
-      policy_title: 'Remote Work Policy',
-      signer_type: 'employee',
-      signer_id: 'u1',
-      signer_name: 'Alice Johnson',
-      signer_email: 'alice@matcha.dev',
-      status: 'signed',
-      signed_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-      signature_data: 'signed',
-      ip_address: '192.168.1.1',
-      token: 'tok1',
-      expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
-    }
-  ],
-  'p2': [
-    {
-      id: 's3',
-      policy_id: 'p2',
-      policy_title: 'Code of Conduct',
-      signer_type: 'employee',
-      signer_id: 'u1',
-      signer_name: 'Alice Johnson',
-      signer_email: 'alice@matcha.dev',
-      status: 'signed',
-      signed_at: new Date(Date.now() - 300 * 24 * 60 * 60 * 1000).toISOString(),
-      signature_data: 'signed',
-      ip_address: '192.168.1.1',
-      token: 'tok3',
-      expires_at: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString(),
-      created_at: new Date(Date.now() - 360 * 24 * 60 * 60 * 1000).toISOString()
-    }
-  ],
-  'p3': []
-};
-
 interface CandidateOption {
   id: string;
   name: string;
@@ -170,10 +48,6 @@ export function PolicyDetail() {
   const loadPolicy = async () => {
     try {
       setLoading(true);
-      if (id && MOCK_POLICIES[id]) {
-        setPolicy(MOCK_POLICIES[id]);
-        return;
-      }
       const data = await policies.get(id!);
       setPolicy(data);
     } catch (error) {
@@ -185,10 +59,6 @@ export function PolicyDetail() {
 
   const loadSignatures = async () => {
     try {
-      if (id && MOCK_SIGNATURES[id]) {
-        setSignatures(MOCK_SIGNATURES[id]);
-        return;
-      }
       const data = await policies.listSignatures(id!);
       setSignatures(data);
     } catch (error) {
@@ -199,21 +69,12 @@ export function PolicyDetail() {
   const loadCandidates = async () => {
     try {
       const data = await candidates.listForCompany();
-      if (!data || data.length === 0) {
-        setCandidateList([
-          { id: 'mc1', name: 'Sarah Miller', email: 'sarah.m@example.com' },
-          { id: 'mc2', name: 'James Wilson', email: 'james.w@example.com' },
-          { id: 'mc3', name: 'Emily Chen', email: 'emily.c@example.com' }
-        ]);
-      } else {
+      if (data) {
         setCandidateList(data);
       }
     } catch (error) {
-      setCandidateList([
-        { id: 'mc1', name: 'Sarah Miller', email: 'sarah.m@example.com' },
-        { id: 'mc2', name: 'James Wilson', email: 'james.w@example.com' },
-        { id: 'mc3', name: 'Emily Chen', email: 'emily.c@example.com' }
-      ]);
+      console.error('Failed to load candidates:', error);
+      setCandidateList([]);
     }
   };
 
@@ -225,9 +86,7 @@ export function PolicyDetail() {
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this policy?')) return;
     try {
-      if (id && !MOCK_POLICIES[id]) {
-        await policies.delete(id!);
-      }
+      await policies.delete(id!);
       navigate('/app/policies');
     } catch (error) {
       console.error('Failed to delete policy:', error);
@@ -267,48 +126,21 @@ export function PolicyDetail() {
     if (validSigners.length === 0) return;
 
     try {
-      if (id && MOCK_POLICIES[id]) {
-        await new Promise(resolve => setTimeout(resolve, 800));
-        const newSignatures: PolicySignature[] = validSigners.map((signer, idx) => ({
-          id: `new_sig_${Date.now()}_${idx}`,
-          policy_id: id,
-          policy_title: MOCK_POLICIES[id].title,
-          signer_type: signer.type,
-          signer_id: signer.id || null,
-          signer_name: signer.name,
-          signer_email: signer.email,
-          status: 'pending',
-          signed_at: null,
-          signature_data: null,
-          ip_address: null,
-          token: `mock_token_${Date.now()}`,
-          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-          created_at: new Date().toISOString()
-        }));
-        if (MOCK_SIGNATURES[id]) {
-          MOCK_SIGNATURES[id] = [...newSignatures, ...MOCK_SIGNATURES[id]];
-        }
-        setSignatures(prev => [...newSignatures, ...prev]);
-        setShowSignatureModal(false);
-        setSigners([{ name: '', email: '', type: 'candidate' as const }]);
-        alert(`Successfully sent ${validSigners.length} signature requests (Simulation)`);
-        return;
-      }
       await policies.sendSignatures(id!, validSigners);
       setShowSignatureModal(false);
       setSigners([{ name: '', email: '', type: 'candidate' as const }]);
       loadSignatures();
+      alert(`Successfully sent ${validSigners.length} signature requests`);
     } catch (error) {
       console.error('Failed to send signature requests:', error);
+      alert('Failed to send signature requests');
     }
   };
 
   const handleCancelSignature = async (signatureId: string) => {
     if (!confirm('Cancel this signature request?')) return;
     try {
-      if (!signatureId.startsWith('new_sig_')) {
-        await policies.cancelSignature(signatureId);
-      }
+      await policies.cancelSignature(signatureId);
       setSignatures(signatures.filter(s => s.id !== signatureId));
     } catch (error) {
       console.error('Failed to cancel signature:', error);
@@ -317,9 +149,7 @@ export function PolicyDetail() {
 
   const handleResendSignature = async (signatureId: string) => {
     try {
-      if (!signatureId.startsWith('new_sig_')) {
-        await policies.resendSignature(signatureId);
-      }
+      await policies.resendSignature(signatureId);
       alert('Signature request resent');
     } catch (error) {
       console.error('Failed to resend signature:', error);
