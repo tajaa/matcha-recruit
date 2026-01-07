@@ -1,7 +1,7 @@
 from typing import Optional, List
 from uuid import UUID
 
-from .compliance import (
+from ..models.compliance import (
     BusinessLocation,
     ComplianceRequirement,
     ComplianceAlert,
