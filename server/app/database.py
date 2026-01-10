@@ -1167,6 +1167,35 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_compliance_alerts_status ON compliance_alerts(status)
         """)
 
+        # Blog posts table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS blog_posts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                title VARCHAR(255) NOT NULL,
+                slug VARCHAR(255) NOT NULL UNIQUE,
+                content TEXT NOT NULL,
+                excerpt TEXT,
+                cover_image TEXT,
+                status VARCHAR(50) DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+                tags JSONB DEFAULT '[]',
+                meta_title VARCHAR(255),
+                meta_description TEXT,
+                published_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_blog_posts_slug ON blog_posts(slug)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_blog_posts_status ON blog_posts(status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_blog_posts_published_at ON blog_posts(published_at)
+        """)
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:
