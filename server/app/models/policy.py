@@ -92,6 +92,8 @@ class PolicySignatureResponse(BaseModel):
     id: UUID
     policy_id: UUID
     policy_title: Optional[str] = None
+    policy_content: Optional[str] = None
+    policy_file_url: Optional[str] = None
     signer_type: SignerType
     signer_id: Optional[UUID] = None
     signer_name: str
@@ -101,4 +103,3 @@ class PolicySignatureResponse(BaseModel):
     signature_data: Optional[str] = None
     expires_at: datetime
     created_at: datetime
-

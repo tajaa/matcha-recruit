@@ -1,3 +1,5 @@
+import html
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
@@ -28,6 +30,18 @@ async def view_signature_page(token: str):
             status_code=400,
         )
 
+    policy_content = (signature.policy_content or "").strip()
+    if policy_content:
+        policy_body_html = html.escape(policy_content)
+    elif signature.policy_file_url:
+        file_url = html.escape(signature.policy_file_url, quote=True)
+        policy_body_html = (
+            f'<a href="{file_url}" target="_blank" rel="noopener noreferrer">'
+            "View policy document</a>"
+        )
+    else:
+        policy_body_html = "Policy content is unavailable."
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -56,7 +70,7 @@ async def view_signature_page(token: str):
         <p><strong>Email:</strong> {signature.signer_email}</p>
         <p><strong>Expires:</strong> {signature.expires_at.strftime('%B %d, %Y at %I:%M %p')}</p>
 
-        <div class="policy-content">{signature.policy_title}</div>
+        <div class="policy-content">{policy_body_html}</div>
 
         <h2>Your Signature</h2>
         <p>Please sign below to accept this policy.</p>

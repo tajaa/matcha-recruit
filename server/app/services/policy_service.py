@@ -227,7 +227,9 @@ class SignatureService:
                 """
                     SELECT
                         ps.*,
-                        p.title as policy_title
+                        p.title as policy_title,
+                        p.content as policy_content,
+                        p.file_url as policy_file_url
                     FROM policy_signatures ps
                     JOIN policies p ON ps.policy_id = p.id
                     WHERE ps.token = $1
