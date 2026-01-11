@@ -151,6 +151,23 @@ const navSections: NavSection[] = [
       },
     ],
   },
+  {
+    title: 'Content',
+    roles: ['admin'],
+    items: [
+      {
+        path: '/app/blog',
+        label: 'Blog',
+        roles: ['admin'],
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 4h9l3 3v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 9h8M8 13h8M8 17h5" />
+          </svg>
+        ),
+      },
+    ],
+  },
 ];
 
 // Flatten for mobile menu and legacy compatibility

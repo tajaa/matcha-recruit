@@ -38,6 +38,8 @@ const InterviewPrepAdmin = lazy(() => import('./pages/InterviewPrepAdmin'));
 const PublicJobs = lazy(() => import('./pages/PublicJobs'));
 const PublicJobDetail = lazy(() => import('./pages/PublicJobDetail'));
 const PublicJobApply = lazy(() => import('./pages/PublicJobApply'));
+const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
+const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 
 // Loading fallback
 function PageLoader() {
@@ -153,6 +155,30 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <Compliance />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="blog"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <BlogAdmin />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="blog/new"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <BlogEditor />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="blog/:slug"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <BlogEditor />
                   </ProtectedRoute>
                 }
               />

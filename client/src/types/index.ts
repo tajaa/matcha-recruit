@@ -1429,6 +1429,57 @@ export interface IRAuditLogResponse {
   total: number;
 }
 
+// Blog types
+export type BlogStatus = 'draft' | 'published' | 'archived';
+
+export interface BlogPost {
+  id: string;
+  title: string;
+  slug: string;
+  content: string;
+  excerpt: string | null;
+  cover_image: string | null;
+  status: BlogStatus;
+  tags: string[];
+  meta_title: string | null;
+  meta_description: string | null;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+  author_id?: string | null;
+  author_name?: string | null;
+  author_email?: string | null;
+}
+
+export interface BlogPostCreate {
+  title: string;
+  slug: string;
+  content: string;
+  excerpt?: string | null;
+  cover_image?: string | null;
+  status?: BlogStatus;
+  tags?: string[];
+  meta_title?: string | null;
+  meta_description?: string | null;
+}
+
+export interface BlogPostUpdate {
+  title?: string;
+  slug?: string;
+  content?: string;
+  excerpt?: string | null;
+  cover_image?: string | null;
+  status?: BlogStatus;
+  tags?: string[];
+  meta_title?: string | null;
+  meta_description?: string | null;
+}
+
+export interface BlogListResponse {
+  items: BlogPost[];
+  total: number;
+}
+
 // Offer Letter types
 export type OfferLetterStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
 

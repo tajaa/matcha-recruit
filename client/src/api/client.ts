@@ -100,6 +100,11 @@ import type {
   OfferLetter,
   OfferLetterCreate,
   OfferLetterUpdate,
+  BlogPost,
+  BlogPostCreate,
+  BlogPostUpdate,
+  BlogStatus,
+  BlogListResponse,
 
 } from '../types';
 import type {
@@ -1353,6 +1358,63 @@ export const adminBeta = {
       body: JSON.stringify({ roles }),
     }),
   };
+
+// Blog API
+export const blogs = {
+  list: (options?: { status?: BlogStatus; tag?: string; page?: number; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.status) params.append('status', options.status);
+    if (options?.tag) params.append('tag', options.tag);
+    if (options?.page) params.append('page', String(options.page));
+    if (options?.limit) params.append('limit', String(options.limit));
+    const query = params.toString();
+    return request<BlogListResponse>(`/blogs${query ? `?${query}` : ''}`);
+  },
+
+  get: (slug: string) =>
+    request<BlogPost>(`/blogs/${slug}`),
+
+  create: (data: BlogPostCreate) =>
+    request<BlogPost>(`/blogs`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (id: string, data: BlogPostUpdate) =>
+    request<BlogPost>(`/blogs/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    request(`/blogs/${id}`, {
+      method: 'DELETE',
+    }),
+
+  uploadImage: async (file: File): Promise<{ url: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const headers: HeadersInit = {};
+    const token = getAccessToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/blogs/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return response.json();
+  },
+};
 
 export const policies = {
   list: (status?: string) => {
