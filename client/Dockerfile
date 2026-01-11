@@ -1,5 +1,5 @@
 # Stage 1: Build stage
-FROM --platform=linux/arm64 node:20-alpine as builder
+FROM --platform=linux/arm64 node:20.19-alpine AS builder
 
 WORKDIR /app
 
@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 # Copy source code
 COPY . .
