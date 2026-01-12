@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { GlassCard } from '../components/GlassCard';
 import { blogs } from '../api/client';
@@ -20,10 +20,13 @@ const formatDate = (value: string | null) => {
 
 export function BlogAdmin() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialStatus = (searchParams.get('status') as BlogStatus) || '';
+
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<BlogStatus | ''>('');
+  const [statusFilter, setStatusFilter] = useState<BlogStatus | ''>(initialStatus);
 
   const loadPosts = useCallback(async (status?: BlogStatus | '') => {
     try {
@@ -45,6 +48,11 @@ export function BlogAdmin() {
   const handleFilterChange = (value: string) => {
     const nextStatus = value as BlogStatus | '';
     setStatusFilter(nextStatus);
+    if (nextStatus) {
+      setSearchParams({ status: nextStatus });
+    } else {
+      setSearchParams({});
+    }
   };
 
   const handleDelete = async (postId: string) => {

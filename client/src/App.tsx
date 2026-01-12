@@ -38,6 +38,8 @@ const InterviewPrepAdmin = lazy(() => import('./pages/InterviewPrepAdmin'));
 const PublicJobs = lazy(() => import('./pages/PublicJobs'));
 const PublicJobDetail = lazy(() => import('./pages/PublicJobDetail'));
 const PublicJobApply = lazy(() => import('./pages/PublicJobApply'));
+const PublicBlogList = lazy(() => import('./pages/PublicBlogList'));
+const PublicBlogDetail = lazy(() => import('./pages/PublicBlogDetail'));
 const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
 const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 
@@ -74,9 +76,16 @@ function App() {
             <Route path="/onboarding/resume" element={<ResumeOnboarding />} />
             <Route path="/unauthorized" element={<Unauthorized />} />
 
+            {/* Public Blog */}
+            <Route path="/blog" element={<PublicBlogList />} />
+            <Route path="/blog/:slug" element={<PublicBlogDetail />} />
+
             {/* Public outreach routes (token-based access) */}
             <Route path="/outreach/:token" element={<OutreachLanding />} />
             <Route path="/outreach/:token/screening" element={<OutreachScreening />} />
+
+            {/* Admin Shortcuts */}
+            <Route path="/admin/blogs/drafts" element={<Navigate to="/app/blog?status=draft" replace />} />
 
             {/* Direct screening invite (handles auth internally) */}
             <Route path="/screening/:token" element={<ScreeningLanding />} />
