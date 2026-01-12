@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { blogs } from '../api/client';
 import type { BlogPost } from '../types';
 import { ArrowLeft, Calendar, User, Share2 } from 'lucide-react';
@@ -145,10 +147,10 @@ export function PublicBlogDetail() {
           )}
 
           {/* Content */}
-          <div className="prose prose-stone prose-lg max-w-none">
-            <div className="whitespace-pre-wrap font-serif text-zinc-800 leading-relaxed text-lg">
+          <div className="prose prose-stone prose-lg max-w-none prose-p:font-serif prose-p:text-zinc-800 prose-p:leading-relaxed prose-headings:font-sans prose-headings:font-light prose-a:text-emerald-600 prose-a:no-underline hover:prose-a:underline">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {post.content}
-            </div>
+            </ReactMarkdown>
           </div>
 
           {/* Footer / Share */}
