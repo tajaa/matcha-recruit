@@ -34,3 +34,17 @@ body {
 ::-webkit-scrollbar-thumb {
   @apply bg-zinc-700 rounded-full hover:bg-zinc-600;
 }
+
+@keyframes drift {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(-50px, -50px); }
+}
+
+@keyframes loading-bar {
+  0% { transform: translateY(100%); }
+  100% { transform: translateY(-100%); }
+}
+
+@utility animate-drift {
+  animation: drift 20s linear infinite;
+}
