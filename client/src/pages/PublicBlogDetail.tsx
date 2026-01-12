@@ -57,19 +57,19 @@ export function PublicBlogDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   if (error || !post) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center text-white space-y-4">
-        <p className="text-zinc-400">{error || 'Post not found'}</p>
+      <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center text-zinc-900 space-y-4">
+        <p className="text-zinc-600">{error || 'Post not found'}</p>
         <Link 
           to="/blog"
-          className="text-sm text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
+          className="text-sm text-emerald-600 hover:text-emerald-700 underline underline-offset-4"
         >
           Back to Blog
         </Link>
@@ -78,27 +78,13 @@ export function PublicBlogDetail() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white overflow-hidden relative font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
-       {/* Grid background */}
-       <div className="absolute inset-0 z-0 pointer-events-none">
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: `
-              linear-gradient(to right, #22c55e 1px, transparent 1px),
-              linear-gradient(to bottom, #22c55e 1px, transparent 1px)
-            `,
-            backgroundSize: '60px 60px',
-          }}
-        />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,#09090b_70%)]" />
-      </div>
-
+    <div className="min-h-screen bg-gradient-to-br from-[#fdfbf7] via-[#f7f7f5] to-[#f4f4f5] text-zinc-900 overflow-hidden relative font-sans selection:bg-emerald-200 selection:text-emerald-900">
+      
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-6 max-w-5xl mx-auto w-full">
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 group-hover:scale-125 transition-transform" />
-          <span className="text-xs tracking-[0.3em] uppercase text-white font-medium">
+          <div className="w-2 h-2 rounded-full bg-emerald-600 group-hover:scale-125 transition-transform" />
+          <span className="text-xs tracking-[0.3em] uppercase text-zinc-900 font-medium">
             Matcha
           </span>
         </Link>
@@ -106,13 +92,13 @@ export function PublicBlogDetail() {
         <nav className="flex items-center gap-6">
           <Link
             to="/blog"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-white transition-colors"
+            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-zinc-900 transition-colors"
           >
             Blog
           </Link>
           <Link
             to="/login"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-white transition-colors"
+            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-zinc-900 transition-colors"
           >
             Login
           </Link>
@@ -123,15 +109,15 @@ export function PublicBlogDetail() {
         <article className="space-y-12 animate-in fade-in duration-700">
           {/* Article Header */}
           <div className="space-y-6 text-center">
-            <div className="flex items-center justify-center gap-3 text-xs text-emerald-500 font-mono uppercase tracking-wider">
+            <div className="flex items-center justify-center gap-3 text-xs text-emerald-600 font-mono uppercase tracking-wider">
               {post.tags && post.tags.map(tag => (
-                <span key={tag} className="px-2 py-1 rounded bg-emerald-950/30 border border-emerald-900/50">
+                <span key={tag} className="px-2 py-1 rounded bg-emerald-50 border border-emerald-100">
                   {tag}
                 </span>
               ))}
             </div>
             
-            <h1 className="text-3xl sm:text-5xl font-light tracking-tight text-white leading-tight">
+            <h1 className="text-3xl sm:text-5xl font-light tracking-tight text-zinc-900 leading-tight">
               {post.title}
             </h1>
 
@@ -149,7 +135,7 @@ export function PublicBlogDetail() {
 
           {/* Cover Image */}
           {post.cover_image && (
-            <div className="aspect-video w-full rounded-lg overflow-hidden border border-zinc-800 bg-zinc-900">
+            <div className="aspect-video w-full rounded-lg overflow-hidden shadow-sm bg-stone-100">
               <img
                 src={post.cover_image}
                 alt={post.title}
@@ -159,17 +145,17 @@ export function PublicBlogDetail() {
           )}
 
           {/* Content */}
-          <div className="prose prose-invert prose-emerald max-w-none prose-lg">
-            <div className="whitespace-pre-wrap font-serif text-zinc-300 leading-loose text-lg">
+          <div className="prose prose-stone prose-lg max-w-none">
+            <div className="whitespace-pre-wrap font-serif text-zinc-800 leading-relaxed text-lg">
               {post.content}
             </div>
           </div>
 
           {/* Footer / Share */}
-          <div className="pt-12 border-t border-zinc-800 flex items-center justify-between">
+          <div className="pt-12 border-t border-zinc-200 flex items-center justify-between">
             <Link 
               to="/blog"
-              className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-emerald-400 transition-colors group"
+              className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-emerald-700 transition-colors group"
             >
               <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
               Back to Blog
@@ -177,7 +163,7 @@ export function PublicBlogDetail() {
             
             <button
               onClick={handleShare}
-              className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-emerald-400 transition-colors"
+              className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-emerald-700 transition-colors"
             >
               <Share2 className="w-4 h-4" />
               Share Post
@@ -187,14 +173,14 @@ export function PublicBlogDetail() {
       </main>
 
        {/* Footer */}
-       <footer className="relative z-10 border-t border-zinc-800 mt-20">
+       <footer className="relative z-10 border-t border-zinc-200 mt-20 bg-white/50">
         <div className="container mx-auto px-4 sm:px-8 py-8 max-w-5xl">
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-zinc-600 text-xs">
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-zinc-500 text-xs">
             <span>&copy; {new Date().getFullYear()} Matcha Recruit</span>
             <div className="flex gap-6">
-              <Link to="/" className="hover:text-white transition-colors">Home</Link>
-              <Link to="/blog" className="hover:text-white transition-colors">Blog</Link>
-              <Link to="/careers" className="hover:text-white transition-colors">Careers</Link>
+              <Link to="/" className="hover:text-zinc-900 transition-colors">Home</Link>
+              <Link to="/blog" className="hover:text-zinc-900 transition-colors">Blog</Link>
+              <Link to="/careers" className="hover:text-zinc-900 transition-colors">Careers</Link>
             </div>
           </div>
         </div>
