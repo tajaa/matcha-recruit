@@ -30,7 +30,7 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 0); // Transparent background
+    renderer.setClearColor(0x000000, 0);
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -40,13 +40,13 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     const colors = new Float32Array(particleCount * 3);
     const sizes = new Float32Array(particleCount);
 
-    // Grayscale color variations - Darker for Light Mode
-    const baseColor = new THREE.Color(0x000000); // Pure Black
-    const darkColor = new THREE.Color(0x18181b); // Zinc-950
-    const lightColor = new THREE.Color(0x27272a); // Zinc-800
+    // Matcha green color variations
+    const baseColor = new THREE.Color(0x22c55e); // matcha-500
+    const darkColor = new THREE.Color(0x16a34a); // matcha-600
+    const lightColor = new THREE.Color(0x4ade80); // matcha-400
 
     for (let i = 0; i < particleCount; i++) {
-      // Fibonacci sphere distribution
+      // Fibonacci sphere distribution for even spacing
       const phi = Math.acos(1 - 2 * (i + 0.5) / particleCount);
       const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
 
@@ -55,12 +55,20 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
       positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
       positions[i * 3 + 2] = radius * Math.cos(phi);
 
-      colors[i * 3] = 0.1; // Dark gray
-      colors[i * 3 + 1] = 0.1;
-      colors[i * 3 + 2] = 0.1;
+      // Vary colors slightly
+      const colorMix = Math.random();
+      const particleColor = colorMix < 0.33
+        ? baseColor
+        : colorMix < 0.66
+          ? darkColor
+          : lightColor;
 
-      // Sizes
-      sizes[i] = 4.0;
+      colors[i * 3] = particleColor.r;
+      colors[i * 3 + 1] = particleColor.g;
+      colors[i * 3 + 2] = particleColor.b;
+
+      // Vary sizes
+      sizes[i] = 2 + Math.random() * 3;
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -68,7 +76,7 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
-    // Custom shader material - HIGH VISIBILITY DEBUG MODE
+    // Custom shader material for glowing particles
     const material = new THREE.ShaderMaterial({
       uniforms: {
         time: { value: 0 },
@@ -78,45 +86,49 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
         attribute float size;
         attribute vec3 color;
         varying vec3 vColor;
+        varying float vAlpha;
         uniform float time;
-        uniform float pixelRatio;
 
         void main() {
           vColor = color;
+
+          // Subtle pulsing based on position
+          float pulse = sin(time * 0.5 + position.x * 2.0 + position.y * 2.0) * 0.15 + 0.85;
+          vAlpha = pulse;
+
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          
-          // Ensure meaningful size
-          gl_PointSize = size * (300.0 / -mvPosition.z) * pixelRatio;
+          gl_PointSize = size * (200.0 / -mvPosition.z);
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
       fragmentShader: `
         varying vec3 vColor;
+        varying float vAlpha;
 
         void main() {
-          // Sharp circular edge
-          vec2 coord = gl_PointCoord - vec2(0.5);
-          if(length(coord) > 0.5) discard;
+          // Circular particle with soft edge
+          float dist = length(gl_PointCoord - vec2(0.5));
+          if (dist > 0.5) discard;
 
-          // SOLID BLACK for maximum visibility test
-          gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+          float alpha = smoothstep(0.5, 0.1, dist) * vAlpha;
+          gl_FragColor = vec4(vColor, alpha);
         }
       `,
       transparent: true,
       depthWrite: false,
-      blending: THREE.NormalBlending
+      blending: THREE.AdditiveBlending
     });
 
     const particles = new THREE.Points(geometry, material);
     scene.add(particles);
 
-    // Add wireframe sphere - High Visibility
+    // Add wireframe sphere for structure hint
     const wireGeometry = new THREE.SphereGeometry(1.02, 32, 32);
     const wireMaterial = new THREE.MeshBasicMaterial({
-      color: 0x000000,
+      color: 0x22c55e,
       wireframe: true,
       transparent: true,
-      opacity: 0.3
+      opacity: 0.03
     });
     const wireSphere = new THREE.Mesh(wireGeometry, wireMaterial);
     scene.add(wireSphere);
@@ -124,9 +136,9 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     // Add glow ring around equator
     const ringGeometry = new THREE.RingGeometry(1.15, 1.18, 64);
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0x000000,
+      color: 0x22c55e,
       transparent: true,
-      opacity: 0.3,
+      opacity: 0.15,
       side: THREE.DoubleSide
     });
     const ring = new THREE.Mesh(ringGeometry, ringMaterial);
@@ -197,21 +209,21 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-10">
         <div className="relative">
           {/* Crosshair */}
-          <div className="absolute w-8 h-px bg-zinc-400/50 -left-4 top-1/2" />
-          <div className="absolute h-8 w-px bg-zinc-400/50 left-1/2 -top-4" />
+          <div className="absolute w-8 h-px bg-matcha-500/50 -left-4 top-1/2" />
+          <div className="absolute h-8 w-px bg-matcha-500/50 left-1/2 -top-4" />
           {/* Center dot */}
-          <div className="w-2 h-2 rounded-full bg-zinc-900 shadow-[0_0_10px_rgba(24,24,27,0.5)]" />
+          <div className="w-2 h-2 rounded-full bg-matcha-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]" />
           {/* Corner brackets */}
-          <div className="absolute -top-6 -left-6 w-3 h-3 border-t border-l border-zinc-400/40" />
-          <div className="absolute -top-6 -right-6 w-3 h-3 border-t border-r border-zinc-400/40" />
-          <div className="absolute -bottom-6 -left-6 w-3 h-3 border-b border-l border-zinc-400/40" />
-          <div className="absolute -bottom-6 -right-6 w-3 h-3 border-b border-r border-zinc-400/40" />
+          <div className="absolute -top-6 -left-6 w-3 h-3 border-t border-l border-matcha-500/40" />
+          <div className="absolute -top-6 -right-6 w-3 h-3 border-t border-r border-matcha-500/40" />
+          <div className="absolute -bottom-6 -left-6 w-3 h-3 border-b border-l border-matcha-500/40" />
+          <div className="absolute -bottom-6 -right-6 w-3 h-3 border-b border-r border-matcha-500/40" />
         </div>
       </div>
 
       {/* Glow effect behind sphere */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-[60%] h-[60%] rounded-full bg-zinc-400/10 blur-[60px]" />
+        <div className="w-[60%] h-[60%] rounded-full bg-matcha-500/10 blur-[60px]" />
       </div>
     </div>
   );
