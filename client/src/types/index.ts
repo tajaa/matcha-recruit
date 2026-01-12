@@ -1449,6 +1449,8 @@ export interface BlogPost {
   author_id?: string | null;
   author_name?: string | null;
   author_email?: string | null;
+  likes_count: number;
+  liked_by_me: boolean;
 }
 
 export interface BlogPostCreate {
@@ -1478,6 +1480,24 @@ export interface BlogPostUpdate {
 export interface BlogListResponse {
   items: BlogPost[];
   total: number;
+}
+
+export type CommentStatus = 'pending' | 'approved' | 'rejected' | 'spam';
+
+export interface BlogComment {
+  id: string;
+  post_id: string;
+  user_id: string | null;
+  author_name: string;
+  content: string;
+  status: CommentStatus;
+  created_at: string;
+  post_title?: string;
+}
+
+export interface BlogCommentCreate {
+  content: string;
+  author_name?: string;
 }
 
 // Offer Letter types

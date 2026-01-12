@@ -10,7 +10,8 @@ from ..database import get_connection
 from ..dependencies import get_current_user, require_admin, get_optional_user
 from ..models.auth import CurrentUser
 from ..models.blog import (
-    BlogPost, BlogPostCreate, BlogPostUpdate, BlogPostResponse, BlogListResponse, BlogStatus
+    BlogPost, BlogPostCreate, BlogPostUpdate, BlogPostResponse, BlogListResponse, BlogStatus,
+    BlogComment, BlogCommentCreate, CommentStatus
 )
 from ..services.storage import get_storage
 
@@ -93,7 +94,11 @@ async def list_blogs(
         return BlogListResponse(items=items, total=total)
 
 @router.get("/{slug}", response_model=BlogPostResponse)
-async def get_blog_post(slug: str, current_user: Optional[CurrentUser] = Depends(get_optional_user)):
+async def get_blog_post(
+    slug: str, 
+    session_id: Optional[str] = Query(None),
+    current_user: Optional[CurrentUser] = Depends(get_optional_user)
+):
     """Get a single blog post by slug."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -121,7 +126,20 @@ async def get_blog_post(slug: str, current_user: Optional[CurrentUser] = Depends
         if isinstance(data.get("tags"), str):
             data["tags"] = json.loads(data["tags"])
             
-        return BlogPostResponse(**data)
+        # Check if liked
+        liked = False
+        if current_user:
+            liked = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM blog_likes WHERE post_id = $1 AND user_id = $2)",
+                row["id"], current_user.id
+            )
+        elif session_id:
+            liked = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM blog_likes WHERE post_id = $1 AND session_id = $2)",
+                row["id"], session_id
+            )
+            
+        return BlogPostResponse(**data, liked_by_me=liked)
 
 @router.post("", response_model=BlogPostResponse)
 async def create_blog_post(
@@ -163,7 +181,7 @@ async def create_blog_post(
         )
         
         # Get full object for response
-        return await get_blog_post(post.slug, current_user)
+        return await get_blog_post(post.slug, None, current_user)
 
 @router.put("/{id}", response_model=BlogPostResponse)
 async def update_blog_post(
@@ -252,7 +270,7 @@ async def update_blog_post(
         
         new_slug = await conn.fetchval(query, *params)
         
-        return await get_blog_post(new_slug, current_user)
+        return await get_blog_post(new_slug, None, current_user)
 
 @router.delete("/{id}")
 async def delete_blog_post(id: UUID, current_user: CurrentUser = Depends(require_admin)):
@@ -288,3 +306,162 @@ async def upload_blog_image(
         return {"url": url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# -----------------------------------------------------------------------------
+# LIKES
+# -----------------------------------------------------------------------------
+
+class BlogLikeRequest(BaseModel):
+    session_id: Optional[str] = None
+
+class BlogLikeResponse(BaseModel):
+    likes_count: int
+    liked: bool
+
+@router.post("/{slug}/like", response_model=BlogLikeResponse)
+async def toggle_like(
+    slug: str,
+    request: BlogLikeRequest,
+    current_user: Optional[CurrentUser] = Depends(get_optional_user)
+):
+    """Toggle like on a blog post."""
+    async with get_connection() as conn:
+        post = await conn.fetchrow("SELECT id, likes_count FROM blog_posts WHERE slug = $1", slug)
+        if not post:
+            raise HTTPException(status_code=404, detail="Blog post not found")
+        
+        post_id = post["id"]
+        user_id = current_user.id if current_user else None
+        session_id = request.session_id
+        
+        if not user_id and not session_id:
+             raise HTTPException(status_code=400, detail="User ID or Session ID required")
+
+        # Check existing like
+        if user_id:
+            existing = await conn.fetchrow(
+                "SELECT id FROM blog_likes WHERE post_id = $1 AND user_id = $2",
+                post_id, user_id
+            )
+        else:
+            existing = await conn.fetchrow(
+                "SELECT id FROM blog_likes WHERE post_id = $1 AND session_id = $2",
+                post_id, session_id
+            )
+            
+        if existing:
+            # Unlike
+            await conn.execute("DELETE FROM blog_likes WHERE id = $1", existing["id"])
+            new_count = max(0, post["likes_count"] - 1)
+            await conn.execute("UPDATE blog_posts SET likes_count = $1 WHERE id = $2", new_count, post_id)
+            return BlogLikeResponse(likes_count=new_count, liked=False)
+        else:
+            # Like
+            if user_id:
+                 await conn.execute(
+                    "INSERT INTO blog_likes (post_id, user_id) VALUES ($1, $2)",
+                    post_id, user_id
+                )
+            else:
+                 await conn.execute(
+                    "INSERT INTO blog_likes (post_id, session_id) VALUES ($1, $2)",
+                    post_id, session_id
+                )
+            
+            new_count = post["likes_count"] + 1
+            await conn.execute("UPDATE blog_posts SET likes_count = $1 WHERE id = $2", new_count, post_id)
+            return BlogLikeResponse(likes_count=new_count, liked=True)
+
+# -----------------------------------------------------------------------------
+# COMMENTS
+# -----------------------------------------------------------------------------
+
+@router.get("/{slug}/comments", response_model=List[BlogComment])
+async def list_comments(slug: str):
+    """List approved comments for a blog post."""
+    async with get_connection() as conn:
+        # Get post ID first
+        post_id = await conn.fetchval("SELECT id FROM blog_posts WHERE slug = $1", slug)
+        if not post_id:
+             raise HTTPException(status_code=404, detail="Blog post not found")
+             
+        query = """
+            SELECT c.*,
+                   COALESCE(u.email, c.author_name, 'Anonymous') as author_name
+            FROM blog_comments c
+            LEFT JOIN users u ON c.user_id = u.id
+            WHERE c.post_id = $1 AND c.status = 'approved'
+            ORDER BY c.created_at ASC
+        """
+        rows = await conn.fetch(query, post_id)
+        return [BlogComment(**row) for row in rows]
+
+@router.post("/{slug}/comments", response_model=BlogComment)
+async def create_comment(
+    slug: str,
+    comment: BlogCommentCreate,
+    current_user: Optional[CurrentUser] = Depends(get_optional_user)
+):
+    """Create a new comment. Auto-approved for users, pending for guests."""
+    async with get_connection() as conn:
+        post = await conn.fetchrow("SELECT id FROM blog_posts WHERE slug = $1", slug)
+        if not post:
+            raise HTTPException(status_code=404, detail="Blog post not found")
+            
+        status = CommentStatus.APPROVED if current_user else CommentStatus.PENDING
+        user_id = current_user.id if current_user else None
+        
+        # If guest, author_name is required
+        if not current_user and not comment.author_name:
+             raise HTTPException(status_code=400, detail="Author name is required for guests")
+             
+        row = await conn.fetchrow(
+            """
+            INSERT INTO blog_comments (post_id, user_id, author_name, content, status)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, created_at, status, user_id, author_name, content, post_id
+            """,
+            post["id"], user_id, comment.author_name, comment.content, status.value
+        )
+        
+        return BlogComment(**row)
+
+@router.get("/comments/pending", response_model=List[BlogComment])
+async def list_pending_comments(current_user: CurrentUser = Depends(require_admin)):
+    """Admin: List all pending comments."""
+    async with get_connection() as conn:
+        query = """
+            SELECT c.*,
+                   COALESCE(u.email, c.author_name, 'Anonymous') as author_name,
+                   p.title as post_title
+            FROM blog_comments c
+            JOIN blog_posts p ON c.post_id = p.id
+            LEFT JOIN users u ON c.user_id = u.id
+            WHERE c.status = 'pending'
+            ORDER BY c.created_at ASC
+        """
+        rows = await conn.fetch(query)
+        return [BlogComment(**row) for row in rows]
+
+@router.patch("/comments/{id}", response_model=BlogComment)
+async def moderate_comment(
+    id: UUID,
+    status: CommentStatus,
+    current_user: CurrentUser = Depends(require_admin)
+):
+    """Admin: Approve or reject a comment."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE blog_comments
+            SET status = $1, updated_at = NOW()
+            WHERE id = $2
+            RETURNING *
+            """,
+            status.value, id
+        )
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Comment not found")
+            
+        return BlogComment(**row)

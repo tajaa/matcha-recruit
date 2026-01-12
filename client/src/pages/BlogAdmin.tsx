@@ -4,7 +4,7 @@ import { Button } from '../components/Button';
 import { GlassCard } from '../components/GlassCard';
 import { blogs } from '../api/client';
 import type { BlogPost, BlogStatus } from '../types';
-import { FileText, Filter, PenSquare, Trash2 } from 'lucide-react';
+import { FileText, Filter, PenSquare, Trash2, MessageSquare } from 'lucide-react';
 
 const statusClasses: Record<BlogStatus, string> = {
   draft: 'bg-zinc-800/80 text-zinc-400 border-zinc-700',
@@ -85,6 +85,13 @@ export function BlogAdmin() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Link
+            to="/app/blog/comments"
+            className="inline-flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-xs text-zinc-400 font-mono hover:text-white transition-colors"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            Comments
+          </Link>
           <div className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-xs text-zinc-400 font-mono">
             {total} posts
           </div>

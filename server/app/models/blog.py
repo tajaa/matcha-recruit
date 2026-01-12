@@ -39,6 +39,7 @@ class BlogPost(BlogPostBase):
     id: UUID
     author_id: Optional[UUID] = None
     published_at: Optional[datetime] = None
+    likes_count: int = 0
     created_at: datetime
     updated_at: datetime
     author_name: Optional[str] = None
@@ -46,8 +47,34 @@ class BlogPost(BlogPostBase):
     model_config = ConfigDict(from_attributes=True)
 
 class BlogPostResponse(BlogPost):
-    pass
+    liked_by_me: bool = False
 
 class BlogListResponse(BaseModel):
     items: List[BlogPostResponse]
     total: int
+
+class CommentStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SPAM = "spam"
+
+class BlogCommentBase(BaseModel):
+    content: str
+    author_name: Optional[str] = None
+
+class BlogCommentCreate(BlogCommentBase):
+    pass
+
+class BlogComment(BlogCommentBase):
+    id: UUID
+    post_id: UUID
+    user_id: Optional[UUID] = None
+    status: CommentStatus
+    created_at: datetime
+    
+    # Computed/Joined fields
+    post_title: Optional[str] = None 
+
+    model_config = ConfigDict(from_attributes=True)
+

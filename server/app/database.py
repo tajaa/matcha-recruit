@@ -1182,6 +1182,7 @@ async def init_db():
                 meta_title VARCHAR(255),
                 meta_description TEXT,
                 published_at TIMESTAMP,
+                likes_count INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )
@@ -1194,6 +1195,54 @@ async def init_db():
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_blog_posts_published_at ON blog_posts(published_at)
+        """)
+
+        # Add likes_count column if not exists
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'blog_posts' AND column_name = 'likes_count'
+                ) THEN
+                    ALTER TABLE blog_posts ADD COLUMN likes_count INTEGER DEFAULT 0;
+                END IF;
+            END $$;
+        """)
+
+        # Blog Likes table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS blog_likes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                post_id UUID NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
+                user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                session_id VARCHAR(255),
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE NULLS NOT DISTINCT (post_id, user_id, session_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_blog_likes_post_id ON blog_likes(post_id)
+        """)
+
+        # Blog Comments table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS blog_comments (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                post_id UUID NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
+                user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                author_name VARCHAR(255),
+                content TEXT NOT NULL,
+                status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'spam')),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_blog_comments_post_id ON blog_comments(post_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_blog_comments_status ON blog_comments(status)
         """)
 
         # Create default admin if no admins exist

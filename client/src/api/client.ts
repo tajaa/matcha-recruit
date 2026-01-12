@@ -100,13 +100,15 @@ import type {
   OfferLetter,
   OfferLetterCreate,
   OfferLetterUpdate,
-  BlogPost,
-  BlogPostCreate,
-  BlogPostUpdate,
-  BlogStatus,
-  BlogListResponse,
-
-} from '../types';
+    BlogPost,
+    BlogPostCreate,
+    BlogPostUpdate,
+    BlogStatus,
+    BlogListResponse,
+    BlogComment,
+    BlogCommentCreate,
+    CommentStatus,
+  } from '../types';
 import type {
   Lead,
   LeadWithContacts,
@@ -1371,8 +1373,35 @@ export const blogs = {
     return request<BlogListResponse>(`/blogs${query ? `?${query}` : ''}`);
   },
 
-  get: (slug: string) =>
-    request<BlogPost>(`/blogs/${slug}`),
+  get: (slug: string, sessionId?: string) => {
+    const params = new URLSearchParams();
+    if (sessionId) params.append('session_id', sessionId);
+    const query = params.toString();
+    return request<BlogPost>(`/blogs/${slug}${query ? `?${query}` : ''}`);
+  },
+
+  toggleLike: (slug: string, sessionId?: string) =>
+    request<{ likes_count: number; liked: boolean }>(`/blogs/${slug}/like`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    }),
+
+  listComments: (slug: string) =>
+    request<BlogComment[]>(`/blogs/${slug}/comments`),
+
+  submitComment: (slug: string, data: BlogCommentCreate) =>
+    request<BlogComment>(`/blogs/${slug}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listPendingComments: () =>
+    request<BlogComment[]>(`/blogs/comments/pending`),
+
+  moderateComment: (id: string, status: CommentStatus) =>
+    request<BlogComment>(`/blogs/comments/${id}?status=${status}`, {
+      method: 'PATCH',
+    }),
 
   create: (data: BlogPostCreate) =>
     request<BlogPost>(`/blogs`, {

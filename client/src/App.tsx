@@ -42,6 +42,7 @@ const PublicBlogList = lazy(() => import('./pages/PublicBlogList'));
 const PublicBlogDetail = lazy(() => import('./pages/PublicBlogDetail'));
 const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
 const BlogEditor = lazy(() => import('./pages/BlogEditor'));
+const BlogCommentsAdmin = lazy(() => import('./pages/BlogCommentsAdmin'));
 
 // Loading fallback
 function PageLoader() {
@@ -188,6 +189,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <BlogEditor />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="blog/comments"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <BlogCommentsAdmin />
                   </ProtectedRoute>
                 }
               />
