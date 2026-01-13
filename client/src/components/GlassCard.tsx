@@ -12,18 +12,15 @@ export function GlassCard({ children, className = '', onClick, hoverEffect = fal
     <div
       className={`
         relative overflow-hidden
-        bg-zinc-900/40 backdrop-blur-sm
-        border border-white/5
-        shadow-xl shadow-black/20
-        ${hoverEffect ? 'hover:bg-zinc-900/60 hover:border-white/10 hover:shadow-2xl hover:shadow-black/30 hover:-translate-y-0.5' : ''}
+        bg-white
+        border border-zinc-200
+        shadow-sm
+        ${hoverEffect ? 'hover:border-zinc-300 hover:shadow-md hover:-translate-y-0.5' : ''}
         transition-all duration-300 ease-out
         ${className}
       `}
       onClick={onClick}
     >
-      {/* Subtle top sheen */}
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-50" />
-      
       {children}
     </div>
   );

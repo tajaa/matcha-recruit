@@ -8,10 +8,10 @@ export function Dashboard() {
   const navigate = useNavigate();
 
   const stats = [
-    { label: 'Active Policies', value: '2', change: '+1 this week', icon: FileText, color: 'text-blue-400' },
-    { label: 'Pending Signatures', value: '5', change: 'Action required', icon: Clock, color: 'text-amber-400' },
-    { label: 'Total Candidates', value: '148', change: '+12% vs last month', icon: Users, color: 'text-emerald-400' },
-    { label: 'Offers Accepted', value: '85%', change: 'Top 10% in industry', icon: CheckCircle2, color: 'text-purple-400' },
+    { label: 'Active Policies', value: '2', change: '+1 this week', icon: FileText, color: 'text-zinc-600' },
+    { label: 'Pending Signatures', value: '5', change: 'Action required', icon: Clock, color: 'text-zinc-600' },
+    { label: 'Total Candidates', value: '148', change: '+12% vs last month', icon: Users, color: 'text-zinc-600' },
+    { label: 'Offers Accepted', value: '85%', change: 'Top 10% in industry', icon: CheckCircle2, color: 'text-zinc-600' },
   ];
 
   return (
@@ -19,7 +19,7 @@ export function Dashboard() {
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-light tracking-tight text-white">
+          <h1 className="text-3xl font-light tracking-tight text-zinc-900">
             Dashboard
           </h1>
           <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">
@@ -41,15 +41,15 @@ export function Dashboard() {
         {stats.map((stat) => (
           <GlassCard key={stat.label} className="p-6" hoverEffect>
             <div className="flex items-start justify-between mb-4">
-              <div className={`p-2 rounded-lg bg-zinc-900/50 border border-zinc-800 ${stat.color}`}>
+              <div className={`p-2 border border-zinc-200 bg-zinc-50 ${stat.color}`}>
                 <stat.icon className="w-5 h-5" />
               </div>
               {stat.label === 'Active Policies' && (
-                 <ArrowUpRight className="w-4 h-4 text-zinc-600" />
+                 <ArrowUpRight className="w-4 h-4 text-zinc-400" />
               )}
             </div>
             <div>
-              <div className="text-2xl font-light text-white mb-1">{stat.value}</div>
+              <div className="text-2xl font-light text-zinc-900 mb-1">{stat.value}</div>
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium mb-3">{stat.label}</div>
               <div className="text-xs text-zinc-400 font-mono">{stat.change}</div>
             </div>
@@ -61,31 +61,31 @@ export function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-widest">Recent Activity</h2>
+            <h2 className="text-sm font-medium text-zinc-500 uppercase tracking-widest">Recent Activity</h2>
           </div>
-          <GlassCard className="divide-y divide-white/5">
+          <GlassCard className="divide-y divide-zinc-100">
             {[
               { action: 'Sarah Miller signed Remote Work Policy', time: '2 hours ago', type: 'success' },
               { action: 'New offer letter drafted for John Doe', time: '5 hours ago', type: 'neutral' },
               { action: 'James Wilson viewed Code of Conduct', time: '1 day ago', type: 'neutral' },
             ].map((item, i) => (
-              <div key={i} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors cursor-default">
+              <div key={i} className="p-4 flex items-center justify-between hover:bg-zinc-50 transition-colors cursor-default">
                 <div className="flex items-center gap-3">
-                  <div className={`w-1.5 h-1.5 rounded-full ${item.type === 'success' ? 'bg-emerald-500' : 'bg-zinc-600'}`} />
-                  <span className="text-sm text-zinc-300">{item.action}</span>
+                  <div className={`w-1.5 h-1.5 rounded-full ${item.type === 'success' ? 'bg-zinc-900' : 'bg-zinc-300'}`} />
+                  <span className="text-sm text-zinc-700">{item.action}</span>
                 </div>
-                <span className="text-[10px] font-mono text-zinc-500 uppercase">{item.time}</span>
+                <span className="text-[10px] font-mono text-zinc-400 uppercase">{item.time}</span>
               </div>
             ))}
           </GlassCard>
         </div>
 
-<div className="space-y-6">
-           <div className="flex items-center justify-between">
-             <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-widest">Compliance</h2>
-           </div>
-           <ComplianceWidget />
-         </div>
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-zinc-500 uppercase tracking-widest">Compliance</h2>
+          </div>
+          <ComplianceWidget />
+        </div>
       </div>
     </div>
   );

@@ -18,15 +18,15 @@ export function Button({
 
   const variants = {
     primary:
-      'bg-zinc-100 text-zinc-950 hover:bg-white shadow-[0_0_15px_rgba(255,255,255,0.1)] border border-transparent',
+      'bg-zinc-900 text-white hover:bg-zinc-800 border border-zinc-900',
     secondary:
-      'bg-zinc-900/50 text-zinc-400 border border-zinc-800 hover:border-zinc-600 hover:text-zinc-200 hover:bg-zinc-800/80 backdrop-blur-sm',
+      'bg-white text-zinc-600 border border-zinc-200 hover:border-zinc-300 hover:text-zinc-900 hover:bg-zinc-50',
     danger:
-      'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/30 hover:text-red-300',
+      'bg-zinc-100 text-zinc-700 border border-zinc-300 hover:bg-zinc-200 hover:border-zinc-400',
     outline:
-      'bg-transparent text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-200',
+      'bg-transparent text-zinc-600 border border-zinc-300 hover:border-zinc-400 hover:text-zinc-900',
     ghost:
-      'bg-transparent text-zinc-500 hover:text-zinc-300 hover:bg-white/5',
+      'bg-transparent text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100',
   };
 
   const sizes = {

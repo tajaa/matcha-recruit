@@ -216,8 +216,8 @@ export function Layout() {
       <Link
         to={item.path}
         className={`flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
-            ? 'text-white bg-zinc-800 border-l-2 border-white'
-            : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
+            ? 'text-zinc-900 bg-zinc-100 border-l-2 border-zinc-900'
+            : 'text-zinc-500 hover:text-zinc-900 border-l-2 border-transparent hover:border-zinc-300'
           }`}
       >
         {item.icon}
@@ -227,15 +227,15 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-zinc-400 font-mono">
+    <div className="min-h-screen bg-zinc-50 text-zinc-600 font-mono">
 
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-50 w-48 flex-col bg-zinc-950 border-r border-zinc-800">
+      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-50 w-48 flex-col bg-white border-r border-zinc-200">
         {/* Logo */}
-        <div className="h-14 flex items-center px-4 border-b border-zinc-800">
+        <div className="h-14 flex items-center px-4 border-b border-zinc-200">
           <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-2 h-2 rounded-full bg-white" />
-            <span className="text-xs tracking-[0.25em] uppercase text-white font-medium group-hover:text-zinc-300 transition-colors">
+            <div className="w-2 h-2 rounded-full bg-zinc-900" />
+            <span className="text-xs tracking-[0.25em] uppercase text-zinc-900 font-medium group-hover:text-zinc-600 transition-colors">
               Matcha
             </span>
           </Link>
@@ -251,7 +251,7 @@ export function Layout() {
                 if (visibleItems.length === 0) return null;
                 return (
                   <div key={section.title}>
-                    <div className="px-3 mb-1 text-[8px] tracking-[0.2em] uppercase text-zinc-600 font-medium">
+                    <div className="px-3 mb-1 text-[8px] tracking-[0.2em] uppercase text-zinc-400 font-medium">
                       {section.title}
                     </div>
                     <div className="space-y-0.5">
@@ -266,17 +266,17 @@ export function Layout() {
         </nav>
 
         {/* Bottom section - Settings & User */}
-        <div className="border-t border-zinc-800 p-2">
+        <div className="border-t border-zinc-200 p-2">
           <NavLink item={settingsItem} />
           <div className="mt-3 px-3 py-2">
-            <div className="text-[9px] text-zinc-600 tracking-wide truncate">{user?.email}</div>
+            <div className="text-[9px] text-zinc-500 tracking-wide truncate">{user?.email}</div>
             <div className="flex items-center justify-between mt-1">
-              <span className="px-1.5 py-0.5 text-[8px] bg-zinc-800 text-zinc-400 border border-zinc-700 tracking-[0.15em] uppercase">
+              <span className="px-1.5 py-0.5 text-[8px] bg-zinc-100 text-zinc-600 border border-zinc-200 tracking-[0.15em] uppercase">
                 {user?.role}
               </span>
               <button
                 onClick={handleLogout}
-                className="text-[9px] tracking-[0.1em] uppercase text-zinc-600 hover:text-zinc-300 transition-colors"
+                className="text-[9px] tracking-[0.1em] uppercase text-zinc-400 hover:text-zinc-900 transition-colors"
               >
                 Logout
               </button>
@@ -286,13 +286,13 @@ export function Layout() {
       </aside>
 
       {/* Mobile Header - visible only on mobile */}
-      <nav className="md:hidden fixed top-0 inset-x-0 z-50 bg-zinc-950 border-b border-zinc-800">
+      <nav className="md:hidden fixed top-0 inset-x-0 z-50 bg-white/80 backdrop-blur-md border-b border-zinc-200">
         <div className="px-4">
           <div className="flex justify-between h-14">
             <div className="flex items-center">
               <Link to="/" className="flex items-center gap-2 group">
-                <div className="w-2 h-2 rounded-full bg-white" />
-                <span className="text-xs tracking-[0.25em] uppercase text-white font-medium group-hover:text-zinc-300 transition-colors">
+                <div className="w-2 h-2 rounded-full bg-zinc-900" />
+                <span className="text-xs tracking-[0.25em] uppercase text-zinc-900 font-medium group-hover:text-zinc-600 transition-colors">
                   Matcha
                 </span>
               </Link>
@@ -302,7 +302,7 @@ export function Layout() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                  className="p-2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="p-2 text-zinc-500 hover:text-zinc-900 transition-colors"
                   aria-label="Toggle menu"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -320,7 +320,7 @@ export function Layout() {
 
         {/* Mobile menu dropdown */}
         {mobileMenuOpen && (
-          <div className="border-t border-zinc-800 bg-zinc-950">
+          <div className="border-t border-zinc-200 bg-white">
             <div className="px-4 py-3 space-y-1">
               {navItems.map((item) => (
                 <Link
@@ -328,8 +328,8 @@ export function Layout() {
                   to={item.path}
                   onClick={() => setMobileMenuOpen(false)}
                   className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${location.pathname === item.path
-                      ? 'text-white bg-zinc-800 border-l-2 border-white'
-                      : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
+                      ? 'text-zinc-900 bg-zinc-100 border-l-2 border-zinc-900'
+                      : 'text-zinc-500 hover:text-zinc-900 border-l-2 border-transparent hover:border-zinc-300'
                     }`}
                 >
                   {item.icon}
@@ -340,17 +340,17 @@ export function Layout() {
                 to="/app/settings"
                 onClick={() => setMobileMenuOpen(false)}
                 className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${location.pathname === '/app/settings'
-                    ? 'text-white bg-zinc-800 border-l-2 border-white'
-                    : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
+                    ? 'text-zinc-900 bg-zinc-100 border-l-2 border-zinc-900'
+                    : 'text-zinc-500 hover:text-zinc-900 border-l-2 border-transparent hover:border-zinc-300'
                   }`}
               >
                 {settingsItem.icon}
                 <span>Settings</span>
               </Link>
-              <div className="pt-3 mt-3 border-t border-zinc-800">
-                <div className="px-3 py-2 text-[10px] text-zinc-600 tracking-wide">
+              <div className="pt-3 mt-3 border-t border-zinc-200">
+                <div className="px-3 py-2 text-[10px] text-zinc-500 tracking-wide">
                   {user?.email}
-                  <span className="ml-2 px-2 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 tracking-[0.15em] uppercase">
+                  <span className="ml-2 px-2 py-0.5 bg-zinc-100 text-zinc-600 border border-zinc-200 tracking-[0.15em] uppercase">
                     {user?.role}
                   </span>
                 </div>
@@ -359,7 +359,7 @@ export function Layout() {
                     setMobileMenuOpen(false);
                     handleLogout();
                   }}
-                  className="block w-full text-left px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="block w-full text-left px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-900 transition-colors"
                 >
                   Logout
                 </button>
@@ -377,15 +377,15 @@ export function Layout() {
       </main>
 
       {/* Bottom status bar */}
-      <footer className="fixed bottom-0 left-0 md:left-48 right-0 z-40 border-t border-zinc-800 bg-zinc-950">
+      <footer className="fixed bottom-0 left-0 md:left-48 right-0 z-40 border-t border-zinc-200 bg-white">
         <div className="px-4 sm:px-6 lg:px-8 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-white" />
-            <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-600">
+            <div className="w-1.5 h-1.5 rounded-full bg-zinc-900" />
+            <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-500">
               Active
             </span>
           </div>
-          <span className="text-[9px] tracking-[0.15em] uppercase text-zinc-700">
+          <span className="text-[9px] tracking-[0.15em] uppercase text-zinc-400">
             v1.0
           </span>
         </div>
