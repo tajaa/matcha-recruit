@@ -151,68 +151,102 @@ export function PublicBlogList() {
       </section>
 
       {/* Main Content - Blog Feed */}
-      <main className="relative z-10 container mx-auto px-4 sm:px-8 py-24 max-w-7xl">
+      <main className="relative z-10 px-4 sm:px-8 py-16 max-w-7xl mx-auto">
+        {/* Section Header */}
+        <div className="flex items-center justify-between mb-12 pb-6 border-b border-zinc-200">
+          <div className="flex items-center gap-4">
+            <div className="w-1 h-8 bg-emerald-500" />
+            <div>
+              <span className="text-[10px] tracking-[0.3em] uppercase text-zinc-400 block">Archive</span>
+              <span className="text-[10px] tracking-[0.2em] uppercase text-zinc-600">{posts.length} Entries</span>
+            </div>
+          </div>
+          <div className="text-[9px] tracking-[0.2em] uppercase text-zinc-400">
+            Latest First
+          </div>
+        </div>
+
         {loading ? (
           <div className="flex flex-col items-center justify-center py-32 gap-4">
-            <div className="w-1 h-12 bg-zinc-100 relative overflow-hidden">
-              <div className="absolute inset-0 bg-emerald-500 animate-[loading-bar_1.5s_infinite]" />
+            <div className="relative w-12 h-12">
+              <div className="absolute inset-0 border border-zinc-200 animate-ping" />
+              <div className="absolute inset-2 border border-emerald-500/50" />
+              <div className="absolute inset-4 bg-emerald-500/20" />
             </div>
-            <span className="text-[10px] tracking-[0.3em] uppercase text-zinc-400">Loading_Entries</span>
+            <span className="text-[10px] tracking-[0.3em] uppercase text-zinc-400">Fetching_Data</span>
           </div>
         ) : error ? (
-          <div className="text-center py-24 border border-red-100 bg-red-50/30">
-            <p className="text-red-600 text-xs tracking-widest uppercase">{error}</p>
+          <div className="text-center py-24 border border-red-200 bg-red-50/50">
+            <div className="w-8 h-8 mx-auto mb-4 border border-red-300 flex items-center justify-center">
+              <span className="text-red-500 text-xs">!</span>
+            </div>
+            <p className="text-red-600 text-[10px] tracking-[0.3em] uppercase mb-6">{error}</p>
             <button
               onClick={loadPosts}
-              className="mt-6 text-[10px] tracking-widest uppercase border border-red-200 px-6 py-2 hover:bg-red-50 transition-colors"
+              className="text-[10px] tracking-[0.2em] uppercase border border-red-300 px-6 py-2.5 hover:bg-red-100 transition-colors text-red-600"
             >
-              Retry_Fetch
+              Retry
             </button>
           </div>
         ) : posts.length === 0 ? (
-          <div className="text-center py-32 border border-zinc-100 bg-zinc-50/30">
-            <p className="text-zinc-400 text-xs tracking-widest uppercase italic">0_Entries_Found</p>
+          <div className="text-center py-32 border border-dashed border-zinc-300">
+            <div className="w-12 h-12 mx-auto mb-4 border border-zinc-200 flex items-center justify-center">
+              <span className="text-zinc-300 text-lg">∅</span>
+            </div>
+            <p className="text-zinc-400 text-[10px] tracking-[0.3em] uppercase">No Entries Found</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-px bg-zinc-200 border border-zinc-200">
-            {posts.map((post) => (
+          <div className="space-y-0">
+            {posts.map((post, index) => (
               <Link
                 key={post.id}
                 to={`/blog/${post.slug}`}
-                className="group relative flex flex-col h-full bg-[#fcfcfc] p-8 sm:p-10 hover:bg-white transition-all duration-300"
+                className="group relative block border-b border-zinc-200 hover:bg-zinc-50/80 transition-all duration-200"
               >
-                <div className="space-y-6 flex-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[9px] tracking-[0.3em] uppercase text-emerald-600 font-bold">
-                      {post.tags && post.tags.length > 0 ? post.tags[0] : 'General'}
-                    </span>
-                    <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-400">
-                      {formatDate(post.published_at || post.created_at)}
-                    </span>
+                <div className="py-8 sm:py-10">
+                  {/* Post number */}
+                  <div className="absolute left-0 top-8 sm:top-10 text-[9px] tracking-wider text-zinc-300 font-medium">
+                    {(index + 1).toString().padStart(2, '0')}
                   </div>
 
-                  <div className="space-y-3">
-                    <h2 className="text-xl font-bold text-zinc-900 group-hover:text-emerald-600 transition-colors leading-tight uppercase">
-                      {post.title}
-                    </h2>
-                    {post.excerpt && (
-                      <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed font-sans">
-                        {post.excerpt}
-                      </p>
-                    )}
-                  </div>
-                </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-[1fr_200px] gap-6 pl-8 sm:pl-12">
+                    <div className="space-y-4">
+                      {/* Meta row */}
+                      <div className="flex items-center gap-4">
+                        <span className="text-[9px] tracking-[0.2em] uppercase text-emerald-600 font-medium px-2 py-1 bg-emerald-50 border border-emerald-100">
+                          {post.tags && post.tags.length > 0 ? post.tags[0] : 'General'}
+                        </span>
+                        <span className="text-[9px] tracking-[0.15em] text-zinc-400">
+                          {formatDate(post.published_at || post.created_at)}
+                        </span>
+                      </div>
 
-                <div className="mt-12 pt-6 border-t border-zinc-100 flex items-center justify-between">
-                  <div className="flex items-center gap-4 text-[9px] tracking-widest text-zinc-400 uppercase">
-                    <span className="flex items-center gap-1.5">
-                      <Heart className={`w-3 h-3 ${post.liked_by_me ? 'fill-emerald-500 text-emerald-500' : ''}`} />
-                      {post.likes_count}
-                    </span>
+                      {/* Title */}
+                      <h2 className="text-lg sm:text-xl font-semibold text-zinc-900 group-hover:text-emerald-600 transition-colors leading-snug pr-4">
+                        {post.title}
+                      </h2>
+
+                      {/* Excerpt */}
+                      {post.excerpt && (
+                        <p className="text-sm text-zinc-500 leading-relaxed line-clamp-2 max-w-2xl">
+                          {post.excerpt}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Right side - stats & arrow */}
+                    <div className="flex lg:flex-col items-center lg:items-end justify-between lg:justify-center gap-4 pl-8 sm:pl-12 lg:pl-0">
+                      <div className="flex items-center gap-4 text-[9px] tracking-wider text-zinc-400">
+                        <span className="flex items-center gap-1.5">
+                          <Heart className={`w-3.5 h-3.5 ${post.liked_by_me ? 'fill-emerald-500 text-emerald-500' : ''}`} />
+                          <span className="tabular-nums">{post.likes_count}</span>
+                        </span>
+                      </div>
+                      <div className="w-8 h-8 border border-zinc-200 group-hover:border-emerald-500 group-hover:bg-emerald-50 flex items-center justify-center transition-all">
+                        <ArrowRight className="w-3.5 h-3.5 text-zinc-400 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all" />
+                      </div>
+                    </div>
                   </div>
-                  <span className="group-hover:translate-x-1 transition-transform text-zinc-900">
-                    <ArrowRight className="w-4 h-4" />
-                  </span>
                 </div>
               </Link>
             ))}
@@ -221,42 +255,65 @@ export function PublicBlogList() {
       </main>
 
       {/* FOOTER STATS */}
-      <section className="relative z-10 py-12 px-4 sm:px-8 bg-zinc-50 border-t border-zinc-200">
-        <div className="flex flex-wrap items-center justify-between max-w-7xl mx-auto gap-8">
-          <div className="flex flex-col gap-2">
-            <span className="text-[10px] tracking-[0.2em] text-zinc-400 uppercase">
-              Total Feed Volume
-            </span>
-            <span className="text-2xl tracking-wider text-zinc-900 tabular-nums">
-              {posts.length.toString().padStart(2, '0')}
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <span className="text-[10px] tracking-[0.2em] text-zinc-400 uppercase">
-              Last Pulse
-            </span>
-            <span className="text-2xl tracking-wider text-zinc-900 tabular-nums">
-              {posts.length > 0 ? formatDate(posts[0].published_at || posts[0].created_at) : 'N/A'}
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <span className="text-[10px] tracking-[0.2em] text-zinc-400 uppercase">
-              Network Status
-            </span>
-            <div className="flex items-center gap-2 mt-1">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
-              <span className="text-xs tracking-[0.15em] text-emerald-600 uppercase font-medium">
-                Active
+      <section className="relative z-10 border-t border-zinc-200 bg-zinc-100/50">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-zinc-200">
+            <div className="p-6 sm:p-8">
+              <span className="text-[9px] tracking-[0.2em] text-zinc-400 uppercase block mb-2">
+                Entries
               </span>
+              <span className="text-2xl sm:text-3xl font-light text-zinc-900 tabular-nums">
+                {posts.length.toString().padStart(2, '0')}
+              </span>
+            </div>
+
+            <div className="p-6 sm:p-8">
+              <span className="text-[9px] tracking-[0.2em] text-zinc-400 uppercase block mb-2">
+                Last Update
+              </span>
+              <span className="text-sm sm:text-base font-light text-zinc-900 tabular-nums">
+                {posts.length > 0 ? formatDate(posts[0].published_at || posts[0].created_at) : '—'}
+              </span>
+            </div>
+
+            <div className="p-6 sm:p-8">
+              <span className="text-[9px] tracking-[0.2em] text-zinc-400 uppercase block mb-2">
+                Categories
+              </span>
+              <span className="text-2xl sm:text-3xl font-light text-zinc-900 tabular-nums">
+                {new Set(posts.flatMap(p => p.tags || [])).size.toString().padStart(2, '0')}
+              </span>
+            </div>
+
+            <div className="p-6 sm:p-8">
+              <span className="text-[9px] tracking-[0.2em] text-zinc-400 uppercase block mb-2">
+                Status
+              </span>
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-sm sm:text-base font-light text-emerald-600 uppercase tracking-wider">
+                  Live
+                </span>
+              </div>
             </div>
           </div>
         </div>
       </section>
-      
-      <footer className="relative z-10 py-8 text-center text-[9px] tracking-[0.4em] text-zinc-400 uppercase border-t border-zinc-100">
-        © {new Date().getFullYear()} Matcha Recruit // Transmission Complete
+
+      <footer className="relative z-10 py-6 border-t border-zinc-200 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <span className="text-[9px] tracking-[0.3em] text-zinc-400 uppercase">
+            © {new Date().getFullYear()} Matcha Recruit
+          </span>
+          <div className="flex items-center gap-6">
+            <Link to="/" className="text-[9px] tracking-[0.2em] text-zinc-400 hover:text-emerald-600 uppercase transition-colors">
+              Home
+            </Link>
+            <Link to="/careers" className="text-[9px] tracking-[0.2em] text-zinc-400 hover:text-emerald-600 uppercase transition-colors">
+              Careers
+            </Link>
+          </div>
+        </div>
       </footer>
 
       <style>{`
