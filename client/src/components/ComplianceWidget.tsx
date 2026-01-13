@@ -7,7 +7,6 @@ export function ComplianceWidget() {
     const { data: summary, isLoading, error } = useQuery({
         queryKey: ['compliance-summary'],
         queryFn: complianceAPI.getSummary,
-        refetchInterval: 5 * 60 * 1000,
     });
 
     if (isLoading) {
