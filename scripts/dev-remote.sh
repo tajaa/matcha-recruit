@@ -204,27 +204,31 @@ tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 # Create new tmux session
 echo -e "${YELLOW}Creating tmux session...${NC}"
 
-# Pane 0: SSH Tunnel
-# We run it in a loop so it reconnects if it drops, and print status
-tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT" \
-    "while true; do echo 'Starting SSH Tunnel...'; ssh -i $KEY_FILE -N -L $LOCAL_PORT:localhost:$REMOTE_PORT $REMOTE_HOST -o ExitOnForwardFailure=yes; echo 'Tunnel dropped. Respawning in 2s...'; sleep 2; done"
+# Enable mouse mode for clicking panes and scrolling
+tmux set-option -g mouse on
+
+# Pane 0: Backend (Server) - Main large pane on the left
+tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
+    "source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
+# Pane 1: SSH Tunnel - Split right side (30% width)
+tmux split-window -t "$SESSION_NAME:dev" -h -p 30 -c "$PROJECT_ROOT" \
+    "while true; do echo 'Starting SSH Tunnel...'; ssh -i $KEY_FILE -N -L $LOCAL_PORT:localhost:$REMOTE_PORT $REMOTE_HOST -o ExitOnForwardFailure=yes; echo 'Tunnel dropped. Respawning in 2s...'; sleep 2; done"
+
 echo -e "${YELLOW}Waiting for tunnel...${NC}"
-sleep 2 
+sleep 2
 
-# Pane 1: Backend (Split horizontally from tunnel)
-tmux split-window -t "$SESSION_NAME:dev" -h -c "$PROJECT_ROOT/server" \
-    "source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
-
-# Pane 2: Worker (Split vertically from Backend)
-tmux split-window -t "$SESSION_NAME:dev" -v -c "$PROJECT_ROOT/server" \
+# Pane 2: Worker - Split below tunnel
+tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
     "source venv/bin/activate && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited.${NC}'; read"
 
-# Pane 3: Frontend (Split vertically from Tunnel)
-tmux select-pane -t "$SESSION_NAME:dev.0"
-tmux split-window -t "$SESSION_NAME:dev" -v -c "$PROJECT_ROOT/client" \
+# Pane 3: Frontend - Split below worker
+tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
     "npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
+
+# Select the server pane as active
+tmux select-pane -t "$SESSION_NAME:dev.0"
 
 echo -e "${GREEN}Remote Dev environment started!${NC}"
 echo -e "  - Database: Tunnel to $REMOTE_HOST:$REMOTE_PORT (mapped to localhost:$LOCAL_PORT)"

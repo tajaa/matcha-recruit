@@ -14,6 +14,13 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     if (!containerRef.current) return;
 
     const container = containerRef.current;
+
+    // Clean up any existing canvas (handles StrictMode double-render)
+    const existingCanvas = container.querySelector('canvas');
+    if (existingCanvas) {
+      container.removeChild(existingCanvas);
+    }
+
     const width = container.clientWidth;
     const height = container.clientHeight;
 
