@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { policies } from '../api/client';
+import { policies, getAccessToken } from '../api/client';
 import type { PolicyUpdate, PolicyStatus } from '../types';
 
 export function PolicyForm() {
@@ -74,7 +74,7 @@ export function PolicyForm() {
         const response = await fetch('/api/policies', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Authorization': `Bearer ${getAccessToken()}`,
           },
           body: formData,
         });

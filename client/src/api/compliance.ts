@@ -79,11 +79,13 @@ export interface ComplianceSummary {
     }[];
 }
 
+import { getAccessToken } from './client';
+
 export const complianceAPI = {
     async getLocations(): Promise<BusinessLocation[]> {
         const response = await fetch('/api/compliance/locations', {
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
             },
         });
         if (!response.ok) throw new Error('Failed to fetch locations');
@@ -93,7 +95,7 @@ export const complianceAPI = {
     async getLocation(locationId: string): Promise<BusinessLocation> {
         const response = await fetch(`/api/compliance/locations/${locationId}`, {
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
             },
         });
         if (!response.ok) throw new Error('Failed to fetch location');
@@ -104,7 +106,7 @@ export const complianceAPI = {
         const response = await fetch('/api/compliance/locations', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(data),
@@ -117,7 +119,7 @@ export const complianceAPI = {
         const response = await fetch(`/api/compliance/locations/${locationId}`, {
             method: 'PUT',
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(data),
@@ -130,7 +132,7 @@ export const complianceAPI = {
         const response = await fetch(`/api/compliance/locations/${locationId}`, {
             method: 'DELETE',
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
             },
         });
         if (!response.ok) throw new Error('Failed to delete location');
@@ -140,7 +142,7 @@ export const complianceAPI = {
         const params = category ? `?category=${category}` : '';
         const response = await fetch(`/api/compliance/locations/${locationId}/requirements${params}`, {
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
             },
         });
         if (!response.ok) throw new Error('Failed to fetch requirements');
@@ -153,10 +155,10 @@ export const complianceAPI = {
         if (params?.severity) searchParams.set('severity', params.severity);
         if (params?.limit) searchParams.set('limit', params.limit.toString());
         const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
-        
+
         const response = await fetch(`/api/compliance/alerts${query}`, {
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
             },
         });
         if (!response.ok) throw new Error('Failed to fetch alerts');
@@ -167,7 +169,7 @@ export const complianceAPI = {
         const response = await fetch(`/api/compliance/alerts/${alertId}/read`, {
             method: 'PUT',
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
             },
         });
         if (!response.ok) throw new Error('Failed to mark alert as read');
@@ -177,7 +179,7 @@ export const complianceAPI = {
         const response = await fetch(`/api/compliance/alerts/${alertId}/dismiss`, {
             method: 'PUT',
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
             },
         });
         if (!response.ok) throw new Error('Failed to dismiss alert');
@@ -186,7 +188,7 @@ export const complianceAPI = {
     async getSummary(): Promise<ComplianceSummary> {
         const response = await fetch('/api/compliance/summary', {
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Authorization': `Bearer ${getAccessToken()}`,
             },
         });
         if (!response.ok) throw new Error('Failed to fetch summary');
