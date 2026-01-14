@@ -209,7 +209,7 @@ tmux set-option -g mouse on
 
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
+    "export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
 # Pane 1: SSH Tunnel - Split right side (30% width)
@@ -221,7 +221,7 @@ sleep 2
 
 # Pane 2: Worker - Split below tunnel
 tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
-    "source venv/bin/activate && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited.${NC}'; read"
+    "export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited.${NC}'; read"
 
 # Pane 3: Frontend - Split below worker
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
