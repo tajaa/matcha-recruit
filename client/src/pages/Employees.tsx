@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { getAccessToken } from '../api/client';
 
+const API_BASE = 'http://localhost:8001/api';
+
 interface Employee {
   id: string;
   email: string;
@@ -47,8 +49,8 @@ export default function Employees() {
     try {
       const token = getAccessToken();
       const url = filter
-        ? `/api/employees?status=${filter}`
-        : `/api/employees`;
+        ? `${API_BASE}/employees?status=${filter}`
+        : `${API_BASE}/employees`;
 
       const response = await fetch(url, {
         headers: {
@@ -77,7 +79,7 @@ export default function Employees() {
 
     try {
       const token = getAccessToken();
-      const response = await fetch(`/api/employees`, {
+      const response = await fetch(`${API_BASE}/employees`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -113,7 +115,7 @@ export default function Employees() {
 
     try {
       const token = getAccessToken();
-      const response = await fetch(`/api/employees/${employeeId}/invite`, {
+      const response = await fetch(`${API_BASE}/employees/${employeeId}/invite`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
