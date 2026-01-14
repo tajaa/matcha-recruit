@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Button } from '../components/Button';
-import { Card } from '../components/Card';
 import { blogs } from '../api/client';
 import type { BlogPostCreate, BlogStatus } from '../types';
+import { ChevronLeft, X } from 'lucide-react';
 
 const slugify = (value: string) =>
   value
@@ -61,7 +60,6 @@ export function BlogEditor() {
         setPublishedAt(data.published_at || null);
       } catch (error) {
         console.error('Failed to load blog post:', error);
-        alert('Failed to load blog post');
       } finally {
         setLoading(false);
       }
@@ -88,55 +86,27 @@ export function BlogEditor() {
       .map((tag) => tag.trim())
       .filter(Boolean);
 
-  const buildPayload = (overrideStatus?: BlogStatus): BlogPostCreate => {
-    const trimmedTitle = title.trim();
-    const trimmedSlug = postSlug.trim() || slugify(trimmedTitle);
-    const trimmedExcerpt = excerpt.trim();
-    const trimmedContent = content.trim();
-    const trimmedMetaTitle = metaTitle.trim();
-    const trimmedMetaDescription = metaDescription.trim();
-    const trimmedCover = coverImage.trim();
-
-    return {
-      title: trimmedTitle,
-      slug: trimmedSlug,
-      content: trimmedContent,
-      status: overrideStatus || status,
-      excerpt: trimmedExcerpt || null,
-      cover_image: trimmedCover || null,
-      tags: parseTags(tags),
-      meta_title: trimmedMetaTitle || null,
-      meta_description: trimmedMetaDescription || null,
-    };
-  };
+  const buildPayload = (overrideStatus?: BlogStatus): BlogPostCreate => ({
+    title: title.trim(),
+    slug: postSlug.trim() || slugify(title.trim()),
+    content: content.trim(),
+    status: overrideStatus || status,
+    excerpt: excerpt.trim() || null,
+    cover_image: coverImage.trim() || null,
+    tags: parseTags(tags),
+    meta_title: metaTitle.trim() || null,
+    meta_description: metaDescription.trim() || null,
+  });
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const trimmedTitle = title.trim();
-    const trimmedContent = content.trim();
-    const finalSlug = postSlug.trim() || slugify(trimmedTitle);
-
-    if (!trimmedTitle) {
-      alert('Title is required.');
-      return;
-    }
-    if (!finalSlug) {
-      alert('Slug is required.');
-      return;
-    }
-    if (!trimmedContent) {
-      alert('Content is required.');
-      return;
-    }
+    if (!title.trim() || !content.trim()) return;
 
     try {
       setSaving(true);
       const payload = buildPayload();
       if (isEditing && postId) {
         const updated = await blogs.update(postId, payload);
-        setPostSlug(updated.slug);
-        setStatus(updated.status);
-        setPublishedAt(updated.published_at || null);
         navigate(`/app/blog/${updated.slug}`);
       } else {
         const created = await blogs.create(payload);
@@ -144,7 +114,6 @@ export function BlogEditor() {
       }
     } catch (error) {
       console.error('Failed to save blog post:', error);
-      alert('Failed to save blog post');
     } finally {
       setSaving(false);
     }
@@ -157,7 +126,6 @@ export function BlogEditor() {
       setCoverImage(result.url);
     } catch (error) {
       console.error('Failed to upload cover image:', error);
-      alert('Failed to upload image');
     } finally {
       setUploading(false);
     }
@@ -165,143 +133,128 @@ export function BlogEditor() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="w-2 h-2 rounded-full bg-white animate-ping" />
+      <div className="flex items-center justify-center py-12">
+        <div className="text-xs text-zinc-500 uppercase tracking-wider">Loading post data...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div className="max-w-3xl mx-auto space-y-12">
+      {/* Header */}
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            {isEditing ? 'Edit Blog Post' : 'Create Blog Post'}
+          <button
+            onClick={() => navigate('/app/blog')}
+            className="text-xs text-zinc-500 hover:text-zinc-900 mb-4 flex items-center gap-1 uppercase tracking-wider transition-colors"
+          >
+            <ChevronLeft size={12} />
+            Back to Posts
+          </button>
+          <h1 className="text-3xl font-light tracking-tight text-zinc-900">
+            {isEditing ? 'Edit Post' : 'New Post'}
           </h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            {isEditing ? 'Update and publish your content.' : 'Draft a new story for your audience.'}
-          </p>
+          {publishedAt && (
+            <p className="text-[10px] text-zinc-400 font-mono mt-2 uppercase tracking-widest">
+              Published on {new Date(publishedAt).toLocaleDateString()}
+            </p>
+          )}
         </div>
-        {publishedAt && (
-          <div className="text-xs text-zinc-500 font-mono uppercase tracking-widest">
-            Published {new Date(publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-          </div>
-        )}
+        <div className="w-40">
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as BlogStatus)}
+            className="w-full px-2 py-1.5 bg-transparent border-b border-zinc-200 text-xs text-zinc-600 focus:outline-none focus:border-zinc-400 cursor-pointer uppercase tracking-wider font-medium"
+          >
+            {statusOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <Card>
-          <div className="p-6 space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-10">
+        <div className="space-y-8">
+          {/* Main Title */}
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Post Title</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => handleTitleChange(e.target.value)}
+              className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 placeholder-zinc-300 text-2xl font-light focus:outline-none focus:border-zinc-900 transition-colors"
+              placeholder="Enter title..."
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div>
-              <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                Title *
-              </label>
+              <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">URL Slug</label>
               <input
                 type="text"
-                value={title}
-                onChange={(event) => handleTitleChange(event.target.value)}
-                className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                placeholder="Post title"
+                value={postSlug}
+                onChange={(e) => handleSlugChange(e.target.value)}
+                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 font-mono text-xs focus:outline-none focus:border-zinc-900 transition-colors"
+                placeholder="post-url-slug"
                 required
               />
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2">
-                <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                  Slug *
-                </label>
-                <input
-                  type="text"
-                  value={postSlug}
-                  onChange={(event) => handleSlugChange(event.target.value)}
-                  className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                  placeholder="blog-post-title"
-                  required
-                />
-                <p className="text-[10px] text-zinc-600 mt-1">
-                  Used for the URL. Keep it short and lowercase.
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                  Status
-                </label>
-                <select
-                  value={status}
-                  onChange={(event) => setStatus(event.target.value as BlogStatus)}
-                  className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                >
-                  {statusOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
             <div>
-              <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                Excerpt
-              </label>
-              <textarea
-                value={excerpt}
-                onChange={(event) => setExcerpt(event.target.value)}
-                className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md min-h-[80px]"
-                placeholder="Short summary for previews"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                Content *
-              </label>
-              <textarea
-                value={content}
-                onChange={(event) => setContent(event.target.value)}
-                className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md min-h-[300px] font-mono text-xs leading-relaxed"
-                placeholder="Write your blog post content..."
-                required
-              />
-              <p className="text-[10px] text-zinc-600 mt-1">
-                Supports rich text or markdown if your renderer allows it.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                Tags
-              </label>
+              <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Tags</label>
               <input
                 type="text"
                 value={tags}
-                onChange={(event) => setTags(event.target.value)}
-                className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
+                onChange={(e) => setTags(e.target.value)}
+                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-900 transition-colors"
                 placeholder="hiring, culture, leadership"
               />
-              <p className="text-[10px] text-zinc-600 mt-1">Separate tags with commas.</p>
             </div>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-              <div className="md:col-span-2">
-                <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                  Cover Image URL
-                </label>
+          {/* Excerpt */}
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Excerpt</label>
+            <textarea
+              value={excerpt}
+              onChange={(e) => setExcerpt(e.target.value)}
+              className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-700 text-sm focus:outline-none focus:border-zinc-900 transition-colors resize-none"
+              placeholder="Short summary for preview cards..."
+              rows={2}
+            />
+          </div>
+
+          {/* Content Body */}
+          <div className="space-y-4 pt-4">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-2">
+              <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Body Content</label>
+              <span className="text-[9px] text-zinc-400 font-mono italic">Markdown supported</span>
+            </div>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              className="w-full px-4 py-4 bg-zinc-50 border border-zinc-200 rounded-sm text-zinc-800 text-sm font-serif leading-relaxed min-h-[500px] focus:outline-none focus:border-zinc-400 focus:bg-white transition-all resize-none shadow-inner"
+              placeholder="Begin writing..."
+              required
+            />
+          </div>
+
+          {/* Cover Image */}
+          <div className="space-y-4 pt-4">
+            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 font-bold border-b border-zinc-200 pb-2">
+              Cover Image
+            </label>
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-4">
                 <input
                   type="text"
                   value={coverImage}
-                  onChange={(event) => setCoverImage(event.target.value)}
-                  className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                  placeholder="https://..."
+                  onChange={(e) => setCoverImage(e.target.value)}
+                  className="flex-1 px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-900 transition-colors"
+                  placeholder="Image URL (https://...)"
                 />
-              </div>
-              <div>
-                <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                  Upload Image
-                </label>
-                <label className="cursor-pointer w-full inline-flex items-center justify-center px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs uppercase tracking-widest rounded-md hover:bg-zinc-700 hover:text-white transition-colors">
-                  {uploading ? 'Uploading...' : 'Choose File'}
+                <label className="cursor-pointer px-4 py-2 bg-zinc-100 border border-zinc-200 text-zinc-600 text-[10px] font-bold uppercase tracking-wider rounded-sm hover:bg-zinc-200 transition-colors">
+                  {uploading ? 'Uploading...' : 'Upload'}
                   <input
                     type="file"
                     accept="image/*"
@@ -314,58 +267,66 @@ export function BlogEditor() {
                   />
                 </label>
               </div>
+              {coverImage && (
+                <div className="relative group w-full aspect-video max-h-[300px] overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                  <img src={coverImage} alt="Cover" className="w-full h-full object-cover" />
+                  <button 
+                    onClick={() => setCoverImage('')}
+                    type="button"
+                    className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
             </div>
+          </div>
 
-            {coverImage && (
-              <div className="border border-zinc-800 rounded-md p-3 bg-zinc-950/50">
-                <img
-                  src={coverImage}
-                  alt="Cover preview"
-                  className="w-full max-h-[220px] object-cover rounded"
-                />
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* SEO Metadata */}
+          <div className="space-y-6 pt-8 border-t border-zinc-100">
+            <h3 className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">SEO Metadata</h3>
+            <div className="space-y-6">
               <div>
-                <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                  Meta Title
-                </label>
+                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Meta Title</label>
                 <input
                   type="text"
                   value={metaTitle}
-                  onChange={(event) => setMetaTitle(event.target.value)}
-                  className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                  placeholder="SEO title"
+                  onChange={(e) => setMetaTitle(e.target.value)}
+                  className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-900 transition-colors"
+                  placeholder="SEO Search Title"
                 />
               </div>
               <div>
-                <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                  Meta Description
-                </label>
+                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Meta Description</label>
                 <textarea
                   value={metaDescription}
-                  onChange={(event) => setMetaDescription(event.target.value)}
-                  className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md min-h-[90px]"
-                  placeholder="SEO description"
+                  onChange={(e) => setMetaDescription(e.target.value)}
+                  className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-700 text-xs focus:outline-none focus:border-zinc-900 transition-colors resize-none"
+                  placeholder="SEO Search Description"
+                  rows={2}
                 />
               </div>
             </div>
-
-            <div className="flex justify-end gap-3 pt-4 border-t border-zinc-800">
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => navigate('/app/blog')}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? 'Saving...' : isEditing ? 'Update Post' : 'Create Post'}
-              </Button>
-            </div>
           </div>
-        </Card>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="flex justify-end gap-4 pt-10 border-t border-zinc-100">
+          <button
+            type="button"
+            onClick={() => navigate('/app/blog')}
+            className="px-6 py-2 text-zinc-500 hover:text-zinc-900 text-xs font-medium uppercase tracking-wider transition-colors"
+          >
+            Discard
+          </button>
+          <button 
+            type="submit" 
+            disabled={saving}
+            className="px-8 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-sm text-xs font-medium uppercase tracking-wider transition-colors disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : isEditing ? 'Update Post' : 'Create Post'}
+          </button>
+        </div>
       </form>
     </div>
   );
