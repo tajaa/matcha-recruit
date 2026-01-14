@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Building, MapPin, Phone, Calendar, AlertCircle, Save } from 'lucide-react';
+import { User, Building, MapPin, Calendar, AlertCircle, Save } from 'lucide-react';
 import { portalApi } from '../../api/portal';
 
 interface Employee {
