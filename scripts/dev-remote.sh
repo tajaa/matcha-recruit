@@ -204,13 +204,13 @@ tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 # Create new tmux session
 echo -e "${YELLOW}Creating tmux session...${NC}"
 
-# Enable mouse mode for clicking panes and scrolling
-tmux set-option -g mouse on
-
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
     "export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
+
+# Enable mouse mode for clicking panes and scrolling
+tmux set-option -t "$SESSION_NAME" mouse on
 
 # Pane 1: SSH Tunnel - Split right side (30% width)
 tmux split-window -t "$SESSION_NAME:dev" -h -p 30 -c "$PROJECT_ROOT" \
