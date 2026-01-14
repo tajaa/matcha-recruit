@@ -14,7 +14,7 @@ import type {
 } from '../types';
 import { 
   ChevronLeft, Upload, Trash2, Search, 
-  AlertTriangle, CheckCircle, Clock, FileText, X
+  AlertTriangle, CheckCircle, Clock, X
 } from 'lucide-react';
 
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
@@ -230,11 +230,6 @@ export function ERCaseDetail() {
     } finally {
       setStatusUpdating(false);
     }
-  };
-
-  const getDocFilename = (docId: string) => {
-    const doc = documents.find(d => d.id === docId);
-    return doc?.filename || docId;
   };
 
   if (loading) {

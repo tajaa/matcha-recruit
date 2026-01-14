@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { erCopilot } from '../api/client';
 import type { ERCase, ERCaseStatus, ERCaseCreate } from '../types';
-import { FileText, X } from 'lucide-react';
+import { X } from 'lucide-react';
 
 const STATUS_TABS: { label: string; value: ERCaseStatus | 'all' }[] = [
   { label: 'All', value: 'all' },
