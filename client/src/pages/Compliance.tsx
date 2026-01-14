@@ -187,11 +187,11 @@ export function Compliance() {
     const getSeverityStyles = (severity: string) => {
         switch (severity) {
             case 'critical':
-                return 'bg-red-500/20 text-red-400 border-red-500/30';
+                return 'bg-red-50 text-red-700 border-red-200';
             case 'warning':
-                return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+                return 'bg-amber-50 text-amber-700 border-amber-200';
             default:
-                return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+                return 'bg-blue-50 text-blue-700 border-blue-200';
         }
     };
 
@@ -200,15 +200,12 @@ export function Compliance() {
     const unreadAlertsCount = locationAlerts.filter(a => a.status === 'unread').length;
 
     return (
-        <div className="space-y-6">
+        <div className="max-w-7xl mx-auto space-y-8">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-thin tracking-tight text-white flex items-center gap-3">
-                        <Shield size={28} className="text-emerald-400" />
-                        Compliance Tracking
-                    </h1>
-                    <p className="text-gray-400 mt-1">
-                        Monitor labor laws, tax rates, and posting requirements by location
+                    <h1 className="text-3xl font-light tracking-tight text-zinc-900">Compliance</h1>
+                    <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+                        Monitor labor laws, tax rates, and posting requirements
                     </p>
                 </div>
                 <button
@@ -217,86 +214,86 @@ export function Compliance() {
                         setEditingLocation(null);
                         setShowAddModal(true);
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-lg text-sm font-medium transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded text-xs font-medium uppercase tracking-wider transition-colors"
                 >
-                    <Plus size={18} />
+                    <Plus size={14} />
                     Add Location
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-1 space-y-4">
-                    <h2 className="text-lg font-medium text-white">Your Locations</h2>
+                    <h2 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider pb-2 border-b border-zinc-200">
+                        Locations
+                    </h2>
 
                     {loadingLocations ? (
                         <div className="space-y-3">
                             {[1, 2, 3].map(i => (
-                                <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-4 animate-pulse">
-                                    <div className="h-5 w-32 bg-white/10 rounded mb-2" />
-                                    <div className="h-4 w-48 bg-white/10 rounded" />
-                                </div>
+                                <div key={i} className="bg-zinc-100 rounded p-4 animate-pulse h-20" />
                             ))}
                         </div>
                     ) : locations?.length === 0 ? (
-                        <div className="bg-white/5 border border-white/10 rounded-xl p-8 text-center">
-                            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/5 flex items-center justify-center">
-                                <MapPin size={28} className="text-gray-500" />
+                        <div className="bg-zinc-50 border border-zinc-200 rounded p-8 text-center">
+                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-100 flex items-center justify-center">
+                                <MapPin size={20} className="text-zinc-400" />
                             </div>
-                            <h3 className="text-white font-medium mb-2">No Locations Yet</h3>
-                            <p className="text-gray-400 text-sm mb-4">
-                                Add your business locations to start tracking compliance requirements.
+                            <h3 className="text-zinc-900 text-sm font-medium mb-1">No Locations</h3>
+                            <p className="text-zinc-500 text-xs mb-4">
+                                Add business locations to track compliance.
                             </p>
                             <button
                                 onClick={() => setShowAddModal(true)}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-lg text-sm font-medium transition-colors"
+                                className="text-zinc-900 text-xs font-medium hover:underline"
                             >
-                                <Plus size={16} />
                                 Add Location
                             </button>
                         </div>
                     ) : (
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                             {locations?.map(location => (
                                 <div
                                     key={location.id}
                                     onClick={() => setSelectedLocationId(location.id)}
-                                    className={`bg-white/5 border rounded-xl p-4 cursor-pointer transition-all ${
+                                    className={`border rounded p-4 cursor-pointer transition-all group ${
                                         selectedLocationId === location.id
-                                            ? 'border-emerald-500/50 bg-emerald-500/5'
-                                            : 'border-white/10 hover:border-white/20'
+                                            ? 'border-zinc-900 bg-zinc-50 shadow-sm'
+                                            : 'border-zinc-200 bg-white hover:border-zinc-300'
                                     }`}
                                 >
                                     <div className="flex items-start justify-between">
                                         <div className="min-w-0 flex-1">
-                                            <h3 className="text-white font-medium truncate">
+                                            <h3 className={`font-medium text-sm truncate ${
+                                                selectedLocationId === location.id ? 'text-zinc-900' : 'text-zinc-700'
+                                            }`}>
                                                 {location.name || `${location.city}, ${location.state}`}
                                             </h3>
-                                            <p className="text-gray-400 text-sm truncate">
+                                            <p className="text-zinc-500 text-xs truncate mt-0.5">
                                                 {location.address ? `${location.address}, ` : ''}{location.city}, {location.state} {location.zipcode}
                                             </p>
-                                            <div className="flex items-center gap-4 mt-2 text-xs">
-                                                <span className="text-gray-500">
-                                                    {location.requirements_count} requirements
+                                            <div className="flex items-center gap-4 mt-3 text-[10px] uppercase tracking-wider">
+                                                <span className="text-zinc-500">
+                                                    {location.requirements_count} reqs
                                                 </span>
                                                 {location.unread_alerts_count > 0 && (
-                                                    <span className="text-amber-400 flex items-center gap-1">
-                                                        <Bell size={12} />
+                                                    <span className="text-amber-600 flex items-center gap-1 font-medium">
+                                                        <Bell size={10} />
                                                         {location.unread_alerts_count} alerts
                                                     </span>
                                                 )}
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-1 ml-2">
+                                        <div className="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     openEditModal(location);
                                                     setShowAddModal(true);
                                                 }}
-                                                className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                                                className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded transition-colors"
                                                 title="Edit"
                                             >
-                                                <Edit2 size={14} />
+                                                <Edit2 size={12} />
                                             </button>
                                             <button
                                                 onClick={(e) => {
@@ -305,19 +302,13 @@ export function Compliance() {
                                                         deleteLocationMutation.mutate(location.id);
                                                     }
                                                 }}
-                                                className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                                className="p-1.5 text-zinc-400 hover:text-red-600 rounded transition-colors"
                                                 title="Delete"
                                             >
-                                                <Trash2 size={14} />
+                                                <Trash2 size={12} />
                                             </button>
                                         </div>
                                     </div>
-                                    {location.last_compliance_check && (
-                                        <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
-                                            <Clock size={10} />
-                                            Last checked: {new Date(location.last_compliance_check).toLocaleDateString()}
-                                        </p>
-                                    )}
                                 </div>
                             ))}
                         </div>
@@ -326,85 +317,85 @@ export function Compliance() {
 
                 <div className="lg:col-span-2">
                     {selectedLocationId && selectedLocation ? (
-                        <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-                            <div className="p-4 border-b border-white/10 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-                                        <Building2 size={20} className="text-emerald-400" />
+                        <div className="bg-white border border-zinc-200 rounded shadow-sm overflow-hidden min-h-[600px] flex flex-col">
+                            <div className="p-6 border-b border-zinc-100 bg-zinc-50/50 flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded bg-white border border-zinc-200 flex items-center justify-center shadow-sm">
+                                        <Building2 size={20} className="text-zinc-400" />
                                     </div>
                                     <div>
-                                        <h2 className="text-lg font-medium text-white">
+                                        <h2 className="text-lg font-medium text-zinc-900">
                                             {selectedLocation.name || `${selectedLocation.city}, ${selectedLocation.state}`}
                                         </h2>
-                                        <p className="text-sm text-gray-400">
+                                        <p className="text-xs text-zinc-500">
                                             {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zipcode}
                                         </p>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="flex border-b border-white/10">
+                            <div className="flex border-b border-zinc-200">
                                 <button
                                     onClick={() => setActiveTab('requirements')}
-                                    className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
+                                    className={`flex-1 px-4 py-3 text-xs font-medium uppercase tracking-wider transition-colors ${
                                         activeTab === 'requirements'
-                                            ? 'text-white border-b-2 border-emerald-500'
-                                            : 'text-gray-400 hover:text-white'
+                                            ? 'text-zinc-900 border-b-2 border-zinc-900 bg-white'
+                                            : 'text-zinc-500 hover:text-zinc-900 bg-zinc-50/50 hover:bg-zinc-50'
                                     }`}
                                 >
                                     Requirements ({requirements?.length || 0})
                                 </button>
                                 <button
                                     onClick={() => setActiveTab('alerts')}
-                                    className={`flex-1 px-4 py-3 text-sm font-medium transition-colors relative ${
+                                    className={`flex-1 px-4 py-3 text-xs font-medium uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
                                         activeTab === 'alerts'
-                                            ? 'text-white border-b-2 border-emerald-500'
-                                            : 'text-gray-400 hover:text-white'
+                                            ? 'text-zinc-900 border-b-2 border-zinc-900 bg-white'
+                                            : 'text-zinc-500 hover:text-zinc-900 bg-zinc-50/50 hover:bg-zinc-50'
                                     }`}
                                 >
                                     Alerts ({locationAlerts.length})
                                     {unreadAlertsCount > 0 && (
-                                        <span className="ml-2 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded-full">
+                                        <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] rounded-full font-bold">
                                             {unreadAlertsCount}
                                         </span>
                                     )}
                                 </button>
                             </div>
 
-                            <div className="p-4 max-h-[600px] overflow-y-auto custom-scrollbar">
+                            <div className="p-6 flex-1 bg-white overflow-y-auto">
                                 {activeTab === 'requirements' ? (
                                     loadingRequirements ? (
-                                        <div className="space-y-3">
+                                        <div className="space-y-4">
                                             {[1, 2, 3].map(i => (
-                                                <div key={i} className="h-16 bg-white/10 rounded-xl animate-pulse" />
+                                                <div key={i} className="h-16 bg-zinc-100 rounded animate-pulse" />
                                             ))}
                                         </div>
                                     ) : Object.keys(requirementsByCategory).length === 0 ? (
-                                        <div className="text-center py-8 text-gray-400">
-                                            No requirements found. Add requirements to see them here.
+                                        <div className="text-center py-12 text-zinc-500 text-sm">
+                                            No requirements found for this jurisdiction.
                                         </div>
                                     ) : (
-                                        <div className="space-y-3">
+                                        <div className="space-y-4">
                                             {Object.entries(requirementsByCategory).map(([category, reqs]) => (
-                                                <div key={category} className="bg-white/5 rounded-xl overflow-hidden">
-                                                    <div className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
-                                                        <button
-                                                            onClick={() => toggleCategory(category)}
-                                                            className="flex items-center gap-3 text-left flex-1"
-                                                        >
-                                                            <span className="text-white font-medium">
+                                                <div key={category} className="border border-zinc-200 rounded overflow-hidden">
+                                                    <button
+                                                        onClick={() => toggleCategory(category)}
+                                                        className="w-full flex items-center justify-between p-4 bg-zinc-50 hover:bg-zinc-100 transition-colors"
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-zinc-900 text-sm font-medium">
                                                                 {COMPLIANCE_CATEGORY_LABELS[category] || category}
                                                             </span>
-                                                            <span className="px-2 py-0.5 bg-white/10 text-gray-400 text-xs rounded-full">
+                                                            <span className="px-2 py-0.5 bg-white border border-zinc-200 text-zinc-500 text-[10px] rounded-full">
                                                                 {reqs.length}
                                                             </span>
-                                                            {expandedCategories.has(category) ? (
-                                                                <ChevronDown size={18} className="text-gray-400" />
-                                                            ) : (
-                                                                <ChevronRight size={18} className="text-gray-400" />
-                                                            )}
-                                                        </button>
-                                                    </div>
+                                                        </div>
+                                                        {expandedCategories.has(category) ? (
+                                                            <ChevronDown size={16} className="text-zinc-400" />
+                                                        ) : (
+                                                            <ChevronRight size={16} className="text-zinc-400" />
+                                                        )}
+                                                    </button>
 
                                                     <AnimatePresence initial={false}>
                                                         {expandedCategories.has(category) && (
@@ -413,46 +404,41 @@ export function Compliance() {
                                                                 animate={{ height: 'auto', opacity: 1 }}
                                                                 exit={{ height: 0, opacity: 0 }}
                                                                 transition={{ duration: 0.2 }}
-                                                                className="overflow-hidden"
+                                                                className="overflow-hidden bg-white border-t border-zinc-200"
                                                             >
-                                                                <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
+                                                                <div className="divide-y divide-zinc-100">
                                                                     {reqs.map(req => (
-                                                                        <div key={req.id} className="bg-white/5 rounded-lg p-3">
-                                                                            <div className="flex items-start justify-between">
+                                                                        <div key={req.id} className="p-4 hover:bg-zinc-50/50 transition-colors">
+                                                                            <div className="flex items-start justify-between mb-2">
                                                                                 <div>
-                                                                                    <h4 className="text-white text-sm font-medium">
+                                                                                    <h4 className="text-zinc-900 text-sm font-medium">
                                                                                         {req.title}
                                                                                     </h4>
                                                                                     <div className="flex items-center gap-2 mt-1">
-                                                                                        <span className="px-1.5 py-0.5 bg-white/10 text-gray-400 text-xs rounded">
+                                                                                        <span className="px-1.5 py-0.5 bg-zinc-100 text-zinc-600 text-[10px] uppercase tracking-wide rounded">
                                                                                             {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
                                                                                         </span>
-                                                                                        <span className="text-gray-500 text-xs">
+                                                                                        <span className="text-zinc-500 text-xs">
                                                                                             {req.jurisdiction_name}
                                                                                         </span>
                                                                                     </div>
                                                                                 </div>
                                                                                 {req.current_value && (
-                                                                                    <span className="text-emerald-400 font-medium text-sm">
+                                                                                    <span className="text-zinc-900 font-mono text-sm bg-zinc-100 px-2 py-1 rounded">
                                                                                         {req.current_value}
                                                                                     </span>
                                                                                 )}
                                                                             </div>
                                                                             {req.description && (
-                                                                                <p className="text-gray-400 text-xs mt-2">
+                                                                                <p className="text-zinc-600 text-xs leading-relaxed mb-3">
                                                                                     {req.description}
                                                                                 </p>
                                                                             )}
-                                                                            <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5">
-                                                                                <div className="flex items-center gap-3 text-xs">
+                                                                            <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                                                                                <div className="flex items-center gap-3">
                                                                                     {req.effective_date && (
-                                                                                        <span className="text-gray-500">
+                                                                                        <span>
                                                                                             Effective: {new Date(req.effective_date).toLocaleDateString()}
-                                                                                        </span>
-                                                                                    )}
-                                                                                    {req.previous_value && (
-                                                                                        <span className="text-amber-400">
-                                                                                            Changed from {req.previous_value}
                                                                                         </span>
                                                                                     )}
                                                                                 </div>
@@ -461,7 +447,7 @@ export function Compliance() {
                                                                                         href={req.source_url}
                                                                                         target="_blank"
                                                                                         rel="noopener noreferrer"
-                                                                                        className="text-blue-400 hover:text-blue-300 text-xs flex items-center gap-1"
+                                                                                        className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
                                                                                     >
                                                                                         Source <ExternalLink size={10} />
                                                                                     </a>
@@ -481,38 +467,38 @@ export function Compliance() {
                                     loadingAlerts ? (
                                         <div className="space-y-3">
                                             {[1, 2, 3].map(i => (
-                                                <div key={i} className="h-20 bg-white/10 rounded-xl animate-pulse" />
+                                                <div key={i} className="h-20 bg-zinc-100 rounded animate-pulse" />
                                             ))}
                                         </div>
                                     ) : locationAlerts.length === 0 ? (
-                                        <div className="text-center py-8">
-                                            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/5 flex items-center justify-center">
-                                                <CheckCircle size={28} className="text-emerald-400" />
+                                        <div className="text-center py-12">
+                                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-emerald-50 flex items-center justify-center">
+                                                <CheckCircle size={20} className="text-emerald-500" />
                                             </div>
-                                            <p className="text-gray-400">No alerts for this location</p>
+                                            <p className="text-zinc-500 text-sm">All clear. No alerts.</p>
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
                                             {locationAlerts.map(alert => (
                                                 <div
                                                     key={alert.id}
-                                                    className={`border rounded-xl p-4 ${getSeverityStyles(alert.severity)} ${
-                                                        alert.status === 'unread' ? 'border-opacity-100' : 'border-opacity-30 opacity-60'
+                                                    className={`border rounded-lg p-4 ${getSeverityStyles(alert.severity)} ${
+                                                        alert.status === 'unread' ? 'shadow-sm' : 'opacity-75 bg-zinc-50 border-zinc-200'
                                                     }`}
                                                 >
                                                     <div className="flex items-start justify-between">
                                                         <div className="flex items-start gap-3">
-                                                            <AlertTriangle size={18} className="mt-0.5 flex-shrink-0" />
+                                                            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0 opacity-80" />
                                                             <div>
-                                                                <h4 className="font-medium">{alert.title}</h4>
-                                                                <p className="text-sm mt-1 opacity-80">{alert.message}</p>
+                                                                <h4 className="text-sm font-medium opacity-90">{alert.title}</h4>
+                                                                <p className="text-xs mt-1 opacity-80 leading-relaxed">{alert.message}</p>
                                                                 {alert.action_required && (
-                                                                    <p className="text-sm mt-2 font-medium">
+                                                                    <p className="text-xs mt-2 font-medium">
                                                                         Action: {alert.action_required}
                                                                     </p>
                                                                 )}
                                                                 {alert.deadline && (
-                                                                    <p className="text-xs mt-1 opacity-70">
+                                                                    <p className="text-[10px] mt-1 opacity-70">
                                                                         Deadline: {new Date(alert.deadline).toLocaleDateString()}
                                                                     </p>
                                                                 )}
@@ -522,31 +508,22 @@ export function Compliance() {
                                                             {alert.status === 'unread' && (
                                                                 <button
                                                                     onClick={() => markAlertReadMutation.mutate(alert.id)}
-                                                                    className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+                                                                    className="p-1.5 hover:bg-black/5 rounded transition-colors"
                                                                     title="Mark as read"
                                                                 >
-                                                                    <CheckCircle size={16} />
+                                                                    <CheckCircle size={14} />
                                                                 </button>
                                                             )}
                                                             {alert.status !== 'dismissed' && (
                                                                 <button
                                                                     onClick={() => dismissAlertMutation.mutate(alert.id)}
-                                                                    className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+                                                                    className="p-1.5 hover:bg-black/5 rounded transition-colors"
                                                                     title="Dismiss"
                                                                 >
-                                                                    <X size={16} />
+                                                                    <X size={14} />
                                                                 </button>
                                                             )}
                                                         </div>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 mt-3 text-xs opacity-60">
-                                                        <span>{new Date(alert.created_at).toLocaleString()}</span>
-                                                        {alert.category && (
-                                                            <>
-                                                                <span>•</span>
-                                                                <span>{COMPLIANCE_CATEGORY_LABELS[alert.category] || alert.category}</span>
-                                                            </>
-                                                        )}
                                                     </div>
                                                 </div>
                                             ))}
@@ -556,13 +533,13 @@ export function Compliance() {
                             </div>
                         </div>
                     ) : (
-                        <div className="bg-white/5 border border-white/10 rounded-2xl p-8 text-center h-full flex flex-col items-center justify-center min-h-[400px]">
-                            <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-white/5 flex items-center justify-center">
-                                <MapPin size={36} className="text-gray-500" />
+                        <div className="bg-zinc-50 border border-zinc-200 rounded p-12 text-center h-full flex flex-col items-center justify-center min-h-[400px]">
+                            <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-white border border-zinc-200 flex items-center justify-center shadow-sm">
+                                <MapPin size={24} className="text-zinc-400" />
                             </div>
-                            <h3 className="text-white font-medium mb-2">Select a Location</h3>
-                            <p className="text-gray-400 text-sm max-w-sm">
-                                Choose a location from the list to view compliance requirements and alerts.
+                            <h3 className="text-zinc-900 font-medium mb-2">Select a Location</h3>
+                            <p className="text-zinc-500 text-sm max-w-sm">
+                                Choose a location from the left to view compliance requirements and alerts.
                             </p>
                         </div>
                     )}
@@ -575,7 +552,7 @@ export function Compliance() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
+                        className="fixed inset-0 bg-zinc-900/20 backdrop-blur-sm z-50 flex items-center justify-center p-4"
                         onClick={() => {
                             setShowAddModal(false);
                             setEditingLocation(null);
@@ -586,11 +563,11 @@ export function Compliance() {
                             initial={{ scale: 0.95, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
-                            className="bg-[#111] border border-white/10 rounded-2xl p-6 w-full max-w-md"
+                            className="bg-white shadow-2xl rounded-sm p-8 w-full max-w-md"
                             onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         >
-                            <div className="flex items-center justify-between mb-6">
-                                <h2 className="text-lg font-medium text-white">
+                            <div className="flex items-center justify-between mb-6 border-b border-zinc-100 pb-4">
+                                <h2 className="text-xl font-light text-zinc-900">
                                     {editingLocation ? 'Edit Location' : 'Add Location'}
                                 </h2>
                                 <button
@@ -599,7 +576,7 @@ export function Compliance() {
                                         setEditingLocation(null);
                                         setFormData(emptyFormData);
                                     }}
-                                    className="p-1 text-gray-400 hover:text-white"
+                                    className="p-1 text-zinc-400 hover:text-zinc-600"
                                 >
                                     <X size={20} />
                                 </button>
@@ -607,7 +584,7 @@ export function Compliance() {
 
                             <form onSubmit={handleSubmitLocation} className="space-y-4">
                                 <div>
-                                    <label className="block text-sm text-gray-400 mb-1">
+                                    <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
                                         Location Name (optional)
                                     </label>
                                     <input
@@ -615,12 +592,12 @@ export function Compliance() {
                                         value={formData.name}
                                         onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
                                         placeholder="e.g., Main Office, Warehouse"
-                                        className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
+                                        className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm text-gray-400 mb-1">
+                                    <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
                                         Street Address (optional)
                                     </label>
                                     <input
@@ -628,14 +605,14 @@ export function Compliance() {
                                         value={formData.address}
                                         onChange={e => setFormData(prev => ({ ...prev, address: e.target.value }))}
                                         placeholder="123 Main St"
-                                        className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
+                                        className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
                                     />
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-sm text-gray-400 mb-1">
-                                            City <span className="text-red-400">*</span>
+                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                                            City <span className="text-red-500">*</span>
                                         </label>
                                         <input
                                             type="text"
@@ -643,18 +620,18 @@ export function Compliance() {
                                             onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))}
                                             required
                                             placeholder="San Francisco"
-                                            className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
+                                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm text-gray-400 mb-1">
-                                            State <span className="text-red-400">*</span>
+                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                                            State <span className="text-red-500">*</span>
                                         </label>
                                         <select
                                             value={formData.state}
                                             onChange={e => setFormData(prev => ({ ...prev, state: e.target.value }))}
                                             required
-                                            className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-emerald-500/50"
+                                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
                                         >
                                             <option value="">Select...</option>
                                             {US_STATES.map(state => (
@@ -668,7 +645,7 @@ export function Compliance() {
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-sm text-gray-400 mb-1">
+                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
                                             County (optional)
                                         </label>
                                         <input
@@ -676,12 +653,12 @@ export function Compliance() {
                                             value={formData.county}
                                             onChange={e => setFormData(prev => ({ ...prev, county: e.target.value }))}
                                             placeholder="San Francisco"
-                                            className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
+                                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm text-gray-400 mb-1">
-                                            ZIP Code <span className="text-red-400">*</span>
+                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                                            ZIP Code <span className="text-red-500">*</span>
                                         </label>
                                         <input
                                             type="text"
@@ -690,12 +667,12 @@ export function Compliance() {
                                             required
                                             placeholder="94105"
                                             maxLength={10}
-                                            className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
+                                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
                                         />
                                     </div>
                                 </div>
 
-                                <div className="flex gap-3 pt-4">
+                                <div className="flex gap-3 pt-6 border-t border-zinc-100">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -703,14 +680,14 @@ export function Compliance() {
                                             setEditingLocation(null);
                                             setFormData(emptyFormData);
                                         }}
-                                        className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-sm font-medium transition-colors"
+                                        className="flex-1 px-4 py-2 bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50 rounded text-sm font-medium transition-colors"
                                     >
                                         Cancel
                                     </button>
                                     <button
                                         type="submit"
                                         disabled={createLocationMutation.isPending || updateLocationMutation.isPending}
-                                        className="flex-1 px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                                        className="flex-1 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded text-sm font-medium transition-colors disabled:opacity-50"
                                     >
                                         {createLocationMutation.isPending || updateLocationMutation.isPending
                                             ? 'Saving...'

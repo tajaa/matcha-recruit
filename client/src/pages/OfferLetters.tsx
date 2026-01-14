@@ -1,7 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Button } from '../components/Button';
-import { GlassCard } from '../components/GlassCard';
-import { FileText, BarChart3, ChevronRight } from 'lucide-react';
+import { FileText, ChevronRight } from 'lucide-react';
 import { offerLetters as offerLettersApi } from '../api/client';
 import type { OfferLetter, OfferLetterCreate } from '../types';
 
@@ -11,7 +10,6 @@ export function OfferLetters() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState<OfferLetterCreate>({
@@ -52,7 +50,6 @@ export function OfferLetters() {
 
     try {
       setIsSubmitting(true);
-      // Clean up date fields (empty string -> undefined/null)
       const payload = {
         ...formData,
         start_date: formData.start_date || undefined,
@@ -62,7 +59,6 @@ export function OfferLetters() {
       await offerLettersApi.create(payload);
       await loadOfferLetters();
       setShowCreateForm(false);
-      // Reset form
       setFormData({
         candidate_name: '',
         position_title: '',
@@ -85,130 +81,120 @@ export function OfferLetters() {
     }
   }
 
-  const statusColors = {
-    draft: 'bg-zinc-800/80 text-zinc-300 border-zinc-700',
-    sent: 'bg-blue-900/20 text-blue-300 border-blue-900/50',
-    accepted: 'bg-emerald-900/20 text-emerald-300 border-emerald-900/50',
-    rejected: 'bg-red-900/20 text-red-300 border-red-900/50',
-    expired: 'bg-zinc-800/80 text-zinc-400 border-zinc-700',
+  const statusColors: Record<string, string> = {
+    draft: 'text-zinc-500',
+    sent: 'text-blue-600',
+    accepted: 'text-emerald-600',
+    rejected: 'text-red-600',
+    expired: 'text-zinc-400',
+  };
+
+  const statusDotColors: Record<string, string> = {
+    draft: 'bg-zinc-400',
+    sent: 'bg-blue-500',
+    accepted: 'bg-emerald-500',
+    rejected: 'bg-red-500',
+    expired: 'bg-zinc-300',
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div className="max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="flex justify-between items-start mb-12">
         <div>
-          <h1 className="text-3xl font-light tracking-tight text-white">Offer Letters</h1>
+          <h1 className="text-3xl font-light tracking-tight text-zinc-900">Offer Letters</h1>
           <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">Manage & Generate Candidate Offers</p>
         </div>
-        <div className="flex gap-3">
-          <Button
-            variant="secondary"
-            onClick={() => setShowHelp(!showHelp)}
+        <div>
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="px-4 py-2 bg-zinc-900 text-white text-xs font-medium hover:bg-zinc-800 uppercase tracking-wider transition-colors"
           >
-            {showHelp ? 'Hide Help' : 'Help'}
-          </Button>
-          <Button onClick={() => setShowCreateForm(true)}>Create Offer</Button>
+            Create Offer
+          </button>
         </div>
       </div>
 
-      {showHelp && (
-        <GlassCard className="mb-6">
-          <div className="p-8 space-y-8">
-             <h2 className="text-lg font-light text-white mb-6">Quick Guide</h2>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div>
-                   <h3 className="text-sm font-medium text-white mb-3 flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-blue-400" /> Creating Offers
-                   </h3>
-                   <p className="text-sm text-zinc-400 leading-relaxed">
-                      Generate professional offer letters by filling in candidate details, role information, and compensation terms.
-                   </p>
-                </div>
-                 <div>
-                   <h3 className="text-sm font-medium text-white mb-3 flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-emerald-400" /> Tracking
-                   </h3>
-                   <p className="text-sm text-zinc-400 leading-relaxed">
-                      Monitor the status of every offer sent. See when candidates view, accept, or decline in real-time.
-                   </p>
-                </div>
-             </div>
-          </div>
-        </GlassCard>
-      )}
+      {isLoading ? (
+        <div className="flex items-center justify-center min-h-[20vh]">
+           <div className="text-xs text-zinc-500 uppercase tracking-wider">Loading...</div>
+        </div>
+      ) : offerLetters.length === 0 ? (
+        <div className="text-center py-16 border-t border-zinc-200">
+          <div className="text-xs text-zinc-500 mb-4">No offer letters generated</div>
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="text-xs text-zinc-900 hover:text-zinc-700 font-medium uppercase tracking-wider"
+          >
+            Create your first offer
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-1">
+           {/* List Header */}
+           <div className="flex items-center gap-4 py-2 text-[10px] text-zinc-500 uppercase tracking-wider border-b border-zinc-200">
+             <div className="w-8"></div>
+             <div className="flex-1">Candidate</div>
+             <div className="w-48">Position</div>
+             <div className="w-32">Status</div>
+             <div className="w-32 text-right">Created</div>
+             <div className="w-8"></div>
+           </div>
 
-      {offerLetters.length === 0 && !isLoading && (
-        <GlassCard className="p-16 text-center">
-          <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-zinc-900/50 border border-zinc-800 flex items-center justify-center">
-            <FileText className="w-8 h-8 text-zinc-700" strokeWidth={1.5} />
-          </div>
-          <h3 className="text-xl font-light text-white mb-2">No offers generated</h3>
-          <p className="text-sm text-zinc-500 mb-8 max-w-sm mx-auto">Start your hiring process by creating your first official offer letter.</p>
-          <Button onClick={() => setShowCreateForm(true)}>Create Offer Letter</Button>
-        </GlassCard>
-      )}
-
-      {offerLetters.length > 0 && (
-        <div className="grid grid-cols-1 gap-4">
           {offerLetters.map((letter) => (
-            <GlassCard 
+            <div 
               key={letter.id} 
-              className="group cursor-pointer"
-              hoverEffect
+              className="group flex items-center gap-4 py-4 cursor-pointer border-b border-zinc-100 hover:bg-zinc-50 transition-colors"
               onClick={() => setSelectedLetter(letter)}
             >
-              <div className="p-6 flex items-center justify-between">
-                <div className="flex items-center gap-6">
-                   <div className="w-12 h-12 rounded-full bg-zinc-800/50 border border-zinc-700/50 flex items-center justify-center text-zinc-400 font-mono text-sm">
-                      {letter.candidate_name.charAt(0)}
-                   </div>
-                   <div>
-                      <h3 className="text-lg font-medium text-white group-hover:text-blue-200 transition-colors">
-                        {letter.candidate_name}
-                      </h3>
-                      <div className="flex items-center gap-2 mt-1">
-                         <span className="text-sm text-zinc-400">{letter.position_title}</span>
-                         <span className="text-zinc-600">•</span>
-                         <span className="text-sm text-zinc-500">{letter.company_name}</span>
-                      </div>
-                   </div>
-                </div>
-
-                <div className="flex items-center gap-6">
-                  <div className="text-right hidden md:block">
-                     <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">Created</div>
-                     <div className="text-sm text-zinc-400 font-mono">{new Date(letter.created_at).toLocaleDateString()}</div>
-                  </div>
-                  
-                  <span className={`px-3 py-1 rounded-full text-[10px] uppercase tracking-wider font-medium border ${statusColors[letter.status]}`}>
-                    {letter.status}
-                  </span>
-
-                  <ChevronRight className="w-5 h-5 text-zinc-700 group-hover:text-zinc-400 transition-colors" />
-                </div>
+              <div className="w-8 flex justify-center">
+                 <div className={`w-1.5 h-1.5 rounded-full ${statusDotColors[letter.status] || 'bg-zinc-300'}`} />
               </div>
-            </GlassCard>
+              
+              <div className="flex-1">
+                 <h3 className="text-sm font-medium text-zinc-900 group-hover:text-zinc-700">
+                   {letter.candidate_name}
+                 </h3>
+                 <p className="text-xs text-zinc-500 mt-0.5">{letter.company_name}</p>
+              </div>
+
+              <div className="w-48 text-xs text-zinc-600">
+                 {letter.position_title}
+              </div>
+
+              <div className={`w-32 text-xs font-medium ${statusColors[letter.status] || 'text-zinc-500'} uppercase tracking-wide text-[10px]`}>
+                 {letter.status}
+              </div>
+
+              <div className="w-32 text-right text-xs text-zinc-500 font-mono">
+                 {new Date(letter.created_at).toLocaleDateString()}
+              </div>
+              
+              <div className="w-8 flex justify-center text-zinc-400 group-hover:text-zinc-600">
+                 <ChevronRight className="w-4 h-4" />
+              </div>
+            </div>
           ))}
         </div>
       )}
 
       {/* Detail Modal */}
       {selectedLetter && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <GlassCard className="w-full max-w-4xl max-h-[90vh] flex flex-col relative bg-zinc-950/90">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-4xl max-h-[90vh] flex flex-col bg-white shadow-2xl rounded-sm overflow-hidden">
              {/* Modal Header */}
-             <div className="p-6 border-b border-white/5 flex items-center justify-between">
+             <div className="p-6 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
                 <div>
-                   <h2 className="text-xl font-light text-white">Offer Details</h2>
-                   <p className="text-sm text-zinc-500 mt-1 font-mono">{selectedLetter.id.toUpperCase()}</p>
+                   <h2 className="text-xl font-light text-zinc-900">Offer Details</h2>
+                   <p className="text-xs text-zinc-500 mt-1 font-mono uppercase tracking-wide">{selectedLetter.id}</p>
                 </div>
                 <div className="flex items-center gap-4">
-                   <span className={`px-3 py-1 rounded-full text-[10px] uppercase tracking-wider font-medium border ${statusColors[selectedLetter.status]}`}>
+                   <span className={`px-2 py-1 rounded-full text-[10px] uppercase tracking-wider font-medium ${statusColors[selectedLetter.status]} bg-zinc-100`}>
                       {selectedLetter.status}
                    </span>
                    <button
                     onClick={() => setSelectedLetter(null)}
-                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-white"
+                    className="p-2 hover:bg-zinc-100 rounded-full transition-colors text-zinc-400 hover:text-zinc-600"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
@@ -218,51 +204,43 @@ export function OfferLetters() {
              </div>
 
              {/* Modal Content */}
-             <div className="flex-1 overflow-y-auto p-8">
+             <div className="flex-1 overflow-y-auto p-8 bg-zinc-50/30">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                    {/* Left Sidebar: Metadata */}
                    <div className="space-y-6">
                       <div>
-                         <label className="text-xs text-zinc-500 uppercase tracking-widest block mb-2">Candidate</label>
-                         <p className="text-white font-medium">{selectedLetter.candidate_name}</p>
+                         <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Candidate</label>
+                         <p className="text-zinc-900 font-medium">{selectedLetter.candidate_name}</p>
                       </div>
                       <div>
-                         <label className="text-xs text-zinc-500 uppercase tracking-widest block mb-2">Position</label>
-                         <p className="text-zinc-300">{selectedLetter.position_title}</p>
+                         <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Position</label>
+                         <p className="text-zinc-700">{selectedLetter.position_title}</p>
                       </div>
                        <div>
-                         <label className="text-xs text-zinc-500 uppercase tracking-widest block mb-2">Company</label>
-                         <p className="text-zinc-300">{selectedLetter.company_name}</p>
+                         <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Company</label>
+                         <p className="text-zinc-700">{selectedLetter.company_name}</p>
                       </div>
                       
-                      <div className="pt-6 border-t border-white/5">
-                         <Button className="w-full mb-3">Download PDF</Button>
+                      <div className="pt-6 border-t border-zinc-200 space-y-3">
+                         <Button variant="secondary" className="w-full justify-center">Download PDF</Button>
                          {selectedLetter.status === 'draft' && (
-                           <Button variant="secondary" className="w-full">Edit Offer</Button>
+                           <Button variant="secondary" className="w-full justify-center">Edit Offer</Button>
                          )}
                       </div>
                    </div>
 
                    {/* Right Content: Preview */}
                    <div className="lg:col-span-2">
-                      <div className="bg-white rounded-sm p-8 text-zinc-900 font-serif shadow-2xl min-h-[600px] text-[13px] leading-relaxed relative">
-                         {/* Paper Texture/Sheen */}
-                         <div className="absolute inset-0 bg-gradient-to-br from-white via-zinc-50 to-zinc-100 opacity-50 pointer-events-none" />
-                         
-                         <div className="relative z-10 space-y-8">
-                            <div className="flex justify-between items-start border-b border-zinc-200 pb-6">
+                      <div className="bg-white border border-zinc-200 shadow-sm p-12 text-zinc-900 font-serif min-h-[600px] text-[13px] leading-relaxed">
+                         <div className="space-y-8">
+                            <div className="flex justify-between items-start border-b border-zinc-100 pb-6">
                               <div>
-                                <div className="flex items-center gap-2 mb-2">
-                                  <div className="w-6 h-6 bg-zinc-900 rounded-full"></div>
-                                  <h3 className="font-bold text-xl tracking-tight">{selectedLetter.company_name}</h3>
-                                </div>
-                                <p className="text-zinc-500 font-sans text-[10px] uppercase tracking-widest">Official Offer of Employment</p>
+                                <h3 className="font-bold text-lg tracking-tight mb-1">{selectedLetter.company_name}</h3>
+                                <p className="text-zinc-400 font-sans text-[10px] uppercase tracking-widest">Official Offer of Employment</p>
                               </div>
-                              <div className="text-right space-y-1">
-                                <div>
-                                  <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest">Date</p>
+                              <div className="text-right">
+                                  <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Date</p>
                                   <p className="font-bold">{new Date(selectedLetter.created_at).toLocaleDateString()}</p>
-                                </div>
                               </div>
                             </div>
 
@@ -280,8 +258,8 @@ export function OfferLetters() {
                               </p>
 
                               {/* Terms Grid */}
-                              <div className="bg-zinc-50 p-6 rounded-lg border border-zinc-100 space-y-4 font-sans mt-6 mb-6">
-                                <h4 className="font-bold text-[11px] uppercase tracking-widest text-zinc-500 border-b border-zinc-200 pb-2">Compensation & Terms</h4>
+                              <div className="bg-zinc-50 p-6 rounded border border-zinc-100 space-y-4 font-sans mt-6 mb-6">
+                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 border-b border-zinc-200 pb-2">Compensation & Terms</h4>
                                 <div className="grid grid-cols-2 gap-y-6 gap-x-4">
                                   <div>
                                     <p className="text-[10px] text-zinc-400 uppercase mb-1">Annual Salary</p>
@@ -296,7 +274,7 @@ export function OfferLetters() {
                                     <p className="font-bold text-zinc-800 text-sm">{selectedLetter.bonus || 'N/A'}</p>
                                   </div>
                                    <div>
-                                    <p className="text-[10px] text-zinc-400 uppercase mb-1">Equity / Stock Options</p>
+                                    <p className="text-[10px] text-zinc-400 uppercase mb-1">Equity / Options</p>
                                     <p className="font-bold text-zinc-800 text-sm">{selectedLetter.stock_options || 'N/A'}</p>
                                   </div>
                                   <div>
@@ -311,19 +289,15 @@ export function OfferLetters() {
                               </div>
 
                               <div className="space-y-2">
-                                <h4 className="font-bold text-[11px] uppercase tracking-widest text-zinc-500 font-sans">Benefits Package</h4>
-                                <p className="text-zinc-700 bg-white p-3 border border-zinc-100 rounded">
+                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 font-sans">Benefits Package</h4>
+                                <p className="text-zinc-600 text-xs leading-relaxed">
                                   {selectedLetter.benefits || 'Standard company benefit package including health, dental, and vision insurance.'}
                                 </p>
                               </div>
-
-                              <p className="pt-4 border-t border-zinc-100">
-                                We look forward to having you join us. This offer is contingent upon the successful completion of standard background checks.
-                              </p>
                             </div>
 
                             {/* Signature Section */}
-                            <div className="mt-12 pt-8 border-t border-zinc-100 flex justify-between items-end">
+                            <div className="mt-16 pt-8 border-t border-zinc-100 flex justify-between items-end">
                               <div>
                                 <div className="w-48 h-px bg-zinc-300 mb-2"></div>
                                 <p className="font-bold text-zinc-900">{selectedLetter.manager_name || 'Hiring Manager'}</p>
@@ -339,176 +313,178 @@ export function OfferLetters() {
                    </div>
                 </div>
              </div>
-          </GlassCard>
+          </div>
         </div>
       )}
 
       {showCreateForm && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <GlassCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto p-8">
-               <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-4">
-                  <h2 className="text-xl font-light text-white">Create Offer Letter</h2>
-                  <button onClick={() => setShowCreateForm(false)} className="text-zinc-500 hover:text-white transition-colors">
+         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm p-4">
+            <div className="w-full max-w-2xl max-h-[90vh] bg-white shadow-2xl rounded-sm flex flex-col">
+               <div className="flex items-center justify-between p-6 border-b border-zinc-100">
+                  <h2 className="text-xl font-light text-zinc-900">Create Offer Letter</h2>
+                  <button onClick={() => setShowCreateForm(false)} className="text-zinc-400 hover:text-zinc-600 transition-colors">
                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
                      </svg>
                   </button>
                </div>
                
-               <form className="space-y-6" onSubmit={handleCreate}>
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-medium text-white border-b border-white/10 pb-2">Candidate & Role</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Candidate Name</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
-                          placeholder="Enter full name"
-                          value={formData.candidate_name}
-                          onChange={(e) => setFormData({...formData, candidate_name: e.target.value})}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Role Title</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
-                          placeholder="e.g. Senior Engineer"
-                          value={formData.position_title}
-                          onChange={(e) => setFormData({...formData, position_title: e.target.value})}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Start Date</label>
-                        <input 
-                          type="date" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors"
-                          value={formData.start_date ? new Date(formData.start_date).toISOString().split('T')[0] : ''}
-                          onChange={(e) => setFormData({...formData, start_date: e.target.value})}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Expiration Date</label>
-                        <input 
-                          type="date" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors"
-                          value={formData.expiration_date ? new Date(formData.expiration_date).toISOString().split('T')[0] : ''}
-                          onChange={(e) => setFormData({...formData, expiration_date: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-medium text-white border-b border-white/10 pb-2">Compensation</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Annual Salary</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
-                          placeholder="e.g. $150,000"
-                          value={formData.salary || ''}
-                          onChange={(e) => setFormData({...formData, salary: e.target.value})}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Bonus Potential</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
-                          placeholder="e.g. 15% Annual"
-                          value={formData.bonus || ''}
-                          onChange={(e) => setFormData({...formData, bonus: e.target.value})}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Equity / Options</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
-                          placeholder="e.g. 5,000 RSUs"
-                          value={formData.stock_options || ''}
-                          onChange={(e) => setFormData({...formData, stock_options: e.target.value})}
-                        />
-                      </div>
-                      <div>
-                         <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Employment Type</label>
-                         <select 
-                            className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors"
-                            value={formData.employment_type || 'Full-time'}
-                            onChange={(e) => setFormData({...formData, employment_type: e.target.value})}
-                         >
-                            <option value="Full-time">Full-time</option>
-                            <option value="Part-time">Part-time</option>
-                            <option value="Contract">Contract</option>
-                            <option value="Internship">Internship</option>
-                         </select>
+               <div className="flex-1 overflow-y-auto p-8">
+                <form className="space-y-8" onSubmit={handleCreate}>
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Candidate & Role</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Candidate Name</label>
+                          <input 
+                            type="text" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                            placeholder="Enter full name"
+                            value={formData.candidate_name}
+                            onChange={(e) => setFormData({...formData, candidate_name: e.target.value})}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Role Title</label>
+                          <input 
+                            type="text" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                            placeholder="e.g. Senior Engineer"
+                            value={formData.position_title}
+                            onChange={(e) => setFormData({...formData, position_title: e.target.value})}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Start Date</label>
+                          <input 
+                            type="date" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                            value={formData.start_date ? new Date(formData.start_date).toISOString().split('T')[0] : ''}
+                            onChange={(e) => setFormData({...formData, start_date: e.target.value})}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Expiration Date</label>
+                          <input 
+                            type="date" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                            value={formData.expiration_date ? new Date(formData.expiration_date).toISOString().split('T')[0] : ''}
+                            onChange={(e) => setFormData({...formData, expiration_date: e.target.value})}
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-medium text-white border-b border-white/10 pb-2">Reporting & Location</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Manager Name</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
-                          placeholder="e.g. David Chen"
-                          value={formData.manager_name || ''}
-                          onChange={(e) => setFormData({...formData, manager_name: e.target.value})}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Manager Title</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
-                          placeholder="e.g. VP of Engineering"
-                          value={formData.manager_title || ''}
-                          onChange={(e) => setFormData({...formData, manager_title: e.target.value})}
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Location</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors" 
-                          placeholder="e.g. San Francisco, CA (Hybrid)"
-                          value={formData.location || ''}
-                          onChange={(e) => setFormData({...formData, location: e.target.value})}
-                        />
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Compensation</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Annual Salary</label>
+                          <input 
+                            type="text" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                            placeholder="e.g. $150,000"
+                            value={formData.salary || ''}
+                            onChange={(e) => setFormData({...formData, salary: e.target.value})}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Bonus Potential</label>
+                          <input 
+                            type="text" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                            placeholder="e.g. 15% Annual"
+                            value={formData.bonus || ''}
+                            onChange={(e) => setFormData({...formData, bonus: e.target.value})}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Equity / Options</label>
+                          <input 
+                            type="text" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                            placeholder="e.g. 5,000 RSUs"
+                            value={formData.stock_options || ''}
+                            onChange={(e) => setFormData({...formData, stock_options: e.target.value})}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Employment Type</label>
+                          <select 
+                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                              value={formData.employment_type || 'Full-time'}
+                              onChange={(e) => setFormData({...formData, employment_type: e.target.value})}
+                          >
+                              <option value="Full-time">Full-time</option>
+                              <option value="Part-time">Part-time</option>
+                              <option value="Contract">Contract</option>
+                              <option value="Internship">Internship</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-4">
-                     <h3 className="text-sm font-medium text-white border-b border-white/10 pb-2">Benefits & Details</h3>
-                     <div>
-                        <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">Benefits Summary</label>
-                        <textarea 
-                           className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-600 rounded-md transition-colors h-24 resize-none"
-                           placeholder="Describe benefits package..."
-                           value={formData.benefits || ''}
-                           onChange={(e) => setFormData({...formData, benefits: e.target.value})}
-                        />
-                     </div>
-                  </div>
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Reporting & Location</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Manager Name</label>
+                          <input 
+                            type="text" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                            placeholder="e.g. David Chen"
+                            value={formData.manager_name || ''}
+                            onChange={(e) => setFormData({...formData, manager_name: e.target.value})}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Manager Title</label>
+                          <input 
+                            type="text" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                            placeholder="e.g. VP of Engineering"
+                            value={formData.manager_title || ''}
+                            onChange={(e) => setFormData({...formData, manager_title: e.target.value})}
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Location</label>
+                          <input 
+                            type="text" 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                            placeholder="e.g. San Francisco, CA (Hybrid)"
+                            value={formData.location || ''}
+                            onChange={(e) => setFormData({...formData, location: e.target.value})}
+                          />
+                        </div>
+                      </div>
+                    </div>
 
-                   <div className="flex items-center justify-end gap-3 pt-6 border-t border-white/5">
-                      <Button variant="secondary" type="button" onClick={() => setShowCreateForm(false)}>Cancel</Button>
-                      <Button type="submit" disabled={isSubmitting}>
-                        {isSubmitting ? 'Generating...' : 'Generate Offer'}
-                      </Button>
-                   </div>
-               </form>
-            </GlassCard>
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Benefits & Details</h3>
+                      <div>
+                          <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Benefits Summary</label>
+                          <textarea 
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors h-24 resize-none"
+                            placeholder="Describe benefits package..."
+                            value={formData.benefits || ''}
+                            onChange={(e) => setFormData({...formData, benefits: e.target.value})}
+                          />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-3 pt-6 border-t border-zinc-100">
+                        <Button variant="secondary" type="button" onClick={() => setShowCreateForm(false)}>Cancel</Button>
+                        <Button type="submit" disabled={isSubmitting} className="bg-zinc-900 text-white hover:bg-zinc-700">
+                          {isSubmitting ? 'Generating...' : 'Generate Offer'}
+                        </Button>
+                    </div>
+                </form>
+               </div>
+            </div>
          </div>
       )}
     </div>
