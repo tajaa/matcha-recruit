@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { blogs } from '../api/client';
 import type { BlogPost } from '../types';
 import { ArrowRight, Heart } from 'lucide-react';
+import { BlogCarousel } from '../components/BlogCarousel';
 
 // Lazy load Three.js component if we want to use it here too, 
 // but let's keep it simple for now or use a lighter version.
@@ -149,6 +150,26 @@ export function PublicBlogList() {
           </div>
         </div>
       </section>
+
+      {/* Featured Posts Carousel */}
+      {!loading && posts.length > 0 && (
+        <section className="relative z-10 px-4 sm:px-8 py-16 max-w-7xl mx-auto border-b border-zinc-200">
+          <div className="mb-8">
+            <div className="flex items-center gap-4">
+              <div className="w-1 h-8 bg-emerald-500" />
+              <div>
+                <span className="text-[10px] tracking-[0.3em] uppercase text-zinc-400 block">
+                  Featured
+                </span>
+                <span className="text-[10px] tracking-[0.2em] uppercase text-zinc-600">
+                  Latest Posts
+                </span>
+              </div>
+            </div>
+          </div>
+          <BlogCarousel posts={posts} limit={8} />
+        </section>
+      )}
 
       {/* Main Content - Blog Feed */}
       <main className="relative z-10 px-4 sm:px-8 py-16 max-w-7xl mx-auto">

@@ -52,6 +52,12 @@ export function Landing() {
 
         <nav className="flex items-center gap-6">
           <Link
+            to="/blog"
+            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-matcha-600 transition-colors"
+          >
+            Blog
+          </Link>
+          <Link
             to="/login"
             className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-matcha-600 transition-colors"
           >
