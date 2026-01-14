@@ -153,7 +153,7 @@ export function PublicBlogList() {
 
       {/* Featured Posts Carousel */}
       {!loading && posts.length > 0 && (
-        <section className="relative z-10 px-4 sm:px-8 py-16 max-w-7xl mx-auto border-b border-zinc-200">
+        <section className="relative z-10 px-4 sm:px-8 py-12 max-w-7xl mx-auto border-b border-zinc-200">
           <div className="mb-8">
             <div className="flex items-center gap-4">
               <div className="w-1 h-8 bg-emerald-500" />
@@ -172,7 +172,7 @@ export function PublicBlogList() {
       )}
 
       {/* Main Content - Blog Feed */}
-      <main className="relative z-10 px-4 sm:px-8 py-16 max-w-7xl mx-auto">
+      <main className="relative z-10 px-4 sm:px-8 py-12 max-w-7xl mx-auto">
         {/* Section Header */}
         <div className="flex items-center justify-between mb-12 pb-6 border-b border-zinc-200">
           <div className="flex items-center gap-4">
@@ -224,9 +224,9 @@ export function PublicBlogList() {
                 to={`/blog/${post.slug}`}
                 className="group relative block border-b border-zinc-200 hover:bg-zinc-50/80 transition-all duration-200"
               >
-                <div className="py-8 sm:py-10">
+                <div className="py-6 sm:py-8">
                   {/* Post number */}
-                  <div className="absolute left-0 top-8 sm:top-10 text-[9px] tracking-wider text-zinc-300 font-medium">
+                  <div className="absolute left-0 top-6 sm:top-8 text-[9px] tracking-wider text-zinc-300 font-medium">
                     {(index + 1).toString().padStart(2, '0')}
                   </div>
 
@@ -249,7 +249,7 @@ export function PublicBlogList() {
 
                       {/* Excerpt */}
                       {post.excerpt && (
-                        <p className="text-sm text-zinc-500 leading-relaxed line-clamp-2 max-w-2xl">
+                        <p className="text-sm text-zinc-500 leading-normal line-clamp-2 max-w-2xl">
                           {post.excerpt}
                         </p>
                       )}

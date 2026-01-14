@@ -195,10 +195,10 @@ export function PublicBlogDetail() {
         </nav>
       </header>
 
-      <main className="relative z-10 container mx-auto px-4 sm:px-8 py-12 max-w-3xl">
-        <article className="space-y-12 animate-in fade-in duration-700">
+      <main className="relative z-10 container mx-auto px-4 sm:px-8 py-8 max-w-4xl">
+        <article className="space-y-8 animate-in fade-in duration-700">
           {/* Article Header */}
-          <div className="space-y-6 text-center">
+          <div className="space-y-4 text-center">
             <div className="flex items-center justify-center gap-3 text-xs text-emerald-600 font-mono uppercase tracking-wider">
               {post.tags && post.tags.map(tag => (
                 <span key={tag} className="px-2 py-1 rounded bg-emerald-50 border border-emerald-100">
@@ -235,14 +235,14 @@ export function PublicBlogDetail() {
           )}
 
           {/* Content */}
-          <div className="prose prose-stone prose-lg max-w-none prose-p:font-serif prose-p:text-zinc-800 prose-p:leading-relaxed prose-headings:font-sans prose-headings:font-light prose-a:text-emerald-600 prose-a:no-underline hover:prose-a:underline">
+          <div className="prose prose-stone max-w-none prose-p:font-serif prose-p:text-zinc-800 prose-p:leading-normal prose-headings:font-sans prose-headings:font-light prose-a:text-emerald-600 prose-a:no-underline hover:prose-a:underline">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {post.content}
             </ReactMarkdown>
           </div>
 
           {/* Footer / Share / Like */}
-          <div className="pt-12 border-t border-zinc-200 flex items-center justify-between">
+          <div className="pt-8 border-t border-zinc-200 flex items-center justify-between">
             <Link 
               to="/blog"
               className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-emerald-700 transition-colors group"
@@ -277,7 +277,7 @@ export function PublicBlogDetail() {
           </div>
 
           {/* Comments Section */}
-          <section className="pt-12 space-y-8">
+          <section className="pt-8 space-y-6">
             <div className="flex items-center gap-3 border-b border-zinc-200 pb-4">
               <MessageSquare className="w-5 h-5 text-zinc-400" />
               <h2 className="text-xl font-light tracking-tight text-zinc-900">
