@@ -113,6 +113,7 @@ def load_settings() -> Settings:
         s3_region=os.getenv("S3_REGION", "us-east-1"),
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        cloudfront_domain=os.getenv("CLOUDFRONT_DOMAIN"),
         mailersend_api_key=os.getenv("MAILERSEND_API_KEY"),
         mailersend_from_email=os.getenv("MAILERSEND_FROM_EMAIL", "outreach@matcha.app"),
         mailersend_from_name=os.getenv("MAILERSEND_FROM_NAME", "Matcha Recruit"),
