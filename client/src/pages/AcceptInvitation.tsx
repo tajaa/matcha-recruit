@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { setTokens } from '../api/client';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
 interface InvitationDetails {
   employee_id: string;
   email: string;
@@ -30,7 +28,7 @@ export default function AcceptInvitation() {
   useEffect(() => {
     const fetchInvitation = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/invitations/${token}`);
+        const response = await fetch(`/api/invitations/${token}`);
 
         if (!response.ok) {
           const data = await response.json();
@@ -68,7 +66,7 @@ export default function AcceptInvitation() {
     setSubmitting(true);
 
     try {
-      const response = await fetch(`${API_BASE}/api/invitations/${token}/accept`, {
+      const response = await fetch(`/api/invitations/${token}/accept`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

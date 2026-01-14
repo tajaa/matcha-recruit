@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from ..models.policy import SignatureCreate, PolicySignatureResponse
 from ..services.policy_service import SignatureService
 
-router = APIRouter(prefix="/api/signatures", tags=["public-signatures"])
+router = APIRouter(prefix="/signatures", tags=["public-signatures"])
 
 
 @router.get("/sign/{token}")

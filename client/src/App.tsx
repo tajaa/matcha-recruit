@@ -43,6 +43,7 @@ const PublicBlogDetail = lazy(() => import('./pages/PublicBlogDetail'));
 const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
 const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 const BlogCommentsAdmin = lazy(() => import('./pages/BlogCommentsAdmin'));
+const TestBot = lazy(() => import('./pages/TestBot').then(m => ({ default: m.TestBot })));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -228,6 +229,14 @@ function App() {
 
 
 
+              <Route
+                path="test-bot"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <TestBot />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="tutor"
                 element={

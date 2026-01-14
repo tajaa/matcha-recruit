@@ -24,7 +24,7 @@ from ..services.compliance_service import (
     get_compliance_summary,
 )
 
-router = APIRouter(prefix="/api/compliance", tags=["compliance"])
+router = APIRouter()
 
 
 @router.post("/locations", response_model=dict)

@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getAccessToken } from '../api/client';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
 interface Employee {
   id: string;
   email: string;
@@ -49,8 +47,8 @@ export default function Employees() {
     try {
       const token = getAccessToken();
       const url = filter
-        ? `${API_BASE}/api/employees?status=${filter}`
-        : `${API_BASE}/api/employees`;
+        ? `/api/employees?status=${filter}`
+        : `/api/employees`;
 
       const response = await fetch(url, {
         headers: {
@@ -79,7 +77,7 @@ export default function Employees() {
 
     try {
       const token = getAccessToken();
-      const response = await fetch(`${API_BASE}/api/employees`, {
+      const response = await fetch(`/api/employees`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -115,7 +113,7 @@ export default function Employees() {
 
     try {
       const token = getAccessToken();
-      const response = await fetch(`${API_BASE}/api/employees/${employeeId}/invite`, {
+      const response = await fetch(`/api/employees/${employeeId}/invite`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

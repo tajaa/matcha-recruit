@@ -21,7 +21,7 @@ from ..services.storage import get_storage
 from ..models.auth import CurrentUser
 from uuid import UUID
 
-router = APIRouter(prefix="/api/policies", tags=["policies"])
+router = APIRouter(prefix="/policies", tags=["policies"])
 
 
 @router.get("", response_model=List[PolicyResponse])

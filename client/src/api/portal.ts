@@ -1,11 +1,9 @@
 import { getAccessToken } from './client';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
 async function fetchWithAuth(url: string, options: RequestInit = {}) {
   const token = getAccessToken();
 
-  const response = await fetch(`${API_BASE}${url}`, {
+  const response = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
