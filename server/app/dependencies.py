@@ -81,7 +81,9 @@ def require_roles(*roles: UserRole):
 require_admin = require_roles("admin")
 require_client = require_roles("client")
 require_candidate = require_roles("candidate")
+require_employee = require_roles("employee")
 require_admin_or_client = require_roles("admin", "client")
+require_admin_or_employee = require_roles("admin", "employee")
 
 
 async def get_optional_user(
@@ -112,6 +114,46 @@ async def get_client_company_id(
             current_user.id
         )
         return company_id
+
+
+async def get_employee_info(
+    current_user: CurrentUser = Depends(get_current_user)
+) -> Optional[dict]:
+    """Get the employee record for an employee user. Returns None for non-employees."""
+    if current_user.role != "employee":
+        return None
+
+    async with get_connection() as conn:
+        employee = await conn.fetchrow(
+            """SELECT id, org_id, email, first_name, last_name, work_state,
+                      employment_type, start_date, termination_date, manager_id,
+                      phone, address, emergency_contact, created_at, updated_at
+               FROM employees WHERE user_id = $1""",
+            current_user.id
+        )
+        if employee:
+            return dict(employee)
+        return None
+
+
+async def require_employee_record(
+    current_user: CurrentUser = Depends(require_employee)
+) -> dict:
+    """Require the current user to be an employee with a valid employee record."""
+    async with get_connection() as conn:
+        employee = await conn.fetchrow(
+            """SELECT id, org_id, email, first_name, last_name, work_state,
+                      employment_type, start_date, termination_date, manager_id,
+                      phone, address, emergency_contact, created_at, updated_at
+               FROM employees WHERE user_id = $1""",
+            current_user.id
+        )
+        if not employee:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Employee record not found"
+            )
+        return dict(employee)
 
 
 async def require_interview_prep_access(

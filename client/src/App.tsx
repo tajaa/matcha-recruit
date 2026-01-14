@@ -44,6 +44,13 @@ const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
 const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 const BlogCommentsAdmin = lazy(() => import('./pages/BlogCommentsAdmin'));
 
+// Employee Portal Pages
+const PortalHome = lazy(() => import('./pages/portal/PortalHome'));
+const PortalDocuments = lazy(() => import('./pages/portal/PortalDocuments'));
+const PortalPTO = lazy(() => import('./pages/portal/PortalPTO'));
+const PortalPolicies = lazy(() => import('./pages/portal/PortalPolicies'));
+const PortalProfile = lazy(() => import('./pages/portal/PortalProfile'));
+
 // Loading fallback
 function PageLoader() {
   return (
@@ -300,6 +307,48 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Settings />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Employee Portal Routes */}
+              <Route
+                path="portal"
+                element={
+                  <ProtectedRoute roles={['employee']}>
+                    <PortalHome />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="portal/documents"
+                element={
+                  <ProtectedRoute roles={['employee']}>
+                    <PortalDocuments />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="portal/pto"
+                element={
+                  <ProtectedRoute roles={['employee']}>
+                    <PortalPTO />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="portal/policies"
+                element={
+                  <ProtectedRoute roles={['employee']}>
+                    <PortalPolicies />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="portal/profile"
+                element={
+                  <ProtectedRoute roles={['employee']}>
+                    <PortalProfile />
                   </ProtectedRoute>
                 }
               />

@@ -344,6 +344,36 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                 } if profile else None
             }
 
+        elif current_user.role == "employee":
+            profile = await conn.fetchrow(
+                """
+                SELECT e.id, e.user_id, e.org_id, c.name as company_name,
+                       e.first_name, e.last_name, e.email, e.work_state,
+                       e.employment_type, e.start_date, e.manager_id, e.created_at
+                FROM employees e
+                JOIN companies c ON e.org_id = c.id
+                WHERE e.user_id = $1
+                """,
+                current_user.id
+            )
+            return {
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
+                "profile": {
+                    "id": str(profile["id"]),
+                    "user_id": str(profile["user_id"]),
+                    "company_id": str(profile["org_id"]),
+                    "company_name": profile["company_name"],
+                    "first_name": profile["first_name"],
+                    "last_name": profile["last_name"],
+                    "email": profile["email"],
+                    "work_state": profile["work_state"],
+                    "employment_type": profile["employment_type"],
+                    "start_date": profile["start_date"].isoformat() if profile["start_date"] else None,
+                    "manager_id": str(profile["manager_id"]) if profile["manager_id"] else None,
+                    "created_at": profile["created_at"].isoformat()
+                } if profile else None
+            }
+
     return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role}, "profile": None}
 
 

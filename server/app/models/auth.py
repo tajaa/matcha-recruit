@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, Literal
 from uuid import UUID
 from pydantic import BaseModel, EmailStr
+from decimal import Decimal
 
-UserRole = Literal["admin", "client", "candidate"]
+UserRole = Literal["admin", "client", "candidate", "employee"]
 
 
 class UserBase(BaseModel):
@@ -71,6 +72,17 @@ class CandidateRegister(BaseModel):
     phone: Optional[str] = None
 
 
+class EmployeeRegister(BaseModel):
+    email: EmailStr
+    password: str
+    first_name: str
+    last_name: str
+    company_id: UUID
+    work_state: Optional[str] = None
+    employment_type: Optional[str] = None  # full_time, part_time, contractor
+    start_date: Optional[datetime] = None
+
+
 # Profile models
 class AdminProfile(BaseModel):
     id: UUID
@@ -103,11 +115,26 @@ class CandidateProfile(BaseModel):
     created_at: datetime
 
 
+class EmployeeProfile(BaseModel):
+    id: UUID
+    user_id: UUID
+    company_id: UUID
+    company_name: str
+    first_name: str
+    last_name: str
+    email: str
+    work_state: Optional[str]
+    employment_type: Optional[str]
+    start_date: Optional[datetime]
+    manager_id: Optional[UUID]
+    created_at: datetime
+
+
 class CurrentUser(BaseModel):
     id: UUID
     email: str
     role: UserRole
-    profile: Optional[AdminProfile | ClientProfile | CandidateProfile] = None
+    profile: Optional[AdminProfile | ClientProfile | CandidateProfile | EmployeeProfile] = None
     beta_features: dict = {}
     interview_prep_tokens: int = 0
     allowed_interview_roles: list[str] = []

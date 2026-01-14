@@ -390,7 +390,7 @@ export interface SavedJob extends SavedJobCreate {
 }
 
 // Auth types
-export type UserRole = 'admin' | 'client' | 'candidate';
+export type UserRole = 'admin' | 'client' | 'candidate' | 'employee';
 
 export interface User {
   id: string;
