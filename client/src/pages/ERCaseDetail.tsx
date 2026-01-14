@@ -14,10 +14,10 @@ import type {
 } from '../types';
 
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
-  open: 'bg-matcha-500/20 text-white',
-  in_review: 'bg-yellow-500/20 text-yellow-400',
-  pending_determination: 'bg-orange-500/20 text-orange-400',
-  closed: 'bg-zinc-700 text-zinc-300',
+  open: 'bg-matcha-500/20 text-matcha-400',
+  in_review: 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400',
+  pending_determination: 'bg-orange-500/20 text-orange-600 dark:text-orange-400',
+  closed: 'bg-gray-200 text-gray-700 dark:bg-zinc-700 dark:text-zinc-300',
 };
 
 const STATUS_OPTIONS: { value: ERCaseStatus; label: string }[] = [
@@ -35,10 +35,10 @@ const DOC_TYPE_OPTIONS: { value: ERDocumentType; label: string }[] = [
 ];
 
 const DOC_TYPE_COLORS: Record<ERDocumentType, string> = {
-  transcript: 'bg-blue-500/20 text-blue-400',
-  policy: 'bg-purple-500/20 text-purple-400',
-  email: 'bg-yellow-500/20 text-yellow-400',
-  other: 'bg-zinc-600 text-zinc-300',
+  transcript: 'bg-blue-500/20 text-blue-600 dark:text-blue-400',
+  policy: 'bg-purple-500/20 text-purple-600 dark:text-purple-400',
+  email: 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400',
+  other: 'bg-gray-200 text-gray-700 dark:bg-zinc-600 dark:text-zinc-300',
 };
 
 type AnalysisTab = 'timeline' | 'discrepancies' | 'policy' | 'search';
@@ -52,6 +52,7 @@ export function ERCaseDetail() {
   const [documents, setDocuments] = useState<ERDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<AnalysisTab>('timeline');
+  const [statusUpdating, setStatusUpdating] = useState(false);
 
   // Upload state
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -184,7 +185,7 @@ export function ERCaseDetail() {
 
   const handleRunPolicyCheck = async () => {
     if (!id) return;
-    const policyDoc = documents.find(d => d.document_type === 'policy' && d.processing_status === 'completed');
+    const policyDoc = uploadedDocs.find(d => d.document_type === 'policy');
     if (!policyDoc) {
       alert('Please upload a policy document first.');
       return;
@@ -214,12 +215,19 @@ export function ERCaseDetail() {
   };
 
   const handleStatusChange = async (newStatus: ERCaseStatus) => {
-    if (!id) return;
+    if (!id || !erCase) return;
+
+    setStatusUpdating(true);
     try {
       await erCopilot.updateCase(id, { status: newStatus });
-      fetchCase();
+      await fetchCase();
+      alert(`Status updated to ${newStatus.replace('_', ' ')}`);
     } catch (err) {
       console.error('Failed to update status:', err);
+      alert('Failed to update status. Please try again.');
+      await fetchCase();
+    } finally {
+      setStatusUpdating(false);
     }
   };
 
@@ -236,7 +244,8 @@ export function ERCaseDetail() {
     return <div className="text-center py-12 text-zinc-500">Case not found</div>;
   }
 
-  const processedDocs = documents.filter(d => d.processing_status === 'completed');
+  // Filter out only failed documents - allow pending/processing/completed
+  const uploadedDocs = documents.filter(d => d.processing_status !== 'failed');
 
   return (
     <div>
@@ -252,17 +261,20 @@ export function ERCaseDetail() {
         </button>
         <div className="flex-1">
           <div className="flex items-center gap-3">
-            <span className="text-sm text-zinc-500 font-mono">{erCase.case_number}</span>
+            <span className="text-sm text-gray-600 dark:text-zinc-500 font-mono">{erCase.case_number}</span>
             <span className={`px-2 py-0.5 text-xs rounded ${STATUS_COLORS[erCase.status]}`}>
               {erCase.status.replace('_', ' ')}
             </span>
           </div>
-          <h1 className="text-2xl font-bold text-white mt-1">{erCase.title}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{erCase.title}</h1>
         </div>
         <select
           value={erCase.status}
           onChange={(e) => handleStatusChange(e.target.value as ERCaseStatus)}
-          className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
+          disabled={statusUpdating}
+          className={`px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm ${
+            statusUpdating ? 'opacity-50 cursor-not-allowed' : 'text-white cursor-pointer'
+          }`}
         >
           {STATUS_OPTIONS.map(opt => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -360,7 +372,7 @@ export function ERCaseDetail() {
                     <Button
                       size="sm"
                       onClick={handleGenerateTimeline}
-                      disabled={analysisLoading === 'timeline' || processedDocs.length === 0}
+                      disabled={analysisLoading === 'timeline' || uploadedDocs.length === 0}
                     >
                       {analysisLoading === 'timeline' ? 'Generating...' : 'Generate'}
                     </Button>
@@ -372,8 +384,8 @@ export function ERCaseDetail() {
 
                   {timeline.length === 0 ? (
                     <p className="text-zinc-500 text-sm">
-                      {processedDocs.length === 0
-                        ? 'Upload and process documents first.'
+                      {uploadedDocs.length === 0
+                        ? 'Upload documents to reconstruct the timeline.'
                         : 'Click "Generate" to reconstruct the timeline from your documents.'}
                     </p>
                   ) : (
@@ -399,7 +411,7 @@ export function ERCaseDetail() {
                               Participants: {event.participants.join(', ')}
                             </p>
                           )}
-                          <p className="text-xs text-zinc-600 italic">
+                          <p className="text-xs text-gray-700 dark:text-zinc-600 italic">
                             Source: {getDocFilename(event.source_document_id)} ({event.source_location})
                           </p>
                           {event.evidence_quote && (
@@ -414,8 +426,8 @@ export function ERCaseDetail() {
 
                   {timelineGaps.length > 0 && (
                     <div className="mt-4 p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
-                      <h4 className="text-sm font-medium text-yellow-400 mb-2">Gaps Identified</h4>
-                      <ul className="text-sm text-zinc-400 space-y-1">
+                      <h4 className="text-sm font-medium text-yellow-600 dark:text-yellow-400 mb-2">Gaps Identified</h4>
+                      <ul className="text-sm text-gray-700 dark:text-zinc-400 space-y-1">
                         {timelineGaps.map((gap, i) => (
                           <li key={i}>• {gap}</li>
                         ))}
@@ -433,7 +445,7 @@ export function ERCaseDetail() {
                     <Button
                       size="sm"
                       onClick={handleGenerateDiscrepancies}
-                      disabled={analysisLoading === 'discrepancies' || processedDocs.filter(d => d.document_type === 'transcript').length < 2}
+                      disabled={analysisLoading === 'discrepancies' || uploadedDocs.filter(d => d.document_type === 'transcript').length < 2}
                     >
                       {analysisLoading === 'discrepancies' ? 'Analyzing...' : 'Analyze'}
                     </Button>
@@ -445,7 +457,7 @@ export function ERCaseDetail() {
 
                   {discrepancies.length === 0 ? (
                     <p className="text-zinc-500 text-sm">
-                      {processedDocs.filter(d => d.document_type === 'transcript').length < 2
+                      {uploadedDocs.filter(d => d.document_type === 'transcript').length < 2
                         ? 'Upload at least 2 transcript documents to detect discrepancies.'
                         : 'Click "Analyze" to detect discrepancies between witness statements.'}
                     </p>
@@ -478,7 +490,7 @@ export function ERCaseDetail() {
                               <p className="text-sm text-zinc-300">"{disc.statement_2.quote}"</p>
                             </div>
                           </div>
-                          <p className="text-xs text-zinc-500 mt-2 italic">{disc.analysis}</p>
+                          <p className="text-xs text-gray-700 dark:text-zinc-500 mt-2 italic">{disc.analysis}</p>
                         </div>
                       ))}
                     </div>
@@ -494,7 +506,7 @@ export function ERCaseDetail() {
                     <Button
                       size="sm"
                       onClick={handleRunPolicyCheck}
-                      disabled={analysisLoading === 'policy' || !documents.find(d => d.document_type === 'policy' && d.processing_status === 'completed')}
+                      disabled={analysisLoading === 'policy' || !uploadedDocs.find(d => d.document_type === 'policy')}
                     >
                       {analysisLoading === 'policy' ? 'Checking...' : 'Run Check'}
                     </Button>
@@ -506,7 +518,7 @@ export function ERCaseDetail() {
 
                   {violations.length === 0 ? (
                     <p className="text-zinc-500 text-sm">
-                      {!documents.find(d => d.document_type === 'policy')
+                      {!uploadedDocs.find(d => d.document_type === 'policy')
                         ? 'Upload a policy document (Code of Conduct, Employee Handbook, etc.) first.'
                         : 'Click "Run Check" to analyze evidence against the policy document.'}
                     </p>
@@ -575,15 +587,15 @@ export function ERCaseDetail() {
                           )}
                           <p className="text-sm text-zinc-300">{result.content}</p>
                           {result.line_range && (
-                            <p className="text-xs text-zinc-600 mt-1">Lines {result.line_range}</p>
+                            <p className="text-xs text-gray-700 dark:text-zinc-600 mt-1">Lines {result.line_range}</p>
                           )}
                         </div>
                       ))}
                     </div>
                   ) : (
                     <p className="text-zinc-500 text-sm">
-                      {processedDocs.length === 0
-                        ? 'Upload and process documents first.'
+                      {uploadedDocs.length === 0
+                        ? 'Upload documents first.'
                         : 'Enter a query to search through case evidence using semantic similarity.'}
                     </p>
                   )}
