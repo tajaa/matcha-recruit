@@ -210,6 +210,60 @@ async def register_client(request: ClientRegister):
         )
 
 
+@router.post("/register/employee", response_model=TokenResponse)
+async def register_employee(request: EmployeeRegister):
+    """Register a new employee."""
+    async with get_connection() as conn:
+        # Check if email exists
+        existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already registered")
+
+        # Verify company exists
+        company = await conn.fetchrow("SELECT id FROM companies WHERE id = $1", request.company_id)
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        # Create user
+        password_hash = hash_password(request.password)
+        user = await conn.fetchrow(
+            """
+            INSERT INTO users (email, password_hash, role)
+            VALUES ($1, $2, 'employee')
+            RETURNING id, email, role, is_active, created_at
+            """,
+            request.email, password_hash
+        )
+
+        # Create employee profile
+        await conn.execute(
+            """
+            INSERT INTO employees (user_id, org_id, email, first_name, last_name, work_state, employment_type, start_date)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """,
+            user["id"], request.company_id, request.email, request.first_name, request.last_name,
+            request.work_state, request.employment_type, request.start_date
+        )
+
+        settings = get_settings()
+        access_token = create_access_token(user["id"], user["email"], user["role"])
+        refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=settings.jwt_access_token_expire_minutes * 60,
+            user=UserResponse(
+                id=user["id"],
+                email=user["email"],
+                role=user["role"],
+                is_active=user["is_active"],
+                created_at=user["created_at"],
+                last_login=None
+            )
+        )
+
+
 @router.post("/register/candidate", response_model=TokenResponse)
 async def register_candidate(request: CandidateRegister):
     """Register a new candidate."""
