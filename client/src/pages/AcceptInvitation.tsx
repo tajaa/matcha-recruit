@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { setTokens } from '../api/client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -17,7 +17,6 @@ interface InvitationDetails {
 export default function AcceptInvitation() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  const { setTokens } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [invitation, setInvitation] = useState<InvitationDetails | null>(null);

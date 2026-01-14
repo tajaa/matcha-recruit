@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getAccessToken } from '../api/client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -46,7 +47,7 @@ export default function Employees() {
 
   const fetchEmployees = async () => {
     try {
-      const token = localStorage.getItem('access_token');
+      const token = getAccessToken();
       const url = filter
         ? `${API_BASE}/api/employees?status=${filter}`
         : `${API_BASE}/api/employees`;
@@ -77,7 +78,7 @@ export default function Employees() {
     setSubmitting(true);
 
     try {
-      const token = localStorage.getItem('access_token');
+      const token = getAccessToken();
       const response = await fetch(`${API_BASE}/api/employees`, {
         method: 'POST',
         headers: {
@@ -113,7 +114,7 @@ export default function Employees() {
     setInvitingId(employeeId);
 
     try {
-      const token = localStorage.getItem('access_token');
+      const token = getAccessToken();
       const response = await fetch(`${API_BASE}/api/employees/${employeeId}/invite`, {
         method: 'POST',
         headers: {

@@ -104,16 +104,22 @@ async def get_optional_user(
 async def get_client_company_id(
     current_user: CurrentUser = Depends(get_current_user)
 ) -> Optional[UUID]:
-    """Get the company_id for a client user. Returns None for non-clients."""
-    if current_user.role != "client":
-        return None
-
+    """Get the company_id for a client user. For admins, returns the first company."""
     async with get_connection() as conn:
-        company_id = await conn.fetchval(
-            "SELECT company_id FROM clients WHERE user_id = $1",
-            current_user.id
-        )
-        return company_id
+        if current_user.role == "admin":
+            # Admin users: default to first company
+            # TODO: Add company selector for admins to switch between companies
+            company_id = await conn.fetchval("SELECT id FROM companies ORDER BY created_at LIMIT 1")
+            return company_id
+
+        if current_user.role == "client":
+            company_id = await conn.fetchval(
+                "SELECT company_id FROM clients WHERE user_id = $1",
+                current_user.id
+            )
+            return company_id
+
+        return None
 
 
 async def get_employee_info(
