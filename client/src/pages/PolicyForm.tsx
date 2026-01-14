@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Card } from '../components/Card';
-import { Button } from '../components/Button';
 import { policies, getAccessToken } from '../api/client';
 import type { PolicyUpdate, PolicyStatus } from '../types';
+import { ChevronLeft, FileText, Upload, X } from 'lucide-react';
 
 export function PolicyForm() {
   const { id } = useParams<{ id?: string }>();
@@ -35,7 +34,6 @@ export function PolicyForm() {
       setStatus(data.status);
     } catch (error) {
       console.error('Failed to load policy:', error);
-      alert('Failed to load policy');
     } finally {
       setLoading(false);
     }
@@ -43,10 +41,7 @@ export function PolicyForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) {
-      alert('Please enter a title');
-      return;
-    }
+    if (!title.trim()) return;
 
     try {
       setLoading(true);
@@ -71,161 +66,172 @@ export function PolicyForm() {
           formData.append('file', file);
         }
         
-        const response = await fetch('/api/policies', {
+        await fetch('/api/policies', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${getAccessToken()}`,
           },
           body: formData,
         });
-        const result = await response.json();
-        console.log('Created policy:', result);
       }
 
       navigate('/app/policies');
     } catch (error) {
       console.error('Failed to save policy:', error);
-      alert('Failed to save policy');
     } finally {
       setLoading(false);
     }
   };
 
-  if (isEditing && !title) {
-    return null;
+  if (isEditing && !title && loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-xs text-zinc-500 uppercase tracking-wider">Loading policy data...</div>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="max-w-2xl mx-auto space-y-12">
+      {/* Header */}
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
+          <button
+            onClick={() => navigate(-1)}
+            className="text-xs text-zinc-500 hover:text-zinc-900 mb-4 flex items-center gap-1 uppercase tracking-wider"
+          >
+            <ChevronLeft size={12} />
+            Back
+          </button>
+          <h1 className="text-3xl font-light tracking-tight text-zinc-900">
             {isEditing ? 'Edit Policy' : 'Create Policy'}
           </h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            {isEditing ? 'Update policy details' : 'Create a new policy document'}
+          <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+            {isEditing ? 'Update existing policy documentation' : 'Draft a new company guideline'}
           </p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <Card>
-          <div className="p-6 space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-10">
+        <div className="space-y-8">
+          {/* Basic Info */}
+          <div className="space-y-6">
             <div>
-              <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                Title *
-              </label>
+              <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Title</label>
               <input
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                placeholder="Enter policy title"
+                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 placeholder-zinc-300 text-lg focus:outline-none focus:border-zinc-900 transition-colors"
+                placeholder="e.g. Employee Conduct Policy"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                Description
-              </label>
-              <textarea
+              <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Short Description</label>
+              <input
+                type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md min-h-[80px]"
-                placeholder="Brief description of this policy"
+                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 placeholder-zinc-300 text-sm focus:outline-none focus:border-zinc-900 transition-colors"
+                placeholder="Brief summary of the policy purpose"
               />
             </div>
+          </div>
 
-            <div>
-              <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                Content *
-              </label>
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md min-h-[300px] font-mono text-xs leading-relaxed"
-                placeholder="Enter policy content..."
-                required
-              />
-              <p className="text-[10px] text-zinc-600 mt-1">
-                Tip: You can use basic text formatting. For rich text, paste formatted HTML.
-              </p>
+          {/* Content */}
+          <div className="space-y-4 pt-4">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-2">
+              <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Content</label>
+              <span className="text-[9px] text-zinc-400 font-mono italic">Plain text or basic formatting</span>
             </div>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              className="w-full px-4 py-4 bg-zinc-50 border border-zinc-200 rounded-sm text-zinc-800 text-sm font-serif leading-relaxed min-h-[400px] focus:outline-none focus:border-zinc-400 focus:bg-white transition-all resize-none shadow-inner"
+              placeholder="Start drafting policy content here..."
+              required
+            />
+          </div>
 
-            <div>
-              <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                Policy Document (Optional)
-              </label>
-              <div className="flex items-center gap-4">
-                <label className="cursor-pointer px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm rounded-md hover:bg-zinc-700 hover:text-white transition-colors">
-                  <span>Choose File</span>
+          {/* File Upload */}
+          <div className="space-y-4 pt-4">
+            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 font-bold border-b border-zinc-200 pb-2">
+              Reference Document (Optional)
+            </label>
+            <div className="flex items-center gap-6 p-6 border-2 border-dashed border-zinc-100 rounded-lg bg-zinc-50/50 hover:bg-zinc-50 transition-colors group">
+              <div className="w-12 h-12 rounded-full bg-white border border-zinc-200 flex items-center justify-center text-zinc-400 group-hover:text-zinc-900 transition-colors shadow-sm">
+                <Upload size={20} />
+              </div>
+              <div className="flex-1">
+                <label className="cursor-pointer">
+                  <span className="text-sm font-medium text-zinc-900 hover:underline">Click to upload policy PDF</span>
                   <input
                     type="file"
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                     accept=".pdf,.doc,.docx,.txt"
                     className="hidden"
                   />
+                  <p className="text-xs text-zinc-500 mt-1">Supports PDF, DOC, DOCX up to 10MB</p>
                 </label>
-                {file ? (
-                  <span className="text-sm text-zinc-300">{file.name}</span>
-                ) : (
-                  <span className="text-sm text-zinc-500">No file selected</span>
-                )}
               </div>
-              <p className="text-[10px] text-zinc-600 mt-2">
-                Upload PDF, DOC, DOCX, or TXT file. This will be stored and accessible to signers.
-              </p>
               {file && (
-                <p className="text-xs text-zinc-400 mt-1">
-                  Size: {(file.size / 1024).toFixed(1)} KB
-                </p>
+                <div className="flex items-center gap-3 bg-white px-3 py-2 rounded border border-zinc-200 shadow-sm">
+                  <FileText size={14} className="text-zinc-400" />
+                  <span className="text-xs text-zinc-900 truncate max-w-[120px]">{file.name}</span>
+                  <button onClick={() => setFile(null)} className="text-zinc-400 hover:text-red-600 transition-colors">
+                    <X size={14} />
+                  </button>
+                </div>
               )}
             </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                  Version
-                </label>
-                <input
-                  type="text"
-                  value={version}
-                  onChange={(e) => setVersion(e.target.value)}
-                  className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                  placeholder="1.0"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs tracking-wider uppercase text-zinc-500 mb-2">
-                  Status
-                </label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as PolicyStatus)}
-                  className="w-full px-4 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-zinc-700 rounded-md"
-                >
-                  <option value="draft">Draft</option>
-                  <option value="active">Active</option>
-                </select>
-              </div>
+          {/* Meta */}
+          <div className="grid grid-cols-2 gap-8 pt-4">
+            <div className="space-y-2">
+              <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Version</label>
+              <input
+                type="text"
+                value={version}
+                onChange={(e) => setVersion(e.target.value)}
+                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-900 transition-colors font-mono"
+                placeholder="1.0"
+              />
             </div>
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-zinc-800">
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => navigate(-1)}
+            <div className="space-y-2">
+              <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Publication Status</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as PolicyStatus)}
+                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-900 transition-colors cursor-pointer uppercase tracking-wider font-medium"
               >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? 'Saving...' : isEditing ? 'Update Policy' : 'Create Policy'}
-              </Button>
+                <option value="draft">Draft (Private)</option>
+                <option value="active">Active (Publish)</option>
+              </select>
             </div>
           </div>
-        </Card>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="flex justify-end gap-4 pt-10 border-t border-zinc-100">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="px-6 py-2 text-zinc-500 hover:text-zinc-900 text-xs font-medium uppercase tracking-wider transition-colors"
+          >
+            Discard
+          </button>
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="px-8 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-sm text-xs font-medium uppercase tracking-wider transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : isEditing ? 'Update Policy' : 'Create Policy'}
+          </button>
+        </div>
       </form>
     </div>
   );
