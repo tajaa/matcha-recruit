@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Button } from '../components/Button';
-import { FileText, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { offerLetters as offerLettersApi } from '../api/client';
 import type { OfferLetter, OfferLetterCreate } from '../types';
 
@@ -304,8 +304,8 @@ export function OfferLetters() {
                                 <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest">Authorized Signature</p>
                               </div>
                               <div className="text-right">
-                                 <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Candidate Acceptance</p>
-                                 <div className="w-48 h-10 border-b border-dashed border-zinc-300 mb-1"></div>
+                                  <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Candidate Acceptance</p>
+                                  <div className="w-48 h-10 border-b border-dashed border-zinc-300 mb-1"></div>
                               </div>
                             </div>
                          </div>

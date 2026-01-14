@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, CardContent, Modal } from '../components';
 import { erCopilot } from '../api/client';
 import type { ERCase, ERCaseStatus, ERCaseCreate } from '../types';
+import { FileText, X } from 'lucide-react';
 
 const STATUS_TABS: { label: string; value: ERCaseStatus | 'all' }[] = [
   { label: 'All', value: 'all' },
@@ -13,16 +13,23 @@ const STATUS_TABS: { label: string; value: ERCaseStatus | 'all' }[] = [
 ];
 
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
-  open: 'bg-matcha-500/20 text-white',
-  in_review: 'bg-yellow-500/20 text-yellow-400',
-  pending_determination: 'bg-orange-500/20 text-orange-400',
-  closed: 'bg-zinc-700 text-zinc-300',
+  open: 'text-zinc-900',
+  in_review: 'text-amber-600',
+  pending_determination: 'text-orange-600',
+  closed: 'text-zinc-400',
+};
+
+const STATUS_DOTS: Record<ERCaseStatus, string> = {
+  open: 'bg-zinc-900',
+  in_review: 'bg-amber-500',
+  pending_determination: 'bg-orange-500',
+  closed: 'bg-zinc-300',
 };
 
 const STATUS_LABELS: Record<ERCaseStatus, string> = {
   open: 'Open',
   in_review: 'In Review',
-  pending_determination: 'Pending Determination',
+  pending_determination: 'Pending',
   closed: 'Closed',
 };
 
@@ -73,45 +80,36 @@ export function ERCopilot() {
     }
   };
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm('Delete this case? This will permanently delete all documents and analysis.')) return;
-    try {
-      await erCopilot.deleteCase(id);
-      fetchCases();
-    } catch (err) {
-      console.error('Failed to delete case:', err);
-    }
-  };
-
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
+    <div className="max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="flex justify-between items-start mb-12">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">ER Copilot</h1>
-          <p className="text-zinc-400 mt-1">Employee Relations Investigation Assistant</p>
+          <h1 className="text-3xl font-light tracking-tight text-zinc-900">ER Copilot</h1>
+          <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">Investigation Assistant</p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)}>New Case</Button>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="px-4 py-2 bg-zinc-900 text-white text-xs font-medium hover:bg-zinc-800 uppercase tracking-wider transition-colors"
+        >
+          New Case
+        </button>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-zinc-900 p-1 rounded-lg w-fit">
+      <div className="flex gap-4 mb-8 border-b border-zinc-200 pb-px">
         {STATUS_TABS.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setActiveTab(tab.value)}
-            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            className={`pb-3 text-[10px] font-medium uppercase tracking-wider transition-colors border-b-2 ${
               activeTab === tab.value
-                ? 'bg-zinc-800 text-white'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'border-zinc-900 text-zinc-900'
+                : 'border-transparent text-zinc-400 hover:text-zinc-600'
             }`}
           >
             {tab.label}
@@ -120,116 +118,122 @@ export function ERCopilot() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-zinc-500">Loading...</div>
+        <div className="flex items-center justify-center min-h-[20vh]">
+           <div className="text-xs text-zinc-500 uppercase tracking-wider">Loading...</div>
+        </div>
       ) : cases.length === 0 ? (
-        <Card>
-          <CardContent className="text-center py-12">
-            <svg
-              className="mx-auto h-12 w-12 text-zinc-600"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            <h3 className="mt-4 text-lg font-medium text-white">No cases found</h3>
-            <p className="mt-2 text-zinc-500">Get started by creating a new investigation case.</p>
-            <Button className="mt-4" onClick={() => setShowCreateModal(true)}>
-              Create Case
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="text-center py-16 border-t border-zinc-200">
+          <div className="text-xs text-zinc-500 mb-4">No cases found</div>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="text-xs text-zinc-900 hover:text-zinc-700 font-medium uppercase tracking-wider"
+          >
+            Create first case
+          </button>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="space-y-1">
+           {/* List Header */}
+           <div className="flex items-center gap-4 py-2 text-[10px] text-zinc-500 uppercase tracking-wider border-b border-zinc-200">
+             <div className="w-4"></div>
+             <div className="w-24">ID</div>
+             <div className="flex-1">Title</div>
+             <div className="w-32">Status</div>
+             <div className="w-24 text-right">Created</div>
+           </div>
+
           {cases.map((erCase) => (
-            <Card
-              key={erCase.id}
-              className="cursor-pointer hover:border-zinc-600 transition-colors"
+            <div 
+              key={erCase.id} 
+              className="group flex items-center gap-4 py-4 cursor-pointer border-b border-zinc-100 hover:bg-zinc-50 transition-colors"
               onClick={() => navigate(`/app/er-copilot/${erCase.id}`)}
             >
-              <CardContent>
-                <div className="flex justify-between items-start mb-3">
-                  <span className="text-sm text-zinc-500 font-mono">{erCase.case_number}</span>
-                  <span className={`px-2 py-0.5 text-xs rounded ${STATUS_COLORS[erCase.status]}`}>
-                    {STATUS_LABELS[erCase.status]}
-                  </span>
-                </div>
+              <div className="w-4 flex justify-center">
+                 <div className={`w-1.5 h-1.5 rounded-full ${STATUS_DOTS[erCase.status] || 'bg-zinc-300'}`} />
+              </div>
+              
+              <div className="w-24 text-[10px] text-zinc-500 font-mono">
+                 {erCase.case_number}
+              </div>
 
-                <h3 className="font-medium text-white mb-2 line-clamp-2">{erCase.title}</h3>
+              <div className="flex-1 min-w-0">
+                 <h3 className="text-sm font-medium text-zinc-900 truncate group-hover:text-zinc-700">
+                   {erCase.title}
+                 </h3>
+                 {erCase.description && (
+                   <p className="text-[10px] text-zinc-500 mt-0.5 truncate max-w-lg">{erCase.description}</p>
+                 )}
+              </div>
 
-                {erCase.description && (
-                  <p className="text-sm text-zinc-500 mb-3 line-clamp-2">{erCase.description}</p>
-                )}
+              <div className={`w-32 text-[10px] font-medium uppercase tracking-wide ${STATUS_COLORS[erCase.status]}`}>
+                 {STATUS_LABELS[erCase.status]}
+              </div>
 
-                <div className="flex items-center justify-between text-sm text-zinc-500">
-                  <span className="flex items-center gap-1">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                      />
-                    </svg>
-                    {erCase.document_count} docs
-                  </span>
-                  <span>{formatDate(erCase.created_at)}</span>
-                </div>
-
-                <div className="mt-3 pt-3 border-t border-zinc-800 flex justify-end">
-                  <button
-                    onClick={(e) => handleDelete(erCase.id, e)}
-                    className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </CardContent>
-            </Card>
+              <div className="w-24 text-right text-[10px] text-zinc-500">
+                 {formatDate(erCase.created_at)}
+              </div>
+            </div>
           ))}
         </div>
       )}
 
-      {/* Create Modal */}
-      <Modal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} title="New Investigation Case">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1">Case Title *</label>
-            <input
-              type="text"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              placeholder="e.g., Harassment Allegation - Sales Team"
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-white"
-            />
-          </div>
+      {/* Create Modal - Inline implementation */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg bg-white shadow-2xl rounded-sm flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-zinc-100">
+              <h3 className="text-sm font-light text-zinc-900 uppercase tracking-wider">New Investigation Case</h3>
+              <button 
+                onClick={() => setShowCreateModal(false)}
+                className="text-zinc-400 hover:text-zinc-600 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-8 space-y-6">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Case Title</label>
+                <input
+                  type="text"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  placeholder="e.g., Harassment Allegation - Sales Team"
+                  className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 placeholder-zinc-300 text-sm focus:outline-none focus:border-zinc-900 transition-colors"
+                  autoFocus
+                />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1">Description</label>
-            <textarea
-              value={formData.description || ''}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Brief summary of the allegation or incident..."
-              rows={3}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-white"
-            />
-          </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Description</label>
+                <textarea
+                  value={formData.description || ''}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Brief summary of the allegation or incident..."
+                  rows={4}
+                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-sm text-zinc-900 placeholder-zinc-300 text-sm focus:outline-none focus:border-zinc-400 resize-none"
+                />
+              </div>
+            </div>
 
-          <div className="flex justify-end gap-2 pt-4">
-            <Button variant="ghost" onClick={() => setShowCreateModal(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreate} disabled={creating || !formData.title.trim()}>
-              {creating ? 'Creating...' : 'Create Case'}
-            </Button>
+            <div className="flex justify-end gap-3 p-6 border-t border-zinc-100">
+              <button
+                 onClick={() => setShowCreateModal(false)}
+                 className="px-4 py-2 text-zinc-500 hover:text-zinc-900 text-xs font-medium uppercase tracking-wider transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                 onClick={handleCreate} 
+                 disabled={creating || !formData.title.trim()}
+                 className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-sm text-xs font-medium uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {creating ? 'Creating...' : 'Create Case'}
+              </button>
+            </div>
           </div>
         </div>
-      </Modal>
+      )}
     </div>
   );
 }

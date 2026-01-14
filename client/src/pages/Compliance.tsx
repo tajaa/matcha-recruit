@@ -7,9 +7,9 @@ import {
     JURISDICTION_LEVEL_LABELS
 } from '../api/compliance';
 import {
-    Shield, MapPin, Plus, Trash2, Edit2, X,
+    MapPin, Plus, Trash2, Edit2, X,
     ChevronDown, ChevronRight, AlertTriangle, Bell, CheckCircle,
-    ExternalLink, Clock, Building2
+    ExternalLink, Building2
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
