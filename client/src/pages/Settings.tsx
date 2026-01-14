@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { settings, setTokens } from '../api/client';
 
@@ -35,7 +35,13 @@ function getStrengthLabel(score: number): { label: string; color: string } {
 }
 
 export function Settings() {
-  const { user, refreshUser } = useAuth();
+  const { user, profile, refreshUser } = useAuth();
+
+  // Profile update state
+  const [profileName, setProfileName] = useState('');
+  const [profileError, setProfileError] = useState('');
+  const [profileSuccess, setProfileSuccess] = useState('');
+  const [profileLoading, setProfileLoading] = useState(false);
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -52,12 +58,35 @@ export function Settings() {
   const [emailSuccess, setEmailSuccess] = useState('');
   const [emailLoading, setEmailLoading] = useState(false);
 
+  useEffect(() => {
+    if (profile?.name) {
+      setProfileName(profile.name);
+    }
+  }, [profile]);
+
   // Password strength
   const passwordStrength = useMemo(() => checkPasswordStrength(newPassword), [newPassword]);
   const strengthInfo = useMemo(() => getStrengthLabel(passwordStrength.score), [passwordStrength.score]);
 
   const inputClasses =
     'w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm tracking-wide placeholder-zinc-600 focus:outline-none focus:border-zinc-700 focus: transition-all font-mono';
+
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError('');
+    setProfileSuccess('');
+    setProfileLoading(true);
+
+    try {
+      await settings.updateProfile({ name: profileName });
+      await refreshUser();
+      setProfileSuccess('Profile updated successfully');
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : 'Failed to update profile');
+    } finally {
+      setProfileLoading(false);
+    }
+  };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,6 +176,64 @@ export function Settings() {
               <span className="text-sm text-white uppercase tracking-wider">{user?.role}</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Personal Information */}
+      <div className="relative mb-8">
+        <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-zinc-700" />
+        <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-zinc-700" />
+        <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-zinc-700" />
+        <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-zinc-700" />
+
+        <div className="bg-zinc-900/50 border border-zinc-800 p-6">
+          <h2 className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 mb-6">
+            Personal Information
+          </h2>
+
+          <form onSubmit={handleProfileUpdate}>
+            {profileError && (
+              <div className="mb-6 p-3 border border-red-500/30 bg-red-500/5 text-red-400 text-[11px] tracking-wide">
+                <span className="text-red-500 mr-2">!</span>
+                {profileError}
+              </div>
+            )}
+            {profileSuccess && (
+              <div className="mb-6 p-3 border border-zinc-700 bg-matcha-500/5 text-white text-[11px] tracking-wide">
+                <span className="text-white mr-2">+</span>
+                {profileSuccess}
+              </div>
+            )}
+
+            <div className="mb-5">
+              <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+                Display Name
+              </label>
+              <input
+                type="text"
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+                required
+                className={inputClasses}
+                placeholder="Enter your name"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={profileLoading}
+              className="w-full py-3 bg-matcha-500 text-black text-[11px] tracking-[0.2em] uppercase font-medium hover:bg-matcha-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:"
+            >
+              {profileLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-black/50 animate-pulse" />
+                  Updating
+                </span>
+              ) : (
+                'Update Profile'
+              )}
+            </button>
+          </form>
         </div>
       </div>
 
