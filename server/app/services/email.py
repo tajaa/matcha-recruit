@@ -559,6 +559,151 @@ If you have questions, please contact your administrator.
             print(f"[Email] Error sending to {to_email}: {e}")
             return False
 
+    async def send_employee_invitation_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        token: str,
+        expires_at,
+    ) -> bool:
+        """Send an employee onboarding invitation email.
+
+        This email is sent when an admin creates an employee and wants them to set up their account.
+
+        Returns True if sent successfully, False otherwise.
+        """
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        invitation_url = f"{app_base_url}/invite/{token}"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .welcome-card {{ background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%); border-radius: 12px; padding: 30px; margin: 20px 0; text-align: center; }}
+        .company-name {{ font-size: 28px; font-weight: 700; color: #111; margin-bottom: 8px; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 20px 0; font-size: 16px; }}
+        .btn:hover {{ background: #16a34a; }}
+        .steps {{ background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .step {{ display: flex; align-items: flex-start; margin-bottom: 12px; }}
+        .step-number {{ background: #22c55e; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; margin-right: 12px; flex-shrink: 0; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>Welcome! You've been invited to join the employee portal.</p>
+
+            <div class="welcome-card">
+                <div class="company-name">{company_name}</div>
+                <p style="color: #6b7280; margin: 0;">is inviting you to set up your account</p>
+            </div>
+
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div>Click the button below to get started</div>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div>Create your password</div>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div>Access your employee portal</div>
+                </div>
+            </div>
+
+            <p style="text-align: center;">
+                <a href="{invitation_url}" class="btn">Set Up My Account</a>
+            </p>
+
+            <p style="color: #6b7280; font-size: 14px; text-align: center;">
+                This invitation expires on {expires_at.strftime('%B %d, %Y at %I:%M %p')}.
+            </p>
+
+            <p style="color: #6b7280; font-size: 14px;">
+                If you weren't expecting this invitation or have questions, please contact your HR administrator.
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+Welcome! You've been invited to join the employee portal at {company_name}.
+
+To set up your account, please visit:
+{invitation_url}
+
+This invitation expires on {expires_at.strftime('%B %d, %Y at %I:%M %p')}.
+
+If you weren't expecting this invitation, please contact your HR administrator.
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_name,
+                }
+            ],
+            "subject": f"Welcome to {company_name} - Set Up Your Account",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent employee invitation to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
 
 # Singleton instance
 _email_service: Optional[EmailService] = None

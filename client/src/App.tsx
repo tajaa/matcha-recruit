@@ -44,6 +44,10 @@ const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
 const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 const BlogCommentsAdmin = lazy(() => import('./pages/BlogCommentsAdmin'));
 
+// Employee Management (Admin)
+const Employees = lazy(() => import('./pages/Employees'));
+const AcceptInvitation = lazy(() => import('./pages/AcceptInvitation'));
+
 // Employee Portal Pages
 const PortalHome = lazy(() => import('./pages/portal/PortalHome'));
 const PortalDocuments = lazy(() => import('./pages/portal/PortalDocuments'));
@@ -97,6 +101,9 @@ function App() {
 
             {/* Direct screening invite (handles auth internally) */}
             <Route path="/screening/:token" element={<ScreeningLanding />} />
+
+            {/* Employee invitation acceptance (public) */}
+            <Route path="/invite/:token" element={<AcceptInvitation />} />
 
             {/* Public job board */}
             <Route path="/careers" element={<PublicJobs />} />
@@ -172,6 +179,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <Compliance />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="employees"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <Employees />
                   </ProtectedRoute>
                 }
               />

@@ -86,6 +86,8 @@ from .routes.public_signatures import router as public_signatures_router
 from .routes.compliance import router as compliance_router
 from .routes.blog import router as blog_router
 from .routes.employee_portal import router as employee_portal_router
+from .routes.employees import router as employees_router
+from .routes.invitations import router as invitations_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(companies_router, prefix="/api/companies", tags=["companies"])
@@ -109,6 +111,8 @@ app.include_router(offer_letters_router, prefix="/api/offer-letters", tags=["off
 app.include_router(compliance_router, prefix="/api/compliance", tags=["compliance"])
 app.include_router(blog_router, prefix="/api/blogs", tags=["blog"])
 app.include_router(employee_portal_router, prefix="/api/v1/portal", tags=["employee-portal"])
+app.include_router(employees_router, prefix="/api/employees", tags=["employees"])
+app.include_router(invitations_router, prefix="/api/invitations", tags=["invitations"])
 
 
 @app.get("/health")
