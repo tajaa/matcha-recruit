@@ -305,6 +305,9 @@ async def upload_blog_image(
         )
         return {"url": url}
     except Exception as e:
+        print(f"[Blog Upload Error] {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 # -----------------------------------------------------------------------------

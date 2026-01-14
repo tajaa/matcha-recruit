@@ -70,7 +70,6 @@ class StorageService:
                     Bucket=self.bucket,
                     Key=key,
                     Body=file_bytes,
-                    ACL='public-read',
                     **extra_args,
                 )
                 return self._get_cloudfront_url(key)
