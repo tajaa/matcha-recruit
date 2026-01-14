@@ -8,8 +8,8 @@ from uuid import UUID
 
 from ..models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
-    AdminRegister, ClientRegister, CandidateRegister,
-    AdminProfile, ClientProfile, CandidateProfile, CurrentUser,
+    AdminRegister, ClientRegister, CandidateRegister, EmployeeRegister,
+    AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile, CurrentUser,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
     TokenAwardRequest, AllowedRolesRequest, CandidateSessionSummary
