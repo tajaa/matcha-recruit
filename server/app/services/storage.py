@@ -90,11 +90,22 @@ class StorageService:
         """Download a file from storage.
 
         Args:
-            path: S3 URI (s3://bucket/key) or local file path
+            path: CloudFront URL, S3 URI (s3://bucket/key), or local file path
 
         Returns:
             File contents as bytes
         """
+        # Handle CloudFront URLs - convert back to S3 path
+        if self.cloudfront_domain and path.startswith(f"https://{self.cloudfront_domain}/"):
+            key = path[len(f"https://{self.cloudfront_domain}/"):]
+            if not self.s3_client or not self.bucket:
+                raise RuntimeError("S3 not configured but CloudFront path provided")
+            try:
+                response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
+                return response["Body"].read()
+            except ClientError as e:
+                raise RuntimeError(f"Failed to download from S3: {e}")
+
         if path.startswith("s3://"):
             if not self.s3_client:
                 raise RuntimeError("S3 not configured but S3 path provided")
