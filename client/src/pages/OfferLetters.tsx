@@ -11,7 +11,7 @@ export function OfferLetters() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Creation Mode State
-  const [createMode, setCreateMode] = useState<'form' | 'wizard' | null>(null);
+  const [createMode, setCreateMode] = useState<'form' | 'wizard' | 'select' | null>(null);
   const [wizardStep, setWizardStep] = useState(1);
 
   // Form state
