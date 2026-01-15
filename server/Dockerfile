@@ -1,10 +1,18 @@
 # Stage 1: Base image with system dependencies
 FROM --platform=linux/arm64 python:3.12-slim-bookworm as base
 
-# Install system dependencies
+# Install system dependencies (including WeasyPrint requirements)
 RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    libcairo2 \
+    libgirepository1.0-dev \
+    gir1.2-pango-1.0 \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Stage 2: Dependencies installation
