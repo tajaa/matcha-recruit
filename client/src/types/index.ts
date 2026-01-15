@@ -1503,6 +1503,8 @@ export interface BlogCommentCreate {
 // Offer Letter types
 export type OfferLetterStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
 
+export type OfferLetterEmploymentType = 'Full-Time Exempt' | 'Full-Time Hourly' | 'Part-Time Hourly' | 'Contract' | 'Internship';
+
 export interface OfferLetter {
   id: string;
   candidate_name: string;
@@ -1522,6 +1524,25 @@ export interface OfferLetter {
   created_at: string;
   updated_at: string;
   sent_at: string | null;
+  // Structured benefits
+  benefits_medical: boolean;
+  benefits_medical_coverage: number | null;
+  benefits_medical_waiting_days: number;
+  benefits_dental: boolean;
+  benefits_vision: boolean;
+  benefits_401k: boolean;
+  benefits_401k_match: string | null;
+  benefits_wellness: string | null;
+  benefits_pto_vacation: boolean;
+  benefits_pto_sick: boolean;
+  benefits_holidays: boolean;
+  benefits_other: string | null;
+  // Contingencies
+  contingency_background_check: boolean;
+  contingency_credit_check: boolean;
+  contingency_drug_screening: boolean;
+  // Company logo
+  company_logo_url: string | null;
 }
 
 export interface OfferLetterCreate {
@@ -1538,6 +1559,25 @@ export interface OfferLetterCreate {
   manager_name?: string;
   manager_title?: string;
   expiration_date?: string;
+  // Structured benefits
+  benefits_medical?: boolean;
+  benefits_medical_coverage?: number;
+  benefits_medical_waiting_days?: number;
+  benefits_dental?: boolean;
+  benefits_vision?: boolean;
+  benefits_401k?: boolean;
+  benefits_401k_match?: string;
+  benefits_wellness?: string;
+  benefits_pto_vacation?: boolean;
+  benefits_pto_sick?: boolean;
+  benefits_holidays?: boolean;
+  benefits_other?: string;
+  // Contingencies
+  contingency_background_check?: boolean;
+  contingency_credit_check?: boolean;
+  contingency_drug_screening?: boolean;
+  // Company logo
+  company_logo_url?: string;
 }
 
 export interface OfferLetterUpdate {
@@ -1555,4 +1595,23 @@ export interface OfferLetterUpdate {
   manager_name?: string;
   manager_title?: string;
   expiration_date?: string;
+  // Structured benefits
+  benefits_medical?: boolean;
+  benefits_medical_coverage?: number;
+  benefits_medical_waiting_days?: number;
+  benefits_dental?: boolean;
+  benefits_vision?: boolean;
+  benefits_401k?: boolean;
+  benefits_401k_match?: string;
+  benefits_wellness?: string;
+  benefits_pto_vacation?: boolean;
+  benefits_pto_sick?: boolean;
+  benefits_holidays?: boolean;
+  benefits_other?: string;
+  // Contingencies
+  contingency_background_check?: boolean;
+  contingency_credit_check?: boolean;
+  contingency_drug_screening?: boolean;
+  // Company logo
+  company_logo_url?: string;
 }

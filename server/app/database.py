@@ -492,11 +492,55 @@ async def init_db():
                 expiration_date TIMESTAMP,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW(),
-                sent_at TIMESTAMP
+                sent_at TIMESTAMP,
+                -- Structured benefits
+                benefits_medical BOOLEAN DEFAULT false,
+                benefits_medical_coverage INTEGER,
+                benefits_medical_waiting_days INTEGER DEFAULT 0,
+                benefits_dental BOOLEAN DEFAULT false,
+                benefits_vision BOOLEAN DEFAULT false,
+                benefits_401k BOOLEAN DEFAULT false,
+                benefits_401k_match VARCHAR(255),
+                benefits_wellness VARCHAR(255),
+                benefits_pto_vacation BOOLEAN DEFAULT false,
+                benefits_pto_sick BOOLEAN DEFAULT false,
+                benefits_holidays BOOLEAN DEFAULT false,
+                benefits_other VARCHAR(500),
+                -- Contingencies
+                contingency_background_check BOOLEAN DEFAULT false,
+                contingency_credit_check BOOLEAN DEFAULT false,
+                contingency_drug_screening BOOLEAN DEFAULT false,
+                -- Company logo
+                company_logo_url TEXT
             )
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_offer_letters_status ON offer_letters(status)
+        """)
+
+        # Migration: Add new columns to offer_letters if they don't exist
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'benefits_medical') THEN
+                    ALTER TABLE offer_letters ADD COLUMN benefits_medical BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN benefits_medical_coverage INTEGER;
+                    ALTER TABLE offer_letters ADD COLUMN benefits_medical_waiting_days INTEGER DEFAULT 0;
+                    ALTER TABLE offer_letters ADD COLUMN benefits_dental BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN benefits_vision BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN benefits_401k BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN benefits_401k_match VARCHAR(255);
+                    ALTER TABLE offer_letters ADD COLUMN benefits_wellness VARCHAR(255);
+                    ALTER TABLE offer_letters ADD COLUMN benefits_pto_vacation BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN benefits_pto_sick BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN benefits_holidays BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN benefits_other VARCHAR(500);
+                    ALTER TABLE offer_letters ADD COLUMN contingency_background_check BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN contingency_credit_check BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN contingency_drug_screening BOOLEAN DEFAULT false;
+                    ALTER TABLE offer_letters ADD COLUMN company_logo_url TEXT;
+                END IF;
+            END $$;
         """)
 
         # Tracked companies table (company watchlist)
