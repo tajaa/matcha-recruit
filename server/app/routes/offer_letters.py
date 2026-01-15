@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 from typing import List
 from uuid import UUID
@@ -9,6 +10,8 @@ from pydantic import BaseModel
 from ..database import get_connection
 from ..models.offer_letter import OfferLetter, OfferLetterCreate, OfferLetterUpdate
 from ..services.storage import get_storage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -456,7 +459,7 @@ async def download_offer_letter_pdf(offer_id: UUID):
     # Generate HTML
     html_content = _generate_offer_letter_html(offer)
 
-    # Try to use weasyprint for PDF generation, fall back to HTML if not available
+    # Try to use weasyprint for PDF generation
     try:
         from weasyprint import HTML
         pdf_bytes = HTML(string=html_content).write_pdf()
@@ -467,14 +470,19 @@ async def download_offer_letter_pdf(offer_id: UUID):
                 "Content-Disposition": f'attachment; filename="offer-letter-{offer["candidate_name"].replace(" ", "-")}.pdf"'
             }
         )
-    except ImportError:
-        # Fallback: return HTML file if weasyprint not installed
-        return StreamingResponse(
-            BytesIO(html_content.encode()),
-            media_type="text/html",
-            headers={
-                "Content-Disposition": f'attachment; filename="offer-letter-{offer["candidate_name"].replace(" ", "-")}.html"'
-            }
+    except ImportError as e:
+        # WeasyPrint not installed - cannot generate PDF
+        logger.error(f"WeasyPrint not installed - cannot generate PDF: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="PDF generation not available. WeasyPrint library is not installed."
+        )
+    except Exception as e:
+        # Other PDF generation errors
+        logger.error(f"Failed to generate PDF: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate PDF: {str(e)}"
         )
 
 
