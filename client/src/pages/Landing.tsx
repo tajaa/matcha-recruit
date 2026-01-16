@@ -96,9 +96,9 @@ export function Landing() {
               </div>
            </div>
 
-           <div className="relative h-[60vh] lg:h-[80vh] w-full flex items-center justify-center">
-              <Suspense fallback={null}>
-                 <ParticleSphere className="scale-125 lg:scale-150" />
+           <div className="relative h-[60vh] lg:h-[80vh] w-full flex items-center justify-center z-0">
+              <Suspense fallback={<div className="w-full h-full flex items-center justify-center text-zinc-800">Loading 3D...</div>}>
+                 <ParticleSphere className="w-full h-full scale-125 lg:scale-150" />
               </Suspense>
               
               {/* Floating UI Elements */}
