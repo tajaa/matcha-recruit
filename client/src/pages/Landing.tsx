@@ -98,7 +98,7 @@ export function Landing() {
 
            <div className="relative h-[60vh] lg:h-[80vh] w-full flex items-center justify-center">
               <Suspense fallback={null}>
-                 <ParticleSphere className="scale-125 lg:scale-150 grayscale contrast-125" />
+                 <ParticleSphere className="scale-125 lg:scale-150" />
               </Suspense>
               
               {/* Floating UI Elements */}

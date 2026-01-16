@@ -47,10 +47,10 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     const colors = new Float32Array(particleCount * 3);
     const sizes = new Float32Array(particleCount);
 
-    // Grayscale / Zinc color variations
-    const baseColor = new THREE.Color(0xffffff); // white
-    const darkColor = new THREE.Color(0xa1a1aa); // zinc-400
-    const lightColor = new THREE.Color(0xe4e4e7); // zinc-200
+    // Matcha green color variations
+    const baseColor = new THREE.Color(0x22c55e); // matcha-500
+    const darkColor = new THREE.Color(0x16a34a); // matcha-600
+    const lightColor = new THREE.Color(0x4ade80); // matcha-400
 
     for (let i = 0; i < particleCount; i++) {
       // Fibonacci sphere distribution for even spacing
@@ -132,7 +132,7 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     // Add wireframe sphere for structure hint
     const wireGeometry = new THREE.SphereGeometry(1.02, 32, 32);
     const wireMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+      color: 0x22c55e,
       wireframe: true,
       transparent: true,
       opacity: 0.05
@@ -143,7 +143,7 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     // Add glow ring around equator
     const ringGeometry = new THREE.RingGeometry(1.15, 1.18, 64);
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+      color: 0x22c55e,
       transparent: true,
       opacity: 0.1,
       side: THREE.DoubleSide
@@ -216,21 +216,21 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-10">
         <div className="relative">
           {/* Crosshair */}
-          <div className="absolute w-8 h-px bg-white/30 -left-4 top-1/2" />
-          <div className="absolute h-8 w-px bg-white/30 left-1/2 -top-4" />
+          <div className="absolute w-8 h-px bg-matcha-500/50 -left-4 top-1/2" />
+          <div className="absolute h-8 w-px bg-matcha-500/50 left-1/2 -top-4" />
           {/* Center dot */}
-          <div className="w-2 h-2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+          <div className="w-2 h-2 rounded-full bg-matcha-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]" />
           {/* Corner brackets */}
-          <div className="absolute -top-6 -left-6 w-3 h-3 border-t border-l border-white/20" />
-          <div className="absolute -top-6 -right-6 w-3 h-3 border-t border-r border-white/20" />
-          <div className="absolute -bottom-6 -left-6 w-3 h-3 border-b border-l border-white/20" />
-          <div className="absolute -bottom-6 -right-6 w-3 h-3 border-b border-r border-white/20" />
+          <div className="absolute -top-6 -left-6 w-3 h-3 border-t border-l border-matcha-500/40" />
+          <div className="absolute -top-6 -right-6 w-3 h-3 border-t border-r border-matcha-500/40" />
+          <div className="absolute -bottom-6 -left-6 w-3 h-3 border-b border-l border-matcha-500/40" />
+          <div className="absolute -bottom-6 -right-6 w-3 h-3 border-b border-r border-matcha-500/40" />
         </div>
       </div>
 
       {/* Glow effect behind sphere */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-[60%] h-[60%] rounded-full bg-white/5 blur-[60px]" />
+        <div className="w-[60%] h-[60%] rounded-full bg-matcha-500/10 blur-[60px]" />
       </div>
     </div>
   );
