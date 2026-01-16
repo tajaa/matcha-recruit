@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, BackgroundTasks
 from typing import List, Optional
 
 from ..dependencies import require_client
@@ -12,6 +12,7 @@ from ..models.policy import (
     SignatureRequest,
     SignatureCreate,
     PolicySignatureResponse,
+    PolicySignatureWithToken,
     SignatureStatus,
     SignerType,
 )
@@ -22,6 +23,20 @@ from ..models.auth import CurrentUser
 from uuid import UUID
 
 router = APIRouter(prefix="/policies", tags=["policies"])
+
+
+async def send_signature_emails_task(signatures: List[PolicySignatureWithToken], policy: PolicyResponse):
+    email_service = get_email_service()
+    for sig in signatures:
+        await email_service.send_policy_signature_email(
+            to_email=sig.signer_email,
+            to_name=sig.signer_name,
+            policy_title=policy.title,
+            policy_version=policy.version,
+            token=sig.token,
+            expires_at=sig.expires_at,
+            company_name=policy.company_name,
+        )
 
 
 @router.get("", response_model=List[PolicyResponse])
@@ -132,6 +147,7 @@ async def delete_policy(
 async def send_signature_requests(
     policy_id: str,
     requests: List[SignatureRequest],
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_client),
 ):
     company_id = await get_client_company_id(current_user)
@@ -151,17 +167,8 @@ async def send_signature_requests(
 
     signatures = await SignatureService.create_batch_signature_requests(policy_id, requests)
 
-    email_service = get_email_service()
-    for sig in signatures:
-        await email_service.send_policy_signature_email(
-            to_email=sig.signer_email,
-            to_name=sig.signer_name,
-            policy_title=policy.title,
-            policy_version=policy.version,
-            token=sig.token,
-            expires_at=sig.expires_at,
-            company_name=policy.company_name,
-        )
+    # Send emails in background to prevent request timeout
+    background_tasks.add_task(send_signature_emails_task, signatures, policy)
 
     return {"message": f"Sent {len(signatures)} signature requests", "signatures": len(signatures)}
 
@@ -207,9 +214,23 @@ async def cancel_signature_request(
     return {"message": "Signature request cancelled"}
 
 
+async def resend_signature_email_task(signature: PolicySignatureWithToken):
+    email_service = get_email_service()
+    await email_service.send_policy_signature_email(
+        to_email=signature.signer_email,
+        to_name=signature.signer_name,
+        policy_title=signature.policy_title,
+        policy_version="",
+        token=signature.token,
+        expires_at=signature.expires_at,
+        company_name=None,
+    )
+
+
 @router.post("/signatures/{signature_id}/resend")
 async def resend_signature_request(
     signature_id: str,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_client),
 ):
     company_id = await get_client_company_id(current_user)
@@ -228,15 +249,6 @@ async def resend_signature_request(
     if not signature:
         raise HTTPException(status_code=400, detail="Cannot resend this signature request")
 
-    email_service = get_email_service()
-    await email_service.send_policy_signature_email(
-        to_email=signature.signer_email,
-        to_name=signature.signer_name,
-        policy_title=signature.policy_title,
-        policy_version="",
-        token=signature.token,
-        expires_at=signature.expires_at,
-        company_name=None,
-    )
+    background_tasks.add_task(resend_signature_email_task, signature)
 
     return {"message": "Signature request resent"}

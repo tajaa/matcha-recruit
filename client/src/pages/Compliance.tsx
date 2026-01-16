@@ -332,6 +332,22 @@ export function Compliance() {
                                         </p>
                                     </div>
                                 </div>
+                                <button
+                                    onClick={async () => {
+                                        if (!selectedLocationId) return;
+                                        try {
+                                            await complianceAPI.checkCompliance(selectedLocationId);
+                                            alert('Compliance check started. Check back in a few moments.');
+                                            queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId] });
+                                        } catch (error) {
+                                            console.error('Failed to check compliance:', error);
+                                            alert('Failed to start compliance check');
+                                        }
+                                    }}
+                                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-500 hover:text-zinc-900 transition-colors flex items-center gap-1.5"
+                                >
+                                    <Bell size={12} /> Check for Updates
+                                </button>
                             </div>
 
                             <div className="flex border-b border-zinc-200">

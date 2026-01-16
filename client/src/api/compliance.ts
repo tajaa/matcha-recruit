@@ -193,6 +193,16 @@ export const complianceAPI = {
         });
         if (!response.ok) throw new Error('Failed to fetch summary');
         return response.json();
+    },
+
+    async checkCompliance(locationId: string): Promise<void> {
+        const response = await fetch(`/api/compliance/locations/${locationId}/check`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+            },
+        });
+        if (!response.ok) throw new Error('Failed to start compliance check');
     }
 };
 

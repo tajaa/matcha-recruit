@@ -14,6 +14,7 @@ from ..models.policy import (
     SignatureRequest,
     SignatureCreate,
     PolicySignatureResponse,
+    PolicySignatureWithToken,
 )
 
 
@@ -168,7 +169,7 @@ class SignatureService:
         policy_id: str,
         signer: SignatureRequest,
         expires_in_days: int = 7,
-    ) -> PolicySignature:
+    ) -> PolicySignatureWithToken:
         token = str(uuid.uuid4())
         expires_at = datetime.utcnow() + timedelta(days=expires_in_days)
 
@@ -188,14 +189,18 @@ class SignatureService:
                 token,
                 expires_at,
             )
-            return await SignatureService.get_signature_by_id(sig_id)
+            # Use get_signature_with_token_by_id to return full object including token
+            sig = await SignatureService.get_signature_with_token_by_id(sig_id)
+            if not sig:
+                 raise ValueError("Failed to retrieve created signature")
+            return sig
 
     @staticmethod
     async def create_batch_signature_requests(
         policy_id: str,
         signers: List[SignatureRequest],
         expires_in_days: int = 7,
-    ) -> List[PolicySignature]:
+    ) -> List[PolicySignatureWithToken]:
         signatures = []
         for signer in signers:
             sig = await SignatureService.create_signature_request(policy_id, signer, expires_in_days)
@@ -219,6 +224,24 @@ class SignatureService:
             if not row:
                 return None
             return PolicySignatureResponse(**dict(row))
+
+    @staticmethod
+    async def get_signature_with_token_by_id(sig_id: str) -> Optional[PolicySignatureWithToken]:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                    SELECT
+                        ps.*,
+                        p.title as policy_title
+                    FROM policy_signatures ps
+                    JOIN policies p ON ps.policy_id = p.id
+                    WHERE ps.id = $1
+                """,
+                sig_id,
+            )
+            if not row:
+                return None
+            return PolicySignatureWithToken(**dict(row))
 
     @staticmethod
     async def get_signature_by_token(token: str) -> Optional[PolicySignatureResponse]:
@@ -296,7 +319,7 @@ class SignatureService:
             return result == "DELETE 1"
 
     @staticmethod
-    async def resend_signature(signature_id: str) -> Optional[PolicySignatureResponse]:
+    async def resend_signature(signature_id: str) -> Optional[PolicySignatureWithToken]:
         signature = await SignatureService.get_signature_by_id(signature_id)
         if not signature or signature.status != "pending":
             return None
@@ -312,7 +335,7 @@ class SignatureService:
                 new_token,
                 signature_id,
             )
-            return await SignatureService.get_signature_by_id(signature_id)
+            return await SignatureService.get_signature_with_token_by_id(signature_id)
 
     @staticmethod
     async def _mark_signature_expired(signature_id: str):

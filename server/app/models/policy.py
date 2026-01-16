@@ -103,3 +103,7 @@ class PolicySignatureResponse(BaseModel):
     signature_data: Optional[str] = None
     expires_at: datetime
     created_at: datetime
+
+
+class PolicySignatureWithToken(PolicySignatureResponse):
+    token: str

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import List, Optional
 from uuid import UUID
 
@@ -22,6 +22,7 @@ from ..services.compliance_service import (
     mark_alert_read,
     dismiss_alert,
     get_compliance_summary,
+    run_compliance_check,
 )
 
 router = APIRouter()
@@ -30,6 +31,7 @@ router = APIRouter()
 @router.post("/locations", response_model=dict)
 async def create_location_endpoint(
     data: LocationCreate,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_client),
 ):
     company_id = await get_client_company_id(current_user)
@@ -37,6 +39,10 @@ async def create_location_endpoint(
         raise HTTPException(status_code=400, detail="No company found")
 
     location = await create_location(company_id, data)
+    
+    # Trigger compliance check in background
+    background_tasks.add_task(run_compliance_check, location.id, company_id)
+    
     return {
         "id": str(location.id),
         "company_id": str(location.company_id),
@@ -49,6 +55,30 @@ async def create_location_endpoint(
         "is_active": location.is_active,
         "created_at": location.created_at.isoformat(),
     }
+
+
+@router.post("/locations/{location_id}/check", response_model=dict)
+async def check_location_compliance_endpoint(
+    location_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(require_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        loc_uuid = UUID(location_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid location ID")
+        
+    location = await get_location(loc_uuid, company_id)
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    background_tasks.add_task(run_compliance_check, loc_uuid, company_id)
+    
+    return {"message": "Compliance check started"}
 
 
 @router.get("/locations", response_model=List[dict])

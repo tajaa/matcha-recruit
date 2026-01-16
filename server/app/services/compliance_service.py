@@ -31,8 +31,108 @@ async def create_location(company_id: UUID, data: LocationCreate) -> BusinessLoc
             data.zipcode,
         )
         row = await conn.fetchrow("SELECT * FROM business_locations WHERE id = $1", location_id)
-        return BusinessLocation(**dict(row))
+        location = BusinessLocation(**dict(row))
+        
+        # Trigger async compliance check (fire and forget for now, or use background tasks)
+        # For simplicity in this function, we will call it but typically this should be backgrounded
+        # To avoid blocking response, we might need BackgroundTasks passed from route
+        return location
 
+async def run_compliance_check(location_id: UUID, company_id: UUID):
+    """
+    Runs a compliance check for a specific location using Gemini.
+    Updates requirements and creates alerts for changes.
+    """
+    from ..database import get_connection
+    from .gemini_compliance import get_gemini_compliance_service
+    
+    location = await get_location(location_id, company_id)
+    if not location:
+        return
+
+    service = get_gemini_compliance_service()
+    requirements = await service.research_location_compliance(
+        city=location.city,
+        state=location.state,
+        county=location.county
+    )
+
+    if not requirements:
+        return
+
+    async with get_connection() as conn:
+        for req in requirements:
+            # Check if requirement exists
+            existing = await conn.fetchrow(
+                """
+                SELECT * FROM compliance_requirements 
+                WHERE location_id = $1 AND category = $2 AND jurisdiction_level = $3 AND title = $4
+                """,
+                location_id, req['category'], req['jurisdiction_level'], req['title']
+            )
+
+            if existing:
+                # Update if value changed
+                if existing['current_value'] != req['current_value']:
+                    # Create alert
+                    await conn.execute(
+                        """
+                        INSERT INTO compliance_alerts 
+                        (location_id, company_id, requirement_id, title, message, severity, status, category, action_required)
+                        VALUES ($1, $2, $3, $4, $5, $6, 'unread', $7, 'Review new requirement')
+                        """,
+                        location_id, company_id, existing['id'],
+                        f"Compliance Change: {req['title']}",
+                        f"Value changed from {existing['current_value']} to {req['current_value']}",
+                        "warning", req['category']
+                    )
+
+                    # Update requirement
+                    await conn.execute(
+                        """
+                        UPDATE compliance_requirements
+                        SET current_value = $1, numeric_value = $2, previous_value = $3, 
+                            last_changed_at = NOW(), description = $4, source_url = $5, 
+                            effective_date = $6, updated_at = NOW()
+                        WHERE id = $7
+                        """,
+                        req['current_value'], req.get('numeric_value'), existing['current_value'],
+                        req['description'], req.get('source_url'), 
+                        req.get('effective_date'), existing['id']
+                    )
+            else:
+                # Insert new requirement
+                req_id = await conn.fetchval(
+                    """
+                    INSERT INTO compliance_requirements
+                    (location_id, category, jurisdiction_level, jurisdiction_name, title, description, 
+                     current_value, numeric_value, source_url, source_name, effective_date)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    RETURNING id
+                    """,
+                    location_id, req['category'], req['jurisdiction_level'], req['jurisdiction_name'],
+                    req['title'], req['description'], req['current_value'], req.get('numeric_value'),
+                    req.get('source_url'), req.get('source_name'), req.get('effective_date')
+                )
+                
+                # Create alert for new requirement
+                await conn.execute(
+                    """
+                    INSERT INTO compliance_alerts 
+                    (location_id, company_id, requirement_id, title, message, severity, status, category, action_required)
+                    VALUES ($1, $2, $3, $4, $5, $6, 'unread', $7, 'Review new requirement')
+                    """,
+                    location_id, company_id, req_id,
+                    f"New Requirement: {req['title']}",
+                    f"New compliance requirement identified: {req['description']}",
+                    "info", req['category']
+                )
+
+        # Update last check timestamp
+        await conn.execute(
+            "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+            location_id
+        )
 
 async def get_locations(company_id: UUID) -> List[BusinessLocation]:
     from ..database import get_connection
