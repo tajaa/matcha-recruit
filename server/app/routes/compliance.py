@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import List, Optional
 from uuid import UUID
 
-from ..dependencies import require_client, get_client_company_id
+from ..dependencies import require_admin_or_client, get_client_company_id
 from ..models.auth import CurrentUser
 from ..models.compliance import (
     LocationCreate,
@@ -32,7 +32,7 @@ router = APIRouter()
 async def create_location_endpoint(
     data: LocationCreate,
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -61,7 +61,7 @@ async def create_location_endpoint(
 async def check_location_compliance_endpoint(
     location_id: str,
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -83,7 +83,7 @@ async def check_location_compliance_endpoint(
 
 @router.get("/locations", response_model=List[dict])
 async def get_locations_endpoint(
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -113,7 +113,7 @@ async def get_locations_endpoint(
 @router.get("/locations/{location_id}", response_model=dict)
 async def get_location_endpoint(
     location_id: str,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -149,7 +149,7 @@ async def get_location_endpoint(
 async def update_location_endpoint(
     location_id: str,
     data: LocationUpdate,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -182,7 +182,7 @@ async def update_location_endpoint(
 @router.delete("/locations/{location_id}")
 async def delete_location_endpoint(
     location_id: str,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -204,7 +204,7 @@ async def delete_location_endpoint(
 async def get_location_requirements_endpoint(
     location_id: str,
     category: Optional[str] = None,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -223,7 +223,7 @@ async def get_alerts_endpoint(
     status: Optional[str] = None,
     severity: Optional[str] = None,
     limit: int = 50,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -235,7 +235,7 @@ async def get_alerts_endpoint(
 @router.put("/alerts/{alert_id}/read")
 async def mark_alert_read_endpoint(
     alert_id: str,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -256,7 +256,7 @@ async def mark_alert_read_endpoint(
 @router.put("/alerts/{alert_id}/dismiss")
 async def dismiss_alert_endpoint(
     alert_id: str,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -276,7 +276,7 @@ async def dismiss_alert_endpoint(
 
 @router.get("/summary", response_model=ComplianceSummary)
 async def get_compliance_summary_endpoint(
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
