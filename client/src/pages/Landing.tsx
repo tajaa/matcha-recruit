@@ -1,430 +1,281 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useRef, lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
+import { 
+  ArrowUpRight, 
+  Terminal, 
+  Shield, 
+  FileText, 
+  Users,
+  Cpu
+} from "lucide-react";
 
-// Lazy load Three.js-heavy component
+// Lazy load 3D component
 const ParticleSphere = lazy(() => import("../components/ParticleSphere"));
 
+// Marquee Component
+const Marquee = ({ children }: { children: React.ReactNode }) => (
+  <div className="relative flex overflow-hidden border-y border-white/10 bg-white/5 py-4">
+    <div className="animate-marquee whitespace-nowrap flex gap-8">
+      {[...Array(4)].map((_, i) => (
+        <span key={i} className="text-4xl font-black uppercase tracking-tighter text-transparent stroke-text opacity-50">
+          {children}
+        </span>
+      ))}
+    </div>
+    <div className="absolute top-0 flex animate-marquee2 whitespace-nowrap gap-8">
+      {[...Array(4)].map((_, i) => (
+        <span key={i} className="text-4xl font-black uppercase tracking-tighter text-transparent stroke-text opacity-50">
+          {children}
+        </span>
+      ))}
+    </div>
+  </div>
+);
+
 export function Landing() {
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [stats] = useState({
-    interviews: 1247,
-    responseTime: "< 1s",
-    matchRate: 94.7,
-  });
-
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const formatTime = (date: Date) => {
-    return date.toISOString().slice(11, 19);
-  };
-
-  const formatDate = (date: Date) => {
-    return date.toISOString().slice(0, 10);
-  };
-
+  const containerRef = useRef<HTMLDivElement>(null);
+  
   return (
-    <div className="bg-zinc-50 text-zinc-900 font-mono selection:bg-zinc-200 selection:text-zinc-900">
-      {/* Fixed Background Elements */}
-      <div className="fixed inset-0 z-0 pointer-events-none">
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: `
-              linear-gradient(to right, #000 1px, transparent 1px),
-              linear-gradient(to bottom, #000 1px, transparent 1px)
-            `,
-            backgroundSize: "60px 60px",
-          }}
-        />
-      </div>
+    <div ref={containerRef} className="bg-zinc-950 text-zinc-100 font-sans selection:bg-white selection:text-black overflow-x-hidden">
+      {/* Noise Overlay */}
+      <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-50 mix-blend-overlay" />
 
       {/* Navigation */}
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 sm:px-8 py-6 bg-white/80 backdrop-blur-md border-b border-zinc-200">
-        <Link to="/" className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.4)]" />
-          <span className="text-xs tracking-[0.3em] uppercase text-zinc-900 font-medium">
-            Matcha
-          </span>
-        </Link>
-
-        <nav className="flex items-center gap-6">
-          <Link
-            to="/blog"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-matcha-600 transition-colors"
-          >
-            Blog
+      <nav className="fixed top-0 inset-x-0 z-40 border-b border-white/5 bg-zinc-950/80 backdrop-blur-xl">
+        <div className="flex items-center justify-between px-6 h-16 max-w-[1800px] mx-auto">
+          <Link to="/" className="flex items-center gap-3 group">
+            <div className="w-8 h-8 bg-white flex items-center justify-center">
+              <div className="w-3 h-3 bg-black group-hover:scale-0 transition-transform duration-500" />
+            </div>
+            <span className="font-mono text-sm tracking-widest uppercase">Matcha</span>
           </Link>
-          <Link
-            to="/login"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-matcha-600 transition-colors"
-          >
-            Login
-          </Link>
-          <Link
-            to="/register"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-600 border border-zinc-300 px-5 py-2 hover:border-matcha-500 hover:text-matcha-600 transition-all bg-white"
-          >
-            Initialize
-          </Link>
-        </nav>
-      </header>
+          <div className="flex items-center gap-8">
+            <div className="hidden md:flex gap-6 text-xs font-mono uppercase tracking-widest text-zinc-500">
+               <span className="hover:text-white cursor-pointer transition-colors">Manifesto</span>
+               <span className="hover:text-white cursor-pointer transition-colors">System</span>
+               <span className="hover:text-white cursor-pointer transition-colors">Pricing</span>
+            </div>
+            <Link to="/register" className="px-6 py-2 border border-white/20 text-xs font-mono uppercase tracking-widest hover:bg-white hover:text-black transition-colors">
+              Initialize
+            </Link>
+          </div>
+        </div>
+      </nav>
 
       {/* HERO SECTION */}
-      <section className="relative z-10 min-h-screen flex items-center justify-center pt-20 px-4 sm:px-8 border-b border-zinc-800/50">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(400px,500px)_1fr] gap-8 items-center w-full max-w-7xl">
-          {/* Left - Title */}
-          <div className="flex flex-col justify-center lg:text-left text-center">
-            <div className="space-y-4">
-              <h1 className="text-4xl sm:text-6xl lg:text-7xl font-bold tracking-[-0.02em] text-gray-600">
-                MATCHA
-              </h1>
-              <p className="text-xs tracking-[0.3em] uppercase text-zinc-500">
-                AI-Powered Recruiting
-              </p>
-            </div>
-
-            <div className="mt-12 space-y-3 hidden lg:block">
-              <div className="flex items-center gap-3 text-[10px] tracking-widest text-zinc-600">
-                <span className="w-2 h-px bg-zinc-700" />
-                <span>THOUGHTFUL CANDIDATE SCREENING</span>
-              </div>
-              <div className="flex items-center gap-3 text-[10px] tracking-widest text-zinc-600">
-                <span className="w-2 h-px bg-zinc-700" />
-                <span>COMMUNICATION & FIT SIGNALS</span>
-              </div>
-              <div className="flex items-center gap-3 text-[10px] tracking-widest text-zinc-600">
-                <span className="w-2 h-px bg-zinc-700" />
-                <span>CURATED SHORTLISTS, NOT RESUME PILES</span>
-              </div>
-
-              <div className="pt-8 space-y-6">
-                <p className="text-zinc-500 text-sm leading-relaxed max-w-md">
-                  15 years in hiring. More than 5,000 people placed. We've built
-                  the tool we always wanted.
-                </p>
-
-                <div className="flex flex-col sm:flex-row gap-4">
-                  <Link
-                    to="/for-candidates"
-                    className="inline-flex items-center justify-center px-6 py-2.5 text-xs font-medium tracking-widest uppercase text-matcha-500 border border-matcha-500/50 hover:bg-matcha-500/10 transition-colors"
-                  >
-                    For Candidates
-                  </Link>
-                  <Link
-                    to="/work-with-us"
-                    className="inline-flex items-center justify-center px-6 py-2.5 text-xs font-medium tracking-widest uppercase text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors"
-                  >
-                    Work with us
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Center - Sphere */}
-          <div className="relative flex items-center justify-center py-12 lg:py-0">
-            <Suspense
-              fallback={
-                <div className="w-full h-[300px] sm:h-[400px] lg:h-[500px] bg-zinc-950" />
-              }
-            >
-              <ParticleSphere className="w-full h-[300px] sm:h-[400px] lg:h-[500px]" />
-            </Suspense>
-
-            {/* Coordinates overlay */}
-            <div className="absolute bottom-4 left-4 text-[9px] tracking-widest text-zinc-600">
-              <div>LAT: 37.7749</div>
-              <div>LNG: -122.4194</div>
-            </div>
-          </div>
-
-          {/* Right - Timestamp */}
-          <div className="flex flex-col items-end justify-center hidden lg:flex">
-            <div className="text-right space-y-6">
+      <section className="relative min-h-screen flex flex-col justify-center px-6 pt-20 border-b border-white/5">
+        <div className="max-w-[1800px] mx-auto w-full grid lg:grid-cols-2 gap-12 items-center">
+           <div className="relative z-20 space-y-12">
               <div>
-                <div className="text-[9px] tracking-[0.2em] text-zinc-600 mb-1">
-                  UTC TIME
-                </div>
-                <div className="text-2xl tracking-wider text-zinc-300 tabular-nums">
-                  {formatTime(currentTime)}
-                </div>
+                 <motion.div 
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="inline-flex items-center gap-3 px-4 py-2 border border-white/10 rounded-full mb-8 bg-white/5"
+                 >
+                    <span className="w-2 h-2 bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-400">System v2.4 Live</span>
+                 </motion.div>
+                 
+                 <h1 className="text-7xl md:text-9xl font-bold tracking-tighter leading-[0.85] mix-blend-difference">
+                    HUMAN <br/>
+                    <span className="text-zinc-500">CAPITAL</span> <br/>
+                    ENGINE
+                 </h1>
               </div>
 
-              <div>
-                <div className="text-[9px] tracking-[0.2em] text-zinc-600 mb-1">
-                  DATE
-                </div>
-                <div className="text-sm tracking-wider text-zinc-400 tabular-nums">
-                  {formatDate(currentTime)}
-                </div>
+              <div className="flex flex-col md:flex-row gap-8 items-start md:items-center max-w-xl">
+                 <p className="text-zinc-400 text-lg leading-relaxed font-light">
+                    The operating system for modern workforce management. <br/>
+                    Stripped of noise. Powered by intelligence.
+                 </p>
+                 <Link to="/register" className="group flex items-center gap-4 border-b border-white pb-1 hover:pb-2 transition-all">
+                    <span className="text-sm font-mono uppercase tracking-widest">Start Trial</span>
+                    <ArrowUpRight className="w-4 h-4 group-hover:-translate-y-1 group-hover:translate-x-1 transition-transform" />
+                 </Link>
               </div>
+           </div>
 
-              <div className="pt-4 border-t border-zinc-800">
-                <div className="text-[9px] tracking-[0.2em] text-zinc-600 mb-1">
-                  SYSTEM STATUS
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-matcha-500 animate-pulse" />
-                  <span className="text-xs tracking-widest text-matcha-500">
-                    OPERATIONAL
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Mobile CTA */}
-        <div className="absolute bottom-8 left-0 right-0 flex justify-center lg:hidden">
-          <Link
-            to="/register"
-            className="text-xs tracking-[0.2em] uppercase bg-matcha-500 text-black px-8 py-3 hover:bg-matcha-400 transition-colors font-medium"
-          >
-            Start Interview
-          </Link>
+           <div className="relative h-[60vh] lg:h-[80vh] w-full flex items-center justify-center">
+              <Suspense fallback={null}>
+                 <ParticleSphere className="scale-125 lg:scale-150 grayscale contrast-125" />
+              </Suspense>
+              
+              {/* Floating UI Elements */}
+              <motion.div 
+                 initial={{ opacity: 0, y: 50 }}
+                 animate={{ opacity: 1, y: 0 }}
+                 transition={{ delay: 0.5 }}
+                 className="absolute bottom-10 -left-10 md:left-0 bg-black/80 backdrop-blur border border-white/10 p-6 max-w-xs"
+              >
+                 <div className="flex items-center gap-3 mb-4 text-xs font-mono text-zinc-500 uppercase tracking-widest border-b border-white/10 pb-2">
+                    <Terminal className="w-3 h-3" />
+                    <span>System Output</span>
+                 </div>
+                 <div className="space-y-2 font-mono text-[10px] text-emerald-500">
+                    <div>&gt; Analyzing policy constraints...</div>
+                    <div>&gt; 142 Documents Processed</div>
+                    <div>&gt; Compliance Verified (99.9%)</div>
+                 </div>
+              </motion.div>
+           </div>
         </div>
       </section>
 
-      {/* PROBLEM SECTION */}
-      <section className="relative z-10 py-24 px-4 sm:px-8 border-b border-zinc-200 bg-white/50">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-start">
-          <div className="space-y-6 sticky top-24">
-            <h2 className="text-sm tracking-[0.2em] uppercase text-matcha-500">
-              The Problem
+      {/* MARQUEE */}
+      <div className="py-20 border-b border-white/5 overflow-hidden">
+         <Marquee>AUTOMATION COMPLIANCE INTELLIGENCE EFFICIENCY SECURITY SCALE</Marquee>
+      </div>
+
+      {/* FEATURE GRID */}
+      <section className="py-32 px-6 max-w-[1800px] mx-auto">
+         <div className="mb-24 flex flex-col md:flex-row justify-between items-end gap-8">
+            <h2 className="text-5xl md:text-7xl font-bold tracking-tighter max-w-2xl">
+               CORE <br/> ARCHITECTURE
             </h2>
-            <h3 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 leading-tight">
-              Recruiting is overwhelmed by noise.
-            </h3>
-            <p className="text-zinc-500 leading-relaxed max-w-md">
-              Great candidates get lost in keyword filters. Hiring managers
-              drown in resume piles. The human element—fit, communication,
-              potential—is ignored until it's too late.
-            </p>
-          </div>
-          <div className="grid gap-6">
-            <div className="p-8 border border-zinc-200 bg-white hover:border-matcha-500/50 hover:shadow-sm transition-all group">
-              <div className="flex items-start gap-6">
-                <div className="w-10 h-10 border border-zinc-200 flex items-center justify-center group-hover:border-matcha-500 group-hover:bg-matcha-50 transition-colors shrink-0">
-                  <span className="text-[10px] tracking-wider text-zinc-400 group-hover:text-matcha-600 transition-colors">
-                    01
-                  </span>
-                </div>
-                <div>
-                  <h4 className="text-base font-semibold text-zinc-900 mb-2">
-                    Resume Fatigue
-                  </h4>
-                  <p className="text-zinc-500 text-sm leading-relaxed">
-                    Hundreds of applications. Hours of reviewing. Most aren't even
-                    close to what you need.
-                  </p>
-                </div>
-              </div>
+            <div className="text-right">
+               <div className="text-xs font-mono uppercase tracking-widest text-zinc-500 mb-2">Available Modules</div>
+               <div className="text-4xl font-light text-zinc-300">04</div>
             </div>
-            <div className="p-8 border border-zinc-200 bg-white hover:border-matcha-500/50 hover:shadow-sm transition-all group">
-              <div className="flex items-start gap-6">
-                <div className="w-10 h-10 border border-zinc-200 flex items-center justify-center group-hover:border-matcha-500 group-hover:bg-matcha-50 transition-colors shrink-0">
-                  <span className="text-[10px] tracking-wider text-zinc-400 group-hover:text-matcha-600 transition-colors">
-                    02
-                  </span>
-                </div>
-                <div>
-                  <h4 className="text-base font-semibold text-zinc-900 mb-2">
-                    Ghosting & Delays
-                  </h4>
-                  <p className="text-zinc-500 text-sm leading-relaxed">
-                    Slow manual screening leads to top talent accepting other offers
-                    before you even speak.
+         </div>
+
+         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-px bg-white/10 border border-white/10">
+            
+            {/* LARGE CARD: ER COPILOT */}
+            <div className="lg:col-span-8 bg-zinc-950 p-12 md:p-20 relative group overflow-hidden">
+               <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 group-hover:opacity-40 transition-opacity" />
+               <div className="relative z-10">
+                  <Cpu className="w-12 h-12 text-white mb-8" strokeWidth={1} />
+                  <h3 className="text-4xl font-bold mb-6">ER Copilot</h3>
+                  <p className="text-xl text-zinc-400 max-w-md leading-relaxed mb-12">
+                     Your automated legal counsel. Resolves complex employee relations cases using your specific policy handbook.
                   </p>
-                </div>
-              </div>
+                  <div className="grid grid-cols-2 gap-8 font-mono text-xs uppercase tracking-widest text-zinc-500">
+                     <div className="flex items-center gap-2">
+                        <span className="w-1 h-1 bg-emerald-500" />
+                        Bias Detection
+                     </div>
+                     <div className="flex items-center gap-2">
+                        <span className="w-1 h-1 bg-emerald-500" />
+                        Policy Citations
+                     </div>
+                  </div>
+               </div>
+               <ArrowUpRight className="absolute top-8 right-8 w-8 h-8 text-white/20 group-hover:text-white group-hover:rotate-45 transition-all" />
             </div>
-            <div className="p-8 border border-zinc-200 bg-white hover:border-matcha-500/50 hover:shadow-sm transition-all group">
-              <div className="flex items-start gap-6">
-                <div className="w-10 h-10 border border-zinc-200 flex items-center justify-center group-hover:border-matcha-500 group-hover:bg-matcha-50 transition-colors shrink-0">
-                  <span className="text-[10px] tracking-wider text-zinc-400 group-hover:text-matcha-600 transition-colors">
-                    03
-                  </span>
-                </div>
-                <div>
-                  <h4 className="text-base font-semibold text-zinc-900 mb-2">
-                    Poor Signal
-                  </h4>
-                  <p className="text-zinc-500 text-sm leading-relaxed">
-                    Resumes don't show soft skills, cultural fit, or problem-solving
-                    ability.
-                  </p>
-                </div>
-              </div>
+
+            {/* TALL CARD: POLICIES */}
+            <div className="lg:col-span-4 bg-zinc-950 p-12 md:p-16 relative group border-l border-white/10">
+               <div className="h-full flex flex-col justify-between">
+                  <div>
+                     <FileText className="w-10 h-10 text-white mb-8" strokeWidth={1} />
+                     <h3 className="text-3xl font-bold mb-4">Policy Hub</h3>
+                     <p className="text-zinc-400 leading-relaxed">
+                        A living repository for your organization's laws. Track acknowledgement in real-time.
+                     </p>
+                  </div>
+                  <div className="mt-12 pt-12 border-t border-white/10">
+                     <div className="flex justify-between items-center text-xs font-mono uppercase tracking-widest">
+                        <span>Coverage</span>
+                        <span>100%</span>
+                     </div>
+                     <div className="w-full bg-zinc-900 h-1 mt-4">
+                        <div className="bg-white h-full w-full" />
+                     </div>
+                  </div>
+               </div>
             </div>
-          </div>
-        </div>
+
+            {/* CARD: IR */}
+            <div className="lg:col-span-4 bg-zinc-950 p-12 relative group border-t border-white/10">
+               <Shield className="w-10 h-10 text-white mb-8" strokeWidth={1} />
+               <h3 className="text-2xl font-bold mb-4">Incident Reporting</h3>
+               <p className="text-sm text-zinc-400 leading-relaxed mb-8">
+                  Structured workflows for safety and security. Audit-ready logs generated automatically.
+               </p>
+               <Link to="/register" className="inline-block border-b border-white/20 pb-1 text-xs font-mono uppercase tracking-widest hover:border-white transition-colors">
+                  Explore Module
+               </Link>
+            </div>
+
+            {/* CARD: EMPLOYEES */}
+            <div className="lg:col-span-4 bg-zinc-950 p-12 relative group border-t border-l border-white/10">
+               <Users className="w-10 h-10 text-white mb-8" strokeWidth={1} />
+               <h3 className="text-2xl font-bold mb-4">Directory</h3>
+               <p className="text-sm text-zinc-400 leading-relaxed mb-8">
+                  The single source of truth. Roles, departments, and history in one view.
+               </p>
+               <Link to="/register" className="inline-block border-b border-white/20 pb-1 text-xs font-mono uppercase tracking-widest hover:border-white transition-colors">
+                  View Data Structure
+               </Link>
+            </div>
+
+            {/* CARD: OFFERS */}
+            <div className="lg:col-span-4 bg-white text-black p-12 relative group border-t border-l border-white/10 hover:bg-zinc-200 transition-colors">
+               <div className="absolute top-6 right-6 px-2 py-1 bg-black text-white text-[10px] font-mono uppercase tracking-widest">
+                  New
+               </div>
+               <h3 className="text-2xl font-bold mb-4 mt-8">Smart Contracts</h3>
+               <p className="text-sm text-black/70 leading-relaxed mb-8">
+                  Generate error-free offer letters. E-signature ready.
+               </p>
+               <ArrowUpRight className="w-6 h-6" />
+            </div>
+
+         </div>
       </section>
 
-      {/* SOLUTION SECTION */}
-      <section className="relative z-10 py-24 px-4 sm:px-8 border-b border-zinc-200">
-        <div className="max-w-7xl mx-auto">
-          <div className="mb-16">
-            <h2 className="text-sm tracking-[0.2em] uppercase text-matcha-500 mb-6">
-              The Solution
-            </h2>
-            <h3 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 max-w-2xl leading-tight">
-              Signal over noise. <br />
-              <span className="text-zinc-400">
-                Autonomous, meaningful screening.
-              </span>
-            </h3>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-zinc-200 border border-zinc-200">
-            <div className="bg-white p-8 sm:p-12 hover:bg-zinc-50 transition-colors group">
-              <div className="w-10 h-10 border border-zinc-200 flex items-center justify-center mb-6 group-hover:border-matcha-500 group-hover:bg-matcha-50 transition-colors">
-                <svg
-                  className="w-5 h-5 text-zinc-400 group-hover:text-matcha-600 transition-colors"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-                  />
-                </svg>
-              </div>
-              <h4 className="text-base font-semibold text-zinc-900 mb-3">
-                Conversational AI
-              </h4>
-              <p className="text-zinc-500 text-sm leading-relaxed">
-                Matcha engages candidates in real-time interviews, adapting to
-                their responses to dig deeper into their experience.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 sm:p-12 hover:bg-zinc-50 transition-colors group">
-              <div className="w-10 h-10 border border-zinc-200 flex items-center justify-center mb-6 group-hover:border-matcha-500 group-hover:bg-matcha-50 transition-colors">
-                <svg
-                  className="w-5 h-5 text-zinc-400 group-hover:text-matcha-600 transition-colors"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                  />
-                </svg>
-              </div>
-              <h4 className="text-base font-semibold text-zinc-900 mb-3">
-                Multi-Dimensional Analysis
-              </h4>
-              <p className="text-zinc-500 text-sm leading-relaxed">
-                We evaluate technical skills, communication clarity, and
-                cultural add simultaneously.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 sm:p-12 hover:bg-zinc-50 transition-colors group">
-              <div className="w-10 h-10 border border-zinc-200 flex items-center justify-center mb-6 group-hover:border-matcha-500 group-hover:bg-matcha-50 transition-colors">
-                <svg
-                  className="w-5 h-5 text-zinc-400 group-hover:text-matcha-600 transition-colors"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              </div>
-              <h4 className="text-base font-semibold text-zinc-900 mb-3">
-                Curated Shortlists
-              </h4>
-              <p className="text-zinc-500 text-sm leading-relaxed">
-                You receive a ranked list of candidates who are actually a fit,
-                with detailed notes on why.
-              </p>
-            </div>
-          </div>
-        </div>
+      {/* STATS / FOOTER PREVIEW */}
+      <section className="py-32 border-t border-white/5">
+         <div className="max-w-[1800px] mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-12">
+            {[
+               { label: "Uptime", value: "99.99%" },
+               { label: "Security", value: "SOC2" },
+               { label: "Deploy", value: "< 5min" },
+               { label: "Support", value: "24/7" },
+            ].map((stat, i) => (
+               <div key={i} className="border-l border-white/20 pl-6">
+                  <div className="text-xs font-mono uppercase tracking-widest text-zinc-500 mb-2">{stat.label}</div>
+                  <div className="text-4xl font-light">{stat.value}</div>
+               </div>
+            ))}
+         </div>
       </section>
 
-      {/* FOOTER STATS */}
-      <section className="relative z-10 border-t border-zinc-200 bg-zinc-100/50">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-zinc-200">
-            <div className="p-6 sm:p-8">
-              <span className="text-[9px] tracking-[0.2em] text-zinc-400 uppercase block mb-2">
-                Interviews
-              </span>
-              <span className="text-2xl sm:text-3xl font-light text-zinc-900 tabular-nums">
-                {stats.interviews.toLocaleString()}
-              </span>
+      <footer className="bg-white text-black py-24 px-6">
+         <div className="max-w-[1800px] mx-auto">
+            <div className="flex flex-col md:flex-row justify-between items-start gap-12">
+               <div>
+                  <h2 className="text-6xl md:text-8xl font-bold tracking-tighter leading-none mb-8">
+                     READY TO <br/> DEPLOY?
+                  </h2>
+                  <Link to="/register" className="inline-block px-8 py-4 bg-black text-white font-mono uppercase tracking-widest hover:bg-zinc-800 transition-colors">
+                     Initialize System
+                  </Link>
+               </div>
+               
+               <div className="grid grid-cols-2 gap-12 text-sm font-mono uppercase tracking-widest">
+                  <div className="space-y-4">
+                     <a href="#" className="block hover:underline">Product</a>
+                     <a href="#" className="block hover:underline">Manifesto</a>
+                     <a href="#" className="block hover:underline">Pricing</a>
+                  </div>
+                  <div className="space-y-4">
+                     <a href="#" className="block hover:underline">Twitter</a>
+                     <a href="#" className="block hover:underline">LinkedIn</a>
+                     <a href="#" className="block hover:underline">GitHub</a>
+                  </div>
+               </div>
             </div>
-
-            <div className="p-6 sm:p-8">
-              <span className="text-[9px] tracking-[0.2em] text-zinc-400 uppercase block mb-2">
-                Response Time
-              </span>
-              <span className="text-2xl sm:text-3xl font-light text-zinc-900">
-                {stats.responseTime}
-              </span>
+            
+            <div className="mt-24 pt-8 border-t border-black/10 flex justify-between items-center text-xs font-mono uppercase tracking-widest opacity-50">
+               <span>© 2024 Matcha Inc.</span>
+               <span>All Systems Normal</span>
             </div>
-
-            <div className="p-6 sm:p-8">
-              <span className="text-[9px] tracking-[0.2em] text-zinc-400 uppercase block mb-2">
-                Match Rate
-              </span>
-              <span className="text-2xl sm:text-3xl font-light text-zinc-900 tabular-nums">
-                {stats.matchRate}%
-              </span>
-            </div>
-
-            <div className="p-6 sm:p-8">
-              <span className="text-[9px] tracking-[0.2em] text-zinc-400 uppercase block mb-2">
-                Status
-              </span>
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-matcha-500 animate-pulse" />
-                <span className="text-sm sm:text-base font-light text-matcha-600 uppercase tracking-wider">
-                  Live
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <footer className="relative z-10 py-6 border-t border-zinc-200 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span className="text-[9px] tracking-[0.3em] text-zinc-400 uppercase">
-            © {new Date().getFullYear()} Matcha Recruit
-          </span>
-          <div className="flex items-center gap-6">
-            <Link
-              to="/blog"
-              className="text-[9px] tracking-[0.2em] text-zinc-400 hover:text-matcha-600 uppercase transition-colors"
-            >
-              Blog
-            </Link>
-            <Link
-              to="/careers"
-              className="text-[9px] tracking-[0.2em] text-zinc-400 hover:text-matcha-600 uppercase transition-colors"
-            >
-              Careers
-            </Link>
-          </div>
-        </div>
+         </div>
       </footer>
     </div>
   );
 }
+
 export default Landing;
