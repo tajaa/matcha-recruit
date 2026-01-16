@@ -8,9 +8,12 @@ Employee Relations Investigation management:
 - Evidence search (RAG)
 """
 
+import asyncio
 import json
+import logging
 import secrets
 from datetime import datetime, timezone
+
 from typing import Optional
 from uuid import UUID
 
@@ -39,6 +42,8 @@ from ..models.er_case import (
     AuditLogEntry,
     AuditLogResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -411,15 +416,28 @@ async def upload_document(
             request.client.host if request.client else None,
         )
 
-        # Queue Celery task for processing
+        # Queue Celery task for processing (with sync fallback)
         task_id = None
         try:
             from ..workers.tasks.er_document_processing import process_er_document
             task = process_er_document.delay(str(row["id"]), str(case_id))
             task_id = task.id
-        except Exception:
-            # Celery not available, processing will need to be triggered manually
-            pass
+            logger.info(f"Queued document {row['id']} for async processing")
+        except Exception as e:
+            logger.warning(f"Celery unavailable ({e}), processing document synchronously")
+            # Fallback: process synchronously in background task
+            try:
+                from ..workers.tasks.er_document_processing import _process_document
+                asyncio.create_task(_process_document(str(row["id"]), str(case_id)))
+            except Exception as sync_error:
+                logger.error(f"Document processing failed: {sync_error}")
+                await conn.execute(
+                    """UPDATE er_case_documents
+                       SET processing_status = 'failed', processing_error = $1
+                       WHERE id = $2""",
+                    str(sync_error),
+                    row["id"],
+                )
 
         document = ERDocumentResponse(
             id=row["id"],
