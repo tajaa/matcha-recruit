@@ -121,6 +121,8 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
                 speaker = speaker_map[chunk["line_start"]]
 
             # Store chunk with embedding
+            # Convert embedding list to string format for pgvector
+            embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
             await conn.execute(
                 """
                 INSERT INTO er_evidence_chunks
@@ -135,7 +137,7 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
                 None,  # page_number - could be extracted from PDF
                 chunk.get("line_start"),
                 chunk.get("line_end"),
-                embedding,
+                embedding_str,
                 json.dumps({"char_start": chunk.get("char_start")}),
             )
 
