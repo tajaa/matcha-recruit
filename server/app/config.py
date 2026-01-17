@@ -32,6 +32,11 @@ class Settings:
     jwt_access_token_expire_minutes: int = 1440  # 24 hours
     jwt_refresh_token_expire_days: int = 30
 
+    # Chat System Auth (separate from main app)
+    chat_jwt_secret_key: str = ""
+    chat_jwt_access_token_expire_minutes: int = 1440  # 24 hours
+    chat_jwt_refresh_token_expire_days: int = 30
+
     # S3 Storage
     s3_bucket: Optional[str] = None
     s3_region: str = "us-east-1"
@@ -94,6 +99,13 @@ def load_settings() -> Settings:
         jwt_secret_key = secrets.token_urlsafe(32)
         print("[WARNING] JWT_SECRET_KEY not set. Using random key (sessions won't persist across restarts)")
 
+    # Chat JWT settings (separate secret for chat system isolation)
+    chat_jwt_secret_key = os.getenv("CHAT_JWT_SECRET_KEY", "")
+    if not chat_jwt_secret_key:
+        import secrets
+        chat_jwt_secret_key = secrets.token_urlsafe(32)
+        print("[WARNING] CHAT_JWT_SECRET_KEY not set. Using random key (chat sessions won't persist across restarts)")
+
     _settings = Settings(
         database_url=database_url.strip().strip('"'),
         gemini_api_key=api_key if api_key else None,
@@ -109,6 +121,9 @@ def load_settings() -> Settings:
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
         jwt_access_token_expire_minutes=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),
         jwt_refresh_token_expire_days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")),
+        chat_jwt_secret_key=chat_jwt_secret_key,
+        chat_jwt_access_token_expire_minutes=int(os.getenv("CHAT_JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),
+        chat_jwt_refresh_token_expire_days=int(os.getenv("CHAT_JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")),
         s3_bucket=os.getenv("S3_BUCKET"),
         s3_region=os.getenv("S3_REGION", "us-east-1"),
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),

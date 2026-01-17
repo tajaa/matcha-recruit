@@ -88,6 +88,7 @@ from .routes.blog import router as blog_router
 from .routes.employee_portal import router as employee_portal_router
 from .routes.employees import router as employees_router
 from .routes.invitations import router as invitations_router
+from .routes.chat import router as chat_router, ws_router as chat_ws_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(companies_router, prefix="/api/companies", tags=["companies"])
@@ -113,6 +114,8 @@ app.include_router(blog_router, prefix="/api/blogs", tags=["blog"])
 app.include_router(employee_portal_router, prefix="/api/v1/portal", tags=["employee-portal"])
 app.include_router(employees_router, prefix="/api/employees", tags=["employees"])
 app.include_router(invitations_router, prefix="/api/invitations", tags=["invitations"])
+app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])
 
 
 @app.get("/health")

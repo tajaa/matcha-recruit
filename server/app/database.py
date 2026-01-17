@@ -1296,6 +1296,91 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_blog_comments_status ON blog_comments(status)
         """)
 
+        # ===========================================
+        # Chat System Tables (Standalone Community Chat)
+        # ===========================================
+
+        # Chat Users table (completely separate from main users)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_users (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                email VARCHAR(255) UNIQUE NOT NULL,
+                first_name VARCHAR(100) NOT NULL,
+                last_name VARCHAR(100) NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                avatar_url VARCHAR(500),
+                bio TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_users_email ON chat_users(email)
+        """)
+
+        # Chat Rooms table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_rooms (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(100) NOT NULL,
+                slug VARCHAR(100) UNIQUE NOT NULL,
+                description TEXT,
+                icon VARCHAR(10),
+                is_default BOOLEAN DEFAULT FALSE,
+                created_by UUID REFERENCES chat_users(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_rooms_slug ON chat_rooms(slug)
+        """)
+
+        # Chat Room Memberships
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_room_members (
+                room_id UUID REFERENCES chat_rooms(id) ON DELETE CASCADE,
+                user_id UUID REFERENCES chat_users(id) ON DELETE CASCADE,
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (room_id, user_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_room_members_user ON chat_room_members(user_id)
+        """)
+
+        # Chat Messages table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                room_id UUID REFERENCES chat_rooms(id) ON DELETE CASCADE,
+                user_id UUID REFERENCES chat_users(id) ON DELETE SET NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                edited_at TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_room ON chat_messages(room_id, created_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON chat_messages(user_id)
+        """)
+
+        # Create default chat rooms if none exist
+        room_exists = await conn.fetchval("SELECT COUNT(*) FROM chat_rooms")
+        if room_exists == 0:
+            await conn.execute("""
+                INSERT INTO chat_rooms (name, slug, description, icon, is_default) VALUES
+                    ('General', 'general', 'General discussion and introductions', '💬', TRUE),
+                    ('Job Hunting', 'job-hunting', 'Share tips and experiences about the job search', '🔍', TRUE),
+                    ('Interview Prep', 'interview-prep', 'Practice and prepare for interviews together', '🎯', TRUE),
+                    ('Career Advice', 'career-advice', 'Get and give career guidance', '📈', TRUE),
+                    ('Off Topic', 'off-topic', 'Anything goes (within reason)', '🎲', TRUE)
+            """)
+            print("[DB] Created default chat rooms")
+
         # Create default admin if no admins exist
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:

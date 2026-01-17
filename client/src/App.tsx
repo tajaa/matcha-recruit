@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
-import { AuthProvider } from './context';
+import { AuthProvider, ChatAuthProvider } from './context';
 import { Layout, ProtectedRoute } from './components';
 
 // Static imports for critical path (landing + auth)
@@ -56,6 +56,13 @@ const PortalPTO = lazy(() => import('./pages/portal/PortalPTO'));
 const PortalPolicies = lazy(() => import('./pages/portal/PortalPolicies'));
 const PortalProfile = lazy(() => import('./pages/portal/PortalProfile'));
 
+// Chat Pages (separate auth system)
+const ChatLogin = lazy(() => import('./pages/chat/ChatLogin'));
+const ChatRegister = lazy(() => import('./pages/chat/ChatRegister'));
+const ChatLayout = lazy(() => import('./pages/chat/ChatLayout'));
+const ChatLobby = lazy(() => import('./pages/chat/ChatLobby'));
+const ChatRoom = lazy(() => import('./pages/chat/ChatRoom'));
+
 // Loading fallback
 function PageLoader() {
   return (
@@ -77,17 +84,26 @@ function CompanyRedirect() {
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/" element={<Landing />} />
-            <Route path="/for-candidates" element={<ForCandidates />} />
-            <Route path="/work-with-us" element={<WorkWithUs />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/onboarding/resume" element={<ResumeOnboarding />} />
-            <Route path="/unauthorized" element={<Unauthorized />} />
+      <ChatAuthProvider>
+        <BrowserRouter>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              {/* Public routes */}
+              <Route path="/" element={<Landing />} />
+              <Route path="/for-candidates" element={<ForCandidates />} />
+              <Route path="/work-with-us" element={<WorkWithUs />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/onboarding/resume" element={<ResumeOnboarding />} />
+              <Route path="/unauthorized" element={<Unauthorized />} />
+
+              {/* Chat routes (separate auth system) */}
+              <Route path="/chat/login" element={<ChatLogin />} />
+              <Route path="/chat/register" element={<ChatRegister />} />
+              <Route path="/chat" element={<ChatLayout />}>
+                <Route index element={<ChatLobby />} />
+                <Route path=":slug" element={<ChatRoom />} />
+              </Route>
 
             {/* Public Blog */}
             <Route path="/blog" element={<PublicBlogList />} />
@@ -381,6 +397,7 @@ function App() {
           </Routes>
         </Suspense>
       </BrowserRouter>
+      </ChatAuthProvider>
     </AuthProvider>
   );
 }
