@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Hash, Users, UserPlus, LogOut, RefreshCw, AlertCircle } from 'lucide-react';
+import { Users, UserPlus, LogOut, RefreshCw, AlertCircle } from 'lucide-react';
 import { chatRooms, chatMessages } from '../../api/chatClient';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { MessageList } from '../../components/chat/MessageList';
 import { MessageInput } from '../../components/chat/MessageInput';
+import { RoomIcon } from '../../components/chat/RoomIcon';
 import type { ChatRoom as ChatRoomType, ChatMessage, ChatUser } from '../../types/chat';
 
 export default function ChatRoom() {
@@ -239,11 +240,7 @@ export default function ChatRoom() {
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="max-w-md text-center">
           <div className="w-16 h-16 bg-zinc-800 border border-white/10 flex items-center justify-center mx-auto mb-6">
-            {room.icon ? (
-              <span className="text-3xl">{room.icon}</span>
-            ) : (
-              <Hash className="w-8 h-8 text-zinc-500" />
-            )}
+            <RoomIcon slug={room.slug} name={room.name} size="xl" className="text-zinc-500" />
           </div>
 
           <h2 className="text-2xl font-bold text-white mb-2">{room.name}</h2>
@@ -288,11 +285,7 @@ export default function ChatRoom() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-zinc-800 border border-white/10 flex items-center justify-center">
-              {room.icon ? (
-                <span className="text-lg">{room.icon}</span>
-              ) : (
-                <Hash className="w-4 h-4 text-zinc-500" />
-              )}
+              <RoomIcon slug={room.slug} name={room.name} size="sm" className="text-zinc-500" />
             </div>
             <div>
               <h2 className="text-sm font-bold text-white">{room.name}</h2>

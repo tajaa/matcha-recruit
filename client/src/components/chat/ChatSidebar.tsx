@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { MessageCircle, Hash, LogOut } from 'lucide-react';
+import { MessageCircle, LogOut } from 'lucide-react';
 import type { ChatRoomWithUnread } from '../../types/chat';
 import { useChatAuth } from '../../context/ChatAuthContext';
+import { RoomIcon } from './RoomIcon';
 
 interface ChatSidebarProps {
   rooms: ChatRoomWithUnread[];
@@ -76,11 +77,7 @@ export function ChatSidebar({ rooms, onClose }: ChatSidebarProps) {
             >
               <div className="flex items-center gap-3 min-w-0 flex-1">
                 <div className="flex-shrink-0">
-                  {room.icon ? (
-                    <span className="text-base">{room.icon}</span>
-                  ) : (
-                    <Hash className="w-4 h-4" />
-                  )}
+                  <RoomIcon slug={room.slug} name={room.name} size="sm" />
                 </div>
                 <span className="truncate font-medium">{room.name}</span>
               </div>

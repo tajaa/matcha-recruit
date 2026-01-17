@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Hash, Users, ArrowRight, RefreshCw, AlertCircle } from 'lucide-react';
+import { Users, ArrowRight, RefreshCw, AlertCircle } from 'lucide-react';
 import { chatRooms } from '../../api/chatClient';
+import { RoomIcon } from '../../components/chat/RoomIcon';
 import type { ChatRoomWithUnread } from '../../types/chat';
 
 export function ChatLobby() {
@@ -100,11 +101,7 @@ export function ChatLobby() {
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-zinc-800 border border-white/10 flex items-center justify-center">
-                    {room.icon ? (
-                      <span className="text-2xl">{room.icon}</span>
-                    ) : (
-                      <Hash className="w-5 h-5 text-zinc-500" />
-                    )}
+                    <RoomIcon slug={room.slug} name={room.name} size="md" className="text-zinc-500" />
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-white">{room.name}</h3>
