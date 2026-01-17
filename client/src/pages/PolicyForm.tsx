@@ -98,12 +98,12 @@ export function PolicyForm() {
         <div>
           <button
             onClick={() => navigate(-1)}
-            className="text-xs text-zinc-500 hover:text-zinc-900 mb-4 flex items-center gap-1 uppercase tracking-wider"
+            className="text-xs text-zinc-500 hover:text-white mb-4 flex items-center gap-1 uppercase tracking-wider"
           >
             <ChevronLeft size={12} />
             Back
           </button>
-          <h1 className="text-3xl font-light tracking-tight text-zinc-900">
+          <h1 className="text-3xl font-light tracking-tight text-white">
             {isEditing ? 'Edit Policy' : 'Create Policy'}
           </h1>
           <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">
@@ -122,7 +122,7 @@ export function PolicyForm() {
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 placeholder-zinc-300 text-lg focus:outline-none focus:border-zinc-900 transition-colors"
+                className="w-full px-0 py-2 bg-transparent border-b border-white/20 text-white placeholder-zinc-300 text-lg focus:outline-none focus:border-white transition-colors"
                 placeholder="e.g. Employee Conduct Policy"
                 required
               />
@@ -134,7 +134,7 @@ export function PolicyForm() {
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 placeholder-zinc-300 text-sm focus:outline-none focus:border-zinc-900 transition-colors"
+                className="w-full px-0 py-2 bg-transparent border-b border-white/20 text-white placeholder-zinc-300 text-sm focus:outline-none focus:border-white transition-colors"
                 placeholder="Brief summary of the policy purpose"
               />
             </div>
@@ -142,14 +142,14 @@ export function PolicyForm() {
 
           {/* Content */}
           <div className="space-y-4 pt-4">
-            <div className="flex items-center justify-between border-b border-zinc-200 pb-2">
+            <div className="flex items-center justify-between border-b border-white/20 pb-2">
               <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Content</label>
               <span className="text-[9px] text-zinc-400 font-mono italic">Plain text or basic formatting</span>
             </div>
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              className="w-full px-4 py-4 bg-zinc-50 border border-zinc-200 rounded-sm text-zinc-800 text-sm font-serif leading-relaxed min-h-[400px] focus:outline-none focus:border-zinc-400 focus:bg-white transition-all resize-none shadow-inner"
+              className="w-full px-4 py-4 bg-zinc-900 border border-white/20 rounded-sm text-white text-sm font-serif leading-relaxed min-h-[400px] focus:outline-none focus:border-white/40 transition-all resize-none placeholder-zinc-500"
               placeholder="Start drafting policy content here..."
               required
             />
@@ -157,16 +157,16 @@ export function PolicyForm() {
 
           {/* File Upload */}
           <div className="space-y-4 pt-4">
-            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 font-bold border-b border-zinc-200 pb-2">
+            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 font-bold border-b border-white/20 pb-2">
               Reference Document (Optional)
             </label>
-            <div className="flex items-center gap-6 p-6 border-2 border-dashed border-zinc-100 rounded-lg bg-zinc-50/50 hover:bg-zinc-50 transition-colors group">
-              <div className="w-12 h-12 rounded-full bg-white border border-zinc-200 flex items-center justify-center text-zinc-400 group-hover:text-zinc-900 transition-colors shadow-sm">
+            <div className="flex items-center gap-6 p-6 border-2 border-dashed border-white/10 rounded-lg bg-white/5 hover:bg-white/10 transition-colors group">
+              <div className="w-12 h-12 rounded-full bg-zinc-900 border border-white/20 flex items-center justify-center text-zinc-400 group-hover:text-white transition-colors">
                 <Upload size={20} />
               </div>
               <div className="flex-1">
                 <label className="cursor-pointer">
-                  <span className="text-sm font-medium text-zinc-900 hover:underline">Click to upload policy PDF</span>
+                  <span className="text-sm font-medium text-white hover:underline">Click to upload policy PDF</span>
                   <input
                     type="file"
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
@@ -177,9 +177,9 @@ export function PolicyForm() {
                 </label>
               </div>
               {file && (
-                <div className="flex items-center gap-3 bg-white px-3 py-2 rounded border border-zinc-200 shadow-sm">
+                <div className="flex items-center gap-3 bg-zinc-900 px-3 py-2 rounded border border-white/20">
                   <FileText size={14} className="text-zinc-400" />
-                  <span className="text-xs text-zinc-900 truncate max-w-[120px]">{file.name}</span>
+                  <span className="text-xs text-white truncate max-w-[120px]">{file.name}</span>
                   <button onClick={() => setFile(null)} className="text-zinc-400 hover:text-red-600 transition-colors">
                     <X size={14} />
                   </button>
@@ -196,7 +196,7 @@ export function PolicyForm() {
                 type="text"
                 value={version}
                 onChange={(e) => setVersion(e.target.value)}
-                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-900 transition-colors font-mono"
+                className="w-full px-0 py-2 bg-transparent border-b border-white/20 text-white text-sm focus:outline-none focus:border-white transition-colors font-mono"
                 placeholder="1.0"
               />
             </div>
@@ -206,7 +206,7 @@ export function PolicyForm() {
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as PolicyStatus)}
-                className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-900 transition-colors cursor-pointer uppercase tracking-wider font-medium"
+                className="w-full px-0 py-2 bg-transparent border-b border-white/20 text-white text-sm focus:outline-none focus:border-white transition-colors cursor-pointer uppercase tracking-wider font-medium"
               >
                 <option value="draft">Draft (Private)</option>
                 <option value="active">Active (Publish)</option>
@@ -216,18 +216,18 @@ export function PolicyForm() {
         </div>
 
         {/* Footer Actions */}
-        <div className="flex justify-end gap-4 pt-10 border-t border-zinc-100">
+        <div className="flex justify-end gap-4 pt-10 border-t border-white/10">
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="px-6 py-2 text-zinc-500 hover:text-zinc-900 text-xs font-medium uppercase tracking-wider transition-colors"
+            className="px-6 py-2 text-zinc-500 hover:text-white text-xs font-medium uppercase tracking-wider transition-colors"
           >
             Discard
           </button>
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={loading}
-            className="px-8 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-sm text-xs font-medium uppercase tracking-wider transition-colors disabled:opacity-50"
+            className="px-8 py-2 bg-white hover:bg-zinc-200 text-black rounded-sm text-xs font-medium uppercase tracking-wider transition-colors disabled:opacity-50"
           >
             {loading ? 'Saving...' : isEditing ? 'Update Policy' : 'Create Policy'}
           </button>

@@ -29,6 +29,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Policies = lazy(() => import('./pages/Policies'));
 const PolicyDetail = lazy(() => import('./pages/PolicyDetail'));
 const PolicyForm = lazy(() => import('./pages/PolicyForm'));
+const PolicySign = lazy(() => import('./pages/PolicySign'));
 const Compliance = lazy(() => import('./pages/Compliance'));
 const IRDashboard = lazy(() => import('./pages/IRDashboard'));
 const IRList = lazy(() => import('./pages/IRList'));
@@ -121,6 +122,9 @@ function App() {
 
             {/* Employee invitation acceptance (public) */}
             <Route path="/invite/:token" element={<AcceptInvitation />} />
+
+            {/* Policy signature (public, token-based) */}
+            <Route path="/sign/policy/:token" element={<PolicySign />} />
 
             {/* Public job board */}
             <Route path="/careers" element={<PublicJobs />} />
