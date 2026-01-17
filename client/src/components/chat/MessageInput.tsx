@@ -1,16 +1,26 @@
-import { useState, useRef, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import { Send } from 'lucide-react';
 
 interface MessageInputProps {
   onSendMessage: (content: string) => void;
   onTyping?: () => void;
   disabled?: boolean;
+  disabledReason?: string;
 }
 
-export function MessageInput({ onSendMessage, onTyping, disabled }: MessageInputProps) {
+export function MessageInput({ onSendMessage, onTyping, disabled, disabledReason }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<number | null>(null);
+
+  // Cleanup typing timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessage(e.target.value);
@@ -91,9 +101,15 @@ export function MessageInput({ onSendMessage, onTyping, disabled }: MessageInput
       </div>
 
       <div className="mt-2 text-[10px] text-zinc-600">
-        Press <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">Enter</kbd> to send,{' '}
-        <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">Shift</kbd> +{' '}
-        <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">Enter</kbd> for new line
+        {disabled && disabledReason ? (
+          <span className="text-amber-500">{disabledReason}</span>
+        ) : (
+          <>
+            Press <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">Enter</kbd> to send,{' '}
+            <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">Shift</kbd> +{' '}
+            <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">Enter</kbd> for new line
+          </>
+        )}
       </div>
     </form>
   );

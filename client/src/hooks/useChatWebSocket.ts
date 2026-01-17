@@ -20,21 +20,49 @@ interface UseChatWebSocketOptions {
 
 interface UseChatWebSocketReturn {
   isConnected: boolean;
+  isReconnecting: boolean;
   joinRoom: (slug: string) => void;
   leaveRoom: (slug: string) => void;
   sendMessage: (room: string, content: string) => void;
   sendTyping: (room: string) => void;
 }
 
+// Exponential backoff constants
+const MIN_RECONNECT_DELAY = 1000; // 1 second
+const MAX_RECONNECT_DELAY = 30000; // 30 seconds
+
 export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChatWebSocketReturn {
   const [isConnected, setIsConnected] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const pingIntervalRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const optionsRef = useRef(options);
+  const connectRef = useRef<() => void>();
 
   // Keep options ref updated
   optionsRef.current = options;
+
+  const scheduleReconnect = useCallback(() => {
+    // Attempt to reconnect with exponential backoff if we have a token
+    if (getChatAccessToken()) {
+      setIsReconnecting(true);
+      const delay = Math.min(
+        MIN_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current),
+        MAX_RECONNECT_DELAY
+      );
+      reconnectAttemptsRef.current += 1;
+
+      console.log(`[Chat WS] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current})`);
+
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        connectRef.current?.();
+      }, delay);
+    } else {
+      setIsReconnecting(false);
+    }
+  }, []);
 
   const connect = useCallback(() => {
     // Don't connect if no token
@@ -53,11 +81,24 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
       wsRef.current.close();
     }
 
+    // Mark as reconnecting if this is a retry
+    if (reconnectAttemptsRef.current > 0) {
+      setIsReconnecting(true);
+    }
+
     const ws = new WebSocket(getChatWebSocketUrl());
     wsRef.current = ws;
 
     ws.onopen = () => {
+      // Send authentication token as first message
+      const currentToken = getChatAccessToken();
+      if (currentToken) {
+        ws.send(JSON.stringify({ type: 'auth', token: currentToken }));
+      }
+
       setIsConnected(true);
+      setIsReconnecting(false);
+      reconnectAttemptsRef.current = 0; // Reset attempts on successful connection
       optionsRef.current.onConnect?.();
 
       // Start ping interval to keep connection alive
@@ -78,15 +119,11 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
         pingIntervalRef.current = null;
       }
 
-      // Attempt to reconnect after 3 seconds if we have a token
-      if (getChatAccessToken()) {
-        reconnectTimeoutRef.current = window.setTimeout(() => {
-          connect();
-        }, 3000);
-      }
+      scheduleReconnect();
     };
 
-    ws.onerror = () => {
+    ws.onerror = (event) => {
+      console.error('[Chat WS] WebSocket error:', event);
       // WebSocket errors are followed by close, so we don't need to do much here
     };
 
@@ -127,6 +164,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
 
           case 'error':
             if (data.error) {
+              console.error('[Chat WS] Server error:', data.error);
               optionsRef.current.onError?.(data.error);
             }
             break;
@@ -139,7 +177,10 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
         console.error('[Chat WS] Failed to parse message:', err);
       }
     };
-  }, []);
+  }, [scheduleReconnect]);
+
+  // Keep connect ref updated for use in setTimeout
+  connectRef.current = connect;
 
   const disconnect = useCallback(() => {
     // Clear reconnect timeout
@@ -161,6 +202,8 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
     }
 
     setIsConnected(false);
+    setIsReconnecting(false);
+    reconnectAttemptsRef.current = 0;
   }, []);
 
   // Connect on mount, disconnect on unmount
@@ -172,14 +215,18 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
     };
   }, [connect, disconnect]);
 
-  // Reconnect when token changes
+  // Reconnect when token changes - close existing connection first to use new token
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
       if (event.key === 'chat_access_token') {
+        // Always disconnect first to ensure clean state
+        disconnect();
+
         if (event.newValue) {
-          connect();
-        } else {
-          disconnect();
+          // Small delay to ensure disconnect completes
+          setTimeout(() => {
+            connect();
+          }, 100);
         }
       }
     };
@@ -212,6 +259,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
 
   return {
     isConnected,
+    isReconnecting,
     joinRoom,
     leaveRoom,
     sendMessage,

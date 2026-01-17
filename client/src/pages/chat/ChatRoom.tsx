@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Hash, Users, UserPlus, LogOut } from 'lucide-react';
+import { Hash, Users, UserPlus, LogOut, RefreshCw, AlertCircle } from 'lucide-react';
 import { chatRooms, chatMessages } from '../../api/chatClient';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { MessageList } from '../../components/chat/MessageList';
@@ -19,9 +19,13 @@ export default function ChatRoom() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isMember, setIsMember] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Track if messages have been loaded to prevent race condition
+  const messagesLoadedRef = useRef(false);
 
   // WebSocket connection
-  const { isConnected, joinRoom, leaveRoom, sendMessage, sendTyping } = useChatWebSocket({
+  const { isConnected, isReconnecting, joinRoom, leaveRoom, sendMessage, sendTyping } = useChatWebSocket({
     onMessage: (message, roomSlug) => {
       if (roomSlug === slug) {
         setMessages((prev) => [...prev, message]);
@@ -53,6 +57,7 @@ export default function ChatRoom() {
 
     const loadRoom = async () => {
       try {
+        setError(null);
         const roomData = await chatRooms.get(slug);
         setRoom(roomData);
 
@@ -60,36 +65,34 @@ export default function ChatRoom() {
         const roomsList = await chatRooms.list();
         const roomInfo = roomsList.find((r) => r.slug === slug);
         setIsMember(roomInfo?.is_member || false);
-      } catch (error) {
-        console.error('Failed to load room:', error);
-        navigate('/chat');
+      } catch (err) {
+        console.error('Failed to load room:', err);
+        setError('Failed to load room. Please try again.');
       }
     };
 
     loadRoom();
-  }, [slug, navigate]);
+  }, [slug]);
 
-  // Load messages and join room
+  // Load messages - separate effect that only runs once isMember is true
   useEffect(() => {
     if (!slug || !isMember) return;
 
     const loadMessages = async () => {
       try {
         setIsLoading(true);
+        setError(null);
         const data = await chatMessages.getMessages(slug, undefined, 50);
         setMessages(data.messages);
         setNextCursor(data.next_cursor);
         setHasMore(data.has_more);
-
-        // Join room via WebSocket
-        if (isConnected) {
-          joinRoom(slug);
-        }
+        messagesLoadedRef.current = true;
 
         // Mark room as read
         await chatRooms.markRead(slug);
-      } catch (error) {
-        console.error('Failed to load messages:', error);
+      } catch (err) {
+        console.error('Failed to load messages:', err);
+        setError('Failed to load messages. Please try again.');
       } finally {
         setIsLoading(false);
       }
@@ -98,9 +101,18 @@ export default function ChatRoom() {
     loadMessages();
 
     return () => {
-      if (slug && isConnected) {
-        leaveRoom(slug);
-      }
+      messagesLoadedRef.current = false;
+    };
+  }, [slug, isMember]);
+
+  // Join WebSocket room only after messages are loaded
+  useEffect(() => {
+    if (!slug || !isMember || !isConnected || !messagesLoadedRef.current) return;
+
+    joinRoom(slug);
+
+    return () => {
+      leaveRoom(slug);
     };
   }, [slug, isMember, isConnected, joinRoom, leaveRoom]);
 
@@ -113,8 +125,8 @@ export default function ChatRoom() {
       setMessages((prev) => [...data.messages, ...prev]);
       setNextCursor(data.next_cursor);
       setHasMore(data.has_more);
-    } catch (error) {
-      console.error('Failed to load more messages:', error);
+    } catch (err) {
+      console.error('Failed to load more messages:', err);
     } finally {
       setIsLoadingMore(false);
     }
@@ -137,10 +149,12 @@ export default function ChatRoom() {
     if (!slug) return;
 
     try {
+      setError(null);
       await chatRooms.join(slug);
       setIsMember(true);
-    } catch (error) {
-      console.error('Failed to join room:', error);
+    } catch (err) {
+      console.error('Failed to join room:', err);
+      setError('Failed to join room. Please try again.');
     }
   };
 
@@ -150,10 +164,59 @@ export default function ChatRoom() {
     try {
       await chatRooms.leave(slug);
       navigate('/chat');
-    } catch (error) {
-      console.error('Failed to leave room:', error);
+    } catch (err) {
+      console.error('Failed to leave room:', err);
+      setError('Failed to leave room. Please try again.');
     }
   };
+
+  const handleRetry = () => {
+    setError(null);
+    setIsLoading(true);
+    // Trigger reload by resetting isMember state
+    if (isMember) {
+      messagesLoadedRef.current = false;
+      // Force re-fetch
+      const loadMessages = async () => {
+        try {
+          if (!slug) return;
+          const data = await chatMessages.getMessages(slug, undefined, 50);
+          setMessages(data.messages);
+          setNextCursor(data.next_cursor);
+          setHasMore(data.has_more);
+          messagesLoadedRef.current = true;
+          await chatRooms.markRead(slug);
+        } catch (err) {
+          console.error('Failed to load messages:', err);
+          setError('Failed to load messages. Please try again.');
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      loadMessages();
+    } else {
+      window.location.reload();
+    }
+  };
+
+  // Error state
+  if (error && !room) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <p className="text-zinc-400 mb-4">{error}</p>
+          <button
+            onClick={handleRetry}
+            className="px-4 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-mono uppercase tracking-widest transition-all inline-flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -191,6 +254,10 @@ export default function ChatRoom() {
             <span>{room.member_count} members</span>
           </div>
 
+          {error && (
+            <p className="text-red-400 text-sm mb-4">{error}</p>
+          )}
+
           <button
             onClick={handleJoinRoom}
             className="px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-mono uppercase tracking-widest font-bold transition-all inline-flex items-center gap-2"
@@ -202,6 +269,17 @@ export default function ChatRoom() {
       </div>
     );
   }
+
+  // Determine disabled reason for MessageInput
+  const getInputDisabledReason = (): string | undefined => {
+    if (!isConnected) {
+      if (isReconnecting) {
+        return 'Reconnecting to server...';
+      }
+      return 'Disconnected from server';
+    }
+    return undefined;
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -224,8 +302,16 @@ export default function ChatRoom() {
 
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-xs text-zinc-500">
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-zinc-600'}`} />
-              <span>{onlineUsers.length} online</span>
+              <div className={`w-2 h-2 rounded-full ${
+                isConnected
+                  ? 'bg-emerald-500'
+                  : isReconnecting
+                    ? 'bg-amber-500 animate-pulse'
+                    : 'bg-zinc-600'
+              }`} />
+              <span>
+                {isReconnecting ? 'Reconnecting...' : `${onlineUsers.length} online`}
+              </span>
             </div>
 
             <button
@@ -237,6 +323,19 @@ export default function ChatRoom() {
             </button>
           </div>
         </div>
+
+        {/* Error banner */}
+        {error && (
+          <div className="mt-3 p-2 bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center justify-between">
+            <span>{error}</span>
+            <button
+              onClick={handleRetry}
+              className="text-red-300 hover:text-red-200 underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Messages */}
@@ -252,6 +351,7 @@ export default function ChatRoom() {
         onSendMessage={handleSendMessage}
         onTyping={handleTyping}
         disabled={!isConnected}
+        disabledReason={getInputDisabledReason()}
       />
     </div>
   );

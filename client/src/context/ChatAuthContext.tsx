@@ -7,6 +7,20 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, ty
 import type { ChatUser, ChatUserRegister, ChatUserLogin } from '../types/chat';
 import { chatAuth, getChatAccessToken, clearChatTokens } from '../api/chatClient';
 
+// Type guard for checking if an error is an auth error
+function isAuthError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    return (
+      message.includes('401') ||
+      message.includes('unauthorized') ||
+      message.includes('expired') ||
+      message.includes('session expired')
+    );
+  }
+  return false;
+}
+
 interface ChatAuthContextType {
   user: ChatUser | null;
   isLoading: boolean;
@@ -40,9 +54,7 @@ export function ChatAuthProvider({ children }: { children: ReactNode }) {
       setUser(userData);
     } catch (err) {
       // Only clear tokens for auth errors
-      const isAuthError = err instanceof Error &&
-        (err.message.includes('401') || err.message.includes('Unauthorized') || err.message.includes('expired'));
-      if (isAuthError) {
+      if (isAuthError(err)) {
         clearChatTokens();
       }
       setUser(null);

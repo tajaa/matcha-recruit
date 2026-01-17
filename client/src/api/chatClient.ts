@@ -17,7 +17,7 @@ import type {
   MessagePage,
 } from '../types/chat';
 
-const API_BASE = 'http://localhost:8001/api/chat';
+const API_BASE = import.meta.env.VITE_CHAT_API_URL || 'http://localhost:8001/api/chat';
 
 // Token storage - separate from main app tokens
 const CHAT_TOKEN_KEY = 'chat_access_token';
@@ -218,6 +218,11 @@ export const chatMessages = {
 // ====================
 
 export function getChatWebSocketUrl(): string {
-  const token = getChatAccessToken();
-  return `ws://localhost:8001/ws/chat?token=${token}`;
+  // Use environment variable or default, convert http(s) to ws(s)
+  const httpBase = import.meta.env.VITE_CHAT_API_URL || 'http://localhost:8001/api/chat';
+  const wsBase = httpBase
+    .replace(/^https:/, 'wss:')
+    .replace(/^http:/, 'ws:')
+    .replace(/\/api\/chat$/, '');
+  return `${wsBase}/ws/chat`;
 }

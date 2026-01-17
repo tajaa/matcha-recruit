@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import { useChatAuth } from '../../context/ChatAuthContext';
@@ -10,24 +10,58 @@ export function ChatLayout() {
   const { isAuthenticated, isLoading } = useChatAuth();
   const [rooms, setRooms] = useState<ChatRoomWithUnread[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const intervalRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadRooms();
-      // Refresh rooms every 30 seconds to update unread counts
-      const interval = setInterval(loadRooms, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [isAuthenticated]);
-
-  const loadRooms = async () => {
+  const loadRooms = useCallback(async () => {
     try {
       const data = await chatRooms.list();
       setRooms(data);
     } catch (error) {
       console.error('Failed to load rooms:', error);
     }
-  };
+  }, []);
+
+  const startPolling = useCallback(() => {
+    // Clear any existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    // Start new polling interval
+    intervalRef.current = window.setInterval(loadRooms, 30000);
+  }, [loadRooms]);
+
+  const stopPolling = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadRooms();
+      startPolling();
+
+      // Handle visibility changes to pause/resume polling
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          // Refresh rooms immediately when tab becomes visible
+          loadRooms();
+          startPolling();
+        } else {
+          // Pause polling when tab is hidden
+          stopPolling();
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        stopPolling();
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+  }, [isAuthenticated, loadRooms, startPolling, stopPolling]);
 
   if (isLoading) {
     return (

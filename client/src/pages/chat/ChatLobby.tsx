@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Hash, Users, ArrowRight } from 'lucide-react';
+import { Hash, Users, ArrowRight, RefreshCw, AlertCircle } from 'lucide-react';
 import { chatRooms } from '../../api/chatClient';
 import type { ChatRoomWithUnread } from '../../types/chat';
 
@@ -8,6 +8,7 @@ export function ChatLobby() {
   const navigate = useNavigate();
   const [rooms, setRooms] = useState<ChatRoomWithUnread[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadRooms();
@@ -15,10 +16,13 @@ export function ChatLobby() {
 
   const loadRooms = async () => {
     try {
+      setIsLoading(true);
+      setError(null);
       const data = await chatRooms.list();
       setRooms(data);
-    } catch (error) {
-      console.error('Failed to load rooms:', error);
+    } catch (err) {
+      console.error('Failed to load rooms:', err);
+      setError('Failed to load chat rooms. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -28,8 +32,9 @@ export function ChatLobby() {
     try {
       await chatRooms.join(slug);
       navigate(`/chat/${slug}`);
-    } catch (error) {
-      console.error('Failed to join room:', error);
+    } catch (err) {
+      console.error('Failed to join room:', err);
+      setError('Failed to join room. Please try again.');
     }
   };
 
@@ -37,6 +42,24 @@ export function ChatLobby() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+      </div>
+    );
+  }
+
+  if (error && rooms.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <p className="text-zinc-400 mb-4">{error}</p>
+          <button
+            onClick={loadRooms}
+            className="px-4 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-mono uppercase tracking-widest transition-all inline-flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -53,6 +76,19 @@ export function ChatLobby() {
             Join rooms to connect with the community and start conversations
           </p>
         </div>
+
+        {/* Error banner */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center justify-between">
+            <span>{error}</span>
+            <button
+              onClick={loadRooms}
+              className="text-red-300 hover:text-red-200 underline text-xs"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* Rooms Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

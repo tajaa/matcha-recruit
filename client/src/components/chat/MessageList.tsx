@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo, useCallback } from 'react';
 import type { ChatMessage } from '../../types/chat';
 import { formatMessageTime, getInitials, isOnline } from '../../types/chat';
 import { useChatAuth } from '../../context/ChatAuthContext';
@@ -16,6 +16,7 @@ export function MessageList({ messages, onLoadMore, hasMore, isLoading }: Messag
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number>(0);
   const shouldAutoScrollRef = useRef(true);
+  const scrollThrottleRef = useRef<number | null>(null);
 
   // Group messages by date
   const groupedMessages = useMemo(() => {
@@ -41,22 +42,41 @@ export function MessageList({ messages, onLoadMore, hasMore, isLoading }: Messag
     }
   }, [messages]);
 
-  // Handle scroll for load more
-  const handleScroll = () => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
+  // Handle scroll for load more (throttled)
+  const handleScroll = useCallback(() => {
+    // Throttle scroll handling using requestAnimationFrame
+    if (scrollThrottleRef.current) return;
 
-    // Check if user is near bottom
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-    shouldAutoScrollRef.current = isNearBottom;
+    scrollThrottleRef.current = requestAnimationFrame(() => {
+      const container = messagesContainerRef.current;
+      if (!container) {
+        scrollThrottleRef.current = null;
+        return;
+      }
 
-    // Load more when scrolled to top
-    if (scrollTop < 100 && hasMore && !isLoading && onLoadMore) {
-      prevScrollHeightRef.current = scrollHeight;
-      onLoadMore();
-    }
-  };
+      // Check if user is near bottom
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+      shouldAutoScrollRef.current = isNearBottom;
+
+      // Load more when scrolled to top
+      if (scrollTop < 100 && hasMore && !isLoading && onLoadMore) {
+        prevScrollHeightRef.current = scrollHeight;
+        onLoadMore();
+      }
+
+      scrollThrottleRef.current = null;
+    });
+  }, [hasMore, isLoading, onLoadMore]);
+
+  // Cleanup throttle ref on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollThrottleRef.current) {
+        cancelAnimationFrame(scrollThrottleRef.current);
+      }
+    };
+  }, []);
 
   // Maintain scroll position after loading more
   useEffect(() => {
