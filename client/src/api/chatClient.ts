@@ -7,7 +7,6 @@ import type {
   ChatUser,
   ChatUserRegister,
   ChatUserLogin,
-  ChatUserUpdate,
   ChatTokenResponse,
   ChatRoom,
   ChatRoomWithUnread,

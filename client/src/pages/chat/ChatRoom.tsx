@@ -3,17 +3,15 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Hash, Users, UserPlus, LogOut } from 'lucide-react';
 import { chatRooms, chatMessages } from '../../api/chatClient';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import { useChatAuth } from '../../context/ChatAuthContext';
 import { MessageList } from '../../components/chat/MessageList';
 import { MessageInput } from '../../components/chat/MessageInput';
-import type { ChatRoom, ChatMessage, ChatUser } from '../../types/chat';
+import type { ChatRoom as ChatRoomType, ChatMessage, ChatUser } from '../../types/chat';
 
-export function ChatRoom() {
+export default function ChatRoom() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { user } = useChatAuth();
 
-  const [room, setRoom] = useState<ChatRoom | null>(null);
+  const [room, setRoom] = useState<ChatRoomType | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<ChatUser[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -258,5 +256,3 @@ export function ChatRoom() {
     </div>
   );
 }
-
-export default ChatRoom;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { useChatAuth } from '../../context/ChatAuthContext';
 import { ChatSidebar } from '../../components/chat/ChatSidebar';
 import { chatRooms } from '../../api/chatClient';
