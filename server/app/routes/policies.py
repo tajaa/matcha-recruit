@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, BackgroundTasks
 from typing import List, Optional
 
-from ..dependencies import require_client
+from ..dependencies import require_admin_or_client
 from ..dependencies import get_client_company_id
 from ..models.policy import (
     Policy,
@@ -42,7 +42,7 @@ async def send_signature_emails_task(signatures: List[PolicySignatureWithToken],
 @router.get("", response_model=List[PolicyResponse])
 async def list_policies(
     status: Optional[PolicyStatus] = None,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -60,7 +60,7 @@ async def create_policy(
     version: str = Form("1.0"),
     status: PolicyStatus = Form("draft"),
     file: Optional[UploadFile] = File(None),
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     data = PolicyCreate(
         title=title,
@@ -93,7 +93,7 @@ async def create_policy(
 @router.get("/{policy_id}", response_model=PolicyResponse)
 async def get_policy(
     policy_id: str,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -114,7 +114,7 @@ async def get_policy(
 async def update_policy(
     policy_id: str,
     data: PolicyUpdate,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
     if not can_access:
@@ -130,7 +130,7 @@ async def update_policy(
 @router.delete("/{policy_id}")
 async def delete_policy(
     policy_id: str,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
     if not can_access:
@@ -148,7 +148,7 @@ async def send_signature_requests(
     policy_id: str,
     requests: List[SignatureRequest],
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -176,7 +176,7 @@ async def send_signature_requests(
 @router.get("/{policy_id}/signatures", response_model=List[PolicySignatureResponse])
 async def list_policy_signatures(
     policy_id: str,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -193,7 +193,7 @@ async def list_policy_signatures(
 @router.delete("/signatures/{signature_id}")
 async def cancel_signature_request(
     signature_id: str,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -231,7 +231,7 @@ async def resend_signature_email_task(signature: PolicySignatureWithToken):
 async def resend_signature_request(
     signature_id: str,
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser = Depends(require_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
