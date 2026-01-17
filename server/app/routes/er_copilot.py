@@ -418,26 +418,39 @@ async def upload_document(
 
         # Queue Celery task for processing (with sync fallback)
         task_id = None
+        celery_available = False
         try:
             from ..workers.tasks.er_document_processing import process_er_document
+            # Check if Celery broker is reachable
+            from ..workers.celery_app import celery_app
+            celery_app.control.ping(timeout=1)
             task = process_er_document.delay(str(row["id"]), str(case_id))
             task_id = task.id
-            logger.info(f"Queued document {row['id']} for async processing")
+            celery_available = True
+            logger.info(f"Queued document {row['id']} for Celery processing, task_id={task_id}")
         except Exception as e:
-            logger.warning(f"Celery unavailable ({e}), processing document synchronously")
-            # Fallback: process synchronously in background task
-            try:
-                from ..workers.tasks.er_document_processing import _process_document
-                asyncio.create_task(_process_document(str(row["id"]), str(case_id)))
-            except Exception as sync_error:
-                logger.error(f"Document processing failed: {sync_error}")
-                await conn.execute(
-                    """UPDATE er_case_documents
-                       SET processing_status = 'failed', processing_error = $1
-                       WHERE id = $2""",
-                    str(sync_error),
-                    row["id"],
-                )
+            logger.warning(f"Celery unavailable ({e}), will process document synchronously")
+
+        # Fallback: process in background if Celery not available
+        if not celery_available:
+            async def process_with_error_handling():
+                try:
+                    from ..workers.tasks.er_document_processing import _process_document
+                    logger.info(f"Starting sync processing for document {row['id']}")
+                    result = await _process_document(str(row["id"]), str(case_id))
+                    logger.info(f"Document {row['id']} processed successfully: {result}")
+                except Exception as sync_error:
+                    logger.error(f"Document {row['id']} processing failed: {sync_error}", exc_info=True)
+                    async with get_connection() as err_conn:
+                        await err_conn.execute(
+                            """UPDATE er_case_documents
+                               SET processing_status = 'failed', processing_error = $1
+                               WHERE id = $2""",
+                            str(sync_error),
+                            row["id"],
+                        )
+
+            asyncio.create_task(process_with_error_handling())
 
         document = ERDocumentResponse(
             id=row["id"],
@@ -533,6 +546,87 @@ async def get_document(
             parsed_at=row["parsed_at"],
             uploaded_by=row["uploaded_by"],
             created_at=row["created_at"],
+        )
+
+
+@router.post("/{case_id}/documents/{doc_id}/reprocess", response_model=TaskStatusResponse)
+async def reprocess_document(
+    case_id: UUID,
+    doc_id: UUID,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Manually reprocess a document that is stuck or failed."""
+    async with get_connection() as conn:
+        doc = await conn.fetchrow(
+            "SELECT id, processing_status FROM er_case_documents WHERE id = $1 AND case_id = $2",
+            doc_id,
+            case_id,
+        )
+
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        if doc["processing_status"] == "processing":
+            raise HTTPException(status_code=400, detail="Document is already being processed")
+
+        # Reset status to pending
+        await conn.execute(
+            "UPDATE er_case_documents SET processing_status = 'pending', processing_error = NULL WHERE id = $1",
+            doc_id,
+        )
+
+        # Delete existing chunks (will be regenerated)
+        await conn.execute(
+            "DELETE FROM er_evidence_chunks WHERE document_id = $1",
+            doc_id,
+        )
+
+        await log_audit(
+            conn,
+            str(case_id),
+            str(current_user.id),
+            "document_reprocessed",
+            "document",
+            str(doc_id),
+            {},
+            request.client.host if request.client else None,
+        )
+
+    # Queue for processing
+    try:
+        from ..workers.tasks.er_document_processing import process_er_document
+        from ..workers.celery_app import celery_app
+        celery_app.control.ping(timeout=1)
+        task = process_er_document.delay(str(doc_id), str(case_id))
+        return TaskStatusResponse(
+            task_id=task.id,
+            status="queued",
+            message="Document queued for reprocessing",
+        )
+    except Exception as e:
+        logger.warning(f"Celery unavailable ({e}), processing synchronously")
+        # Fallback to sync processing
+        async def process_sync():
+            try:
+                from ..workers.tasks.er_document_processing import _process_document
+                await _process_document(str(doc_id), str(case_id))
+            except Exception as sync_error:
+                logger.error(f"Reprocess failed: {sync_error}", exc_info=True)
+                async with get_connection() as err_conn:
+                    await err_conn.execute(
+                        """UPDATE er_case_documents
+                           SET processing_status = 'failed', processing_error = $1
+                           WHERE id = $2""",
+                        str(sync_error),
+                        doc_id,
+                    )
+
+        asyncio.create_task(process_sync())
+        return TaskStatusResponse(
+            task_id=None,
+            status="processing",
+            message="Document being reprocessed (synchronous mode)",
         )
 
 

@@ -45,10 +45,14 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
     """
     from ..database import get_connection
     from .gemini_compliance import get_gemini_compliance_service
-    
+
     location = await get_location(location_id, company_id)
     if not location:
+        print(f"[Compliance Check] Location {location_id} not found")
         return
+
+    location_name = location.name or f"{location.city}, {location.state}"
+    print(f"[Compliance Check] Starting check for {location_name}...")
 
     service = get_gemini_compliance_service()
     requirements = await service.research_location_compliance(
@@ -58,7 +62,16 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
     )
 
     if not requirements:
+        print(f"[Compliance Check] No requirements found for {location_name}")
+        # Still update the last check timestamp
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+                location_id
+            )
         return
+
+    print(f"[Compliance Check] Processing {len(requirements)} requirements for {location_name}")
 
     async with get_connection() as conn:
         for req in requirements:
@@ -133,6 +146,27 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
             "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
             location_id
         )
+
+    print(f"[Compliance Check] Completed check for {location_name}")
+
+
+async def get_location_counts(location_id: UUID) -> dict:
+    """Get requirements count and unread alerts count for a location."""
+    from ..database import get_connection
+    async with get_connection() as conn:
+        requirements_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM compliance_requirements WHERE location_id = $1",
+            location_id,
+        )
+        unread_alerts_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM compliance_alerts WHERE location_id = $1 AND status = 'unread'",
+            location_id,
+        )
+        return {
+            "requirements_count": requirements_count or 0,
+            "unread_alerts_count": unread_alerts_count or 0,
+        }
+
 
 async def get_locations(company_id: UUID) -> List[BusinessLocation]:
     from ..database import get_connection

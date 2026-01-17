@@ -90,8 +90,12 @@ async def get_locations_endpoint(
         return []
 
     locations = await get_locations(company_id)
-    return [
-        {
+    from ..services.compliance_service import get_location_counts
+
+    result = []
+    for loc in locations:
+        counts = await get_location_counts(loc.id)
+        result.append({
             "id": str(loc.id),
             "company_id": str(loc.company_id),
             "name": loc.name,
@@ -103,11 +107,10 @@ async def get_locations_endpoint(
             "is_active": loc.is_active,
             "last_compliance_check": loc.last_compliance_check.isoformat() if loc.last_compliance_check else None,
             "created_at": loc.created_at.isoformat(),
-            "requirements_count": 0,
-            "unread_alerts_count": 0,
-        }
-        for loc in locations
-    ]
+            "requirements_count": counts["requirements_count"],
+            "unread_alerts_count": counts["unread_alerts_count"],
+        })
+    return result
 
 
 @router.get("/locations/{location_id}", response_model=dict)
@@ -128,6 +131,9 @@ async def get_location_endpoint(
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
 
+    from ..services.compliance_service import get_location_counts
+    counts = await get_location_counts(loc_uuid)
+
     return {
         "id": str(location.id),
         "company_id": str(location.company_id),
@@ -140,8 +146,8 @@ async def get_location_endpoint(
         "is_active": location.is_active,
         "last_compliance_check": location.last_compliance_check.isoformat() if location.last_compliance_check else None,
         "created_at": location.created_at.isoformat(),
-        "requirements_count": 0,
-        "unread_alerts_count": 0,
+        "requirements_count": counts["requirements_count"],
+        "unread_alerts_count": counts["unread_alerts_count"],
     }
 
 

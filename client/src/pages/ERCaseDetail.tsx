@@ -12,9 +12,9 @@ import type {
   PolicyViolation,
   EvidenceSearchResult,
 } from '../types';
-import { 
-  ChevronLeft, Upload, Trash2, Search, 
-  AlertTriangle, CheckCircle, Clock, X
+import {
+  ChevronLeft, Upload, Trash2, Search,
+  AlertTriangle, CheckCircle, Clock, X, RefreshCw
 } from 'lucide-react';
 
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
@@ -157,6 +157,28 @@ export function ERCaseDetail() {
       fetchDocuments();
     } catch (err) {
       console.error('Failed to delete document:', err);
+    }
+  };
+
+  const handleReprocessDoc = async (docId: string) => {
+    if (!id) return;
+    try {
+      await erCopilot.reprocessDocument(id, docId);
+      // Refresh documents to show updated status
+      fetchDocuments();
+      // Poll for completion
+      const pollInterval = setInterval(async () => {
+        const docs = await erCopilot.listDocuments(id);
+        const doc = docs.find(d => d.id === docId);
+        if (doc && (doc.processing_status === 'completed' || doc.processing_status === 'failed')) {
+          clearInterval(pollInterval);
+          setDocuments(docs);
+        }
+      }, 2000);
+      // Clear interval after 60 seconds max
+      setTimeout(() => clearInterval(pollInterval), 60000);
+    } catch (err) {
+      console.error('Failed to reprocess document:', err);
     }
   };
 
@@ -306,21 +328,41 @@ export function ERCaseDetail() {
                         <span className={`text-[10px] uppercase tracking-wide font-medium ${DOC_TYPE_COLORS[doc.document_type]}`}>
                           {doc.document_type}
                         </span>
+                        {doc.processing_status === 'pending' && (
+                          <span className="text-[10px] text-zinc-400">Pending</span>
+                        )}
                         {doc.processing_status === 'processing' && (
                           <span className="text-[10px] text-amber-500">Processing...</span>
+                        )}
+                        {doc.processing_status === 'completed' && (
+                          <span className="text-[10px] text-emerald-500">✓</span>
                         )}
                         {doc.processing_status === 'failed' && (
                           <span className="text-[10px] text-red-500">Failed</span>
                         )}
                       </div>
                       <p className="text-xs text-zinc-900 truncate hover:text-zinc-700 cursor-pointer" title={doc.filename}>{doc.filename}</p>
+                      {doc.processing_error && (
+                        <p className="text-[10px] text-red-400 truncate" title={doc.processing_error}>{doc.processing_error}</p>
+                      )}
                     </div>
-                    <button
-                      onClick={() => handleDeleteDoc(doc.id)}
-                      className="text-zinc-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 p-1"
-                    >
-                      <Trash2 size={12} />
-                    </button>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                      {(doc.processing_status === 'pending' || doc.processing_status === 'failed') && (
+                        <button
+                          onClick={() => handleReprocessDoc(doc.id)}
+                          className="text-zinc-300 hover:text-blue-500 transition-colors p-1"
+                          title="Reprocess document"
+                        >
+                          <RefreshCw size={12} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteDoc(doc.id)}
+                        className="text-zinc-300 hover:text-red-500 transition-colors p-1"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

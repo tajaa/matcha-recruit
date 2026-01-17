@@ -1152,6 +1152,11 @@ export const erCopilot = {
       method: 'DELETE',
     }),
 
+  reprocessDocument: (caseId: string, docId: string): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/documents/${docId}/reprocess`, {
+      method: 'POST',
+    }),
+
   // Analysis
   generateTimeline: (caseId: string): Promise<ERTaskStatus> =>
     request<ERTaskStatus>(`/er/cases/${caseId}/analysis/timeline`, {

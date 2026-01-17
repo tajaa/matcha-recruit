@@ -104,9 +104,17 @@ Ensure all data is accurate and recent. If a local (city/county) law overrides a
 """
 
         try:
+            # Check for API key
+            api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
+            if not api_key and not self.settings.use_vertex:
+                print(f"[Gemini Compliance] ERROR: No GEMINI_API_KEY configured")
+                return []
+
+            print(f"[Gemini Compliance] Researching compliance for {location_str}...")
+
             # Use Google Search tool
             tools = [types.Tool(google_search=types.GoogleSearch())]
-            
+
             response = await self.client.aio.models.generate_content(
                 model=self.settings.analysis_model,
                 contents=prompt,
@@ -119,18 +127,30 @@ Ensure all data is accurate and recent. If a local (city/county) law overrides a
 
             # Parse JSON from response
             text = response.text
-            
+
             # Clean up markdown code blocks if present
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0]
             elif "```" in text:
                 text = text.split("```")[1].split("```")[0]
-            
-            data = json.loads(text.strip())
-            return data.get("requirements", [])
 
+            data = json.loads(text.strip())
+            requirements = data.get("requirements", [])
+            print(f"[Gemini Compliance] Found {len(requirements)} requirements for {location_str}")
+            return requirements
+
+        except json.JSONDecodeError as e:
+            print(f"[Gemini Compliance] Error parsing JSON response: {e}")
+            print(f"[Gemini Compliance] Raw response: {response.text[:500] if response else 'No response'}...")
+            return []
         except Exception as e:
-            print(f"[Gemini Compliance] Error researching requirements: {e}")
+            error_msg = str(e)
+            if "API_KEY" in error_msg.upper() or "PERMISSION" in error_msg.upper():
+                print(f"[Gemini Compliance] API Key/Permission error: {e}")
+            elif "QUOTA" in error_msg.upper() or "RATE" in error_msg.upper():
+                print(f"[Gemini Compliance] Rate limit/quota error: {e}")
+            else:
+                print(f"[Gemini Compliance] Error researching requirements: {e}")
             return []
 
 # Singleton instance
