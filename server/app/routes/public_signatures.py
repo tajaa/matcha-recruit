@@ -1,12 +1,81 @@
 import html
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 from ..models.policy import SignatureCreate, PolicySignatureResponse
 from ..services.policy_service import SignatureService
 
 router = APIRouter(prefix="/signatures", tags=["public-signatures"])
+
+
+class SignatureDataResponse(BaseModel):
+    id: str
+    policy_id: str
+    policy_title: Optional[str] = None
+    policy_content: Optional[str] = None
+    policy_file_url: Optional[str] = None
+    policy_version: str = "1.0"
+    company_name: Optional[str] = None
+    signer_name: str
+    signer_email: str
+    status: str
+    expires_at: str
+
+
+class SignAction(BaseModel):
+    action: str  # "sign" or "decline"
+    signature_data: Optional[str] = None
+
+
+# JSON API endpoints for React frontend
+@router.get("/verify/{token}", response_model=SignatureDataResponse)
+async def get_signature_data(token: str):
+    """Get signature data as JSON for React frontend."""
+    signature = await SignatureService.get_signature_by_token(token)
+    if not signature:
+        raise HTTPException(status_code=404, detail="Invalid or expired signature link")
+
+    return SignatureDataResponse(
+        id=str(signature.id),
+        policy_id=str(signature.policy_id),
+        policy_title=signature.policy_title,
+        policy_content=signature.policy_content,
+        policy_file_url=signature.policy_file_url,
+        policy_version=signature.policy_version or "1.0",
+        company_name=signature.company_name,
+        signer_name=signature.signer_name,
+        signer_email=signature.signer_email,
+        status=signature.status,
+        expires_at=signature.expires_at.isoformat(),
+    )
+
+
+@router.post("/verify/{token}")
+async def submit_signature_json(token: str, data: SignAction, request: Request):
+    """Submit signature via JSON API for React frontend."""
+    signature = await SignatureService.get_signature_by_token(token)
+    if not signature:
+        raise HTTPException(status_code=404, detail="Invalid or expired signature link")
+
+    if signature.status != "pending":
+        raise HTTPException(status_code=410, detail="This signature request is no longer pending")
+
+    accepted = data.action == "sign"
+    signature_create = SignatureCreate(
+        signature_data=data.signature_data if accepted else None,
+        accepted=accepted,
+    )
+
+    ip_address = request.client.host if request.client else None
+    result = await SignatureService.submit_signature(token, signature_create, ip_address)
+
+    if not result:
+        raise HTTPException(status_code=400, detail="Failed to process signature")
+
+    return {"status": result.status, "message": "Signature recorded successfully"}
 
 
 @router.get("/sign/{token}")

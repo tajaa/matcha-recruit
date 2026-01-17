@@ -5,17 +5,18 @@ import { CheckCircle, XCircle, FileText, AlertCircle } from 'lucide-react';
 interface SignatureData {
   id: string;
   policy_id: string;
-  policy_title: string;
-  policy_content: string;
+  policy_title: string | null;
+  policy_content: string | null;
+  policy_file_url: string | null;
   policy_version: string;
-  company_name: string;
+  company_name: string | null;
   signer_name: string;
   signer_email: string;
   status: 'pending' | 'signed' | 'declined' | 'expired';
   expires_at: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = 'http://localhost:8001';
 
 export function PolicySign() {
   const { token } = useParams<{ token: string }>();
@@ -37,7 +38,7 @@ export function PolicySign() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`${API_BASE}/api/v1/policies/sign/${token}`);
+      const res = await fetch(`${API_BASE}/api/signatures/verify/${token}`);
       if (!res.ok) {
         if (res.status === 404) {
           setError('This signature link is invalid or has expired.');
@@ -69,7 +70,7 @@ export function PolicySign() {
 
     try {
       setSigning(true);
-      const res = await fetch(`${API_BASE}/api/v1/policies/sign/${token}`, {
+      const res = await fetch(`${API_BASE}/api/signatures/verify/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'sign' }),
@@ -96,7 +97,7 @@ export function PolicySign() {
 
     try {
       setSigning(true);
-      const res = await fetch(`${API_BASE}/api/v1/policies/sign/${token}`, {
+      const res = await fetch(`${API_BASE}/api/signatures/verify/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'decline' }),
@@ -212,11 +213,28 @@ export function PolicySign() {
       {/* Content */}
       <div className="max-w-4xl mx-auto px-6 py-8">
         <div className="bg-zinc-900 border border-white/10 rounded-sm p-8 mb-8">
-          <div className="prose prose-invert prose-zinc max-w-none">
-            <div className="text-zinc-300 text-sm leading-relaxed whitespace-pre-wrap font-serif">
-              {data.policy_content}
+          {data.policy_content ? (
+            <div className="prose prose-invert prose-zinc max-w-none">
+              <div className="text-zinc-300 text-sm leading-relaxed whitespace-pre-wrap font-serif">
+                {data.policy_content}
+              </div>
             </div>
-          </div>
+          ) : data.policy_file_url ? (
+            <div className="text-center py-8">
+              <FileText className="w-12 h-12 text-zinc-500 mx-auto mb-4" />
+              <p className="text-zinc-400 mb-4">This policy is provided as a document.</p>
+              <a
+                href={data.policy_file_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block px-6 py-3 bg-white/10 text-white hover:bg-white/20 text-xs font-mono uppercase tracking-widest transition-all"
+              >
+                View Policy Document
+              </a>
+            </div>
+          ) : (
+            <p className="text-zinc-500 text-center py-8">No policy content available.</p>
+          )}
         </div>
 
         {/* Signature Section */}

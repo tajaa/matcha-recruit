@@ -94,6 +94,8 @@ class PolicySignatureResponse(BaseModel):
     policy_title: Optional[str] = None
     policy_content: Optional[str] = None
     policy_file_url: Optional[str] = None
+    policy_version: Optional[str] = None
+    company_name: Optional[str] = None
     signer_type: SignerType
     signer_id: Optional[UUID] = None
     signer_name: str

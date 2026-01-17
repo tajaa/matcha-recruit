@@ -252,9 +252,12 @@ class SignatureService:
                         ps.*,
                         p.title as policy_title,
                         p.content as policy_content,
-                        p.file_url as policy_file_url
+                        p.file_url as policy_file_url,
+                        p.version as policy_version,
+                        c.name as company_name
                     FROM policy_signatures ps
                     JOIN policies p ON ps.policy_id = p.id
+                    LEFT JOIN companies c ON p.company_id = c.id
                     WHERE ps.token = $1
                 """,
                 token,
