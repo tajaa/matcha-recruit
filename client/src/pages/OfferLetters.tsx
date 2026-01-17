@@ -250,18 +250,18 @@ export function OfferLetters() {
 
   const statusColors: Record<string, string> = {
     draft: 'text-zinc-500',
-    sent: 'text-blue-600',
-    accepted: 'text-emerald-600',
-    rejected: 'text-red-600',
-    expired: 'text-zinc-400',
+    sent: 'text-blue-400',
+    accepted: 'text-emerald-400',
+    rejected: 'text-red-400',
+    expired: 'text-zinc-600',
   };
 
   const statusDotColors: Record<string, string> = {
-    draft: 'bg-zinc-400',
+    draft: 'bg-zinc-600',
     sent: 'bg-blue-500',
     accepted: 'bg-emerald-500',
     rejected: 'bg-red-500',
-    expired: 'bg-zinc-300',
+    expired: 'bg-zinc-700',
   };
 
   // Wizard Steps Components
@@ -270,13 +270,13 @@ export function OfferLetters() {
       case 1: // Basics
         return (
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-            <h3 className="text-sm font-medium text-zinc-900 mb-4">Who are we hiring?</h3>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Who are we hiring?</h3>
             <div className="space-y-4">
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Candidate Name</label>
                 <input 
                   type="text" 
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="Enter full name"
                   value={formData.candidate_name}
                   onChange={(e) => setFormData({...formData, candidate_name: e.target.value})}
@@ -287,7 +287,7 @@ export function OfferLetters() {
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Role Title</label>
                 <input 
                   type="text" 
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. Senior Engineer"
                   value={formData.position_title}
                   onChange={(e) => setFormData({...formData, position_title: e.target.value})}
@@ -297,7 +297,7 @@ export function OfferLetters() {
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Start Date</label>
                 <input
                   type="date"
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
                   value={formData.start_date ? new Date(formData.start_date).toISOString().split('T')[0] : ''}
                   onChange={(e) => setFormData({...formData, start_date: e.target.value})}
                 />
@@ -306,14 +306,14 @@ export function OfferLetters() {
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Company Logo (optional)</label>
                 <input type="file" ref={logoInputRef} accept="image/*" onChange={handleLogoChange} className="hidden" />
                 {logoPreview ? (
-                  <div className="flex items-center gap-4 p-3 bg-zinc-50 border border-zinc-200 rounded">
+                  <div className="flex items-center gap-4 p-3 bg-zinc-900 border border-zinc-800 rounded">
                     <img src={logoPreview} alt="Logo preview" className="h-10 max-w-[120px] object-contain" />
-                    <button type="button" onClick={removeLogo} className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1">
+                    <button type="button" onClick={removeLogo} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
                       <X size={14} /> Remove
                     </button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => logoInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-zinc-300 text-sm text-zinc-500 hover:border-zinc-400 hover:text-zinc-600 transition-colors rounded">
+                  <button type="button" onClick={() => logoInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-zinc-700 text-sm text-zinc-500 hover:border-zinc-500 hover:text-zinc-300 transition-colors rounded">
                     <Upload size={16} />
                     Upload company logo
                   </button>
@@ -325,13 +325,13 @@ export function OfferLetters() {
       case 2: // Compensation
         return (
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-            <h3 className="text-sm font-medium text-zinc-900 mb-4">Compensation Package</h3>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Compensation Package</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Annual Salary</label>
                 <input 
                   type="text" 
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. $150,000"
                   value={formData.salary || ''}
                   onChange={(e) => setFormData({...formData, salary: e.target.value})}
@@ -342,7 +342,7 @@ export function OfferLetters() {
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Bonus Potential</label>
                 <input 
                   type="text" 
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. 15% Annual"
                   value={formData.bonus || ''}
                   onChange={(e) => setFormData({...formData, bonus: e.target.value})}
@@ -352,7 +352,7 @@ export function OfferLetters() {
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Equity / Options</label>
                 <input 
                   type="text" 
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. 5,000 RSUs"
                   value={formData.stock_options || ''}
                   onChange={(e) => setFormData({...formData, stock_options: e.target.value})}
@@ -361,7 +361,7 @@ export function OfferLetters() {
               <div className="col-span-2">
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Employment Type</label>
                 <select
-                    className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
                     value={formData.employment_type || 'Full-Time Exempt'}
                     onChange={(e) => setFormData({...formData, employment_type: e.target.value})}
                 >
@@ -376,13 +376,13 @@ export function OfferLetters() {
       case 3: // Reporting
         return (
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-            <h3 className="text-sm font-medium text-zinc-900 mb-4">Reporting & Location</h3>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Reporting & Location</h3>
             <div className="space-y-4">
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Manager Name</label>
                 <input 
                   type="text" 
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. David Chen"
                   value={formData.manager_name || ''}
                   onChange={(e) => setFormData({...formData, manager_name: e.target.value})}
@@ -393,7 +393,7 @@ export function OfferLetters() {
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Manager Title</label>
                 <input 
                   type="text" 
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. VP of Engineering"
                   value={formData.manager_title || ''}
                   onChange={(e) => setFormData({...formData, manager_title: e.target.value})}
@@ -403,7 +403,7 @@ export function OfferLetters() {
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Location</label>
                 <input 
                   type="text" 
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. San Francisco, CA (Hybrid)"
                   value={formData.location || ''}
                   onChange={(e) => setFormData({...formData, location: e.target.value})}
@@ -416,18 +416,18 @@ export function OfferLetters() {
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
             <div>
-              <h3 className="text-sm font-medium text-zinc-900 mb-4">Benefits Package</h3>
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Benefits Package</h3>
               <div className="space-y-3">
                 {/* Medical */}
-                <div className="p-3 bg-zinc-50 border border-zinc-200 rounded">
+                <div className="p-3 bg-zinc-900 border border-zinc-800 rounded">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={formData.benefits_medical || false}
                       onChange={(e) => setFormData({...formData, benefits_medical: e.target.checked})}
-                      className="w-4 h-4 rounded border-zinc-300"
+                      className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-900">Medical insurance offered</span>
+                    <span className="text-sm text-zinc-200">Medical insurance offered</span>
                   </label>
                   {formData.benefits_medical && (
                     <div className="mt-3 pl-6 grid grid-cols-2 gap-3">
@@ -438,7 +438,7 @@ export function OfferLetters() {
                           min="0"
                           max="100"
                           placeholder="e.g. 80"
-                          className="w-full px-2 py-1.5 bg-white border border-zinc-200 text-sm rounded"
+                          className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 text-white text-sm rounded placeholder-zinc-600"
                           value={formData.benefits_medical_coverage || ''}
                           onChange={(e) => setFormData({...formData, benefits_medical_coverage: e.target.value ? parseInt(e.target.value) : undefined})}
                         />
@@ -446,7 +446,7 @@ export function OfferLetters() {
                       <div>
                         <label className="block text-[10px] uppercase text-zinc-500 mb-1">Waiting Period</label>
                         <select
-                          className="w-full px-2 py-1.5 bg-white border border-zinc-200 text-sm rounded"
+                          className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 text-white text-sm rounded"
                           value={formData.benefits_medical_waiting_days || 0}
                           onChange={(e) => setFormData({...formData, benefits_medical_waiting_days: parseInt(e.target.value)})}
                         >
@@ -467,31 +467,31 @@ export function OfferLetters() {
                       type="checkbox"
                       checked={formData.benefits_dental || false}
                       onChange={(e) => setFormData({...formData, benefits_dental: e.target.checked})}
-                      className="w-4 h-4 rounded border-zinc-300"
+                      className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-700">Dental insurance</span>
+                    <span className="text-sm text-zinc-400">Dental insurance</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={formData.benefits_vision || false}
                       onChange={(e) => setFormData({...formData, benefits_vision: e.target.checked})}
-                      className="w-4 h-4 rounded border-zinc-300"
+                      className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-700">Vision insurance</span>
+                    <span className="text-sm text-zinc-400">Vision insurance</span>
                   </label>
                 </div>
 
                 {/* 401k */}
-                <div className="p-3 bg-zinc-50 border border-zinc-200 rounded">
+                <div className="p-3 bg-zinc-900 border border-zinc-800 rounded">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={formData.benefits_401k || false}
                       onChange={(e) => setFormData({...formData, benefits_401k: e.target.checked})}
-                      className="w-4 h-4 rounded border-zinc-300"
+                      className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-900">401(k) retirement plan</span>
+                    <span className="text-sm text-zinc-200">401(k) retirement plan</span>
                   </label>
                   {formData.benefits_401k && (
                     <div className="mt-3 pl-6">
@@ -499,7 +499,7 @@ export function OfferLetters() {
                       <input
                         type="text"
                         placeholder="e.g. 4% match up to 6%"
-                        className="w-full px-2 py-1.5 bg-white border border-zinc-200 text-sm rounded"
+                        className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 text-white text-sm rounded placeholder-zinc-600"
                         value={formData.benefits_401k_match || ''}
                         onChange={(e) => setFormData({...formData, benefits_401k_match: e.target.value})}
                       />
@@ -513,7 +513,7 @@ export function OfferLetters() {
                   <input
                     type="text"
                     placeholder="e.g. gym membership, mental health stipend"
-                    className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-sm focus:bg-white focus:border-zinc-400 transition-colors"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                     value={formData.benefits_wellness || ''}
                     onChange={(e) => setFormData({...formData, benefits_wellness: e.target.value})}
                   />
@@ -526,27 +526,27 @@ export function OfferLetters() {
                       type="checkbox"
                       checked={formData.benefits_pto_vacation || false}
                       onChange={(e) => setFormData({...formData, benefits_pto_vacation: e.target.checked})}
-                      className="w-4 h-4 rounded border-zinc-300"
+                      className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-700">Paid vacation</span>
+                    <span className="text-sm text-zinc-400">Paid vacation</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={formData.benefits_pto_sick || false}
                       onChange={(e) => setFormData({...formData, benefits_pto_sick: e.target.checked})}
-                      className="w-4 h-4 rounded border-zinc-300"
+                      className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-700">Paid sick leave</span>
+                    <span className="text-sm text-zinc-400">Paid sick leave</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={formData.benefits_holidays || false}
                       onChange={(e) => setFormData({...formData, benefits_holidays: e.target.checked})}
-                      className="w-4 h-4 rounded border-zinc-300"
+                      className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-700">Paid holidays</span>
+                    <span className="text-sm text-zinc-400">Paid holidays</span>
                   </label>
                 </div>
 
@@ -556,7 +556,7 @@ export function OfferLetters() {
                   <input
                     type="text"
                     placeholder="e.g. parking, commuter benefits"
-                    className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-sm focus:bg-white focus:border-zinc-400 transition-colors"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                     value={formData.benefits_other || ''}
                     onChange={(e) => setFormData({...formData, benefits_other: e.target.value})}
                   />
@@ -566,7 +566,7 @@ export function OfferLetters() {
 
             {/* Contingencies */}
             <div>
-              <h3 className="text-sm font-medium text-zinc-900 mb-2">Offer Contingencies</h3>
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-2">Offer Contingencies</h3>
               <p className="text-xs text-zinc-500 mb-3">I-9 employment verification is always required</p>
               <div className="flex gap-4 flex-wrap">
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -574,27 +574,27 @@ export function OfferLetters() {
                     type="checkbox"
                     checked={formData.contingency_background_check || false}
                     onChange={(e) => setFormData({...formData, contingency_background_check: e.target.checked})}
-                    className="w-4 h-4 rounded border-zinc-300"
+                    className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                   />
-                  <span className="text-sm text-zinc-700">Background check</span>
+                  <span className="text-sm text-zinc-400">Background check</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={formData.contingency_credit_check || false}
                     onChange={(e) => setFormData({...formData, contingency_credit_check: e.target.checked})}
-                    className="w-4 h-4 rounded border-zinc-300"
+                    className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                   />
-                  <span className="text-sm text-zinc-700">Credit check</span>
+                  <span className="text-sm text-zinc-400">Credit check</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={formData.contingency_drug_screening || false}
                     onChange={(e) => setFormData({...formData, contingency_drug_screening: e.target.checked})}
-                    className="w-4 h-4 rounded border-zinc-300"
+                    className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                   />
-                  <span className="text-sm text-zinc-700">Drug screening</span>
+                  <span className="text-sm text-zinc-400">Drug screening</span>
                 </label>
               </div>
             </div>
@@ -604,7 +604,7 @@ export function OfferLetters() {
               <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Offer Expiration Date</label>
               <input
                 type="date"
-                className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
                 value={formData.expiration_date ? new Date(formData.expiration_date).toISOString().split('T')[0] : ''}
                 onChange={(e) => setFormData({...formData, expiration_date: e.target.value})}
               />
@@ -614,27 +614,27 @@ export function OfferLetters() {
       case 5: // Review
         return (
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-            <h3 className="text-sm font-medium text-zinc-900 mb-4">Review Offer</h3>
-            <div className="bg-zinc-50 border border-zinc-200 rounded p-4 text-sm space-y-3">
-              <div className="flex justify-between border-b border-zinc-200 pb-2">
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Review Offer</h3>
+            <div className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm space-y-3">
+              <div className="flex justify-between border-b border-zinc-800 pb-2">
                 <span className="text-zinc-500">Candidate</span>
-                <span className="font-medium text-zinc-900">{formData.candidate_name}</span>
+                <span className="font-medium text-white">{formData.candidate_name}</span>
               </div>
-              <div className="flex justify-between border-b border-zinc-200 pb-2">
+              <div className="flex justify-between border-b border-zinc-800 pb-2">
                 <span className="text-zinc-500">Role</span>
-                <span className="font-medium text-zinc-900">{formData.position_title}</span>
+                <span className="font-medium text-white">{formData.position_title}</span>
               </div>
-              <div className="flex justify-between border-b border-zinc-200 pb-2">
+              <div className="flex justify-between border-b border-zinc-800 pb-2">
                 <span className="text-zinc-500">Salary</span>
-                <span className="font-medium text-zinc-900">{formData.salary}</span>
+                <span className="font-medium text-white">{formData.salary}</span>
               </div>
-              <div className="flex justify-between border-b border-zinc-200 pb-2">
+              <div className="flex justify-between border-b border-zinc-800 pb-2">
                 <span className="text-zinc-500">Start Date</span>
-                <span className="font-medium text-zinc-900">{formData.start_date ? new Date(formData.start_date).toLocaleDateString() : 'TBD'}</span>
+                <span className="font-medium text-white">{formData.start_date ? new Date(formData.start_date).toLocaleDateString() : 'TBD'}</span>
               </div>
               <div className="pt-2">
                 <p className="text-zinc-500 mb-1 text-xs uppercase tracking-wide">Benefits</p>
-                <p className="text-zinc-700">{formData.benefits || 'Standard benefits'}</p>
+                <p className="text-zinc-300">{formData.benefits || 'Standard benefits'}</p>
               </div>
             </div>
           </div>
@@ -645,17 +645,17 @@ export function OfferLetters() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex justify-between items-start mb-12">
+      <div className="flex justify-between items-start mb-12 border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-3xl font-light tracking-tight text-zinc-900">Offer Letters</h1>
-          <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">Manage & Generate Candidate Offers</p>
+          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Offer Letters</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Manage & Generate Candidate Offers</p>
         </div>
         <div className="relative">
           <button
             onClick={() => setCreateMode(createMode ? null : 'select')} // Toggle selection mode
-            className="px-4 py-2 bg-zinc-900 text-white text-xs font-medium hover:bg-zinc-800 uppercase tracking-wider transition-colors"
+            className="px-6 py-2 bg-white text-black text-xs font-bold hover:bg-zinc-200 uppercase tracking-wider transition-colors"
           >
             Create Offer
           </button>
@@ -664,19 +664,19 @@ export function OfferLetters() {
           {createMode === 'select' && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setCreateMode(null)} />
-              <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-zinc-200 shadow-xl rounded-sm z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+              <div className="absolute right-0 top-full mt-2 w-48 bg-zinc-900 border border-zinc-700 shadow-xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                 <button 
                   onClick={() => setCreateMode('form')}
-                  className="w-full text-left px-4 py-3 hover:bg-zinc-50 transition-colors border-b border-zinc-100"
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-800 transition-colors border-b border-zinc-800"
                 >
-                  <span className="block text-xs font-bold text-zinc-900 uppercase tracking-wide">Quick Form</span>
+                  <span className="block text-xs font-bold text-white uppercase tracking-wide">Quick Form</span>
                   <span className="block text-[10px] text-zinc-500 mt-0.5">All fields in one view</span>
                 </button>
                 <button 
                   onClick={() => setCreateMode('wizard')}
-                  className="w-full text-left px-4 py-3 hover:bg-zinc-50 transition-colors"
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-800 transition-colors"
                 >
-                  <span className="block text-xs font-bold text-zinc-900 uppercase tracking-wide">Wizard Mode</span>
+                  <span className="block text-xs font-bold text-white uppercase tracking-wide">Wizard Mode</span>
                   <span className="block text-[10px] text-zinc-500 mt-0.5">Step-by-step guidance</span>
                 </button>
               </div>
@@ -687,22 +687,22 @@ export function OfferLetters() {
 
       {isLoading ? (
         <div className="flex items-center justify-center min-h-[20vh]">
-           <div className="text-xs text-zinc-500 uppercase tracking-wider">Loading...</div>
+           <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading...</div>
         </div>
       ) : offerLetters.length === 0 ? (
-        <div className="text-center py-16 border-t border-zinc-200">
-          <div className="text-xs text-zinc-500 mb-4">No offer letters generated</div>
+        <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
+          <div className="text-xs text-zinc-500 mb-4 font-mono uppercase tracking-wider">NO OFFERS GENERATED</div>
           <button
             onClick={() => setCreateMode('wizard')}
-            className="text-xs text-zinc-900 hover:text-zinc-700 font-medium uppercase tracking-wider"
+            className="text-xs text-white hover:text-zinc-300 font-bold uppercase tracking-wider underline underline-offset-4"
           >
             Create your first offer
           </button>
         </div>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-px bg-white/10 border border-white/10">
            {/* List Header */}
-           <div className="flex items-center gap-4 py-2 text-[10px] text-zinc-500 uppercase tracking-wider border-b border-zinc-200">
+           <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950 border-b border-white/10">
              <div className="w-8"></div>
              <div className="flex-1">Candidate</div>
              <div className="w-48">Position</div>
@@ -714,33 +714,33 @@ export function OfferLetters() {
           {offerLetters.map((letter) => (
             <div 
               key={letter.id} 
-              className="group flex items-center gap-4 py-4 cursor-pointer border-b border-zinc-100 hover:bg-zinc-50 transition-colors"
+              className="group flex items-center gap-4 py-4 px-4 cursor-pointer bg-zinc-950 hover:bg-zinc-900 transition-colors"
               onClick={() => setSelectedLetter(letter)}
             >
               <div className="w-8 flex justify-center">
-                 <div className={`w-1.5 h-1.5 rounded-full ${statusDotColors[letter.status] || 'bg-zinc-300'}`} />
+                 <div className={`w-1.5 h-1.5 rounded-full ${statusDotColors[letter.status] || 'bg-zinc-700'}`} />
               </div>
               
               <div className="flex-1">
-                 <h3 className="text-sm font-medium text-zinc-900 group-hover:text-zinc-700">
+                 <h3 className="text-sm font-bold text-white group-hover:text-zinc-300">
                    {letter.candidate_name}
                  </h3>
-                 <p className="text-xs text-zinc-500 mt-0.5">{letter.company_name}</p>
+                 <p className="text-[10px] text-zinc-500 mt-0.5">{letter.company_name}</p>
               </div>
 
-              <div className="w-48 text-xs text-zinc-600">
+              <div className="w-48 text-xs text-zinc-400">
                  {letter.position_title}
               </div>
 
-              <div className={`w-32 text-xs font-medium ${statusColors[letter.status] || 'text-zinc-500'} uppercase tracking-wide text-[10px]`}>
+              <div className={`w-32 text-[10px] font-bold ${statusColors[letter.status] || 'text-zinc-500'} uppercase tracking-wider`}>
                  {letter.status}
               </div>
 
-              <div className="w-32 text-right text-xs text-zinc-500 font-mono">
+              <div className="w-32 text-right text-[10px] text-zinc-500 font-mono">
                  {new Date(letter.created_at).toLocaleDateString()}
               </div>
               
-              <div className="w-8 flex justify-center text-zinc-400 group-hover:text-zinc-600">
+              <div className="w-8 flex justify-center text-zinc-600 group-hover:text-white">
                  <ChevronRight className="w-4 h-4" />
               </div>
             </div>
@@ -750,28 +750,26 @@ export function OfferLetters() {
 
       {/* Create Modal (Form or Wizard) */}
       {(createMode === 'form' || createMode === 'wizard') && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm p-4">
-            <div className="w-full max-w-2xl max-h-[90vh] bg-white shadow-2xl rounded-sm flex flex-col">
-               <div className="flex items-center justify-between p-6 border-b border-zinc-100">
+         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="w-full max-w-3xl max-h-[90vh] bg-zinc-950 border border-zinc-800 shadow-2xl flex flex-col">
+               <div className="flex items-center justify-between p-6 border-b border-white/10">
                   <div className="flex items-center gap-3">
-                    <h2 className="text-xl font-light text-zinc-900">
+                    <h2 className="text-xl font-bold text-white uppercase tracking-tight">
                       {createMode === 'wizard' ? `Step ${wizardStep} of 5` : 'Create Offer Letter'}
                     </h2>
                     {createMode === 'wizard' && (
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 ml-4">
                         {[1, 2, 3, 4, 5].map(step => (
                           <div 
                             key={step} 
-                            className={`w-1.5 h-1.5 rounded-full ${step <= wizardStep ? 'bg-zinc-900' : 'bg-zinc-200'}`}
+                            className={`w-1.5 h-1.5 rounded-full ${step <= wizardStep ? 'bg-white' : 'bg-zinc-700'}`}
                           />
                         ))}
                       </div>
                     )}
                   </div>
-                  <button onClick={resetCreation} className="text-zinc-400 hover:text-zinc-600 transition-colors">
-                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-                     </svg>
+                  <button onClick={resetCreation} className="text-zinc-500 hover:text-white transition-colors">
+                     <X size={20} />
                   </button>
                </div>
                
@@ -781,13 +779,13 @@ export function OfferLetters() {
                 ) : (
                   <form className="space-y-8" id="quick-form" onSubmit={handleCreate}>
                       <div className="space-y-4">
-                        <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Candidate & Role</h3>
+                        <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Candidate & Role</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Candidate Name</label>
                             <input 
                               type="text" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="Enter full name"
                               value={formData.candidate_name}
                               onChange={(e) => setFormData({...formData, candidate_name: e.target.value})}
@@ -798,7 +796,7 @@ export function OfferLetters() {
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Role Title</label>
                             <input 
                               type="text" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. Senior Engineer"
                               value={formData.position_title}
                               onChange={(e) => setFormData({...formData, position_title: e.target.value})}
@@ -809,7 +807,7 @@ export function OfferLetters() {
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Start Date</label>
                             <input 
                               type="date" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
                               value={formData.start_date ? new Date(formData.start_date).toISOString().split('T')[0] : ''}
                               onChange={(e) => setFormData({...formData, start_date: e.target.value})}
                               required
@@ -819,7 +817,7 @@ export function OfferLetters() {
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Expiration Date</label>
                             <input 
                               type="date" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
                               value={formData.expiration_date ? new Date(formData.expiration_date).toISOString().split('T')[0] : ''}
                               onChange={(e) => setFormData({...formData, expiration_date: e.target.value})}
                             />
@@ -828,13 +826,13 @@ export function OfferLetters() {
                       </div>
 
                       <div className="space-y-4">
-                        <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Compensation</h3>
+                        <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Compensation</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Annual Salary</label>
                             <input 
                               type="text" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. $150,000"
                               value={formData.salary || ''}
                               onChange={(e) => setFormData({...formData, salary: e.target.value})}
@@ -844,7 +842,7 @@ export function OfferLetters() {
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Bonus Potential</label>
                             <input 
                               type="text" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. 15% Annual"
                               value={formData.bonus || ''}
                               onChange={(e) => setFormData({...formData, bonus: e.target.value})}
@@ -854,7 +852,7 @@ export function OfferLetters() {
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Equity / Options</label>
                             <input 
                               type="text" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. 5,000 RSUs"
                               value={formData.stock_options || ''}
                               onChange={(e) => setFormData({...formData, stock_options: e.target.value})}
@@ -863,7 +861,7 @@ export function OfferLetters() {
                           <div>
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Employment Type</label>
                             <select
-                                className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
                                 value={formData.employment_type || 'Full-Time Exempt'}
                                 onChange={(e) => setFormData({...formData, employment_type: e.target.value})}
                             >
@@ -876,13 +874,13 @@ export function OfferLetters() {
                       </div>
 
                       <div className="space-y-4">
-                        <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Reporting & Location</h3>
+                        <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Reporting & Location</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Manager Name</label>
                             <input 
                               type="text" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. David Chen"
                               value={formData.manager_name || ''}
                               onChange={(e) => setFormData({...formData, manager_name: e.target.value})}
@@ -892,7 +890,7 @@ export function OfferLetters() {
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Manager Title</label>
                             <input 
                               type="text" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. VP of Engineering"
                               value={formData.manager_title || ''}
                               onChange={(e) => setFormData({...formData, manager_title: e.target.value})}
@@ -902,7 +900,7 @@ export function OfferLetters() {
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Location</label>
                             <input 
                               type="text" 
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors" 
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. San Francisco, CA (Hybrid)"
                               value={formData.location || ''}
                               onChange={(e) => setFormData({...formData, location: e.target.value})}
@@ -912,46 +910,46 @@ export function OfferLetters() {
                       </div>
 
                       <div className="space-y-4">
-                        <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Benefits Package</h3>
+                        <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Benefits Package</h3>
                         <div className="grid grid-cols-2 gap-4">
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_medical || false} onChange={(e) => setFormData({...formData, benefits_medical: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">Medical insurance</span>
+                            <input type="checkbox" checked={formData.benefits_medical || false} onChange={(e) => setFormData({...formData, benefits_medical: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">Medical insurance</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_dental || false} onChange={(e) => setFormData({...formData, benefits_dental: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">Dental insurance</span>
+                            <input type="checkbox" checked={formData.benefits_dental || false} onChange={(e) => setFormData({...formData, benefits_dental: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">Dental insurance</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_vision || false} onChange={(e) => setFormData({...formData, benefits_vision: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">Vision insurance</span>
+                            <input type="checkbox" checked={formData.benefits_vision || false} onChange={(e) => setFormData({...formData, benefits_vision: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">Vision insurance</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_401k || false} onChange={(e) => setFormData({...formData, benefits_401k: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">401(k)</span>
+                            <input type="checkbox" checked={formData.benefits_401k || false} onChange={(e) => setFormData({...formData, benefits_401k: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">401(k)</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_pto_vacation || false} onChange={(e) => setFormData({...formData, benefits_pto_vacation: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">Paid vacation</span>
+                            <input type="checkbox" checked={formData.benefits_pto_vacation || false} onChange={(e) => setFormData({...formData, benefits_pto_vacation: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">Paid vacation</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_pto_sick || false} onChange={(e) => setFormData({...formData, benefits_pto_sick: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">Paid sick leave</span>
+                            <input type="checkbox" checked={formData.benefits_pto_sick || false} onChange={(e) => setFormData({...formData, benefits_pto_sick: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">Paid sick leave</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_holidays || false} onChange={(e) => setFormData({...formData, benefits_holidays: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">Paid holidays</span>
+                            <input type="checkbox" checked={formData.benefits_holidays || false} onChange={(e) => setFormData({...formData, benefits_holidays: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">Paid holidays</span>
                           </label>
                         </div>
                         {formData.benefits_medical && (
-                          <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-zinc-200">
+                          <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-zinc-800">
                             <div>
                               <label className="block text-[10px] uppercase text-zinc-500 mb-1">Medical Coverage %</label>
-                              <input type="number" min="0" max="100" placeholder="e.g. 80" className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 text-sm" value={formData.benefits_medical_coverage || ''} onChange={(e) => setFormData({...formData, benefits_medical_coverage: e.target.value ? parseInt(e.target.value) : undefined})} />
+                              <input type="number" min="0" max="100" placeholder="e.g. 80" className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formData.benefits_medical_coverage || ''} onChange={(e) => setFormData({...formData, benefits_medical_coverage: e.target.value ? parseInt(e.target.value) : undefined})} />
                             </div>
                             <div>
                               <label className="block text-[10px] uppercase text-zinc-500 mb-1">Waiting Period</label>
-                              <select className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 text-sm" value={formData.benefits_medical_waiting_days || 0} onChange={(e) => setFormData({...formData, benefits_medical_waiting_days: parseInt(e.target.value)})}>
+                              <select className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formData.benefits_medical_waiting_days || 0} onChange={(e) => setFormData({...formData, benefits_medical_waiting_days: parseInt(e.target.value)})}>
                                 <option value={0}>No waiting</option>
                                 <option value={30}>30 days</option>
                                 <option value={60}>60 days</option>
@@ -961,47 +959,47 @@ export function OfferLetters() {
                           </div>
                         )}
                         {formData.benefits_401k && (
-                          <div className="pl-4 border-l-2 border-zinc-200">
+                          <div className="pl-4 border-l-2 border-zinc-800">
                             <label className="block text-[10px] uppercase text-zinc-500 mb-1">401(k) Match</label>
-                            <input type="text" placeholder="e.g. 4% match" className="w-full px-2 py-1.5 bg-zinc-50 border border-zinc-200 text-sm" value={formData.benefits_401k_match || ''} onChange={(e) => setFormData({...formData, benefits_401k_match: e.target.value})} />
+                            <input type="text" placeholder="e.g. 4% match" className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formData.benefits_401k_match || ''} onChange={(e) => setFormData({...formData, benefits_401k_match: e.target.value})} />
                           </div>
                         )}
                         <div>
                           <label className="block text-[10px] uppercase text-zinc-500 mb-1">Other Benefits</label>
-                          <input type="text" placeholder="e.g. wellness stipend, parking" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-sm" value={formData.benefits_other || ''} onChange={(e) => setFormData({...formData, benefits_other: e.target.value})} />
+                          <input type="text" placeholder="e.g. wellness stipend, parking" className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formData.benefits_other || ''} onChange={(e) => setFormData({...formData, benefits_other: e.target.value})} />
                         </div>
                       </div>
 
                       <div className="space-y-4">
-                        <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Contingencies</h3>
+                        <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Contingencies</h3>
                         <p className="text-xs text-zinc-500">I-9 verification is always required</p>
                         <div className="flex gap-6">
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.contingency_background_check || false} onChange={(e) => setFormData({...formData, contingency_background_check: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">Background check</span>
+                            <input type="checkbox" checked={formData.contingency_background_check || false} onChange={(e) => setFormData({...formData, contingency_background_check: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">Background check</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.contingency_credit_check || false} onChange={(e) => setFormData({...formData, contingency_credit_check: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">Credit check</span>
+                            <input type="checkbox" checked={formData.contingency_credit_check || false} onChange={(e) => setFormData({...formData, contingency_credit_check: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">Credit check</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.contingency_drug_screening || false} onChange={(e) => setFormData({...formData, contingency_drug_screening: e.target.checked})} className="w-4 h-4" />
-                            <span className="text-sm">Drug screening</span>
+                            <input type="checkbox" checked={formData.contingency_drug_screening || false} onChange={(e) => setFormData({...formData, contingency_drug_screening: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <span className="text-sm text-zinc-300">Drug screening</span>
                           </label>
                         </div>
                       </div>
 
                       <div className="space-y-4">
-                        <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider border-b border-zinc-100 pb-2">Company Logo</h3>
+                        <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Company Logo</h3>
                         <div>
                           <input type="file" ref={logoInputRef} accept="image/*" onChange={handleLogoChange} className="hidden" />
                           {logoPreview ? (
                             <div className="flex items-center gap-4">
                               <img src={logoPreview} alt="Logo preview" className="h-12 max-w-[150px] object-contain" />
-                              <button type="button" onClick={removeLogo} className="text-xs text-red-600 hover:text-red-700">Remove</button>
+                              <button type="button" onClick={removeLogo} className="text-xs text-red-400 hover:text-red-300">Remove</button>
                             </div>
                           ) : (
-                            <button type="button" onClick={() => logoInputRef.current?.click()} className="flex items-center gap-2 px-4 py-2 border border-dashed border-zinc-300 text-sm text-zinc-600 hover:border-zinc-400 hover:text-zinc-700 transition-colors">
+                            <button type="button" onClick={() => logoInputRef.current?.click()} className="flex items-center gap-2 px-4 py-2 border border-dashed border-zinc-700 text-sm text-zinc-400 hover:border-white hover:text-white transition-colors">
                               <Upload size={16} />
                               Upload company logo
                             </button>
@@ -1012,28 +1010,28 @@ export function OfferLetters() {
                 )}
                </div>
 
-               <div className="flex items-center justify-between p-6 border-t border-zinc-100 bg-zinc-50/30">
-                  <Button variant="secondary" type="button" onClick={resetCreation}>Cancel</Button>
+               <div className="flex items-center justify-between p-6 border-t border-white/10 bg-zinc-900/50">
+                  <Button variant="secondary" type="button" onClick={resetCreation} className="bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">Cancel</Button>
                   
                   {createMode === 'wizard' ? (
                     <div className="flex gap-2">
                       {wizardStep > 1 && (
-                        <Button variant="secondary" onClick={() => setWizardStep(wizardStep - 1)}>
+                        <Button variant="secondary" onClick={() => setWizardStep(wizardStep - 1)} className="bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">
                           <ArrowLeft size={14} className="mr-2" /> Back
                         </Button>
                       )}
                       {wizardStep < 5 ? (
-                        <Button onClick={() => setWizardStep(wizardStep + 1)} className="bg-zinc-900 text-white hover:bg-zinc-800">
+                        <Button onClick={() => setWizardStep(wizardStep + 1)} className="bg-white text-black hover:bg-zinc-200">
                           Next <ArrowRight size={14} className="ml-2" />
                         </Button>
                       ) : (
-                        <Button onClick={() => handleCreate()} disabled={isSubmitting} className="bg-zinc-900 text-white hover:bg-zinc-800">
+                        <Button onClick={() => handleCreate()} disabled={isSubmitting} className="bg-white text-black hover:bg-zinc-200">
                           {isSubmitting ? 'Generating...' : 'Generate Offer'} <Check size={14} className="ml-2" />
                         </Button>
                       )}
                     </div>
                   ) : (
-                    <Button type="submit" form="quick-form" disabled={isSubmitting} className="bg-zinc-900 text-white hover:bg-zinc-800">
+                    <Button type="submit" form="quick-form" disabled={isSubmitting} className="bg-white text-black hover:bg-zinc-200">
                       {isSubmitting ? 'Generating...' : 'Generate Offer'}
                     </Button>
                   )}
@@ -1044,58 +1042,56 @@ export function OfferLetters() {
 
       {/* Detail Modal (Existing View Logic) */}
       {selectedLetter && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-4xl max-h-[90vh] flex flex-col bg-white shadow-2xl rounded-sm overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-4xl max-h-[90vh] flex flex-col bg-zinc-900 border border-zinc-800 shadow-2xl overflow-hidden">
              {/* Modal Header */}
-             <div className="p-6 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
+             <div className="p-6 border-b border-white/10 flex items-center justify-between bg-zinc-950/50">
                 <div>
-                   <h2 className="text-xl font-light text-zinc-900">Offer Details</h2>
+                   <h2 className="text-xl font-bold text-white tracking-tight">Offer Details</h2>
                    <p className="text-xs text-zinc-500 mt-1 font-mono uppercase tracking-wide">{selectedLetter.id}</p>
                 </div>
                 <div className="flex items-center gap-4">
-                   <span className={`px-2 py-1 rounded-full text-[10px] uppercase tracking-wider font-medium ${statusColors[selectedLetter.status]} bg-zinc-100`}>
+                   <span className={`px-2 py-1 text-[10px] uppercase tracking-wider font-bold ${statusColors[selectedLetter.status]} bg-zinc-950 border border-white/5`}>
                       {selectedLetter.status}
                    </span>
                    <button
                     onClick={() => setSelectedLetter(null)}
-                    className="p-2 hover:bg-zinc-100 rounded-full transition-colors text-zinc-400 hover:text-zinc-600"
+                    className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-white"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <X size={20} />
                   </button>
                 </div>
              </div>
 
              {/* Modal Content */}
-             <div className="flex-1 overflow-y-auto p-8 bg-zinc-50/30">
+             <div className="flex-1 overflow-y-auto p-8 bg-zinc-950">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                    {/* Left Sidebar: Metadata */}
                    <div className="space-y-6">
                       <div>
-                         <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Candidate</label>
-                         <p className="text-zinc-900 font-medium">{selectedLetter.candidate_name}</p>
+                         <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Candidate</label>
+                         <p className="text-white font-bold">{selectedLetter.candidate_name}</p>
                       </div>
                       <div>
-                         <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Position</label>
-                         <p className="text-zinc-700">{selectedLetter.position_title}</p>
+                         <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Position</label>
+                         <p className="text-zinc-300">{selectedLetter.position_title}</p>
                       </div>
                        <div>
-                         <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Company</label>
-                         <p className="text-zinc-700">{selectedLetter.company_name}</p>
+                         <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Company</label>
+                         <p className="text-zinc-300">{selectedLetter.company_name}</p>
                       </div>
                       
-                      <div className="pt-6 border-t border-zinc-200 space-y-3">
-                         <Button variant="secondary" className="w-full justify-center" onClick={() => handleDownloadPdf(selectedLetter)}>Download PDF</Button>
+                      <div className="pt-6 border-t border-white/10 space-y-3">
+                         <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={() => handleDownloadPdf(selectedLetter)}>Download PDF</Button>
                          {selectedLetter.status === 'draft' && (
-                           <Button variant="secondary" className="w-full justify-center" onClick={() => handleEditDraft(selectedLetter)}>Edit Draft</Button>
+                           <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={() => handleEditDraft(selectedLetter)}>Edit Draft</Button>
                          )}
                       </div>
                    </div>
 
                    {/* Right Content: Preview */}
                    <div className="lg:col-span-2">
-                      <div className="bg-white border border-zinc-200 shadow-sm p-12 text-zinc-900 font-serif min-h-[600px] text-[13px] leading-relaxed">
+                      <div className="bg-white text-zinc-900 font-serif p-12 shadow-sm min-h-[600px] text-[13px] leading-relaxed">
                          <div className="space-y-8">
                             <div className="flex justify-between items-start border-b border-zinc-100 pb-6">
                               <div>
