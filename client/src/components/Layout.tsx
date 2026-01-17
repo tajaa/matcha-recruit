@@ -8,7 +8,7 @@ interface NavItem {
   label: string;
   roles: UserRole[];
   icon: React.ReactNode;
-  betaFeature?: string; // If set, candidates with this beta feature can also see this item
+  betaFeature?: string;
 }
 
 interface NavSection {
@@ -282,8 +282,8 @@ export function Layout() {
       <Link
         to={item.path}
         className={`flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
-            ? 'text-zinc-900 bg-zinc-100 border-l-2 border-zinc-900'
-            : 'text-zinc-500 hover:text-zinc-900 border-l-2 border-transparent hover:border-zinc-300'
+            ? 'text-white bg-zinc-800 border-l-2 border-white'
+            : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
           }`}
       >
         {item.icon}
@@ -293,23 +293,27 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-600 font-mono">
+    <div className="min-h-screen bg-zinc-950 text-zinc-400 font-sans selection:bg-white selection:text-black">
+      {/* Noise Overlay */}
+      <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-30 mix-blend-overlay" />
 
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-50 w-48 flex-col bg-white border-r border-zinc-200">
+      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 border-r border-white/10">
         {/* Logo */}
-        <div className="h-14 flex items-center px-4 border-b border-zinc-200">
-          <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-2 h-2 rounded-full bg-zinc-900" />
-            <span className="text-xs tracking-[0.25em] uppercase text-zinc-900 font-medium group-hover:text-zinc-600 transition-colors">
+        <div className="h-16 flex items-center px-6 border-b border-white/10">
+          <Link to="/" className="flex items-center gap-3 group">
+            <div className="w-3 h-3 bg-white flex items-center justify-center">
+               <div className="w-1 h-1 bg-black group-hover:scale-0 transition-transform" />
+            </div>
+            <span className="text-xs tracking-[0.25em] uppercase text-white font-bold group-hover:text-zinc-300 transition-colors">
               Matcha
             </span>
           </Link>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 py-4 overflow-y-auto">
-          <div className="space-y-4 px-2">
+        <nav className="flex-1 py-6 overflow-y-auto">
+          <div className="space-y-6 px-4">
             {navSections
               .filter((section) => hasRole(...section.roles) || section.items.some(canSeeItem))
               .map((section) => {
@@ -317,10 +321,10 @@ export function Layout() {
                 if (visibleItems.length === 0) return null;
                 return (
                   <div key={section.title}>
-                    <div className="px-3 mb-1 text-[8px] tracking-[0.2em] uppercase text-zinc-400 font-medium">
+                    <div className="px-3 mb-3 text-[9px] tracking-[0.2em] uppercase text-zinc-600 font-bold">
                       {section.title}
                     </div>
-                    <div className="space-y-0.5">
+                    <div className="space-y-1">
                       {visibleItems.map((item) => (
                         <NavLink key={item.path} item={item} />
                       ))}
@@ -332,17 +336,17 @@ export function Layout() {
         </nav>
 
         {/* Bottom section - Settings & User */}
-        <div className="border-t border-zinc-200 p-2">
+        <div className="border-t border-white/10 p-4">
           <NavLink item={settingsItem} />
-          <div className="mt-3 px-3 py-2">
-            <div className="text-[9px] text-zinc-500 tracking-wide truncate">{user?.email}</div>
-            <div className="flex items-center justify-between mt-1">
-              <span className="px-1.5 py-0.5 text-[8px] bg-zinc-100 text-zinc-600 border border-zinc-200 tracking-[0.15em] uppercase">
+          <div className="mt-4 px-3 py-3 bg-zinc-900 border border-white/5">
+            <div className="text-[10px] text-white tracking-wide truncate font-mono">{user?.email}</div>
+            <div className="flex items-center justify-between mt-2">
+              <span className="px-1.5 py-0.5 text-[8px] bg-emerald-900/30 text-emerald-400 border border-emerald-500/20 tracking-[0.15em] uppercase">
                 {user?.role}
               </span>
               <button
                 onClick={handleLogout}
-                className="text-[9px] tracking-[0.1em] uppercase text-zinc-400 hover:text-zinc-900 transition-colors"
+                className="text-[9px] tracking-[0.1em] uppercase text-zinc-500 hover:text-white transition-colors"
               >
                 Logout
               </button>
@@ -352,13 +356,13 @@ export function Layout() {
       </aside>
 
       {/* Mobile Header - visible only on mobile */}
-      <nav className="md:hidden fixed top-0 inset-x-0 z-50 bg-white/80 backdrop-blur-md border-b border-zinc-200">
+      <nav className="md:hidden fixed top-0 inset-x-0 z-50 bg-zinc-950/80 backdrop-blur-md border-b border-white/10">
         <div className="px-4">
           <div className="flex justify-between h-14">
             <div className="flex items-center">
               <Link to="/" className="flex items-center gap-2 group">
-                <div className="w-2 h-2 rounded-full bg-zinc-900" />
-                <span className="text-xs tracking-[0.25em] uppercase text-zinc-900 font-medium group-hover:text-zinc-600 transition-colors">
+                <div className="w-2 h-2 rounded-full bg-white" />
+                <span className="text-xs tracking-[0.25em] uppercase text-white font-medium">
                   Matcha
                 </span>
               </Link>
@@ -368,7 +372,7 @@ export function Layout() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                  className="p-2 text-zinc-500 hover:text-zinc-900 transition-colors"
+                  className="p-2 text-zinc-400 hover:text-white transition-colors"
                   aria-label="Toggle menu"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -386,7 +390,7 @@ export function Layout() {
 
         {/* Mobile menu dropdown */}
         {mobileMenuOpen && (
-          <div className="border-t border-zinc-200 bg-white">
+          <div className="border-t border-white/10 bg-zinc-950">
             <div className="px-4 py-3 space-y-1">
               {navItems.map((item) => (
                 <Link
@@ -394,29 +398,18 @@ export function Layout() {
                   to={item.path}
                   onClick={() => setMobileMenuOpen(false)}
                   className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${location.pathname === item.path
-                      ? 'text-zinc-900 bg-zinc-100 border-l-2 border-zinc-900'
-                      : 'text-zinc-500 hover:text-zinc-900 border-l-2 border-transparent hover:border-zinc-300'
+                      ? 'text-white bg-zinc-900 border-l-2 border-white'
+                      : 'text-zinc-500 hover:text-white border-l-2 border-transparent hover:border-zinc-800'
                     }`}
                 >
                   {item.icon}
                   <span>{item.label}</span>
                 </Link>
               ))}
-              <Link
-                to="/app/settings"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase transition-all ${location.pathname === '/app/settings'
-                    ? 'text-zinc-900 bg-zinc-100 border-l-2 border-zinc-900'
-                    : 'text-zinc-500 hover:text-zinc-900 border-l-2 border-transparent hover:border-zinc-300'
-                  }`}
-              >
-                {settingsItem.icon}
-                <span>Settings</span>
-              </Link>
-              <div className="pt-3 mt-3 border-t border-zinc-200">
-                <div className="px-3 py-2 text-[10px] text-zinc-500 tracking-wide">
+              <div className="pt-3 mt-3 border-t border-white/10">
+                <div className="px-3 py-2 text-[10px] text-zinc-400 tracking-wide font-mono">
                   {user?.email}
-                  <span className="ml-2 px-2 py-0.5 bg-zinc-100 text-zinc-600 border border-zinc-200 tracking-[0.15em] uppercase">
+                  <span className="ml-2 px-2 py-0.5 bg-emerald-900/20 text-emerald-400 border border-emerald-500/20 tracking-[0.15em] uppercase">
                     {user?.role}
                   </span>
                 </div>
@@ -425,7 +418,7 @@ export function Layout() {
                     setMobileMenuOpen(false);
                     handleLogout();
                   }}
-                  className="block w-full text-left px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-900 transition-colors"
+                  className="block w-full text-left px-3 py-2.5 text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-white transition-colors"
                 >
                   Logout
                 </button>
@@ -436,23 +429,23 @@ export function Layout() {
       </nav>
 
       {/* Main content - offset for sidebar on desktop, header on mobile */}
-      <main className="relative z-10 md:ml-48 pt-16 md:pt-6 pb-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto">
+      <main className="relative z-10 md:ml-56 pt-20 md:pt-8 pb-12 px-4 sm:px-8 lg:px-12">
+        <div className="max-w-[1600px] mx-auto">
           <Outlet />
         </div>
       </main>
 
       {/* Bottom status bar */}
-      <footer className="fixed bottom-0 left-0 md:left-48 right-0 z-40 border-t border-zinc-200 bg-white">
-        <div className="px-4 sm:px-6 lg:px-8 py-2 flex items-center justify-between">
+      <footer className="fixed bottom-0 left-0 md:left-56 right-0 z-30 border-t border-white/5 bg-zinc-950 text-zinc-600">
+        <div className="px-6 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-zinc-900" />
-            <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-500">
-              Active
+            <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-[9px] tracking-[0.2em] uppercase">
+              System Active
             </span>
           </div>
-          <span className="text-[9px] tracking-[0.15em] uppercase text-zinc-400">
-            v1.0
+          <span className="text-[9px] tracking-[0.15em] uppercase font-mono">
+            v2.4.0
           </span>
         </div>
       </footer>
