@@ -124,7 +124,7 @@ function App() {
             <Route path="/invite/:token" element={<AcceptInvitation />} />
 
             {/* Policy signature (public, token-based) */}
-            <Route path="/sign/policy/:token" element={<PolicySign />} />
+            <Route path="/sign/:token" element={<PolicySign />} />
 
             {/* Public job board */}
             <Route path="/careers" element={<PublicJobs />} />
