@@ -187,11 +187,11 @@ export function Compliance() {
     const getSeverityStyles = (severity: string) => {
         switch (severity) {
             case 'critical':
-                return 'bg-red-50 text-red-700 border-red-200';
+                return 'bg-red-500/10 text-red-400 border-red-500/20';
             case 'warning':
-                return 'bg-amber-50 text-amber-700 border-amber-200';
+                return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
             default:
-                return 'bg-blue-50 text-blue-700 border-blue-200';
+                return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
         }
     };
 
@@ -201,10 +201,10 @@ export function Compliance() {
 
     return (
         <div className="max-w-7xl mx-auto space-y-8">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between border-b border-white/10 pb-8">
                 <div>
-                    <h1 className="text-3xl font-light tracking-tight text-zinc-900">Compliance</h1>
-                    <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+                    <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Compliance</h1>
+                    <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
                         Monitor labor laws, tax rates, and posting requirements
                     </p>
                 </div>
@@ -214,7 +214,7 @@ export function Compliance() {
                         setEditingLocation(null);
                         setShowAddModal(true);
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded text-xs font-medium uppercase tracking-wider transition-colors"
+                    className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
                 >
                     <Plus size={14} />
                     Add Location
@@ -223,28 +223,28 @@ export function Compliance() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-1 space-y-4">
-                    <h2 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider pb-2 border-b border-zinc-200">
+                    <h2 className="text-xs font-bold text-white uppercase tracking-wider pb-2 border-b border-white/10">
                         Locations
                     </h2>
 
                     {loadingLocations ? (
                         <div className="space-y-3">
                             {[1, 2, 3].map(i => (
-                                <div key={i} className="bg-zinc-100 rounded p-4 animate-pulse h-20" />
+                                <div key={i} className="bg-zinc-900 border border-zinc-800 rounded p-4 animate-pulse h-20" />
                             ))}
                         </div>
                     ) : locations?.length === 0 ? (
-                        <div className="bg-zinc-50 border border-zinc-200 rounded p-8 text-center">
-                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-100 flex items-center justify-center">
-                                <MapPin size={20} className="text-zinc-400" />
+                        <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded p-8 text-center">
+                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                                <MapPin size={20} className="text-zinc-500" />
                             </div>
-                            <h3 className="text-zinc-900 text-sm font-medium mb-1">No Locations</h3>
+                            <h3 className="text-white text-sm font-bold mb-1">No Locations</h3>
                             <p className="text-zinc-500 text-xs mb-4">
                                 Add business locations to track compliance.
                             </p>
                             <button
                                 onClick={() => setShowAddModal(true)}
-                                className="text-zinc-900 text-xs font-medium hover:underline"
+                                className="text-white text-xs font-bold hover:text-zinc-300 uppercase tracking-wider underline underline-offset-4"
                             >
                                 Add Location
                             </button>
@@ -257,18 +257,18 @@ export function Compliance() {
                                     onClick={() => setSelectedLocationId(location.id)}
                                     className={`border rounded p-4 cursor-pointer transition-all group ${
                                         selectedLocationId === location.id
-                                            ? 'border-zinc-900 bg-zinc-50 shadow-sm'
-                                            : 'border-zinc-200 bg-white hover:border-zinc-300'
+                                            ? 'border-white bg-zinc-900 shadow-sm'
+                                            : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'
                                     }`}
                                 >
                                     <div className="flex items-start justify-between">
                                         <div className="min-w-0 flex-1">
-                                            <h3 className={`font-medium text-sm truncate ${
-                                                selectedLocationId === location.id ? 'text-zinc-900' : 'text-zinc-700'
+                                            <h3 className={`font-bold text-sm truncate uppercase tracking-wide ${
+                                                selectedLocationId === location.id ? 'text-white' : 'text-zinc-400'
                                             }`}>
                                                 {location.name || `${location.city}, ${location.state}`}
                                             </h3>
-                                            <p className="text-zinc-500 text-xs truncate mt-0.5">
+                                            <p className="text-zinc-600 text-xs truncate mt-1 font-mono">
                                                 {location.address ? `${location.address}, ` : ''}{location.city}, {location.state} {location.zipcode}
                                             </p>
                                             <div className="flex items-center gap-4 mt-3 text-[10px] uppercase tracking-wider">
@@ -276,7 +276,7 @@ export function Compliance() {
                                                     {location.requirements_count} reqs
                                                 </span>
                                                 {location.unread_alerts_count > 0 && (
-                                                    <span className="text-amber-600 flex items-center gap-1 font-medium">
+                                                    <span className="text-amber-500 flex items-center gap-1 font-bold">
                                                         <Bell size={10} />
                                                         {location.unread_alerts_count} alerts
                                                     </span>
@@ -290,7 +290,7 @@ export function Compliance() {
                                                     openEditModal(location);
                                                     setShowAddModal(true);
                                                 }}
-                                                className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded transition-colors"
+                                                className="p-1.5 text-zinc-500 hover:text-white rounded transition-colors"
                                                 title="Edit"
                                             >
                                                 <Edit2 size={12} />
@@ -302,7 +302,7 @@ export function Compliance() {
                                                         deleteLocationMutation.mutate(location.id);
                                                     }
                                                 }}
-                                                className="p-1.5 text-zinc-400 hover:text-red-600 rounded transition-colors"
+                                                className="p-1.5 text-zinc-500 hover:text-red-500 rounded transition-colors"
                                                 title="Delete"
                                             >
                                                 <Trash2 size={12} />
@@ -317,17 +317,17 @@ export function Compliance() {
 
                 <div className="lg:col-span-2">
                     {selectedLocationId && selectedLocation ? (
-                        <div className="bg-white border border-zinc-200 rounded shadow-sm overflow-hidden min-h-[600px] flex flex-col">
-                            <div className="p-6 border-b border-zinc-100 bg-zinc-50/50 flex items-center justify-between">
+                        <div className="bg-zinc-950 border border-white/10 rounded overflow-hidden min-h-[600px] flex flex-col">
+                            <div className="p-6 border-b border-white/10 bg-zinc-900/50 flex items-center justify-between">
                                 <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded bg-white border border-zinc-200 flex items-center justify-center shadow-sm">
-                                        <Building2 size={20} className="text-zinc-400" />
+                                    <div className="w-10 h-10 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                                        <Building2 size={20} className="text-white" />
                                     </div>
                                     <div>
-                                        <h2 className="text-lg font-medium text-zinc-900">
+                                        <h2 className="text-lg font-bold text-white uppercase tracking-tight">
                                             {selectedLocation.name || `${selectedLocation.city}, ${selectedLocation.state}`}
                                         </h2>
-                                        <p className="text-xs text-zinc-500">
+                                        <p className="text-xs text-zinc-500 font-mono mt-0.5">
                                             {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zipcode}
                                         </p>
                                     </div>
@@ -344,72 +344,72 @@ export function Compliance() {
                                             alert('Failed to start compliance check');
                                         }
                                     }}
-                                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-500 hover:text-zinc-900 transition-colors flex items-center gap-1.5"
+                                    className="text-[10px] uppercase tracking-wider font-bold text-zinc-500 hover:text-white transition-colors flex items-center gap-1.5 border border-zinc-800 px-3 py-1.5 bg-zinc-900 hover:border-zinc-600"
                                 >
                                     <Bell size={12} /> Check for Updates
                                 </button>
                             </div>
 
-                            <div className="flex border-b border-zinc-200">
+                            <div className="flex border-b border-white/10">
                                 <button
                                     onClick={() => setActiveTab('requirements')}
-                                    className={`flex-1 px-4 py-3 text-xs font-medium uppercase tracking-wider transition-colors ${
+                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${
                                         activeTab === 'requirements'
-                                            ? 'text-zinc-900 border-b-2 border-zinc-900 bg-white'
-                                            : 'text-zinc-500 hover:text-zinc-900 bg-zinc-50/50 hover:bg-zinc-50'
+                                            ? 'text-white border-b-2 border-white bg-zinc-900'
+                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
                                     }`}
                                 >
                                     Requirements ({requirements?.length || 0})
                                 </button>
                                 <button
                                     onClick={() => setActiveTab('alerts')}
-                                    className={`flex-1 px-4 py-3 text-xs font-medium uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
+                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
                                         activeTab === 'alerts'
-                                            ? 'text-zinc-900 border-b-2 border-zinc-900 bg-white'
-                                            : 'text-zinc-500 hover:text-zinc-900 bg-zinc-50/50 hover:bg-zinc-50'
+                                            ? 'text-white border-b-2 border-white bg-zinc-900'
+                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
                                     }`}
                                 >
                                     Alerts ({locationAlerts.length})
                                     {unreadAlertsCount > 0 && (
-                                        <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] rounded-full font-bold">
+                                        <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-[10px] rounded-full font-bold border border-amber-500/30">
                                             {unreadAlertsCount}
                                         </span>
                                     )}
                                 </button>
                             </div>
 
-                            <div className="p-6 flex-1 bg-white overflow-y-auto">
+                            <div className="p-6 flex-1 bg-zinc-950 overflow-y-auto">
                                 {activeTab === 'requirements' ? (
                                     loadingRequirements ? (
                                         <div className="space-y-4">
                                             {[1, 2, 3].map(i => (
-                                                <div key={i} className="h-16 bg-zinc-100 rounded animate-pulse" />
+                                                <div key={i} className="h-16 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
                                             ))}
                                         </div>
                                     ) : Object.keys(requirementsByCategory).length === 0 ? (
-                                        <div className="text-center py-12 text-zinc-500 text-sm">
+                                        <div className="text-center py-12 text-zinc-500 text-sm font-mono uppercase tracking-wider">
                                             No requirements found for this jurisdiction.
                                         </div>
                                     ) : (
-                                        <div className="space-y-4">
+                                        <div className="space-y-px bg-white/10 border border-white/10">
                                             {Object.entries(requirementsByCategory).map(([category, reqs]) => (
-                                                <div key={category} className="border border-zinc-200 rounded overflow-hidden">
+                                                <div key={category} className="bg-zinc-950">
                                                     <button
                                                         onClick={() => toggleCategory(category)}
-                                                        className="w-full flex items-center justify-between p-4 bg-zinc-50 hover:bg-zinc-100 transition-colors"
+                                                        className="w-full flex items-center justify-between p-4 bg-zinc-900 hover:bg-zinc-800 transition-colors"
                                                     >
                                                         <div className="flex items-center gap-3">
-                                                            <span className="text-zinc-900 text-sm font-medium">
+                                                            <span className="text-white text-sm font-bold uppercase tracking-wider">
                                                                 {COMPLIANCE_CATEGORY_LABELS[category] || category}
                                                             </span>
-                                                            <span className="px-2 py-0.5 bg-white border border-zinc-200 text-zinc-500 text-[10px] rounded-full">
+                                                            <span className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-400 text-[10px] rounded-full font-mono">
                                                                 {reqs.length}
                                                             </span>
                                                         </div>
                                                         {expandedCategories.has(category) ? (
-                                                            <ChevronDown size={16} className="text-zinc-400" />
+                                                            <ChevronDown size={16} className="text-zinc-500" />
                                                         ) : (
-                                                            <ChevronRight size={16} className="text-zinc-400" />
+                                                            <ChevronRight size={16} className="text-zinc-500" />
                                                         )}
                                                     </button>
 
@@ -420,37 +420,37 @@ export function Compliance() {
                                                                 animate={{ height: 'auto', opacity: 1 }}
                                                                 exit={{ height: 0, opacity: 0 }}
                                                                 transition={{ duration: 0.2 }}
-                                                                className="overflow-hidden bg-white border-t border-zinc-200"
+                                                                className="overflow-hidden bg-zinc-950 border-t border-white/5"
                                                             >
-                                                                <div className="divide-y divide-zinc-100">
+                                                                <div className="divide-y divide-white/5">
                                                                     {reqs.map(req => (
-                                                                        <div key={req.id} className="p-4 hover:bg-zinc-50/50 transition-colors">
-                                                                            <div className="flex items-start justify-between mb-2">
+                                                                        <div key={req.id} className="p-6 hover:bg-white/5 transition-colors">
+                                                                            <div className="flex items-start justify-between mb-3">
                                                                                 <div>
-                                                                                    <h4 className="text-zinc-900 text-sm font-medium">
+                                                                                    <h4 className="text-white text-sm font-bold mb-1">
                                                                                         {req.title}
                                                                                     </h4>
-                                                                                    <div className="flex items-center gap-2 mt-1">
-                                                                                        <span className="px-1.5 py-0.5 bg-zinc-100 text-zinc-600 text-[10px] uppercase tracking-wide rounded">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 text-[10px] uppercase tracking-wide rounded">
                                                                                             {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
                                                                                         </span>
-                                                                                        <span className="text-zinc-500 text-xs">
+                                                                                        <span className="text-zinc-500 text-xs font-mono">
                                                                                             {req.jurisdiction_name}
                                                                                         </span>
                                                                                     </div>
                                                                                 </div>
                                                                                 {req.current_value && (
-                                                                                    <span className="text-zinc-900 font-mono text-sm bg-zinc-100 px-2 py-1 rounded">
+                                                                                    <span className="text-emerald-400 font-mono text-sm bg-emerald-900/20 border border-emerald-900/50 px-2 py-1 rounded">
                                                                                         {req.current_value}
                                                                                     </span>
                                                                                 )}
                                                                             </div>
                                                                             {req.description && (
-                                                                                <p className="text-zinc-600 text-xs leading-relaxed mb-3">
+                                                                                <p className="text-zinc-400 text-xs leading-relaxed mb-4 max-w-2xl">
                                                                                     {req.description}
                                                                                 </p>
                                                                             )}
-                                                                            <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                                                                            <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase tracking-widest">
                                                                                 <div className="flex items-center gap-3">
                                                                                     {req.effective_date && (
                                                                                         <span>
@@ -463,7 +463,7 @@ export function Compliance() {
                                                                                         href={req.source_url}
                                                                                         target="_blank"
                                                                                         rel="noopener noreferrer"
-                                                                                        className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                                                                                        className="text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
                                                                                     >
                                                                                         Source <ExternalLink size={10} />
                                                                                     </a>
@@ -483,15 +483,15 @@ export function Compliance() {
                                     loadingAlerts ? (
                                         <div className="space-y-3">
                                             {[1, 2, 3].map(i => (
-                                                <div key={i} className="h-20 bg-zinc-100 rounded animate-pulse" />
+                                                <div key={i} className="h-20 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
                                             ))}
                                         </div>
                                     ) : locationAlerts.length === 0 ? (
                                         <div className="text-center py-12">
-                                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-emerald-50 flex items-center justify-center">
+                                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-emerald-900/20 border border-emerald-900/50 flex items-center justify-center">
                                                 <CheckCircle size={20} className="text-emerald-500" />
                                             </div>
-                                            <p className="text-zinc-500 text-sm">All clear. No alerts.</p>
+                                            <p className="text-zinc-500 text-sm font-mono uppercase tracking-wider">All systems nominal.</p>
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
@@ -499,22 +499,22 @@ export function Compliance() {
                                                 <div
                                                     key={alert.id}
                                                     className={`border rounded-lg p-4 ${getSeverityStyles(alert.severity)} ${
-                                                        alert.status === 'unread' ? 'shadow-sm' : 'opacity-75 bg-zinc-50 border-zinc-200'
+                                                        alert.status === 'unread' ? 'bg-opacity-10' : 'opacity-60 bg-zinc-900 border-zinc-800'
                                                     }`}
                                                 >
                                                     <div className="flex items-start justify-between">
                                                         <div className="flex items-start gap-3">
-                                                            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0 opacity-80" />
+                                                            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
                                                             <div>
-                                                                <h4 className="text-sm font-medium opacity-90">{alert.title}</h4>
-                                                                <p className="text-xs mt-1 opacity-80 leading-relaxed">{alert.message}</p>
+                                                                <h4 className="text-sm font-bold uppercase tracking-wide">{alert.title}</h4>
+                                                                <p className="text-xs mt-1 opacity-90 leading-relaxed">{alert.message}</p>
                                                                 {alert.action_required && (
-                                                                    <p className="text-xs mt-2 font-medium">
+                                                                    <p className="text-xs mt-2 font-bold uppercase tracking-wider bg-black/20 inline-block px-2 py-1 rounded">
                                                                         Action: {alert.action_required}
                                                                     </p>
                                                                 )}
                                                                 {alert.deadline && (
-                                                                    <p className="text-[10px] mt-1 opacity-70">
+                                                                    <p className="text-[10px] mt-2 font-mono opacity-70">
                                                                         Deadline: {new Date(alert.deadline).toLocaleDateString()}
                                                                     </p>
                                                                 )}
@@ -524,7 +524,7 @@ export function Compliance() {
                                                             {alert.status === 'unread' && (
                                                                 <button
                                                                     onClick={() => markAlertReadMutation.mutate(alert.id)}
-                                                                    className="p-1.5 hover:bg-black/5 rounded transition-colors"
+                                                                    className="p-1.5 hover:bg-black/20 rounded transition-colors"
                                                                     title="Mark as read"
                                                                 >
                                                                     <CheckCircle size={14} />
@@ -533,7 +533,7 @@ export function Compliance() {
                                                             {alert.status !== 'dismissed' && (
                                                                 <button
                                                                     onClick={() => dismissAlertMutation.mutate(alert.id)}
-                                                                    className="p-1.5 hover:bg-black/5 rounded transition-colors"
+                                                                    className="p-1.5 hover:bg-black/20 rounded transition-colors"
                                                                     title="Dismiss"
                                                                 >
                                                                     <X size={14} />
@@ -549,12 +549,12 @@ export function Compliance() {
                             </div>
                         </div>
                     ) : (
-                        <div className="bg-zinc-50 border border-zinc-200 rounded p-12 text-center h-full flex flex-col items-center justify-center min-h-[400px]">
-                            <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-white border border-zinc-200 flex items-center justify-center shadow-sm">
-                                <MapPin size={24} className="text-zinc-400" />
+                        <div className="bg-zinc-900/30 border border-zinc-800 rounded p-12 text-center h-full flex flex-col items-center justify-center min-h-[400px]">
+                            <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                                <MapPin size={24} className="text-zinc-600" />
                             </div>
-                            <h3 className="text-zinc-900 font-medium mb-2">Select a Location</h3>
-                            <p className="text-zinc-500 text-sm max-w-sm">
+                            <h3 className="text-white font-bold uppercase tracking-wider mb-2">Select a Location</h3>
+                            <p className="text-zinc-500 text-xs max-w-sm font-mono">
                                 Choose a location from the left to view compliance requirements and alerts.
                             </p>
                         </div>
@@ -568,7 +568,7 @@ export function Compliance() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-zinc-900/20 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                        className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
                         onClick={() => {
                             setShowAddModal(false);
                             setEditingLocation(null);
@@ -579,11 +579,11 @@ export function Compliance() {
                             initial={{ scale: 0.95, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
-                            className="bg-white shadow-2xl rounded-sm p-8 w-full max-w-md"
+                            className="bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm p-8 w-full max-w-md"
                             onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         >
-                            <div className="flex items-center justify-between mb-6 border-b border-zinc-100 pb-4">
-                                <h2 className="text-xl font-light text-zinc-900">
+                            <div className="flex items-center justify-between mb-6 border-b border-white/10 pb-4">
+                                <h2 className="text-xl font-bold text-white uppercase tracking-tight">
                                     {editingLocation ? 'Edit Location' : 'Add Location'}
                                 </h2>
                                 <button
@@ -592,7 +592,7 @@ export function Compliance() {
                                         setEditingLocation(null);
                                         setFormData(emptyFormData);
                                     }}
-                                    className="p-1 text-zinc-400 hover:text-zinc-600"
+                                    className="p-1 text-zinc-500 hover:text-white transition-colors"
                                 >
                                     <X size={20} />
                                 </button>
@@ -608,7 +608,7 @@ export function Compliance() {
                                         value={formData.name}
                                         onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
                                         placeholder="e.g., Main Office, Warehouse"
-                                        className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                                        className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                                     />
                                 </div>
 
@@ -621,7 +621,7 @@ export function Compliance() {
                                         value={formData.address}
                                         onChange={e => setFormData(prev => ({ ...prev, address: e.target.value }))}
                                         placeholder="123 Main St"
-                                        className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                                        className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                                     />
                                 </div>
 
@@ -636,7 +636,7 @@ export function Compliance() {
                                             onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))}
                                             required
                                             placeholder="San Francisco"
-                                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                                         />
                                     </div>
                                     <div>
@@ -647,7 +647,7 @@ export function Compliance() {
                                             value={formData.state}
                                             onChange={e => setFormData(prev => ({ ...prev, state: e.target.value }))}
                                             required
-                                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
                                         >
                                             <option value="">Select...</option>
                                             {US_STATES.map(state => (
@@ -669,7 +669,7 @@ export function Compliance() {
                                             value={formData.county}
                                             onChange={e => setFormData(prev => ({ ...prev, county: e.target.value }))}
                                             placeholder="San Francisco"
-                                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                                         />
                                     </div>
                                     <div>
@@ -683,12 +683,12 @@ export function Compliance() {
                                             required
                                             placeholder="94105"
                                             maxLength={10}
-                                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                                         />
                                     </div>
                                 </div>
 
-                                <div className="flex gap-3 pt-6 border-t border-zinc-100">
+                                <div className="flex gap-3 pt-6 border-t border-white/10">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -696,14 +696,14 @@ export function Compliance() {
                                             setEditingLocation(null);
                                             setFormData(emptyFormData);
                                         }}
-                                        className="flex-1 px-4 py-2 bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50 rounded text-sm font-medium transition-colors"
+                                        className="flex-1 px-4 py-2 bg-transparent border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded text-xs font-bold uppercase tracking-wider transition-colors"
                                     >
                                         Cancel
                                     </button>
                                     <button
                                         type="submit"
                                         disabled={createLocationMutation.isPending || updateLocationMutation.isPending}
-                                        className="flex-1 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded text-sm font-medium transition-colors disabled:opacity-50"
+                                        className="flex-1 px-4 py-2 bg-white hover:bg-zinc-200 text-black rounded text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
                                     >
                                         {createLocationMutation.isPending || updateLocationMutation.isPending
                                             ? 'Saving...'

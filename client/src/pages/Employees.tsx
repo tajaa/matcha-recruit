@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getAccessToken } from '../api/client';
+import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8001/api';
 
@@ -138,28 +139,28 @@ export default function Employees() {
   const getStatusBadge = (employee: Employee) => {
     if (employee.termination_date) {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
-          Terminated
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] uppercase tracking-wider font-bold bg-zinc-800 text-zinc-400 border border-zinc-700">
+          <UserX size={10} /> Terminated
         </span>
       );
     }
     if (employee.user_id) {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-          Active
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] uppercase tracking-wider font-bold bg-emerald-900/30 text-emerald-400 border border-emerald-500/20">
+          <CheckCircle size={10} /> Active
         </span>
       );
     }
     if (employee.invitation_status === 'pending') {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-          Invited
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] uppercase tracking-wider font-bold bg-amber-900/30 text-amber-400 border border-amber-500/20">
+          <Clock size={10} /> Invited
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
-        Not Invited
+      <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] uppercase tracking-wider font-bold bg-zinc-800 text-zinc-500 border border-zinc-700">
+        <Mail size={10} /> Not Invited
       </span>
     );
   };
@@ -174,40 +175,41 @@ export default function Employees() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading directory...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-7xl mx-auto space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Employees</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Manage your team and send onboarding invitations
+          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Directory</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+            Manage personnel and access rights
           </p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black"
+          className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
         >
-          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
+          <Plus size={14} />
           Add Employee
         </button>
       </div>
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-sm text-red-700">{error}</p>
+        <div className="bg-red-500/10 border border-red-500/20 rounded p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+             <AlertTriangle className="text-red-400" size={16} />
+             <p className="text-sm text-red-400 font-mono">{error}</p>
+          </div>
           <button
             onClick={() => setError(null)}
-            className="mt-2 text-sm text-red-600 underline"
+            className="text-xs text-red-400 hover:text-red-300 uppercase tracking-wider font-bold"
           >
             Dismiss
           </button>
@@ -215,7 +217,7 @@ export default function Employees() {
       )}
 
       {/* Filter tabs */}
-      <div className="border-b border-gray-200">
+      <div className="border-b border-white/10">
         <nav className="-mb-px flex space-x-8">
           {[
             { value: '', label: 'All' },
@@ -226,10 +228,10 @@ export default function Employees() {
             <button
               key={tab.value}
               onClick={() => setFilter(tab.value)}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors ${
                 filter === tab.value
-                  ? 'border-black text-black'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-white text-white'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-800'
               }`}
             >
               {tab.label}
@@ -240,124 +242,104 @@ export default function Employees() {
 
       {/* Employee list */}
       {employees.length === 0 ? (
-        <div className="text-center py-12 bg-gray-50 rounded-lg">
-          <svg
-            className="mx-auto h-12 w-12 text-gray-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-            />
-          </svg>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No employees</h3>
-          <p className="mt-1 text-sm text-gray-500">Get started by adding your first employee.</p>
-          <div className="mt-6">
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-black hover:bg-gray-800"
-            >
-              Add Employee
-            </button>
+        <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
+          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+             <Search size={24} className="text-zinc-600" />
           </div>
+          <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">No employees found</h3>
+          <p className="text-zinc-500 text-xs mb-6 font-mono">Get started by adding your first team member.</p>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="text-white text-xs font-bold hover:text-zinc-300 uppercase tracking-wider underline underline-offset-4"
+          >
+            Add Employee
+          </button>
         </div>
       ) : (
-        <div className="bg-white shadow overflow-hidden rounded-md">
-          <ul className="divide-y divide-gray-200">
-            {employees.map((employee) => (
-              <li key={employee.id} className="px-6 py-4 hover:bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center min-w-0">
-                    <div className="flex-shrink-0">
-                      <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                        <span className="text-sm font-medium text-gray-600">
-                          {employee.first_name[0]}{employee.last_name[0]}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="ml-4">
-                      <div className="flex items-center">
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {employee.first_name} {employee.last_name}
-                        </p>
-                        <span className="ml-2">{getStatusBadge(employee)}</span>
-                      </div>
-                      <p className="text-sm text-gray-500">{employee.email}</p>
-                    </div>
+        <div className="space-y-px bg-white/10 border border-white/10">
+           {/* Table Header */}
+           <div className="hidden md:flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
+              <div className="flex-1">Name / Email</div>
+              <div className="w-32 text-right">Work State</div>
+              <div className="w-32 text-right">Type</div>
+              <div className="w-32 text-right">Status</div>
+              <div className="w-32"></div>
+           </div>
+
+          {employees.map((employee) => (
+            <div key={employee.id} className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 md:px-6 flex flex-col md:flex-row md:items-center gap-4">
+              <div className="flex items-center min-w-0 flex-1">
+                <div className="flex-shrink-0">
+                  <div className="h-10 w-10 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-white font-bold text-xs">
+                    {employee.first_name[0]}{employee.last_name[0]}
                   </div>
-                  <div className="flex items-center space-x-4">
-                    <div className="text-right text-sm">
-                      {employee.work_state && (
-                        <p className="text-gray-500">{employee.work_state}</p>
-                      )}
-                      {employee.employment_type && (
-                        <p className="text-gray-400 text-xs capitalize">
-                          {employee.employment_type.replace('_', ' ')}
-                        </p>
-                      )}
-                    </div>
+                </div>
+                <div className="ml-4 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-bold text-white truncate group-hover:text-zinc-200">
+                      {employee.first_name} {employee.last_name}
+                    </p>
+                  </div>
+                  <p className="text-xs text-zinc-500 font-mono truncate">{employee.email}</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center justify-between md:justify-end gap-4 md:gap-8 w-full md:w-auto">
+                 <div className="text-right">
+                    <p className="text-xs text-zinc-400 font-mono">{employee.work_state || '—'}</p>
+                 </div>
+                 <div className="text-right w-24">
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                      {employee.employment_type?.replace('_', ' ') || '—'}
+                    </p>
+                 </div>
+                 <div className="flex justify-end w-32">
+                    {getStatusBadge(employee)}
+                 </div>
+                 
+                 <div className="w-32 flex justify-end">
                     {!employee.user_id && !employee.termination_date && (
                       <button
                         onClick={() => handleSendInvite(employee.id)}
                         disabled={invitingId === employee.id}
-                        className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black disabled:opacity-50"
+                        className="inline-flex items-center px-3 py-1.5 border border-white/10 text-[10px] font-bold uppercase tracking-wider rounded text-zinc-300 hover:text-white hover:border-white/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-zinc-900"
                       >
                         {invitingId === employee.id ? (
-                          <>
-                            <svg className="animate-spin -ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            Sending...
-                          </>
+                          <span className="animate-pulse">Sending...</span>
                         ) : employee.invitation_status === 'pending' ? (
-                          <>
-                            <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                            Resend Invite
-                          </>
+                          'Resend Invite'
                         ) : (
-                          <>
-                            <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                            </svg>
-                            Send Invite
-                          </>
+                          'Send Invite'
                         )}
                       </button>
                     )}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+                 </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
       {/* Add Employee Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
-            <div
-              className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
-              onClick={() => setShowAddModal(false)}
-            ></div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-6 border-b border-white/10">
+                  <h3 className="text-xl font-bold text-white uppercase tracking-tight">Add Personnel</h3>
+                  <button 
+                    onClick={() => setShowAddModal(false)}
+                    className="text-zinc-500 hover:text-white transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+              </div>
 
-            <div className="relative inline-block bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:max-w-lg sm:w-full">
-              <form onSubmit={handleAddEmployee}>
-                <div className="bg-white px-6 pt-6 pb-4">
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Add New Employee</h3>
-
-                  <div className="space-y-4">
+              <form onSubmit={handleAddEmployee} className="flex-1 overflow-y-auto p-8">
+                  <div className="space-y-6">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          First Name *
+                        <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                          First Name <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
@@ -366,12 +348,12 @@ export default function Employees() {
                           onChange={(e) =>
                             setNewEmployee({ ...newEmployee, first_name: e.target.value })
                           }
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-black focus:border-black"
+                          className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Last Name *
+                        <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                          Last Name <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
@@ -380,14 +362,14 @@ export default function Employees() {
                           onChange={(e) =>
                             setNewEmployee({ ...newEmployee, last_name: e.target.value })
                           }
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-black focus:border-black"
+                          className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Email *
+                      <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                        Email <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="email"
@@ -396,13 +378,13 @@ export default function Employees() {
                         onChange={(e) =>
                           setNewEmployee({ ...newEmployee, email: e.target.value })
                         }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-black focus:border-black"
+                        className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                       />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
                           Work State
                         </label>
                         <select
@@ -410,7 +392,7 @@ export default function Employees() {
                           onChange={(e) =>
                             setNewEmployee({ ...newEmployee, work_state: e.target.value })
                           }
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-black focus:border-black"
+                          className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
                         >
                           <option value="">Select state</option>
                           {US_STATES.map((state) => (
@@ -421,7 +403,7 @@ export default function Employees() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
                           Employment Type
                         </label>
                         <select
@@ -429,7 +411,7 @@ export default function Employees() {
                           onChange={(e) =>
                             setNewEmployee({ ...newEmployee, employment_type: e.target.value })
                           }
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-black focus:border-black"
+                          className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
                         >
                           <option value="full_time">Full Time</option>
                           <option value="part_time">Part Time</option>
@@ -440,7 +422,7 @@ export default function Employees() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
                         Start Date
                       </label>
                       <input
@@ -449,31 +431,29 @@ export default function Employees() {
                         onChange={(e) =>
                           setNewEmployee({ ...newEmployee, start_date: e.target.value })
                         }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-black focus:border-black"
+                        className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
                       />
                     </div>
                   </div>
-                </div>
 
-                <div className="bg-gray-50 px-6 py-4 flex justify-end space-x-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddModal(false)}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="px-4 py-2 text-sm font-medium text-white bg-black border border-transparent rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black disabled:opacity-50"
-                  >
-                    {submitting ? 'Adding...' : 'Add Employee'}
-                  </button>
-                </div>
+                  <div className="mt-8 flex justify-end gap-3 pt-6 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddModal(false)}
+                      className="px-4 py-2 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {submitting ? 'Adding...' : 'Add Employee'}
+                    </button>
+                  </div>
               </form>
             </div>
-          </div>
         </div>
       )}
     </div>

@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, CardContent } from '../components';
 import { useAudioInterview } from '../hooks/useAudioInterview';
 import { companies, interviews } from '../api/client';
 import type { Company, InterviewType } from '../types';
+import { Mic, Square, RefreshCcw, Radio, Users, Search, Target } from 'lucide-react';
 
 export function TestBot() {
   const navigate = useNavigate();
@@ -25,12 +25,10 @@ export function TestBot() {
     stopRecording,
   } = useAudioInterview(interviewId || '');
 
-  // Load companies on mount
   useEffect(() => {
     loadCompanies();
   }, []);
 
-  // Auto-scroll messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -39,7 +37,6 @@ export function TestBot() {
     try {
       const list = await companies.list();
       setCompaniesList(list);
-      // Auto-select "test" company if it exists
       const testCompany = list.find(c => c.name.toLowerCase() === 'test');
       if (testCompany) {
         setSelectedCompany(testCompany.id);
@@ -73,7 +70,6 @@ export function TestBot() {
 
   const handleEndSession = () => {
     disconnect();
-    // Navigate to analysis page
     if (interviewId) {
       navigate(`/app/test-bot/analysis/${interviewId}`);
     }
@@ -89,395 +85,242 @@ export function TestBot() {
   const selectedCompanyName = companiesList.find(c => c.id === selectedCompany)?.name || 'Unknown';
 
   return (
-    <div className="space-y-8">
+    <div className="max-w-5xl mx-auto space-y-12">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-          <svg className="w-8 h-8 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-          </svg>
+      <div className="border-b border-white/10 pb-8">
+        <h1 className="text-4xl font-bold tracking-tighter text-white uppercase flex items-center gap-4">
+          <div className="w-10 h-10 bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+             <Radio className="w-5 h-5 text-white" />
+          </div>
           Test Bot
         </h1>
-        <p className="text-zinc-400 mt-1">Test the AI interview agents</p>
+        <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase pl-[56px]">
+          AI Interviewer Sandbox & Diagnostics
+        </p>
       </div>
 
       {!interviewId ? (
-        <>
-          {/* Mode Selection */}
-          <Card>
-            <CardContent className="p-6">
-              <h2 className="text-lg font-semibold text-zinc-100 mb-4">Select Interview Mode</h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                {/* Culture Interview */}
-                <button
-                  onClick={() => setMode('culture')}
-                  className={`p-5 rounded-xl border-2 text-left transition-all ${
-                    mode === 'culture'
-                      ? 'border-white bg-zinc-800'
-                      : 'border-zinc-800 hover:border-zinc-700 bg-zinc-900/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      mode === 'culture' ? 'bg-matcha-500/20 text-white' : 'bg-zinc-800 text-zinc-500'
-                    }`}>
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className={`font-semibold ${mode === 'culture' ? 'text-white' : 'text-zinc-300'}`}>
-                        Culture Interview
-                      </h3>
-                      <p className="text-xs text-zinc-500">Test as HR representative</p>
-                    </div>
-                  </div>
-                  <p className="text-sm text-zinc-400">
-                    The AI will interview you as an HR rep describing your company's culture and values.
-                  </p>
-                </button>
-
-                {/* Screening Interview */}
-                <button
-                  onClick={() => setMode('screening')}
-                  className={`p-5 rounded-xl border-2 text-left transition-all ${
-                    mode === 'screening'
-                      ? 'border-orange-500 bg-orange-500/10'
-                      : 'border-zinc-800 hover:border-zinc-700 bg-zinc-900/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      mode === 'screening' ? 'bg-orange-500/20 text-orange-400' : 'bg-zinc-800 text-zinc-500'
-                    }`}>
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className={`font-semibold ${mode === 'screening' ? 'text-orange-400' : 'text-zinc-300'}`}>
-                        Screening Interview
-                      </h3>
-                      <p className="text-xs text-zinc-500">First-round filtering</p>
-                    </div>
-                  </div>
-                  <p className="text-sm text-zinc-400">
-                    Quick assessment of communication, engagement, critical thinking, and professionalism.
-                  </p>
-                </button>
-
-                {/* Candidate Interview */}
-                <button
-                  onClick={() => setMode('candidate')}
-                  className={`p-5 rounded-xl border-2 text-left transition-all ${
-                    mode === 'candidate'
-                      ? 'border-violet-500 bg-violet-500/10'
-                      : 'border-zinc-800 hover:border-zinc-700 bg-zinc-900/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      mode === 'candidate' ? 'bg-violet-500/20 text-violet-400' : 'bg-zinc-800 text-zinc-500'
-                    }`}>
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className={`font-semibold ${mode === 'candidate' ? 'text-violet-400' : 'text-zinc-300'}`}>
-                        Culture Fit Interview
-                      </h3>
-                      <p className="text-xs text-zinc-500">Requires culture profile</p>
-                    </div>
-                  </div>
-                  <p className="text-sm text-zinc-400">
-                    Deep dive into work preferences and values, assessed against company culture profile.
-                  </p>
-                </button>
-              </div>
-
-              {/* Company Selection */}
-              <div className="mb-6 p-4 bg-zinc-800/30 rounded-lg border border-zinc-700">
-                <label className="block text-sm font-medium text-zinc-400 mb-2">Select Company</label>
-                <select
-                  value={selectedCompany}
-                  onChange={(e) => setSelectedCompany(e.target.value)}
-                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 focus:ring-2 focus:ring-white focus:border-transparent outline-none text-lg font-medium"
-                >
-                  {companiesList.map((company) => (
-                    <option key={company.id} value={company.id}>
-                      {company.name} {company.culture_profile ? '(has culture profile)' : ''}
-                    </option>
-                  ))}
-                </select>
-                {selectedCompanyName && (
-                  <p className="text-sm text-white mt-2 font-medium">
-                    Testing with: {selectedCompanyName}
-                  </p>
-                )}
-                {mode === 'candidate' && (
-                  <p className="text-xs text-zinc-500 mt-1">
-                    The candidate interview will use this company's culture profile (if available) to understand fit.
-                  </p>
-                )}
-              </div>
-
-              {error && (
-                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-                  {error}
-                </div>
-              )}
-
-              <Button
-                onClick={handleStartSession}
-                disabled={!selectedCompany || isCreating}
-                className="w-full py-4 text-lg"
-              >
-                {isCreating ? (
-                  <>
-                    <svg className="w-5 h-5 animate-spin mr-2" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Creating Session...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Start {mode === 'culture' ? 'Culture' : mode === 'screening' ? 'Screening' : 'Culture Fit'} Interview
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Mode Description */}
-          <div className={`p-5 rounded-xl border ${
-            mode === 'culture'
-              ? 'bg-matcha-500/5 border-zinc-700'
-              : mode === 'screening'
-              ? 'bg-orange-500/5 border-orange-500/10'
-              : 'bg-violet-500/5 border-violet-500/10'
-          }`}>
-            <h3 className={`font-semibold mb-3 flex items-center gap-2 ${
-              mode === 'culture' ? 'text-white' : mode === 'screening' ? 'text-orange-400' : 'text-violet-400'
-            }`}>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              {mode === 'culture' ? 'Culture Interview Tips' : mode === 'screening' ? 'Screening Interview Tips' : 'Culture Fit Interview Tips'}
-            </h3>
-            <ul className="text-sm text-zinc-400 space-y-2 ml-1">
-              {mode === 'culture' ? (
-                <>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-matcha-500 flex-shrink-0"></span>
-                    Pretend you're an HR rep or team lead at a company
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-matcha-500 flex-shrink-0"></span>
-                    Describe your company's culture, values, and work style
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-matcha-500 flex-shrink-0"></span>
-                    Share how teams collaborate and make decisions
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-matcha-500 flex-shrink-0"></span>
-                    This helps build the company's culture profile
-                  </li>
-                </>
-              ) : mode === 'screening' ? (
-                <>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-orange-500 flex-shrink-0"></span>
-                    Respond as yourself - a job candidate
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-orange-500 flex-shrink-0"></span>
-                    Be clear and concise in your responses
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-orange-500 flex-shrink-0"></span>
-                    Show enthusiasm and engagement
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-orange-500 flex-shrink-0"></span>
-                    Give specific examples when possible
-                  </li>
-                </>
-              ) : (
-                <>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-violet-500 flex-shrink-0"></span>
-                    Respond as yourself - a job candidate
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-violet-500 flex-shrink-0"></span>
-                    Share your work style preferences honestly
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-violet-500 flex-shrink-0"></span>
-                    Describe what you're looking for in a role
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1 h-1 rounded-full bg-violet-500 flex-shrink-0"></span>
-                    This tests how well the AI assesses culture fit
-                  </li>
-                </>
-              )}
-            </ul>
-          </div>
-        </>
-      ) : (
-        <>
-          {/* Active Interview Session */}
-          <Card>
-            <CardContent className="p-6">
-              {/* Session Info */}
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
-                    mode === 'culture'
-                      ? 'bg-matcha-500/15 text-white'
-                      : mode === 'screening'
-                      ? 'bg-orange-500/15 text-orange-400'
-                      : 'bg-violet-500/15 text-violet-400'
-                  }`}>
-                    {mode === 'culture' ? (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                      </svg>
-                    ) : mode === 'screening' ? (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                    )}
-                    {mode === 'culture' ? 'Culture Interview' : mode === 'screening' ? 'Screening Interview' : 'Culture Fit Interview'}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-zinc-800 text-zinc-200 border border-zinc-700">
-                    <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                    </svg>
-                    {selectedCompanyName}
-                  </span>
-                </div>
-                <button
-                  onClick={handleReset}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm transition-colors"
-                >
-                  Reset
-                </button>
-              </div>
-
-              {/* Connection Status */}
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] transition-colors ${
-                      isConnected ? 'bg-matcha-500 text-white' : 'bg-zinc-600 text-zinc-600'
-                    }`}
-                  />
-                  <span className="text-sm font-medium text-zinc-300">
-                    {isConnected ? 'Connected' : 'Disconnected'}
-                  </span>
-                </div>
-                {isRecording && (
-                  <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20">
-                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                    <span className="text-sm font-medium text-red-400">Recording</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Controls */}
-              <div className="flex gap-4">
-                {!isConnected ? (
-                  <Button onClick={connect} className="flex-1 py-4 text-lg">
-                    Connect to AI Interviewer
-                  </Button>
-                ) : (
-                  <>
-                    {!isRecording ? (
-                      <Button onClick={startRecording} className="flex-1 py-4 text-lg ">
-                        <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-                          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-                        </svg>
-                        Start Speaking
-                      </Button>
-                    ) : (
-                      <Button onClick={stopRecording} variant="danger" className="flex-1 py-4 text-lg">
-                        <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 24 24">
-                          <rect x="6" y="6" width="12" height="12" />
-                        </svg>
-                        Stop Speaking
-                      </Button>
-                    )}
-                    <Button onClick={handleEndSession} variant="secondary" className="px-8">
-                      End
-                    </Button>
-                  </>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Conversation */}
-          <Card>
-            <CardContent className="h-[500px] overflow-y-auto custom-scrollbar p-6">
-              {messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-zinc-500 space-y-4">
-                  <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center">
-                    <svg className="w-8 h-8 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                    </svg>
-                  </div>
-                  <p>Connect and start speaking to begin the interview</p>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {messages.map((msg, idx) => (
-                    <div
-                      key={idx}
-                      className={`flex ${
-                        msg.type === 'user' ? 'justify-end' : 'justify-start'
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-8">
+             <div className="bg-zinc-950 border border-zinc-800 p-8">
+                <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-6">Select Interview Mode</h2>
+                <div className="space-y-4">
+                  {[
+                    { id: 'culture', label: 'Culture Interview', desc: 'Test as HR representative', icon: Users, activeClass: 'border-white bg-zinc-900' },
+                    { id: 'screening', label: 'Screening Interview', desc: 'First-round filtering', icon: Search, activeClass: 'border-amber-500/50 bg-amber-900/10' },
+                    { id: 'candidate', label: 'Culture Fit Interview', desc: 'Requires culture profile', icon: Target, activeClass: 'border-blue-500/50 bg-blue-900/10' }
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      onClick={() => setMode(option.id as InterviewType)}
+                      className={`w-full p-6 border text-left transition-all group ${
+                        mode === option.id 
+                          ? option.activeClass 
+                          : 'border-zinc-800 hover:border-zinc-700 bg-zinc-950'
                       }`}
                     >
-                      <div
-                        className={`max-w-[80%] px-5 py-3 rounded-2xl shadow-md ${
-                          msg.type === 'user'
-                            ? 'bg-matcha-500 text-zinc-950 rounded-br-none'
-                            : msg.type === 'assistant'
-                            ? 'bg-zinc-800 text-zinc-100 rounded-bl-none border border-zinc-700'
-                            : msg.type === 'system'
-                            ? 'bg-yellow-500/10 text-yellow-400 text-sm border border-yellow-500/20 text-center mx-auto'
-                            : 'bg-blue-500/10 text-blue-400 text-sm border border-blue-500/20 text-center mx-auto'
-                        }`}
-                      >
-                        {msg.type === 'system' || msg.type === 'status' ? (
-                          <span className="text-xs uppercase font-bold mr-2 opacity-75">
-                            {msg.type}:
-                          </span>
-                        ) : null}
-                        {msg.content}
+                      <div className="flex items-center gap-4">
+                        <div className={`p-2 rounded-none border ${
+                           mode === option.id ? 'border-white/20 bg-white/10 text-white' : 'border-zinc-800 bg-zinc-900 text-zinc-500 group-hover:text-zinc-300'
+                        }`}>
+                           <option.icon size={20} />
+                        </div>
+                        <div>
+                          <h3 className={`font-bold uppercase tracking-wider text-xs mb-1 ${
+                             mode === option.id ? 'text-white' : 'text-zinc-400 group-hover:text-zinc-200'
+                          }`}>
+                            {option.label}
+                          </h3>
+                          <p className="text-[10px] text-zinc-500 font-mono">{option.desc}</p>
+                        </div>
                       </div>
-                    </div>
+                    </button>
                   ))}
-                  <div ref={messagesEndRef} />
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </>
+             </div>
+
+             <div className="bg-zinc-900/30 border border-zinc-800 p-8">
+                <div className="mb-6">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Target Company</label>
+                  <select
+                    value={selectedCompany}
+                    onChange={(e) => setSelectedCompany(e.target.value)}
+                    className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors font-mono"
+                  >
+                    {companiesList.map((company) => (
+                      <option key={company.id} value={company.id}>
+                        {company.name} {company.culture_profile ? '[HAS PROFILE]' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {error && (
+                  <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-mono">
+                    ERROR: {error}
+                  </div>
+                )}
+
+                <button
+                  onClick={handleStartSession}
+                  disabled={!selectedCompany || isCreating}
+                  className="w-full py-4 bg-white text-black hover:bg-zinc-200 text-sm font-bold uppercase tracking-widest transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isCreating ? 'INITIALIZING SESSION...' : 'START SESSION'}
+                </button>
+             </div>
+          </div>
+
+          <div className="border border-zinc-800 bg-zinc-900/20 p-8 h-fit">
+             <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-4 border-b border-white/10 pb-4">
+                Protocol: {mode.toUpperCase()}
+             </h3>
+             <div className="text-xs text-zinc-400 space-y-4 font-mono leading-relaxed">
+                {mode === 'culture' && (
+                  <>
+                    <p>ROLE: Act as an HR representative.</p>
+                    <p>OBJECTIVE: Describe your company's culture, values, and working style.</p>
+                    <p>OUTPUT: System will generate a culture profile based on your inputs.</p>
+                  </>
+                )}
+                {mode === 'screening' && (
+                  <>
+                    <p>ROLE: Act as a job candidate.</p>
+                    <p>OBJECTIVE: Respond to screening questions about your experience.</p>
+                    <p>METRICS: Communication, engagement, professionalism.</p>
+                  </>
+                )}
+                {mode === 'candidate' && (
+                  <>
+                    <p>ROLE: Act as a job candidate.</p>
+                    <p>OBJECTIVE: Determine alignment with {selectedCompanyName}'s culture profile.</p>
+                    <p>FOCUS: Work preferences, values, team dynamics.</p>
+                  </>
+                )}
+             </div>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[calc(100vh-200px)]">
+          {/* Main Interface */}
+          <div className="lg:col-span-2 flex flex-col bg-zinc-950 border border-zinc-800 relative overflow-hidden">
+             {/* Status Bar */}
+             <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
+                <div className="flex items-center gap-4">
+                   <div className={`flex items-center gap-2 px-3 py-1 border text-[10px] font-bold uppercase tracking-wider ${
+                      isConnected ? 'border-emerald-900/50 bg-emerald-900/20 text-emerald-400' : 'border-red-900/50 bg-red-900/20 text-red-400'
+                   }`}>
+                      <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+                      {isConnected ? 'LIVE FEED' : 'OFFLINE'}
+                   </div>
+                   {isRecording && (
+                      <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider animate-pulse">REC ●</span>
+                   )}
+                </div>
+                <div className="text-[10px] font-mono text-zinc-500">
+                   SESSION ID: {interviewId.slice(0, 8)}...
+                </div>
+             </div>
+
+             {/* Chat Area */}
+             <div className="flex-1 overflow-y-auto p-6 space-y-6 font-mono text-sm bg-black/50">
+                {messages.length === 0 ? (
+                   <div className="h-full flex flex-col items-center justify-center text-zinc-600 space-y-4">
+                      <Radio size={48} className="opacity-20" />
+                      <p className="uppercase tracking-widest text-xs">Awaiting Audio Stream...</p>
+                   </div>
+                ) : (
+                   messages.map((msg, idx) => (
+                      <div key={idx} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                         <div className={`max-w-[80%] p-4 border ${
+                            msg.type === 'user' 
+                               ? 'bg-zinc-900 border-zinc-700 text-white' 
+                               : msg.type === 'assistant'
+                                  ? 'bg-zinc-950 border-white/20 text-emerald-400'
+                                  : 'bg-transparent border-dashed border-zinc-800 text-zinc-500 text-xs w-full text-center'
+                         }`}>
+                            {msg.type !== 'system' && msg.type !== 'status' && (
+                               <div className="text-[9px] uppercase tracking-widest mb-2 opacity-50">
+                                  {msg.type === 'user' ? 'SUBJECT' : 'AI AGENT'}
+                               </div>
+                            )}
+                            {msg.content}
+                         </div>
+                      </div>
+                   ))
+                )}
+                <div ref={messagesEndRef} />
+             </div>
+
+             {/* Controls */}
+             <div className="p-6 border-t border-zinc-800 bg-zinc-900/30">
+                {!isConnected ? (
+                   <button 
+                      onClick={connect} 
+                      className="w-full py-4 bg-white text-black hover:bg-zinc-200 text-sm font-bold uppercase tracking-widest flex items-center justify-center gap-3 transition-colors"
+                   >
+                      <Radio size={18} /> Initialize Connection
+                   </button>
+                ) : (
+                   <div className="flex gap-4">
+                      {!isRecording ? (
+                         <button 
+                            onClick={startRecording} 
+                            className="flex-1 py-4 bg-white text-black hover:bg-zinc-200 text-sm font-bold uppercase tracking-widest flex items-center justify-center gap-3 transition-colors"
+                         >
+                            <Mic size={18} /> Start Speaking
+                         </button>
+                      ) : (
+                         <button 
+                            onClick={stopRecording} 
+                            className="flex-1 py-4 bg-red-500 hover:bg-red-600 text-white text-sm font-bold uppercase tracking-widest flex items-center justify-center gap-3 transition-colors"
+                         >
+                            <Square size={18} /> Stop Speaking
+                         </button>
+                      )}
+                      <button 
+                         onClick={handleEndSession} 
+                         className="px-8 border border-zinc-700 text-zinc-400 hover:text-white hover:border-white hover:bg-zinc-900 transition-colors uppercase tracking-widest text-xs font-bold"
+                      >
+                         End
+                      </button>
+                   </div>
+                )}
+             </div>
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+             <div className="border border-zinc-800 bg-zinc-900/20 p-6">
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-4 border-b border-white/10 pb-4">
+                   Session Metadata
+                </h3>
+                <div className="space-y-4">
+                   <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Company</label>
+                      <div className="text-sm text-white font-mono">{selectedCompanyName}</div>
+                   </div>
+                   <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Mode</label>
+                      <div className="text-sm text-white font-mono uppercase">{mode}</div>
+                   </div>
+                   <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Status</label>
+                      <div className={`text-sm font-mono uppercase ${isConnected ? 'text-emerald-500' : 'text-zinc-500'}`}>
+                         {isConnected ? 'Active' : 'Standby'}
+                      </div>
+                   </div>
+                </div>
+             </div>
+
+             <button 
+                onClick={handleReset}
+                className="w-full py-3 border border-zinc-800 text-zinc-500 hover:text-white hover:border-white transition-colors text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2"
+             >
+                <RefreshCcw size={14} /> Reset System
+             </button>
+          </div>
+        </div>
       )}
     </div>
   );

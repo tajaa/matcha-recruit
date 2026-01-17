@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent } from '../components';
 import { tutorMetrics } from '../api/client';
 import type { TutorSessionSummary, TutorMetricsAggregate, TutorProgressDataPoint, TutorVocabularyStats } from '../types';
+import { Activity, BarChart2, Book, Trash2, Clock, CheckCircle2 } from 'lucide-react';
 
 type TabValue = 'all' | 'interview_prep' | 'language_test';
 
@@ -13,24 +13,24 @@ const TABS: { label: string; value: TabValue }[] = [
 ];
 
 const STATUS_COLORS: Record<string, string> = {
-  completed: 'bg-matcha-500/20 text-white',
-  analyzing: 'bg-yellow-500/20 text-yellow-400',
-  in_progress: 'bg-blue-500/20 text-blue-400',
-  pending: 'bg-zinc-700 text-zinc-300',
+  completed: 'text-emerald-400 bg-emerald-900/20 border-emerald-900/50',
+  analyzing: 'text-amber-400 bg-amber-900/20 border-amber-900/50',
+  in_progress: 'text-blue-400 bg-blue-900/20 border-blue-900/50',
+  pending: 'text-zinc-400 bg-zinc-800 border-zinc-700',
 };
 
 function ScoreDisplay({ score, label }: { score: number | null; label?: string }) {
-  if (score === null) return <span className="text-zinc-500">-</span>;
+  if (score === null) return <span className="text-zinc-600 font-mono">-</span>;
 
   const getColor = (s: number) => {
-    if (s >= 80) return 'text-white';
-    if (s >= 60) return 'text-yellow-400';
+    if (s >= 80) return 'text-emerald-400';
+    if (s >= 60) return 'text-amber-400';
     return 'text-red-400';
   };
 
   return (
-    <span className={getColor(score)}>
-      {label && <span className="text-zinc-500 mr-1">{label}</span>}
+    <span className={`${getColor(score)} font-mono font-bold`}>
+      {label && <span className="text-zinc-500 mr-2 font-sans uppercase text-[10px] tracking-wider">{label}</span>}
       {score}
     </span>
   );
@@ -68,9 +68,9 @@ function ProgressChart({ data, title, color }: { data: TutorProgressDataPoint[];
   const min = Math.min(...scores, 0);
 
   return (
-    <div>
-      <div className="text-xs text-zinc-400 mb-2">{title}</div>
-      <div className="flex items-end gap-1 h-24">
+    <div className="bg-zinc-900/50 border border-white/5 p-4 rounded-sm">
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-4 font-bold">{title}</div>
+      <div className="flex items-end gap-1 h-32">
         {data.map((point, idx) => {
           const score = title === 'Fluency' ? point.fluency_score
             : title === 'Grammar' ? point.grammar_score
@@ -80,20 +80,20 @@ function ProgressChart({ data, title, color }: { data: TutorProgressDataPoint[];
           return (
             <div
               key={idx}
-              className={`flex-1 ${color} hover:opacity-80 transition-opacity rounded-t cursor-pointer relative group`}
+              className={`flex-1 ${color} hover:opacity-100 opacity-60 transition-opacity rounded-t-sm cursor-pointer relative group`}
               style={{ height: `${Math.max(height, 5)}%` }}
             >
-              <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs whitespace-nowrap z-10">
-                <div className="font-medium text-white">{score}</div>
-                <div className="text-zinc-400">{formatShortDate(point.date)}</div>
+              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block bg-zinc-950 border border-zinc-800 p-2 text-xs whitespace-nowrap z-10 shadow-xl">
+                <div className="font-bold text-white font-mono">{score}</div>
+                <div className="text-zinc-500 text-[10px] uppercase tracking-wide">{formatShortDate(point.date)}</div>
               </div>
             </div>
           );
         })}
       </div>
-      <div className="flex justify-between mt-1">
-        <span className="text-[10px] text-zinc-600">{data[0] ? formatShortDate(data[0].date) : ''}</span>
-        <span className="text-[10px] text-zinc-600">{data[data.length - 1] ? formatShortDate(data[data.length - 1].date) : ''}</span>
+      <div className="flex justify-between mt-2 pt-2 border-t border-white/5">
+        <span className="text-[9px] text-zinc-600 uppercase font-mono">{data[0] ? formatShortDate(data[0].date) : ''}</span>
+        <span className="text-[9px] text-zinc-600 uppercase font-mono">{data[data.length - 1] ? formatShortDate(data[data.length - 1].date) : ''}</span>
       </div>
     </div>
   );
@@ -109,22 +109,25 @@ function ProficiencyTimeline({ data }: { data: TutorProgressDataPoint[] }) {
   const getColor = (level: string) => {
     const idx = levelOrder.indexOf(level);
     if (idx <= 1) return 'bg-red-500';
-    if (idx <= 3) return 'bg-yellow-500';
-    return 'bg-matcha-500';
+    if (idx <= 3) return 'bg-amber-500';
+    return 'bg-emerald-500';
   };
 
   return (
-    <div>
-      <div className="text-xs text-zinc-400 mb-2">CEFR Level Progression</div>
-      <div className="flex gap-2 items-center">
+    <div className="border-t border-white/10 pt-6 mt-6">
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-4 font-bold flex items-center gap-2">
+         <Activity size={12} /> CEFR Level Progression
+      </div>
+      <div className="flex gap-3 items-center overflow-x-auto pb-2">
         {data.map((point, idx) => {
           if (!point.proficiency_level) return null;
           return (
-            <div key={idx} className="flex flex-col items-center">
-              <div className={`w-8 h-8 rounded-full ${getColor(point.proficiency_level)} flex items-center justify-center text-xs font-bold text-white`}>
-                {point.proficiency_level}
+            <div key={idx} className="flex flex-col items-center group cursor-default">
+              <div className={`w-8 h-8 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center text-xs font-bold text-white group-hover:border-zinc-600 transition-colors relative overflow-hidden`}>
+                 <div className={`absolute bottom-0 left-0 right-0 h-1 ${getColor(point.proficiency_level)}`} />
+                 {point.proficiency_level}
               </div>
-              <div className="text-[10px] text-zinc-600 mt-1">{formatShortDate(point.date)}</div>
+              <div className="text-[9px] text-zinc-600 mt-2 font-mono uppercase">{formatShortDate(point.date)}</div>
             </div>
           );
         })}
@@ -135,67 +138,72 @@ function ProficiencyTimeline({ data }: { data: TutorProgressDataPoint[] }) {
 
 function VocabularySection({ vocab }: { vocab: TutorVocabularyStats }) {
   return (
-    <Card>
-      <CardContent className="p-4">
-        <h3 className="text-sm font-medium text-zinc-400 mb-4">Spanish Vocabulary ({vocab.total_unique_words} words tracked)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Mastered Words */}
-          <div>
-            <div className="text-xs text-zinc-500 mb-2">Mastered</div>
-            <div className="space-y-1">
-              {vocab.mastered_words.length === 0 ? (
-                <div className="text-xs text-zinc-600">No mastered words yet</div>
-              ) : (
-                vocab.mastered_words.slice(0, 5).map((w, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm">
-                    <span className="text-matcha-400">{w.word}</span>
-                    <span className="text-zinc-600 text-xs">{w.times_used}x</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Words to Review */}
-          <div>
-            <div className="text-xs text-zinc-500 mb-2">Needs Review</div>
-            <div className="space-y-1">
-              {vocab.words_to_review.length === 0 ? (
-                <div className="text-xs text-zinc-600">No words to review</div>
-              ) : (
-                vocab.words_to_review.slice(0, 5).map((w, i) => (
-                  <div key={i} className="text-sm">
-                    <span className="text-yellow-400">{w.word}</span>
-                    {w.correction && (
-                      <span className="text-zinc-500 text-xs ml-1">&rarr; {w.correction}</span>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Suggested Vocabulary */}
-          <div>
-            <div className="text-xs text-zinc-500 mb-2">Suggested to Learn</div>
-            <div className="space-y-1">
-              {vocab.suggested_vocabulary.length === 0 ? (
-                <div className="text-xs text-zinc-600">No suggestions yet</div>
-              ) : (
-                vocab.suggested_vocabulary.slice(0, 5).map((w, i) => (
-                  <div key={i} className="text-sm">
-                    <span className="text-blue-400">{w.word}</span>
-                    {w.meaning && (
-                      <span className="text-zinc-500 text-xs ml-1">- {w.meaning}</span>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
+    <div className="bg-zinc-900 border border-white/10 p-6">
+      <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-6 flex items-center gap-2">
+         <Book size={14} className="text-zinc-500" />
+         Vocabulary Analysis <span className="text-zinc-600 ml-2 font-mono">({vocab.total_unique_words} words)</span>
+      </h3>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Mastered Words */}
+        <div className="bg-zinc-950 border border-zinc-800 p-4">
+          <div className="text-[10px] text-emerald-500 uppercase tracking-widest mb-3 font-bold">Mastered</div>
+          <div className="space-y-2">
+            {vocab.mastered_words.length === 0 ? (
+              <div className="text-xs text-zinc-600 font-mono">No data yet</div>
+            ) : (
+              vocab.mastered_words.slice(0, 5).map((w, i) => (
+                <div key={i} className="flex items-center justify-between text-sm group">
+                  <span className="text-zinc-300 font-medium group-hover:text-white transition-colors">{w.word}</span>
+                  <span className="text-zinc-600 text-xs font-mono bg-zinc-900 px-1.5 py-0.5 rounded">{w.times_used}x</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
-      </CardContent>
-    </Card>
+
+        {/* Words to Review */}
+        <div className="bg-zinc-950 border border-zinc-800 p-4">
+          <div className="text-[10px] text-amber-500 uppercase tracking-widest mb-3 font-bold">Needs Review</div>
+          <div className="space-y-2">
+            {vocab.words_to_review.length === 0 ? (
+              <div className="text-xs text-zinc-600 font-mono">No data yet</div>
+            ) : (
+              vocab.words_to_review.slice(0, 5).map((w, i) => (
+                <div key={i} className="text-sm">
+                  <div className="text-zinc-300 font-medium">{w.word}</div>
+                  {w.correction && (
+                    <div className="text-zinc-500 text-xs mt-0.5 flex items-center gap-1 font-mono">
+                       <span className="text-amber-500/50">&rarr;</span> {w.correction}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Suggested Vocabulary */}
+        <div className="bg-zinc-950 border border-zinc-800 p-4">
+          <div className="text-[10px] text-blue-500 uppercase tracking-widest mb-3 font-bold">Suggested</div>
+          <div className="space-y-2">
+            {vocab.suggested_vocabulary.length === 0 ? (
+              <div className="text-xs text-zinc-600 font-mono">No data yet</div>
+            ) : (
+              vocab.suggested_vocabulary.slice(0, 5).map((w, i) => (
+                <div key={i} className="text-sm">
+                  <span className="text-zinc-300 font-medium">{w.word}</span>
+                  {w.meaning && (
+                    <span className="text-zinc-500 text-xs block mt-0.5 ml-2 border-l border-zinc-800 pl-2">
+                       {w.meaning}
+                    </span>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -252,21 +260,25 @@ export function TutorMetrics() {
   }, [fetchData]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Tutor Metrics</h1>
+    <div className="max-w-7xl mx-auto space-y-12">
+      {/* Header */}
+      <div className="flex justify-between items-start border-b border-white/10 pb-8">
+        <div>
+          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Performance Metrics</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Analysis & Progress Tracking</p>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2">
+      <div className="flex gap-8 border-b border-white/10 pb-px">
         {TABS.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setActiveTab(tab.value)}
-            className={`px-4 py-2 rounded-lg transition-colors ${
+            className={`pb-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2 ${
               activeTab === tab.value
-                ? 'bg-matcha-500 text-white'
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                ? 'border-white text-white'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
             }`}
           >
             {tab.label}
@@ -276,112 +288,103 @@ export function TutorMetrics() {
 
       {/* Aggregate Stats */}
       {aggregate && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 border border-white/10">
           {activeTab !== 'language_test' && (
             <>
-              <Card>
-                <CardContent className="p-4">
-                  <div className="text-sm text-zinc-400">Interview Prep Sessions</div>
-                  <div className="text-2xl font-bold text-white mt-1">
-                    {aggregate.interview_prep.total_sessions}
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <div className="text-sm text-zinc-400">Avg Response Quality</div>
-                  <div className="text-2xl font-bold mt-1">
-                    <ScoreDisplay score={aggregate.interview_prep.avg_response_quality} />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <div className="text-sm text-zinc-400">Avg Communication</div>
-                  <div className="text-2xl font-bold mt-1">
-                    <ScoreDisplay score={aggregate.interview_prep.avg_communication_score} />
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="bg-zinc-950 p-6">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">Total Sessions</div>
+                <div className="text-3xl font-light text-white font-mono">
+                  {aggregate.interview_prep.total_sessions}
+                </div>
+              </div>
+              <div className="bg-zinc-950 p-6">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">Avg Quality</div>
+                <div className="text-3xl font-light text-white">
+                  <ScoreDisplay score={aggregate.interview_prep.avg_response_quality} />
+                </div>
+              </div>
+              <div className="bg-zinc-950 p-6">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">Communication</div>
+                <div className="text-3xl font-light text-white">
+                  <ScoreDisplay score={aggregate.interview_prep.avg_communication_score} />
+                </div>
+              </div>
             </>
           )}
           {activeTab !== 'interview_prep' && (
             <>
-              <Card>
-                <CardContent className="p-4">
-                  <div className="text-sm text-zinc-400">Language Test Sessions</div>
-                  <div className="text-2xl font-bold text-white mt-1">
-                    {aggregate.language_test.total_sessions}
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <div className="text-sm text-zinc-400">Avg Fluency Score</div>
-                  <div className="text-2xl font-bold mt-1">
-                    <ScoreDisplay score={aggregate.language_test.avg_fluency_score} />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <div className="text-sm text-zinc-400">Avg Grammar Score</div>
-                  <div className="text-2xl font-bold mt-1">
-                    <ScoreDisplay score={aggregate.language_test.avg_grammar_score} />
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="bg-zinc-950 p-6">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">Language Sessions</div>
+                <div className="text-3xl font-light text-white font-mono">
+                  {aggregate.language_test.total_sessions}
+                </div>
+              </div>
+              <div className="bg-zinc-950 p-6">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">Avg Fluency</div>
+                <div className="text-3xl font-light text-white">
+                  <ScoreDisplay score={aggregate.language_test.avg_fluency_score} />
+                </div>
+              </div>
+              <div className="bg-zinc-950 p-6">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">Avg Grammar</div>
+                <div className="text-3xl font-light text-white">
+                  <ScoreDisplay score={aggregate.language_test.avg_grammar_score} />
+                </div>
+              </div>
             </>
           )}
         </div>
       )}
 
-      {/* Common Issues */}
-      {activeTab === 'interview_prep' && aggregate?.interview_prep.common_improvement_areas.length ? (
-        <Card>
-          <CardContent className="p-4">
-            <h3 className="text-sm font-medium text-zinc-400 mb-3">Common Improvement Areas</h3>
-            <div className="flex flex-wrap gap-2">
-              {aggregate.interview_prep.common_improvement_areas.map((item, i) => (
-                <span key={i} className="px-3 py-1 bg-zinc-800 rounded-full text-sm text-zinc-300">
-                  {item.area} <span className="text-zinc-500">({item.count})</span>
-                </span>
-              ))}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+         {/* Common Issues */}
+         {activeTab === 'interview_prep' && aggregate?.interview_prep.common_improvement_areas.length ? (
+            <div className="bg-zinc-900 border border-white/10 p-6 h-full">
+               <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <CheckCircle2 size={14} className="text-zinc-500" />
+                  Focus Areas
+               </h3>
+               <div className="flex flex-wrap gap-2">
+                  {aggregate.interview_prep.common_improvement_areas.map((item, i) => (
+                  <span key={i} className="px-3 py-1 bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 font-mono">
+                     {item.area} <span className="text-zinc-600 ml-1">x{item.count}</span>
+                  </span>
+                  ))}
+               </div>
             </div>
-          </CardContent>
-        </Card>
-      ) : null}
+         ) : null}
 
-      {activeTab === 'language_test' && aggregate?.language_test.common_grammar_errors.length ? (
-        <Card>
-          <CardContent className="p-4">
-            <h3 className="text-sm font-medium text-zinc-400 mb-3">Common Grammar Errors</h3>
-            <div className="flex flex-wrap gap-2">
-              {aggregate.language_test.common_grammar_errors.map((item, i) => (
-                <span key={i} className="px-3 py-1 bg-zinc-800 rounded-full text-sm text-zinc-300">
-                  {item.type} <span className="text-zinc-500">({item.count})</span>
-                </span>
-              ))}
+         {activeTab === 'language_test' && aggregate?.language_test.common_grammar_errors.length ? (
+            <div className="bg-zinc-900 border border-white/10 p-6 h-full">
+               <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Activity size={14} className="text-zinc-500" />
+                  Common Errors
+               </h3>
+               <div className="flex flex-wrap gap-2">
+                  {aggregate.language_test.common_grammar_errors.map((item, i) => (
+                  <span key={i} className="px-3 py-1 bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 font-mono">
+                     {item.type} <span className="text-zinc-600 ml-1">x{item.count}</span>
+                  </span>
+                  ))}
+               </div>
             </div>
-          </CardContent>
-        </Card>
-      ) : null}
+         ) : null}
+      </div>
 
       {/* Progress Over Time */}
       {(activeTab === 'all' || activeTab === 'language_test') && progress.length > 1 && (
-        <Card>
-          <CardContent className="p-4">
-            <h3 className="text-sm font-medium text-zinc-400 mb-4">Spanish Progress Over Time</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <ProgressChart data={progress} title="Fluency" color="bg-matcha-500" />
-              <ProgressChart data={progress} title="Grammar" color="bg-blue-500" />
-              <ProgressChart data={progress} title="Vocabulary" color="bg-purple-500" />
-            </div>
-            <div className="mt-6 pt-4 border-t border-zinc-800">
-              <ProficiencyTimeline data={progress} />
-            </div>
-          </CardContent>
-        </Card>
+        <div className="bg-zinc-900 border border-white/10 p-6">
+          <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-6 flex items-center gap-2">
+             <BarChart2 size={14} className="text-zinc-500" />
+             Progress Velocity
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <ProgressChart data={progress} title="Fluency" color="bg-emerald-500" />
+            <ProgressChart data={progress} title="Grammar" color="bg-blue-500" />
+            <ProgressChart data={progress} title="Vocabulary" color="bg-violet-500" />
+          </div>
+          <ProficiencyTimeline data={progress} />
+        </div>
       )}
 
       {/* Vocabulary Tracking */}
@@ -390,74 +393,70 @@ export function TutorMetrics() {
       )}
 
       {/* Sessions Table */}
-      <Card>
-        <CardContent className="p-0">
+      <div className="space-y-px bg-white/10 border border-white/10">
+          <div className="flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
+             <div className="flex-1">Date / Type</div>
+             <div className="w-32 text-right">Language</div>
+             <div className="w-32 text-right">Score</div>
+             <div className="w-32 text-right">Status</div>
+             <div className="w-16"></div>
+          </div>
+
           {loading ? (
-            <div className="p-8 text-center text-zinc-400">Loading sessions...</div>
+            <div className="p-12 text-center text-xs text-zinc-500 uppercase tracking-wider bg-zinc-950">Loading sessions...</div>
           ) : sessions.length === 0 ? (
-            <div className="p-8 text-center text-zinc-400">No tutor sessions yet</div>
+            <div className="p-12 text-center text-xs text-zinc-500 uppercase tracking-wider bg-zinc-950">No sessions recorded</div>
           ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-zinc-800">
-                  <th className="text-left p-4 text-sm font-medium text-zinc-400">Date</th>
-                  <th className="text-left p-4 text-sm font-medium text-zinc-400">Type</th>
-                  <th className="text-left p-4 text-sm font-medium text-zinc-400">Language</th>
-                  <th className="text-left p-4 text-sm font-medium text-zinc-400">Score</th>
-                  <th className="text-left p-4 text-sm font-medium text-zinc-400">Status</th>
-                  <th className="w-12"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sessions.map((session) => (
-                  <tr
-                    key={session.id}
-                    onClick={() => navigate(`/app/tutor-metrics/${session.id}`)}
-                    className="border-b border-zinc-800 hover:bg-zinc-800/50 cursor-pointer transition-colors"
-                  >
-                    <td className="p-4 text-sm text-zinc-300">
-                      {formatDate(session.created_at)}
-                    </td>
-                    <td className="p-4 text-sm text-zinc-300">
-                      {session.interview_type === 'tutor_interview' ? 'Interview Prep' : 'Language Test'}
-                    </td>
-                    <td className="p-4 text-sm text-zinc-300">
-                      {session.language === 'en' ? 'English' : session.language === 'es' ? 'Spanish' : '-'}
-                    </td>
-                    <td className="p-4 text-sm">
-                      <ScoreDisplay score={session.overall_score} />
-                    </td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 rounded text-xs ${STATUS_COLORS[session.status] || 'bg-zinc-700 text-zinc-300'}`}>
+             sessions.map((session) => (
+               <div
+                  key={session.id}
+                  onClick={() => navigate(`/app/tutor-metrics/${session.id}`)}
+                  className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 px-6 flex items-center gap-4 cursor-pointer"
+               >
+                  <div className="flex-1">
+                     <div className="text-sm font-bold text-white mb-1">
+                        {session.interview_type === 'tutor_interview' ? 'Interview Prep' : 'Language Test'}
+                     </div>
+                     <div className="text-xs text-zinc-500 font-mono flex items-center gap-2">
+                        <Clock size={10} />
+                        {formatDate(session.created_at)}
+                     </div>
+                  </div>
+
+                  <div className="w-32 text-right">
+                     <span className="text-xs font-mono text-zinc-400 uppercase">
+                        {session.language === 'en' ? 'English' : session.language === 'es' ? 'Spanish' : '—'}
+                     </span>
+                  </div>
+
+                  <div className="w-32 text-right">
+                     <ScoreDisplay score={session.overall_score} />
+                  </div>
+
+                  <div className="w-32 flex justify-end">
+                     <span className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider border rounded-sm ${STATUS_COLORS[session.status] || 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}>
                         {session.status}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <button
+                     </span>
+                  </div>
+
+                  <div className="w-16 flex justify-end">
+                     <button
                         onClick={(e) => handleDelete(session.id, e)}
                         disabled={deletingId === session.id}
-                        className="p-1.5 rounded hover:bg-red-500/20 text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
+                        className="p-2 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
                         title="Delete session"
-                      >
+                     >
                         {deletingId === session.id ? (
-                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
+                           <div className="w-4 h-4 rounded-full border-2 border-zinc-600 border-t-transparent animate-spin" />
                         ) : (
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
+                           <Trash2 size={14} />
                         )}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                     </button>
+                  </div>
+               </div>
+             ))
           )}
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 }

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Button, Card, CardContent } from '../components';
+import { Button } from '../components/Button';
 import { tutor } from '../api/client';
 import { useAudioInterview } from '../hooks/useAudioInterview';
 import { useAuth } from '../context/AuthContext';
+import { Mic, Square, Clock, Award, Users, Globe, Play, CheckCircle2 } from 'lucide-react';
 
 type TutorMode = 'interview_prep' | 'language_test';
 type Language = 'en' | 'es';
@@ -119,47 +120,49 @@ export function Tutor() {
   // Completed state
   if (completed) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="max-w-2xl mx-auto space-y-8 py-12">
+        <div className="text-center space-y-6">
+          <div className="w-20 h-20 mx-auto rounded-full bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center">
+            <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+          </div>
           <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">Session Complete</h1>
-            <p className="text-zinc-500 mt-1">Great practice session!</p>
+            <h1 className="text-4xl font-bold text-white tracking-tight uppercase">Session Complete</h1>
+            <p className="text-zinc-400 mt-2 font-mono">Analysis in progress...</p>
           </div>
         </div>
 
-        <Card>
-          <CardContent className="py-12 text-center">
-            <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-matcha-500/20 flex items-center justify-center">
-              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <h2 className="text-xl font-semibold text-white mb-2">
-              {selectedMode === 'interview_prep' ? `${selectedRole} Interview Practice Complete` : 'Language Practice Complete'}
-            </h2>
-            <p className="text-zinc-400 mb-6">
-              {selectedMode === 'interview_prep'
-                ? `Keep practicing to ace your ${selectedRole} interview!`
-                : `Great job practicing ${selectedLanguage === 'es' ? 'Spanish' : 'English'}!`}
-            </p>
-            <p className="text-zinc-500 text-sm mb-6">
-              Your session is being analyzed. View your detailed feedback below.
-            </p>
-            <div className="flex gap-4 justify-center">
-              <Button onClick={() => navigate(`/app/tutor-metrics/${interviewId}`)}>
-                View Your Analysis
-              </Button>
-              <Button variant="secondary" onClick={handleReset}>
-                Start Another Session
-              </Button>
-            </div>
-            <p className="text-zinc-500 text-sm mt-6">
-              <Link to="/app/tutor-metrics" className="text-matcha-400 hover:text-matcha-300 underline">
-                View all your sessions
-              </Link>
-            </p>
-          </CardContent>
-        </Card>
+        <div className="bg-zinc-900 border border-zinc-800 p-8 text-center">
+          <h2 className="text-lg font-bold text-white uppercase tracking-wider mb-4">
+            {selectedMode === 'interview_prep' ? `${selectedRole} Simulation` : 'Language Practice'}
+          </h2>
+          <p className="text-sm text-zinc-400 mb-8 max-w-md mx-auto leading-relaxed">
+            {selectedMode === 'interview_prep'
+              ? `Your responses for the ${selectedRole} role have been recorded. Our system is generating detailed feedback on your delivery and content.`
+              : `Great job practicing ${selectedLanguage === 'es' ? 'Spanish' : 'English'}! Review your grammar and fluency scores below.`}
+          </p>
+          
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Button 
+               onClick={() => navigate(`/app/tutor-metrics/${interviewId}`)}
+               className="bg-white text-black hover:bg-zinc-200 font-bold uppercase tracking-wider"
+            >
+              View Analysis
+            </Button>
+            <Button 
+               variant="secondary" 
+               onClick={handleReset}
+               className="bg-transparent border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 font-bold uppercase tracking-wider"
+            >
+              Start New Session
+            </Button>
+          </div>
+        </div>
+        
+        <div className="text-center">
+           <Link to="/app/tutor-metrics" className="text-xs text-zinc-500 hover:text-white uppercase tracking-widest border-b border-transparent hover:border-white pb-0.5 transition-all">
+             View All Sessions
+           </Link>
+        </div>
       </div>
     );
   }
@@ -167,359 +170,327 @@ export function Tutor() {
   // Active session
   if (interviewId) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <div className="flex items-center justify-between border-b border-white/10 pb-6">
           <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">
-              {selectedMode === 'interview_prep' ? 'Interview Practice' : 'Language Practice'}
-            </h1>
-            <p className="text-zinc-500 mt-1">
+            <div className="flex items-center gap-3 mb-1">
+               <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+               <h1 className="text-xl font-bold text-white uppercase tracking-wider">
+                 {selectedMode === 'interview_prep' ? 'Interview Simulation' : 'Language Lab'}
+               </h1>
+            </div>
+            <p className="text-xs text-zinc-500 font-mono ml-5">
               {selectedMode === 'interview_prep'
-                ? `Practicing for ${selectedRole} interview`
-                : `Practicing ${selectedLanguage === 'es' ? 'Spanish' : 'English'} conversation`}
+                ? `ROLE: ${selectedRole}`
+                : `TARGET: ${selectedLanguage === 'es' ? 'Spanish' : 'English'}`}
             </p>
           </div>
           {sessionTimeRemaining !== null && (
-            <div className="text-sm text-zinc-500">
-              Time: <span className="text-zinc-300 font-medium">{formatTime(sessionTimeRemaining)}</span>
+            <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-sm">
+              <Clock className="w-4 h-4 text-zinc-500" />
+              <span className={`font-mono text-lg font-bold ${sessionTimeRemaining < 60 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                 {formatTime(sessionTimeRemaining)}
+              </span>
             </div>
           )}
         </div>
 
-        {/* Controls */}
-        <Card>
-          <CardContent>
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div
-                  className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] transition-colors ${
-                    isConnected ? 'bg-matcha-500 text-white' : 'bg-zinc-600 text-zinc-600'
-                  }`}
-                />
-                <span className="text-sm font-medium text-zinc-300">
-                  {isConnected ? 'Connected' : 'Disconnected'}
-                </span>
-              </div>
-              {isRecording && (
-                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20">
-                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  <span className="text-sm font-medium text-red-400">Recording</span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-4">
-              {!isConnected ? (
-                <Button onClick={connect} className="flex-1 py-4 text-lg">
-                  Connect to {selectedMode === 'interview_prep' ? 'Coach' : 'Tutor'}
-                </Button>
-              ) : (
-                <>
-                  {!isRecording ? (
-                    <Button onClick={startRecording} className="flex-1 py-4 text-lg ">
-                      <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-                        <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-                      </svg>
-                      Start Speaking
-                    </Button>
-                  ) : (
-                    <Button onClick={stopRecording} variant="danger" className="flex-1 py-4 text-lg">
-                      <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 24 24">
-                        <rect x="6" y="6" width="12" height="12" />
-                      </svg>
-                      Stop Speaking
-                    </Button>
-                  )}
-                  <Button onClick={handleEnd} variant="secondary" className="px-8">
-                    End
-                  </Button>
-                </>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Conversation */}
-        <Card>
-          <CardContent className="h-[400px] overflow-y-auto custom-scrollbar p-6">
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-zinc-500 space-y-4">
-                <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center">
-                  <svg className="w-8 h-8 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
-                </div>
-                <p>Connect and start speaking to begin</p>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {messages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[80%] px-5 py-3 rounded-2xl shadow-md ${
-                        msg.type === 'user'
-                          ? 'bg-matcha-500 text-zinc-950 rounded-br-none'
-                          : msg.type === 'assistant'
-                          ? 'bg-zinc-800 text-zinc-100 rounded-bl-none border border-zinc-700'
-                          : msg.type === 'system'
-                          ? 'bg-yellow-500/10 text-yellow-400 text-sm border border-yellow-500/20 text-center mx-auto'
-                          : 'bg-blue-500/10 text-blue-400 text-sm border border-blue-500/20 text-center mx-auto'
-                      }`}
-                    >
-                      {msg.type === 'system' || msg.type === 'status' ? (
-                        <span className="text-xs uppercase font-bold mr-2 opacity-75">
-                          {msg.type}:
-                        </span>
-                      ) : null}
-                      {msg.content}
+        {/* Interface */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[600px]">
+           {/* Chat Feed */}
+           <div className="lg:col-span-2 bg-zinc-950 border border-white/10 flex flex-col">
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-black/40">
+                 {messages.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-zinc-600 space-y-4 opacity-50">
+                       <Mic size={48} />
+                       <p className="uppercase tracking-widest text-xs">Waiting for audio input...</p>
                     </div>
-                  </div>
-                ))}
-                <div ref={messagesEndRef} />
+                 ) : (
+                    messages.map((msg, idx) => (
+                       <div key={idx} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[85%] p-4 border ${
+                             msg.type === 'user'
+                                ? 'bg-zinc-900 border-zinc-700 text-white'
+                                : msg.type === 'assistant'
+                                   ? 'bg-zinc-950 border-emerald-500/30 text-emerald-100 shadow-[0_0_15px_rgba(16,185,129,0.1)]'
+                                   : 'bg-transparent border-dashed border-zinc-800 text-zinc-500 text-xs w-full text-center'
+                          }`}>
+                             {msg.type !== 'system' && (
+                                <div className={`text-[9px] uppercase tracking-widest mb-2 ${msg.type === 'user' ? 'text-zinc-500' : 'text-emerald-500'}`}>
+                                   {msg.type === 'user' ? 'Candidate' : 'AI Interviewer'}
+                                </div>
+                             )}
+                             <p className="leading-relaxed">{msg.content}</p>
+                          </div>
+                       </div>
+                    ))
+                 )}
+                 <div ref={messagesEndRef} />
               </div>
-            )}
-          </CardContent>
-        </Card>
+
+              {/* Controls */}
+              <div className="p-6 bg-zinc-900 border-t border-white/10">
+                 {!isConnected ? (
+                    <Button onClick={connect} className="w-full py-4 text-sm font-bold bg-white text-black hover:bg-zinc-200 uppercase tracking-widest">
+                       Initialize Connection
+                    </Button>
+                 ) : (
+                    <div className="flex gap-4">
+                       {!isRecording ? (
+                          <Button onClick={startRecording} className="flex-1 py-4 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+                             <Mic size={16} /> Start Speaking
+                          </Button>
+                       ) : (
+                          <Button onClick={stopRecording} className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 animate-pulse">
+                             <Square size={16} /> Stop Speaking
+                          </Button>
+                       )}
+                       <Button onClick={handleEnd} variant="secondary" className="px-6 bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white uppercase tracking-widest text-xs font-bold">
+                          End
+                       </Button>
+                    </div>
+                 )}
+              </div>
+           </div>
+
+           {/* Status Panel */}
+           <div className="space-y-4">
+              <div className="bg-zinc-900 border border-white/10 p-6">
+                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4 border-b border-zinc-800 pb-2">Session Status</h3>
+                 <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                       <span className="text-xs text-zinc-400">Connection</span>
+                       <span className={`text-xs font-mono uppercase ${isConnected ? 'text-emerald-500' : 'text-zinc-600'}`}>
+                          {isConnected ? 'Stable' : 'Offline'}
+                       </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                       <span className="text-xs text-zinc-400">Audio Stream</span>
+                       <span className={`text-xs font-mono uppercase ${isRecording ? 'text-red-500 animate-pulse' : 'text-zinc-600'}`}>
+                          {isRecording ? 'Active' : 'Idle'}
+                       </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                       <span className="text-xs text-zinc-400">Transcript</span>
+                       <span className="text-xs font-mono text-zinc-300">{messages.length} Events</span>
+                    </div>
+                 </div>
+              </div>
+
+              <div className="bg-zinc-900/50 border border-zinc-800 p-6">
+                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4">Tips</h3>
+                 <ul className="text-xs text-zinc-400 space-y-3 leading-relaxed">
+                    <li>• Speak clearly and at a moderate pace.</li>
+                    <li>• Wait for the AI to finish speaking before responding.</li>
+                    <li>• Use specific examples (STAR method) for behavioral questions.</li>
+                 </ul>
+              </div>
+           </div>
+        </div>
       </div>
     );
   }
 
   // Mode selection
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="max-w-5xl mx-auto space-y-12">
+      <div className="flex items-center justify-between border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">
+          <h1 className="text-4xl font-bold text-white tracking-tighter uppercase">
             {isCandidate ? 'Interview Prep' : 'Tutor'}
           </h1>
-          <p className="text-zinc-500 mt-1">
-            {isCandidate ? 'Practice your interview skills' : 'Practice your interview skills or language proficiency'}
+          <p className="text-zinc-500 mt-2 text-xs font-mono tracking-wide uppercase">
+            {isCandidate ? 'AI-Powered Role Simulation' : 'Language & Interview Practice Module'}
           </p>
         </div>
         {isCandidate && (
-          <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg">
-            <span className="text-xs text-zinc-500 uppercase tracking-wide">Tokens:</span>
-            <span className={`text-lg font-mono font-bold ${interviewPrepTokens > 0 ? 'text-white' : 'text-red-400'}`}>
-              {interviewPrepTokens}
-            </span>
+          <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900 border border-zinc-800">
+            <Award className="w-4 h-4 text-amber-500" />
+            <div className="flex flex-col items-end">
+               <span className={`text-lg font-mono font-bold leading-none ${interviewPrepTokens > 0 ? 'text-white' : 'text-red-500'}`}>
+                 {interviewPrepTokens}
+               </span>
+               <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Tokens Available</span>
+            </div>
           </div>
         )}
       </div>
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-red-400">
-          {error}
+        <div className="bg-red-900/20 border border-red-500/30 p-4 text-red-400 text-sm font-mono flex items-center gap-3">
+           <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+           {error}
         </div>
       )}
 
       {isCandidate && interviewPrepTokens === 0 && (
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 text-amber-400">
-          <div className="flex items-center gap-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <span>You have no tokens remaining. Contact support to get more tokens.</span>
-          </div>
+        <div className="bg-amber-900/20 border border-amber-500/30 p-6 text-amber-400">
+          <h3 className="font-bold uppercase tracking-wider text-sm mb-2 flex items-center gap-2">
+             <Clock className="w-4 h-4" /> Insufficient Tokens
+          </h3>
+          <p className="text-xs opacity-80 font-mono">You have exhausted your interview preparation tokens. Please contact your administrator to request additional access.</p>
         </div>
       )}
 
-      <div className={`grid gap-6 ${isCandidate ? 'grid-cols-1 max-w-xl' : 'grid-cols-1 md:grid-cols-2'}`}>
+      <div className={`grid gap-8 ${isCandidate ? 'grid-cols-1 max-w-2xl' : 'grid-cols-1 md:grid-cols-2'}`}>
         {/* Interview Prep Card */}
-        <Card className="overflow-hidden">
-          <div className="h-2 bg-gradient-to-r from-matcha-500 to-matcha-400" />
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-lg bg-matcha-500/20 flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-white">Interview Prep</h3>
-                <p className="text-sm text-zinc-500">Practice for your target role</p>
-              </div>
-            </div>
+        <div className="bg-zinc-950 border border-white/10 p-8 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+             <Users className="w-32 h-32 text-white" />
+          </div>
+          
+          <div className="relative z-10">
+             <div className="w-12 h-12 bg-white text-black flex items-center justify-center mb-6">
+                <Users className="w-6 h-6" />
+             </div>
+             
+             <h2 className="text-xl font-bold text-white uppercase tracking-tight mb-2">Role Simulation</h2>
+             <p className="text-zinc-400 text-sm mb-8 max-w-sm">
+               Practice role-specific interview questions with an AI coach that adapts to your responses and provides detailed feedback.
+             </p>
 
-            <p className="text-zinc-400 text-sm mb-4">
-              Practice role-specific interview questions with tailored feedback.
-            </p>
-
-            <div className="mb-4">
-              <label className="block text-xs text-zinc-500 mb-2">Interviewing for</label>
-              {availableRoles.length === 0 ? (
-                <div className="py-4 px-3 rounded-lg border border-zinc-700 bg-zinc-900/50 text-center">
-                  <p className="text-sm text-zinc-500">No interview roles assigned yet.</p>
-                  <p className="text-xs text-zinc-600 mt-1">Contact your admin to enable roles.</p>
+             <div className="space-y-6">
+                <div>
+                   <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-bold mb-2">Target Role</label>
+                   {availableRoles.length === 0 ? (
+                      <div className="p-4 border border-dashed border-zinc-800 text-center text-xs text-zinc-600 font-mono uppercase">
+                         No roles assigned
+                      </div>
+                   ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                         {availableRoles.map((role) => (
+                            <button
+                               key={role.value}
+                               onClick={() => setSelectedRole(role.value)}
+                               className={`px-3 py-2 text-left border text-xs font-bold uppercase tracking-wider transition-all ${
+                                  selectedRole === role.value 
+                                     ? 'bg-white text-black border-white' 
+                                     : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600'
+                               }`}
+                            >
+                               {role.label}
+                            </button>
+                         ))}
+                      </div>
+                   )}
                 </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {availableRoles.map((role) => (
-                    <button
-                      key={role.value}
-                      onClick={() => setSelectedRole(role.value)}
-                      className={`py-2 px-3 rounded-lg border transition-colors text-left ${
-                        selectedRole === role.value
-                          ? 'bg-matcha-500/20 border-matcha-500 text-matcha-400'
-                          : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                      }`}
-                    >
-                      <div className="text-sm font-medium">{role.label}</div>
-                      <div className="text-xs text-zinc-500">{role.description}</div>
-                    </button>
-                  ))}
+
+                <div>
+                   <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-bold mb-2">Duration</label>
+                   <div className="flex gap-2">
+                      {[5, 8].map((d) => (
+                         <button
+                            key={d}
+                            onClick={() => setSelectedInterviewDuration(d as Duration)}
+                            className={`flex-1 py-2 border text-xs font-bold uppercase tracking-wider transition-all ${
+                               selectedInterviewDuration === d 
+                                  ? 'bg-white text-black border-white' 
+                                  : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600'
+                            }`}
+                         >
+                            {d} MIN
+                         </button>
+                      ))}
+                   </div>
                 </div>
-              )}
-            </div>
 
-            <div className="mb-6">
-              <label className="block text-xs text-zinc-500 mb-2">Session Duration</label>
-              <div className="flex gap-2">
-                {([5, 8] as const).map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setSelectedInterviewDuration(d)}
-                    className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
-                      selectedInterviewDuration === d
-                        ? 'bg-matcha-500/20 border-matcha-500 text-matcha-400'
-                        : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                    }`}
-                  >
-                    {d} min
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <Button
-              onClick={() => handleStartSession('interview_prep', undefined, selectedInterviewDuration, selectedRole)}
-              disabled={starting || (isCandidate && interviewPrepTokens === 0) || (isCandidate && availableRoles.length === 0)}
-              className="w-full"
-            >
-              {starting ? 'Starting...' : availableRoles.length === 0 ? 'No Roles Available' : `Practice ${selectedRole} Interview (${selectedInterviewDuration} min)`}
-            </Button>
-            {isCandidate && (
-              <p className="text-xs text-zinc-500 text-center mt-2">
-                This will use 1 token
-              </p>
-            )}
-          </CardContent>
-        </Card>
+                <Button
+                   onClick={() => handleStartSession('interview_prep', undefined, selectedInterviewDuration, selectedRole)}
+                   disabled={starting || (isCandidate && interviewPrepTokens === 0) || (isCandidate && availableRoles.length === 0)}
+                   className="w-full bg-white text-black hover:bg-zinc-200 font-bold uppercase tracking-widest py-4 rounded-none"
+                >
+                   {starting ? 'INITIALIZING...' : 'START SIMULATION'}
+                </Button>
+                
+                {isCandidate && (
+                   <div className="text-center text-[10px] text-zinc-600 uppercase tracking-wider font-mono">
+                      Cost: 1 Token
+                   </div>
+                )}
+             </div>
+          </div>
+        </div>
 
         {/* Language Test Card - Admin only */}
         {!isCandidate && (
-        <Card className="overflow-hidden">
-          <div className="h-2 bg-gradient-to-r from-blue-500 to-blue-400" />
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-white">Language Test</h3>
-                <p className="text-sm text-zinc-500">Practice conversation</p>
-              </div>
-            </div>
+        <div className="bg-zinc-900/30 border border-zinc-800 p-8 relative overflow-hidden group hover:border-zinc-700 transition-colors">
+           <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
+             <Globe className="w-32 h-32 text-white" />
+          </div>
 
-            <p className="text-zinc-400 text-sm mb-6">
-              Have a natural conversation to practice and improve your language skills.
-              Get gentle corrections and vocabulary suggestions.
-            </p>
+          <div className="relative z-10">
+             <div className="w-12 h-12 bg-zinc-800 border border-zinc-700 flex items-center justify-center mb-6 text-zinc-400">
+                <Globe className="w-6 h-6" />
+             </div>
+             
+             <h2 className="text-xl font-bold text-white uppercase tracking-tight mb-2">Language Lab</h2>
+             <p className="text-zinc-500 text-sm mb-8 max-w-sm">
+               Test fluency and grammar in English or Spanish through natural conversation.
+             </p>
 
-            <div className="mb-4">
-              <label className="block text-xs text-zinc-500 mb-2">Select Language</label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setSelectedLanguage('en')}
-                  className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
-                    selectedLanguage === 'en'
-                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
-                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                  }`}
-                >
-                  English
-                </button>
-                <button
-                  onClick={() => setSelectedLanguage('es')}
-                  className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
-                    selectedLanguage === 'es'
-                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
-                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                  }`}
-                >
-                  Spanish
-                </button>
-              </div>
-            </div>
+             <div className="space-y-6">
+                <div>
+                   <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-bold mb-2">Language</label>
+                   <div className="flex gap-2">
+                      <button
+                         onClick={() => setSelectedLanguage('en')}
+                         className={`flex-1 py-2 border text-xs font-bold uppercase tracking-wider transition-all ${
+                            selectedLanguage === 'en' 
+                               ? 'bg-zinc-800 text-white border-zinc-600' 
+                               : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:border-zinc-700'
+                         }`}
+                      >
+                         English
+                      </button>
+                      <button
+                         onClick={() => setSelectedLanguage('es')}
+                         className={`flex-1 py-2 border text-xs font-bold uppercase tracking-wider transition-all ${
+                            selectedLanguage === 'es' 
+                               ? 'bg-zinc-800 text-white border-zinc-600' 
+                               : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:border-zinc-700'
+                         }`}
+                      >
+                         Spanish
+                      </button>
+                   </div>
+                </div>
 
-            <div className="mb-6">
-              <label className="block text-xs text-zinc-500 mb-2">Session Duration</label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setSelectedDuration(2)}
-                  className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
-                    selectedDuration === 2
-                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
-                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                  }`}
-                >
-                  2 min
-                </button>
-                <button
-                  onClick={() => setSelectedDuration(8)}
-                  className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
-                    selectedDuration === 8
-                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
-                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                  }`}
-                >
-                  8 min
-                </button>
-              </div>
-            </div>
+                <div>
+                   <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-bold mb-2">Duration</label>
+                   <div className="flex gap-2">
+                      {[2, 8].map((d) => (
+                         <button
+                            key={d}
+                            onClick={() => setSelectedDuration(d as Duration)}
+                            className={`flex-1 py-2 border text-xs font-bold uppercase tracking-wider transition-all ${
+                               selectedDuration === d 
+                                  ? 'bg-zinc-800 text-white border-zinc-600' 
+                                  : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:border-zinc-700'
+                            }`}
+                         >
+                            {d} MIN
+                         </button>
+                      ))}
+                   </div>
+                </div>
 
-            <Button
-              onClick={() => handleStartSession('language_test', selectedLanguage, selectedDuration)}
-              disabled={starting}
-              variant="secondary"
-              className="w-full border-blue-500/30 hover:bg-blue-500/10"
-            >
-              {starting ? 'Starting...' : `Practice ${selectedLanguage === 'es' ? 'Spanish' : 'English'} (${selectedDuration} min)`}
-            </Button>
-          </CardContent>
-        </Card>
+                <Button
+                   onClick={() => handleStartSession('language_test', selectedLanguage, selectedDuration)}
+                   disabled={starting}
+                   variant="secondary"
+                   className="w-full bg-transparent border border-white/20 text-white hover:bg-white hover:text-black font-bold uppercase tracking-widest py-4 rounded-none flex items-center justify-center gap-2"
+                >
+                   {starting ? 'INITIALIZING...' : (
+                      <>
+                         <Play size={14} fill="currentColor" /> Start Practice
+                      </>
+                   )}
+                </Button>
+             </div>
+          </div>
+        </div>
         )}
       </div>
-
-      {/* Tips */}
-      <Card>
-        <CardContent>
-          <h3 className="text-sm font-medium text-zinc-400 mb-3">Tips for a good session</h3>
-          <ul className="text-sm text-zinc-500 space-y-2">
-            <li className="flex items-start gap-2">
-              <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
-              Find a quiet place with minimal background noise
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
-              Use headphones for the best audio quality
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
-              Speak naturally and take your time with responses
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 flex-shrink-0" />
-              Choose 2 min for quick practice or 8 min for deeper conversation
-            </li>
-          </ul>
-        </CardContent>
-      </Card>
     </div>
   );
 }

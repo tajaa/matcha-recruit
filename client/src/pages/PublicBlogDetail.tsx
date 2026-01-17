@@ -50,8 +50,7 @@ export function PublicBlogDetail() {
       setLiked(data.liked_by_me);
       setLikesCount(data.likes_count);
       
-      // Update document title
-      document.title = `${data.meta_title || data.title} | Matcha Blog`;
+      document.title = `${data.meta_title || data.title} | Matcha`;
     } catch (err) {
       console.error(err);
       setError('Post not found');
@@ -72,7 +71,6 @@ export function PublicBlogDetail() {
   const handleLike = async () => {
     if (!slug || liking) return;
     
-    // Optimistic update
     const prevLiked = liked;
     const prevCount = likesCount;
     
@@ -87,7 +85,6 @@ export function PublicBlogDetail() {
       setLikesCount(result.likes_count);
     } catch (error) {
       console.error('Failed to toggle like:', error);
-      // Revert on error
       setLiked(prevLiked);
       setLikesCount(prevCount);
     } finally {
@@ -117,7 +114,7 @@ export function PublicBlogDetail() {
       }
     } catch (error) {
       console.error('Failed to submit comment:', error);
-      alert('Failed to submit comment. Please try again.');
+      alert('Failed to submit comment.');
     } finally {
       setSubmittingComment(false);
     }
@@ -147,77 +144,73 @@ export function PublicBlogDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <div className="text-xs font-bold uppercase tracking-widest text-zinc-500 animate-pulse">Loading Transmission...</div>
       </div>
     );
   }
 
   if (error || !post) {
     return (
-      <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center text-zinc-900 space-y-4">
-        <p className="text-zinc-600">{error || 'Post not found'}</p>
+      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center text-white space-y-6">
+        <p className="text-zinc-500 font-mono uppercase tracking-wider">{error || 'Data Not Found'}</p>
         <Link 
           to="/blog"
-          className="text-sm text-emerald-600 hover:text-emerald-700 underline underline-offset-4"
+          className="text-xs font-bold uppercase tracking-widest border border-zinc-700 px-6 py-3 hover:bg-white hover:text-black transition-colors"
         >
-          Back to Blog
+          Return to Archive
         </Link>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#fdfbf7] via-[#f7f7f5] to-[#f4f4f5] text-zinc-900 overflow-hidden relative font-sans selection:bg-emerald-200 selection:text-emerald-900">
-      
+    <div className="min-h-screen bg-zinc-950 text-white font-sans selection:bg-white selection:text-black">
+      {/* Noise Overlay */}
+      <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-30 mix-blend-overlay" />
+
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-6 max-w-5xl mx-auto w-full">
+      <header className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-6 py-6 bg-zinc-950/80 backdrop-blur-xl border-b border-white/10">
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-2 h-2 rounded-full bg-emerald-600 group-hover:scale-125 transition-transform" />
-          <span className="text-xs tracking-[0.3em] uppercase text-zinc-900 font-medium">
-            Matcha
-          </span>
+          <div className="w-8 h-8 bg-white flex items-center justify-center">
+             <div className="w-3 h-3 bg-black group-hover:scale-0 transition-transform duration-500" />
+          </div>
+          <span className="text-sm font-bold tracking-widest uppercase">Matcha</span>
         </Link>
 
-        <nav className="flex items-center gap-6">
-          <Link
-            to="/blog"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-zinc-900 transition-colors"
-          >
-            Blog
+        <nav className="flex items-center gap-8">
+          <Link to="/blog" className="text-xs font-bold tracking-widest uppercase text-zinc-500 hover:text-white transition-colors">
+            Archive
           </Link>
-          <Link
-            to="/login"
-            className="text-[10px] tracking-[0.2em] uppercase text-zinc-500 hover:text-zinc-900 transition-colors"
-          >
+          <Link to="/login" className="px-4 py-2 border border-white/20 text-xs font-bold uppercase tracking-widest hover:bg-white hover:text-black transition-colors">
             Login
           </Link>
         </nav>
       </header>
 
-      <main className="relative z-10 container mx-auto px-4 sm:px-8 py-8 max-w-4xl">
-        <article className="space-y-8 animate-in fade-in duration-700">
+      <main className="relative z-10 container mx-auto px-6 py-32 max-w-4xl">
+        <article className="space-y-12">
           {/* Article Header */}
-          <div className="space-y-4 text-center">
-            <div className="flex items-center justify-center gap-3 text-xs text-emerald-600 font-mono uppercase tracking-wider">
+          <div className="space-y-8 text-center border-b border-white/10 pb-12">
+            <div className="flex items-center justify-center gap-4">
               {post.tags && post.tags.map(tag => (
-                <span key={tag} className="px-2 py-1 rounded bg-emerald-50 border border-emerald-100">
+                <span key={tag} className="text-[10px] font-bold uppercase tracking-widest text-emerald-500 border border-emerald-900/50 bg-emerald-900/10 px-3 py-1">
                   {tag}
                 </span>
               ))}
             </div>
             
-            <h1 className="text-3xl sm:text-5xl font-light tracking-tight text-zinc-900 leading-tight">
+            <h1 className="text-4xl md:text-6xl font-bold tracking-tighter leading-none text-white uppercase">
               {post.title}
             </h1>
 
-            <div className="flex items-center justify-center gap-6 text-sm text-zinc-500 font-mono">
+            <div className="flex items-center justify-center gap-8 text-xs text-zinc-500 font-mono uppercase tracking-wider">
               <span className="flex items-center gap-2">
-                <User className="w-4 h-4" />
-                {post.author_name || 'Matcha Team'}
+                <User size={14} />
+                {post.author_name || 'System'}
               </span>
               <span className="flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
+                <Calendar size={14} />
                 {formatDate(post.published_at || post.created_at)}
               </span>
             </div>
@@ -225,39 +218,40 @@ export function PublicBlogDetail() {
 
           {/* Cover Image */}
           {post.cover_image && (
-            <div className="aspect-video w-full rounded-lg overflow-hidden shadow-sm bg-stone-100">
+            <div className="w-full aspect-[21/9] bg-zinc-900 border border-zinc-800 overflow-hidden relative group">
               <img
                 src={post.cover_image}
                 alt={post.title}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-700 grayscale group-hover:grayscale-0"
               />
+              <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-transparent opacity-50" />
             </div>
           )}
 
           {/* Content */}
-          <div className="prose prose-stone max-w-none prose-p:font-serif prose-p:text-zinc-800 prose-p:leading-normal prose-headings:font-sans prose-headings:font-light prose-a:text-emerald-600 prose-a:no-underline hover:prose-a:underline">
+          <div className="prose prose-invert prose-lg max-w-none prose-headings:font-bold prose-headings:uppercase prose-headings:tracking-tight prose-p:text-zinc-400 prose-p:font-light prose-p:leading-relaxed prose-a:text-white prose-a:no-underline prose-a:border-b prose-a:border-zinc-700 hover:prose-a:border-white prose-blockquote:border-l-white prose-blockquote:text-zinc-300 prose-code:text-emerald-400 prose-code:bg-zinc-900 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-none prose-code:font-mono prose-code:before:content-none prose-code:after:content-none">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {post.content}
             </ReactMarkdown>
           </div>
 
           {/* Footer / Share / Like */}
-          <div className="pt-8 border-t border-zinc-200 flex items-center justify-between">
+          <div className="pt-12 border-t border-white/10 flex flex-col sm:flex-row justify-between items-center gap-6">
             <Link 
               to="/blog"
-              className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-emerald-700 transition-colors group"
+              className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors group"
             >
               <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-              Back to Blog
+              Return to Archive
             </Link>
             
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-6">
               <button
                 onClick={handleLike}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                className={`inline-flex items-center gap-2 px-4 py-2 border text-xs font-bold uppercase tracking-widest transition-all ${
                   liked 
-                    ? 'text-pink-600 bg-pink-50 border border-pink-200' 
-                    : 'text-zinc-500 hover:text-pink-600 hover:bg-pink-50/50 border border-transparent'
+                    ? 'text-emerald-400 border-emerald-900 bg-emerald-900/10' 
+                    : 'text-zinc-500 border-zinc-800 hover:text-white hover:border-zinc-600'
                 }`}
               >
                 <Heart 
@@ -268,94 +262,91 @@ export function PublicBlogDetail() {
               
               <button
                 onClick={handleShare}
-                className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-emerald-700 transition-colors"
+                className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
               >
                 <Share2 className="w-4 h-4" />
-                Share
+                Share Protocol
               </button>
             </div>
           </div>
 
           {/* Comments Section */}
-          <section className="pt-8 space-y-6">
-            <div className="flex items-center gap-3 border-b border-zinc-200 pb-4">
-              <MessageSquare className="w-5 h-5 text-zinc-400" />
-              <h2 className="text-xl font-light tracking-tight text-zinc-900">
-                Comments ({comments.length})
+          <section className="pt-16 max-w-2xl mx-auto">
+            <div className="flex items-center gap-3 border-b border-white/10 pb-6 mb-8">
+              <MessageSquare className="w-5 h-5 text-zinc-500" />
+              <h2 className="text-xl font-bold uppercase tracking-tight text-white">
+                Feedback Loop <span className="text-zinc-600 ml-2">({comments.length})</span>
               </h2>
             </div>
 
             {/* Comment Form */}
-            <form onSubmit={handleSubmitComment} className="space-y-4 bg-white/50 p-6 rounded-lg border border-zinc-200">
-              <div className="grid grid-cols-1 gap-4">
+            <form onSubmit={handleSubmitComment} className="mb-12 bg-zinc-900/30 p-6 border border-white/5">
+              <div className="space-y-6">
                 <div>
-                  <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-2 font-medium">
-                    Name (optional if logged in)
+                  <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-2 font-bold">
+                    Identification (Optional)
                   </label>
                   <input
                     type="text"
                     value={authorName}
                     onChange={(e) => setAuthorName(e.target.value)}
-                    placeholder="Your name"
-                    className="w-full bg-white border border-zinc-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    placeholder="ENTER DESIGNATION..."
+                    className="w-full bg-zinc-950 border border-zinc-800 px-4 py-3 text-sm text-white focus:outline-none focus:border-white/30 transition-colors font-mono placeholder-zinc-700"
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-2 font-medium">
-                    Comment
+                  <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-2 font-bold">
+                    Input Data
                   </label>
                   <textarea
                     value={commentContent}
                     onChange={(e) => setCommentContent(e.target.value)}
-                    placeholder="Share your thoughts..."
+                    placeholder="TRANSMIT MESSAGE..."
                     required
                     rows={4}
-                    className="w-full bg-white border border-zinc-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    className="w-full bg-zinc-950 border border-zinc-800 px-4 py-3 text-sm text-white focus:outline-none focus:border-white/30 transition-colors font-mono placeholder-zinc-700"
                   />
                 </div>
               </div>
               
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] text-zinc-400 italic">
-                  Guest comments will be reviewed by our team before publishing.
-                </p>
+              <div className="flex items-center justify-end mt-6">
                 <button
                   type="submit"
                   disabled={submittingComment || !commentContent.trim()}
-                  className="inline-flex items-center gap-2 px-6 py-2 bg-zinc-900 text-white text-xs font-medium uppercase tracking-widest rounded-md hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  className="inline-flex items-center gap-2 px-8 py-3 bg-white text-black text-xs font-bold uppercase tracking-widest hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
-                  {submittingComment ? 'Sending...' : 'Post Comment'}
+                  {submittingComment ? 'Transmitting...' : 'Send Transmission'}
                   <Send className="w-3.5 h-3.5" />
                 </button>
               </div>
 
               {commentSuccess && (
-                <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs rounded-md animate-in fade-in slide-in-from-top-2">
-                  Thank you! Your comment has been submitted for review.
+                <div className="mt-4 p-3 bg-emerald-900/20 border border-emerald-900/50 text-emerald-400 text-xs font-mono uppercase tracking-wide">
+                   Transmission received. Pending moderation cycle.
                 </div>
               )}
             </form>
 
             {/* Comments List */}
-            <div className="space-y-6">
+            <div className="space-y-px bg-zinc-900 border border-zinc-800">
               {comments.length === 0 ? (
-                <p className="text-center py-8 text-zinc-400 text-sm italic">
-                  No comments yet. Be the first to start the conversation!
-                </p>
+                <div className="text-center py-12 text-zinc-600 text-xs font-mono uppercase tracking-widest">
+                  No data points available
+                </div>
               ) : (
                 comments.map((comment) => (
-                  <div key={comment.id} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-zinc-900">
-                        {comment.author_name}
+                  <div key={comment.id} className="p-6 bg-zinc-950 border-b border-zinc-900">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-bold text-white uppercase tracking-wider">
+                        {comment.author_name || 'Anonymous User'}
                       </span>
-                      <span className="text-[10px] font-mono text-zinc-400 uppercase">
+                      <span className="text-[10px] font-mono text-zinc-600 uppercase">
                         {new Date(comment.created_at).toLocaleDateString()}
                       </span>
                     </div>
-                    <div className="bg-white/30 border border-zinc-100 p-4 rounded-lg text-sm text-zinc-700 leading-relaxed">
+                    <p className="text-sm text-zinc-400 leading-relaxed font-mono">
                       {comment.content}
-                    </div>
+                    </p>
                   </div>
                 ))
               )}
@@ -365,15 +356,14 @@ export function PublicBlogDetail() {
       </main>
 
        {/* Footer */}
-       <footer className="relative z-10 border-t border-zinc-200 mt-20 bg-white/50">
-        <div className="container mx-auto px-4 sm:px-8 py-8 max-w-5xl">
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-zinc-500 text-xs">
-            <span>&copy; {new Date().getFullYear()} Matcha Recruit</span>
-            <div className="flex gap-6">
-              <Link to="/" className="hover:text-zinc-900 transition-colors">Home</Link>
-              <Link to="/blog" className="hover:text-zinc-900 transition-colors">Blog</Link>
-              <Link to="/careers" className="hover:text-zinc-900 transition-colors">Careers</Link>
-            </div>
+       <footer className="relative z-10 border-t border-white/10 mt-20 bg-zinc-950 py-12 px-6">
+        <div className="container mx-auto max-w-5xl flex flex-col sm:flex-row justify-between items-center gap-6">
+          <span className="text-[10px] tracking-[0.3em] text-zinc-600 uppercase">
+            © {new Date().getFullYear()} Matcha Intelligence
+          </span>
+          <div className="flex gap-8">
+            <Link to="/" className="text-[10px] tracking-[0.2em] text-zinc-500 hover:text-white uppercase transition-colors">System</Link>
+            <Link to="/blog" className="text-[10px] tracking-[0.2em] text-zinc-500 hover:text-white uppercase transition-colors">Archive</Link>
           </div>
         </div>
       </footer>
