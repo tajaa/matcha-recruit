@@ -39,7 +39,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
   const pingIntervalRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const optionsRef = useRef(options);
-  const connectRef = useRef<() => void>();
+  const connectRef = useRef<(() => void) | undefined>(undefined);
 
   // Keep options ref updated
   optionsRef.current = options;
