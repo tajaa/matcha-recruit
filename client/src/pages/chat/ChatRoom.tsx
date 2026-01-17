@@ -1,16 +1,19 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Users, UserPlus, LogOut, RefreshCw, AlertCircle } from 'lucide-react';
+import { Users, UserPlus, LogOut, RefreshCw, AlertCircle, Video, VideoOff } from 'lucide-react';
 import { chatRooms, chatMessages } from '../../api/chatClient';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
+import { useChatAuth } from '../../context/ChatAuthContext';
 import { MessageList } from '../../components/chat/MessageList';
 import { MessageInput } from '../../components/chat/MessageInput';
 import { RoomIcon } from '../../components/chat/RoomIcon';
+import { VideoCall } from '../../components/video/VideoCall';
 import type { ChatRoom as ChatRoomType, ChatMessage, ChatUser } from '../../types/chat';
 
 export default function ChatRoom() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const { user } = useChatAuth();
 
   const [room, setRoom] = useState<ChatRoomType | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -21,6 +24,7 @@ export default function ChatRoom() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isMember, setIsMember] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isInCall, setIsInCall] = useState(false);
 
   // Track if messages have been loaded to prevent race condition
   const messagesLoadedRef = useRef(false);
@@ -293,8 +297,8 @@ export default function ChatRoom() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 text-xs text-zinc-500 mr-2">
               <div className={`w-2 h-2 rounded-full ${
                 isConnected
                   ? 'bg-emerald-500'
@@ -306,6 +310,18 @@ export default function ChatRoom() {
                 {isReconnecting ? 'Reconnecting...' : `${onlineUsers.length} online`}
               </span>
             </div>
+
+            <button
+              onClick={() => setIsInCall(!isInCall)}
+              className={`p-2 rounded transition-colors ${
+                isInCall
+                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                  : 'hover:bg-white/5 text-zinc-500 hover:text-zinc-300'
+              }`}
+              title={isInCall ? 'Leave call' : 'Start video call'}
+            >
+              {isInCall ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+            </button>
 
             <button
               onClick={handleLeaveRoom}
@@ -331,21 +347,31 @@ export default function ChatRoom() {
         )}
       </div>
 
-      {/* Messages */}
-      <MessageList
-        messages={messages}
-        onLoadMore={handleLoadMore}
-        hasMore={hasMore}
-        isLoading={isLoadingMore}
-      />
+      {/* Content Area - Video Call or Messages */}
+      {isInCall ? (
+        <VideoCall
+          roomName={room.slug}
+          displayName={user ? `${user.first_name} ${user.last_name}` : 'Guest'}
+          onClose={() => setIsInCall(false)}
+        />
+      ) : (
+        <>
+          <MessageList
+            messages={messages}
+            onLoadMore={handleLoadMore}
+            hasMore={hasMore}
+            isLoading={isLoadingMore}
+          />
 
-      {/* Input */}
-      <MessageInput
-        onSendMessage={handleSendMessage}
-        onTyping={handleTyping}
-        disabled={!isConnected}
-        disabledReason={getInputDisabledReason()}
-      />
+          {/* Input */}
+          <MessageInput
+            onSendMessage={handleSendMessage}
+            onTyping={handleTyping}
+            disabled={!isConnected}
+            disabledReason={getInputDisabledReason()}
+          />
+        </>
+      )}
     </div>
   );
 }
