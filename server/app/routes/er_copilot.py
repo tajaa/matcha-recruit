@@ -8,7 +8,6 @@ Employee Relations Investigation management:
 - Evidence search (RAG)
 """
 
-import asyncio
 import json
 import logging
 import secrets
@@ -431,26 +430,40 @@ async def upload_document(
         except Exception as e:
             logger.warning(f"Celery unavailable ({e}), will process document synchronously")
 
-        # Fallback: process in background if Celery not available
+        # Fallback: process synchronously if Celery not available
         if not celery_available:
-            async def process_with_error_handling():
-                try:
-                    from ..workers.tasks.er_document_processing import _process_document
-                    logger.info(f"Starting sync processing for document {row['id']}")
-                    result = await _process_document(str(row["id"]), str(case_id))
-                    logger.info(f"Document {row['id']} processed successfully: {result}")
-                except Exception as sync_error:
-                    logger.error(f"Document {row['id']} processing failed: {sync_error}", exc_info=True)
-                    async with get_connection() as err_conn:
-                        await err_conn.execute(
-                            """UPDATE er_case_documents
-                               SET processing_status = 'failed', processing_error = $1
-                               WHERE id = $2""",
-                            str(sync_error),
-                            row["id"],
-                        )
-
-            asyncio.create_task(process_with_error_handling())
+            try:
+                from ..workers.tasks.er_document_processing import _process_document
+                logger.info(f"Starting synchronous processing for document {row['id']}")
+                result = await _process_document(str(row["id"]), str(case_id))
+                logger.info(f"Document {row['id']} processed successfully: {result}")
+                # Refresh document data after processing
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, case_id, document_type, filename, file_path, mime_type, file_size,
+                           pii_scrubbed, processing_status, processing_error, parsed_at, uploaded_by, created_at
+                    FROM er_case_documents WHERE id = $1
+                    """,
+                    row["id"],
+                )
+            except Exception as sync_error:
+                logger.error(f"Document {row['id']} processing failed: {sync_error}", exc_info=True)
+                await conn.execute(
+                    """UPDATE er_case_documents
+                       SET processing_status = 'failed', processing_error = $1
+                       WHERE id = $2""",
+                    str(sync_error),
+                    row["id"],
+                )
+                # Refresh document data after failure
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, case_id, document_type, filename, file_path, mime_type, file_size,
+                           pii_scrubbed, processing_status, processing_error, parsed_at, uploaded_by, created_at
+                    FROM er_case_documents WHERE id = $1
+                    """,
+                    row["id"],
+                )
 
         document = ERDocumentResponse(
             id=row["id"],
@@ -606,28 +619,30 @@ async def reprocess_document(
         )
     except Exception as e:
         logger.warning(f"Celery unavailable ({e}), processing synchronously")
-        # Fallback to sync processing
-        async def process_sync():
-            try:
-                from ..workers.tasks.er_document_processing import _process_document
-                await _process_document(str(doc_id), str(case_id))
-            except Exception as sync_error:
-                logger.error(f"Reprocess failed: {sync_error}", exc_info=True)
-                async with get_connection() as err_conn:
-                    await err_conn.execute(
-                        """UPDATE er_case_documents
-                           SET processing_status = 'failed', processing_error = $1
-                           WHERE id = $2""",
-                        str(sync_error),
-                        doc_id,
-                    )
-
-        asyncio.create_task(process_sync())
-        return TaskStatusResponse(
-            task_id=None,
-            status="processing",
-            message="Document being reprocessed (synchronous mode)",
-        )
+        # Fallback to synchronous processing
+        try:
+            from ..workers.tasks.er_document_processing import _process_document
+            await _process_document(str(doc_id), str(case_id))
+            return TaskStatusResponse(
+                task_id=None,
+                status="completed",
+                message="Document reprocessed successfully",
+            )
+        except Exception as sync_error:
+            logger.error(f"Reprocess failed: {sync_error}", exc_info=True)
+            async with get_connection() as err_conn:
+                await err_conn.execute(
+                    """UPDATE er_case_documents
+                       SET processing_status = 'failed', processing_error = $1
+                       WHERE id = $2""",
+                    str(sync_error),
+                    doc_id,
+                )
+            return TaskStatusResponse(
+                task_id=None,
+                status="failed",
+                message=f"Reprocessing failed: {str(sync_error)}",
+            )
 
 
 @router.delete("/{case_id}/documents/{doc_id}")
