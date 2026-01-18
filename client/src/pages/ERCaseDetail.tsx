@@ -182,6 +182,25 @@ export function ERCaseDetail() {
     }
   };
 
+  const [reprocessingAll, setReprocessingAll] = useState(false);
+
+  const handleReprocessAllDocs = async () => {
+    if (!id) return;
+    setReprocessingAll(true);
+    try {
+      const result = await erCopilot.reprocessAllDocuments(id);
+      console.log('Reprocess all result:', result);
+      // Refresh documents to show updated status
+      fetchDocuments();
+    } catch (err) {
+      console.error('Failed to reprocess all documents:', err);
+    } finally {
+      setReprocessingAll(false);
+    }
+  };
+
+  const hasUnprocessedDocs = documents.some(d => d.processing_status === 'pending' || d.processing_status === 'failed');
+
   const handleGenerateTimeline = async () => {
     if (!id) return;
     setAnalysisLoading('timeline');
@@ -305,13 +324,26 @@ export function ERCaseDetail() {
         <div className="lg:col-span-1 space-y-6">
           <div className="flex justify-between items-center border-b border-zinc-200 pb-2">
             <h2 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Evidence</h2>
-            <button 
-              onClick={() => setShowUploadModal(true)}
-              className="text-[10px] text-zinc-900 hover:text-zinc-600 flex items-center gap-1 uppercase tracking-wide font-medium"
-            >
-              <Upload size={10} />
-              Upload
-            </button>
+            <div className="flex items-center gap-3">
+              {hasUnprocessedDocs && (
+                <button
+                  onClick={handleReprocessAllDocs}
+                  disabled={reprocessingAll}
+                  className="text-[10px] text-amber-600 hover:text-amber-500 flex items-center gap-1 uppercase tracking-wide font-medium disabled:opacity-50"
+                  title="Reprocess all pending/failed documents"
+                >
+                  <RefreshCw size={10} className={reprocessingAll ? 'animate-spin' : ''} />
+                  {reprocessingAll ? 'Processing...' : 'Reprocess All'}
+                </button>
+              )}
+              <button
+                onClick={() => setShowUploadModal(true)}
+                className="text-[10px] text-zinc-900 hover:text-zinc-600 flex items-center gap-1 uppercase tracking-wide font-medium"
+              >
+                <Upload size={10} />
+                Upload
+              </button>
+            </div>
           </div>
 
           <div className="min-h-[200px]">

@@ -420,9 +420,11 @@ async def upload_document(
         celery_available = False
         try:
             from ..workers.tasks.er_document_processing import process_er_document
-            # Check if Celery broker is reachable
+            # Check if Celery broker AND workers are available
             from ..workers.celery_app import celery_app
-            celery_app.control.ping(timeout=1)
+            ping_responses = celery_app.control.ping(timeout=1)
+            if not ping_responses:
+                raise RuntimeError("No Celery workers responded to ping")
             task = process_er_document.delay(str(row["id"]), str(case_id))
             task_id = task.id
             celery_available = True
@@ -610,7 +612,9 @@ async def reprocess_document(
     try:
         from ..workers.tasks.er_document_processing import process_er_document
         from ..workers.celery_app import celery_app
-        celery_app.control.ping(timeout=1)
+        ping_responses = celery_app.control.ping(timeout=1)
+        if not ping_responses:
+            raise RuntimeError("No Celery workers responded to ping")
         task = process_er_document.delay(str(doc_id), str(case_id))
         return TaskStatusResponse(
             task_id=task.id,
@@ -643,6 +647,77 @@ async def reprocess_document(
                 status="failed",
                 message=f"Reprocessing failed: {str(sync_error)}",
             )
+
+
+@router.post("/{case_id}/documents/reprocess-all")
+async def reprocess_all_documents(
+    case_id: UUID,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Reprocess all pending or failed documents in a case."""
+    async with get_connection() as conn:
+        # Find all documents that need processing
+        docs = await conn.fetch(
+            """
+            SELECT id, filename, processing_status
+            FROM er_case_documents
+            WHERE case_id = $1 AND processing_status IN ('pending', 'failed')
+            """,
+            case_id,
+        )
+
+        if not docs:
+            return {
+                "status": "no_action",
+                "message": "No pending or failed documents to reprocess",
+                "processed": 0,
+            }
+
+        results = []
+        for doc in docs:
+            doc_id = doc["id"]
+            try:
+                # Reset status
+                await conn.execute(
+                    "UPDATE er_case_documents SET processing_status = 'pending', processing_error = NULL WHERE id = $1",
+                    doc_id,
+                )
+                # Delete existing chunks
+                await conn.execute("DELETE FROM er_evidence_chunks WHERE document_id = $1", doc_id)
+
+                # Process synchronously (most reliable)
+                from ..workers.tasks.er_document_processing import _process_document
+                await _process_document(str(doc_id), str(case_id))
+                results.append({"id": str(doc_id), "filename": doc["filename"], "status": "completed"})
+            except Exception as e:
+                logger.error(f"Failed to reprocess document {doc_id}: {e}", exc_info=True)
+                await conn.execute(
+                    "UPDATE er_case_documents SET processing_status = 'failed', processing_error = $1 WHERE id = $2",
+                    str(e),
+                    doc_id,
+                )
+                results.append({"id": str(doc_id), "filename": doc["filename"], "status": "failed", "error": str(e)})
+
+        await log_audit(
+            conn,
+            str(case_id),
+            str(current_user.id),
+            "documents_batch_reprocessed",
+            "case",
+            str(case_id),
+            {"count": len(docs), "results": results},
+            request.client.host if request.client else None,
+        )
+
+        completed = sum(1 for r in results if r["status"] == "completed")
+        return {
+            "status": "completed",
+            "message": f"Reprocessed {completed}/{len(docs)} documents",
+            "processed": completed,
+            "total": len(docs),
+            "results": results,
+        }
 
 
 @router.delete("/{case_id}/documents/{doc_id}")

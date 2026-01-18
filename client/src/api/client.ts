@@ -1157,6 +1157,17 @@ export const erCopilot = {
       method: 'POST',
     }),
 
+  reprocessAllDocuments: (caseId: string): Promise<{
+    status: string;
+    message: string;
+    processed: number;
+    total?: number;
+    results?: Array<{ id: string; filename: string; status: string; error?: string }>;
+  }> =>
+    request(`/er/cases/${caseId}/documents/reprocess-all`, {
+      method: 'POST',
+    }),
+
   // Analysis
   generateTimeline: (caseId: string): Promise<ERTaskStatus> =>
     request<ERTaskStatus>(`/er/cases/${caseId}/analysis/timeline`, {

@@ -12,7 +12,9 @@ load_dotenv()
 
 async def get_db_connection() -> asyncpg.Connection:
     """Create a database connection for the worker."""
-    database_url = os.getenv("DATABASE_URL", "")
+    database_url = os.getenv("DATABASE_URL", "").strip().strip('"')
+    if not database_url:
+        raise RuntimeError("DATABASE_URL environment variable not set")
     return await asyncpg.connect(database_url)
 
 
