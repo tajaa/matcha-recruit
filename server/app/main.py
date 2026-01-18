@@ -78,6 +78,9 @@ from .routes import (
     projects_router,
     public_jobs_router,
     offer_letters_router,
+    creators_router,
+    agencies_router,
+    deals_router,
 )
 from .routes.leads_agent import router as leads_agent_router
 from .routes.er_copilot import router as er_copilot_router
@@ -116,6 +119,9 @@ app.include_router(employees_router, prefix="/api/employees", tags=["employees"]
 app.include_router(invitations_router, prefix="/api/invitations", tags=["invitations"])
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])
+app.include_router(creators_router, prefix="/api/creators", tags=["creators"])
+app.include_router(agencies_router, prefix="/api/agencies", tags=["agencies"])
+app.include_router(deals_router, prefix="/api/deals", tags=["deals"])
 
 
 @app.get("/health")

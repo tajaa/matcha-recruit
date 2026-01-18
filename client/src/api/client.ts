@@ -1725,3 +1725,464 @@ export const leadsAgent = {
       }),
   },
 };
+
+// =============================================================================
+// CREATOR PLATFORM API
+// =============================================================================
+
+import type {
+  Creator,
+  CreatorUpdate,
+  CreatorPublic,
+  CreatorRegister,
+  PlatformConnection,
+  RevenueStream,
+  RevenueStreamCreate,
+  RevenueStreamUpdate,
+  RevenueEntry,
+  RevenueEntryCreate,
+  RevenueEntryUpdate,
+  Expense,
+  ExpenseCreate,
+  ExpenseUpdate,
+  RevenueOverview,
+} from '../types/creator';
+
+import type {
+  Agency,
+  AgencyUpdate,
+  AgencyPublic,
+  AgencyRegister,
+  AgencyMember,
+  AgencyMemberInvite,
+  AgencyMemberUpdate,
+  AgencyWithMembership,
+} from '../types/agency';
+
+import type {
+  BrandDeal,
+  BrandDealCreate,
+  BrandDealUpdate,
+  BrandDealPublic,
+  DealApplication,
+  DealApplicationCreate,
+  DealApplicationUpdate,
+  ApplicationStatusUpdate,
+  DealContract,
+  ContractCreate,
+  ContractStatusUpdate,
+  ContractPayment,
+  PaymentCreate,
+  PaymentUpdate,
+} from '../types/deals';
+
+// Creator API
+export const creators = {
+  // Profile
+  getMyProfile: () => request<Creator>('/creators/me'),
+
+  updateMyProfile: (data: CreatorUpdate) =>
+    request<Creator>('/creators/me', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getPublicProfile: (creatorId: string) =>
+    request<CreatorPublic>(`/creators/public/${creatorId}`),
+
+  discover: (params?: {
+    niches?: string;
+    min_followers?: number;
+    max_followers?: number;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.niches) searchParams.append('niches', params.niches);
+    if (params?.min_followers) searchParams.append('min_followers', params.min_followers.toString());
+    if (params?.max_followers) searchParams.append('max_followers', params.max_followers.toString());
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.offset) searchParams.append('offset', params.offset.toString());
+    const query = searchParams.toString();
+    return request<CreatorPublic[]>(`/creators/discover${query ? `?${query}` : ''}`);
+  },
+
+  // Platform connections
+  listPlatformConnections: () =>
+    request<PlatformConnection[]>('/creators/me/platforms'),
+
+  disconnectPlatform: (platform: string) =>
+    request<{ status: string }>(`/creators/me/platforms/${platform}`, {
+      method: 'DELETE',
+    }),
+
+  // Revenue streams
+  createRevenueStream: (data: RevenueStreamCreate) =>
+    request<RevenueStream>('/creators/me/revenue-streams', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listRevenueStreams: (activeOnly = true) =>
+    request<RevenueStream[]>(`/creators/me/revenue-streams?active_only=${activeOnly}`),
+
+  updateRevenueStream: (streamId: string, data: RevenueStreamUpdate) =>
+    request<RevenueStream>(`/creators/me/revenue-streams/${streamId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteRevenueStream: (streamId: string) =>
+    request<{ status: string }>(`/creators/me/revenue-streams/${streamId}`, {
+      method: 'DELETE',
+    }),
+
+  // Revenue entries
+  createRevenueEntry: (data: RevenueEntryCreate) =>
+    request<RevenueEntry>('/creators/me/revenue', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listRevenueEntries: (params?: {
+    start_date?: string;
+    end_date?: string;
+    stream_id?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.start_date) searchParams.append('start_date', params.start_date);
+    if (params?.end_date) searchParams.append('end_date', params.end_date);
+    if (params?.stream_id) searchParams.append('stream_id', params.stream_id);
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.offset) searchParams.append('offset', params.offset.toString());
+    const query = searchParams.toString();
+    return request<RevenueEntry[]>(`/creators/me/revenue${query ? `?${query}` : ''}`);
+  },
+
+  updateRevenueEntry: (entryId: string, data: RevenueEntryUpdate) =>
+    request<RevenueEntry>(`/creators/me/revenue/${entryId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteRevenueEntry: (entryId: string) =>
+    request<{ status: string }>(`/creators/me/revenue/${entryId}`, {
+      method: 'DELETE',
+    }),
+
+  // Expenses
+  createExpense: (data: ExpenseCreate) =>
+    request<Expense>('/creators/me/expenses', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listExpenses: (params?: {
+    start_date?: string;
+    end_date?: string;
+    category?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.start_date) searchParams.append('start_date', params.start_date);
+    if (params?.end_date) searchParams.append('end_date', params.end_date);
+    if (params?.category) searchParams.append('category', params.category);
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.offset) searchParams.append('offset', params.offset.toString());
+    const query = searchParams.toString();
+    return request<Expense[]>(`/creators/me/expenses${query ? `?${query}` : ''}`);
+  },
+
+  updateExpense: (expenseId: string, data: ExpenseUpdate) =>
+    request<Expense>(`/creators/me/expenses/${expenseId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteExpense: (expenseId: string) =>
+    request<{ status: string }>(`/creators/me/expenses/${expenseId}`, {
+      method: 'DELETE',
+    }),
+
+  uploadReceipt: async (expenseId: string, file: File): Promise<{ status: string; receipt_url: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/creators/me/expenses/${expenseId}/receipt`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return response.json();
+  },
+
+  // Dashboard
+  getDashboard: () => request<RevenueOverview>('/creators/me/dashboard'),
+};
+
+// Agency API
+export const agencies = {
+  // Profile
+  getMyAgency: () => request<AgencyWithMembership>('/agencies/me'),
+
+  updateMyAgency: (data: AgencyUpdate) =>
+    request<Agency>('/agencies/me', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getPublicAgency: (slug: string) =>
+    request<AgencyPublic>(`/agencies/public/${slug}`),
+
+  // Team management
+  listMembers: () => request<AgencyMember[]>('/agencies/me/members'),
+
+  inviteMember: (data: AgencyMemberInvite) =>
+    request<AgencyMember>('/agencies/me/members', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateMember: (memberId: string, data: AgencyMemberUpdate) =>
+    request<AgencyMember>(`/agencies/me/members/${memberId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  removeMember: (memberId: string) =>
+    request<{ status: string }>(`/agencies/me/members/${memberId}`, {
+      method: 'DELETE',
+    }),
+
+  // Creator discovery
+  searchCreators: (params?: {
+    query?: string;
+    niches?: string;
+    min_followers?: number;
+    verified_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.query) searchParams.append('query', params.query);
+    if (params?.niches) searchParams.append('niches', params.niches);
+    if (params?.min_followers) searchParams.append('min_followers', params.min_followers.toString());
+    if (params?.verified_only) searchParams.append('verified_only', 'true');
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.offset) searchParams.append('offset', params.offset.toString());
+    const query = searchParams.toString();
+    return request<CreatorPublic[]>(`/agencies/creators/search${query ? `?${query}` : ''}`);
+  },
+
+  getCreatorProfile: (creatorId: string) =>
+    request<CreatorPublic>(`/agencies/creators/${creatorId}`),
+};
+
+// Deals API
+export const deals = {
+  // Marketplace (for creators)
+  browseMarketplace: (params?: {
+    niches?: string;
+    min_compensation?: number;
+    max_compensation?: number;
+    platforms?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.niches) searchParams.append('niches', params.niches);
+    if (params?.min_compensation) searchParams.append('min_compensation', params.min_compensation.toString());
+    if (params?.max_compensation) searchParams.append('max_compensation', params.max_compensation.toString());
+    if (params?.platforms) searchParams.append('platforms', params.platforms);
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.offset) searchParams.append('offset', params.offset.toString());
+    const query = searchParams.toString();
+    return request<BrandDealPublic[]>(`/deals/marketplace${query ? `?${query}` : ''}`);
+  },
+
+  getMarketplaceDeal: (dealId: string) =>
+    request<BrandDealPublic>(`/deals/marketplace/${dealId}`),
+
+  // Agency deal management
+  createDeal: (data: BrandDealCreate) =>
+    request<BrandDeal>('/deals/agency/deals', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listAgencyDeals: (status?: string) => {
+    const query = status ? `?status=${status}` : '';
+    return request<BrandDeal[]>(`/deals/agency/deals${query}`);
+  },
+
+  getAgencyDeal: (dealId: string) =>
+    request<BrandDeal>(`/deals/agency/deals/${dealId}`),
+
+  updateDeal: (dealId: string, data: BrandDealUpdate) =>
+    request<BrandDeal>(`/deals/agency/deals/${dealId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteDeal: (dealId: string) =>
+    request<{ status: string }>(`/deals/agency/deals/${dealId}`, {
+      method: 'DELETE',
+    }),
+
+  // Creator applications
+  applyToDeal: (dealId: string, data: DealApplicationCreate) =>
+    request<DealApplication>(`/deals/apply/${dealId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listMyApplications: (status?: string) => {
+    const query = status ? `?status=${status}` : '';
+    return request<DealApplication[]>(`/deals/my-applications${query}`);
+  },
+
+  updateMyApplication: (applicationId: string, data: DealApplicationUpdate) =>
+    request<DealApplication>(`/deals/my-applications/${applicationId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  withdrawApplication: (applicationId: string) =>
+    request<{ status: string }>(`/deals/my-applications/${applicationId}/withdraw`, {
+      method: 'POST',
+    }),
+
+  // Agency application review
+  listDealApplications: (dealId: string, status?: string) => {
+    const query = status ? `?status=${status}` : '';
+    return request<DealApplication[]>(`/deals/agency/deals/${dealId}/applications${query}`);
+  },
+
+  updateApplicationStatus: (applicationId: string, data: ApplicationStatusUpdate) =>
+    request<DealApplication>(`/deals/agency/applications/${applicationId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  // Contracts
+  createContract: (applicationId: string, data: ContractCreate) =>
+    request<DealContract>(`/deals/agency/applications/${applicationId}/contract`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listMyContracts: (status?: string) => {
+    const query = status ? `?status=${status}` : '';
+    return request<DealContract[]>(`/deals/my-contracts${query}`);
+  },
+
+  listAgencyContracts: (status?: string) => {
+    const query = status ? `?status=${status}` : '';
+    return request<DealContract[]>(`/deals/agency/contracts${query}`);
+  },
+
+  updateContractStatus: (contractId: string, data: ContractStatusUpdate) =>
+    request<{ status: string; new_status: string }>(`/deals/agency/contracts/${contractId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  // Payments
+  addPayment: (contractId: string, data: PaymentCreate) =>
+    request<ContractPayment>(`/deals/agency/contracts/${contractId}/payments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listPayments: (contractId: string) =>
+    request<ContractPayment[]>(`/deals/contracts/${contractId}/payments`),
+
+  updatePayment: (paymentId: string, data: PaymentUpdate) =>
+    request<ContractPayment>(`/deals/agency/payments/${paymentId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+};
+
+// Auth extensions for creator/agency registration
+export const authExtended = {
+  registerCreator: async (data: CreatorRegister): Promise<TokenResponse> => {
+    const response = await fetch(`${API_BASE}/auth/register/creator`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(error.detail || 'Registration failed');
+    }
+
+    const result: TokenResponse = await response.json();
+    setTokens(result.access_token, result.refresh_token);
+    return result;
+  },
+
+  registerAgency: async (data: AgencyRegister): Promise<TokenResponse> => {
+    const response = await fetch(`${API_BASE}/auth/register/agency`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(error.detail || 'Registration failed');
+    }
+
+    const result: TokenResponse = await response.json();
+    setTokens(result.access_token, result.refresh_token);
+    return result;
+  },
+};
+
+// Combined API object for convenient imports
+export const api = {
+  auth,
+  authExtended,
+  companies,
+  interviews,
+  candidates,
+  matching,
+  positions,
+  bulkImport,
+  jobSearch,
+  openings,
+  settings,
+  projects,
+  outreach,
+  screening,
+  tutor,
+  tutorMetrics,
+  publicJobs,
+  erCopilot,
+  irIncidents,
+  adminBeta,
+  blogs,
+  policies,
+  offerLetters,
+  leadsAgent,
+  creators,
+  agencies,
+  deals,
+};

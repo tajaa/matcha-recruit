@@ -17,6 +17,9 @@ from .public_signatures import router as public_signatures_router
 from .offer_letters import router as offer_letters_router
 from .compliance import router as compliance_router
 from .blog import router as blog_router
+from .creators import router as creators_router
+from .agencies import router as agencies_router
+from .deals import router as deals_router
 
 __all__ = [
     "companies_router",
@@ -38,4 +41,7 @@ __all__ = [
     "offer_letters_router",
     "compliance_router",
     "blog_router",
+    "creators_router",
+    "agencies_router",
+    "deals_router",
 ]

@@ -64,6 +64,22 @@ const ChatLayout = lazy(() => import('./pages/chat/ChatLayout'));
 const ChatLobby = lazy(() => import('./pages/chat/ChatLobby'));
 const ChatRoom = lazy(() => import('./pages/chat/ChatRoom'));
 
+// Creator Pages
+const CreatorDashboard = lazy(() => import('./pages/creator/CreatorDashboard'));
+const RevenueDashboard = lazy(() => import('./pages/creator/RevenueDashboard'));
+const ExpenseTracker = lazy(() => import('./pages/creator/ExpenseTracker'));
+const PlatformConnections = lazy(() => import('./pages/creator/PlatformConnections'));
+const DealMarketplace = lazy(() => import('./pages/creator/DealMarketplace'));
+const MyApplications = lazy(() => import('./pages/creator/MyApplications'));
+const MyContracts = lazy(() => import('./pages/creator/MyContracts'));
+
+// Agency Pages
+const AgencyDashboard = lazy(() => import('./pages/agency/AgencyDashboard'));
+const DealManager = lazy(() => import('./pages/agency/DealManager'));
+const CreatorDiscovery = lazy(() => import('./pages/agency/CreatorDiscovery'));
+const ApplicationReview = lazy(() => import('./pages/agency/ApplicationReview'));
+const ContractManager = lazy(() => import('./pages/agency/ContractManager'));
+
 // Loading fallback
 function PageLoader() {
   return (
@@ -393,6 +409,106 @@ function App() {
                 element={
                   <ProtectedRoute roles={['employee']}>
                     <PortalProfile />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Creator Routes */}
+              <Route
+                path="creator"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <CreatorDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="creator/revenue"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <RevenueDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="creator/expenses"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <ExpenseTracker />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="creator/platforms"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <PlatformConnections />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="creator/deals"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <DealMarketplace />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="creator/applications"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <MyApplications />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="creator/contracts"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <MyContracts />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Agency Routes */}
+              <Route
+                path="agency"
+                element={
+                  <ProtectedRoute roles={['agency']}>
+                    <AgencyDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="agency/deals"
+                element={
+                  <ProtectedRoute roles={['agency']}>
+                    <DealManager />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="agency/creators"
+                element={
+                  <ProtectedRoute roles={['agency']}>
+                    <CreatorDiscovery />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="agency/applications"
+                element={
+                  <ProtectedRoute roles={['agency']}>
+                    <ApplicationReview />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="agency/contracts"
+                element={
+                  <ProtectedRoute roles={['agency']}>
+                    <ContractManager />
                   </ProtectedRoute>
                 }
               />

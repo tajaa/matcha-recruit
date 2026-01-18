@@ -100,6 +100,25 @@ async def init_db():
             END $$;
         """)
 
+        # Update users role constraint to include creator and agency roles
+        await conn.execute("""
+            DO $$
+            BEGIN
+                -- Drop the old constraint if it exists and recreate with new values
+                IF EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check'
+                ) THEN
+                    ALTER TABLE users DROP CONSTRAINT users_role_check;
+                    ALTER TABLE users ADD CONSTRAINT users_role_check
+                        CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency'));
+                END IF;
+            EXCEPTION WHEN undefined_object THEN
+                -- Constraint doesn't exist, add it
+                ALTER TABLE users ADD CONSTRAINT users_role_check
+                    CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency'));
+            END $$;
+        """)
+
         # Admins table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS admins (
@@ -1367,6 +1386,342 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON chat_messages(user_id)
         """)
+
+        # ===========================================
+        # Creator Platform Tables
+        # ===========================================
+
+        # Creators table (creator profiles linked to users)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS creators (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+                display_name VARCHAR(255) NOT NULL,
+                bio TEXT,
+                profile_image_url TEXT,
+                niches JSONB DEFAULT '[]',
+                social_handles JSONB DEFAULT '{}',
+                audience_demographics JSONB DEFAULT '{}',
+                metrics JSONB DEFAULT '{}',
+                is_verified BOOLEAN DEFAULT false,
+                is_public BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_creators_user_id ON creators(user_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_creators_is_public ON creators(is_public)
+        """)
+
+        # Creator platform connections (OAuth tokens)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS creator_platform_connections (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                platform VARCHAR(50) NOT NULL CHECK (platform IN ('youtube', 'patreon', 'tiktok', 'instagram', 'twitch', 'twitter', 'spotify')),
+                platform_user_id VARCHAR(255),
+                platform_username VARCHAR(255),
+                access_token_encrypted TEXT,
+                refresh_token_encrypted TEXT,
+                token_expires_at TIMESTAMP,
+                scopes JSONB DEFAULT '[]',
+                last_synced_at TIMESTAMP,
+                sync_status VARCHAR(50) DEFAULT 'pending' CHECK (sync_status IN ('pending', 'syncing', 'synced', 'failed')),
+                sync_error TEXT,
+                platform_data JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(creator_id, platform)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_creator_platform_connections_creator_id ON creator_platform_connections(creator_id)
+        """)
+
+        # Revenue streams (categories of income)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS revenue_streams (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                category VARCHAR(100) NOT NULL CHECK (category IN ('adsense', 'sponsorship', 'affiliate', 'merch', 'subscription', 'tips', 'licensing', 'services', 'other')),
+                platform VARCHAR(100),
+                description TEXT,
+                is_active BOOLEAN DEFAULT true,
+                tax_category VARCHAR(100),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_revenue_streams_creator_id ON revenue_streams(creator_id)
+        """)
+
+        # Revenue entries (individual transactions)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS revenue_entries (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                stream_id UUID REFERENCES revenue_streams(id) ON DELETE SET NULL,
+                amount DECIMAL(12, 2) NOT NULL,
+                currency VARCHAR(10) DEFAULT 'USD',
+                date DATE NOT NULL,
+                description TEXT,
+                source VARCHAR(255),
+                is_recurring BOOLEAN DEFAULT false,
+                tax_category VARCHAR(100),
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_revenue_entries_creator_id ON revenue_entries(creator_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_revenue_entries_date ON revenue_entries(date)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_revenue_entries_stream_id ON revenue_entries(stream_id)
+        """)
+
+        # Creator expenses (for tax tracking)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS creator_expenses (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                amount DECIMAL(12, 2) NOT NULL,
+                currency VARCHAR(10) DEFAULT 'USD',
+                date DATE NOT NULL,
+                category VARCHAR(100) NOT NULL CHECK (category IN ('equipment', 'software', 'travel', 'marketing', 'contractors', 'office', 'education', 'legal', 'other')),
+                description TEXT NOT NULL,
+                vendor VARCHAR(255),
+                receipt_url TEXT,
+                is_deductible BOOLEAN DEFAULT true,
+                tax_category VARCHAR(100),
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_creator_expenses_creator_id ON creator_expenses(creator_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_creator_expenses_date ON creator_expenses(date)
+        """)
+
+        # ===========================================
+        # Agency Tables
+        # ===========================================
+
+        # Agencies table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS agencies (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(255) NOT NULL,
+                slug VARCHAR(255) NOT NULL UNIQUE,
+                agency_type VARCHAR(50) NOT NULL CHECK (agency_type IN ('talent', 'brand', 'hybrid')),
+                description TEXT,
+                logo_url TEXT,
+                website_url TEXT,
+                is_verified BOOLEAN DEFAULT false,
+                verification_status VARCHAR(50) DEFAULT 'pending' CHECK (verification_status IN ('pending', 'in_review', 'verified', 'rejected')),
+                contact_email VARCHAR(255),
+                industries JSONB DEFAULT '[]',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_agencies_slug ON agencies(slug)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_agencies_agency_type ON agencies(agency_type)
+        """)
+
+        # Agency members (team members)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS agency_members (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                agency_id UUID NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                role VARCHAR(50) NOT NULL CHECK (role IN ('owner', 'admin', 'member')),
+                title VARCHAR(255),
+                permissions JSONB DEFAULT '{}',
+                invited_at TIMESTAMP DEFAULT NOW(),
+                joined_at TIMESTAMP,
+                is_active BOOLEAN DEFAULT true,
+                UNIQUE(agency_id, user_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_agency_members_agency_id ON agency_members(agency_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_agency_members_user_id ON agency_members(user_id)
+        """)
+
+        # ===========================================
+        # Marketplace Tables (Brand Deals)
+        # ===========================================
+
+        # Brand deals (opportunities posted by agencies)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS brand_deals (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                agency_id UUID NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+                title VARCHAR(500) NOT NULL,
+                brand_name VARCHAR(255) NOT NULL,
+                description TEXT NOT NULL,
+                requirements JSONB DEFAULT '{}',
+                deliverables JSONB DEFAULT '[]',
+                compensation_type VARCHAR(50) NOT NULL CHECK (compensation_type IN ('fixed', 'per_deliverable', 'revenue_share', 'product_only', 'negotiable')),
+                compensation_min DECIMAL(12, 2),
+                compensation_max DECIMAL(12, 2),
+                compensation_currency VARCHAR(10) DEFAULT 'USD',
+                compensation_details TEXT,
+                niches JSONB DEFAULT '[]',
+                min_followers INTEGER,
+                max_followers INTEGER,
+                preferred_platforms JSONB DEFAULT '[]',
+                audience_requirements JSONB DEFAULT '{}',
+                timeline_start DATE,
+                timeline_end DATE,
+                application_deadline DATE,
+                status VARCHAR(50) DEFAULT 'draft' CHECK (status IN ('draft', 'open', 'closed', 'filled', 'cancelled')),
+                visibility VARCHAR(50) DEFAULT 'public' CHECK (visibility IN ('public', 'invite_only', 'private')),
+                applications_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_brand_deals_agency_id ON brand_deals(agency_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_brand_deals_status ON brand_deals(status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_brand_deals_visibility ON brand_deals(visibility)
+        """)
+
+        # Deal applications (creators applying to deals)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS deal_applications (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                deal_id UUID NOT NULL REFERENCES brand_deals(id) ON DELETE CASCADE,
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                pitch TEXT NOT NULL,
+                proposed_rate DECIMAL(12, 2),
+                proposed_currency VARCHAR(10) DEFAULT 'USD',
+                proposed_deliverables JSONB DEFAULT '[]',
+                portfolio_links JSONB DEFAULT '[]',
+                availability_notes TEXT,
+                status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'under_review', 'shortlisted', 'accepted', 'rejected', 'withdrawn')),
+                agency_notes TEXT,
+                match_score FLOAT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(deal_id, creator_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_applications_deal_id ON deal_applications(deal_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_applications_creator_id ON deal_applications(creator_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_applications_status ON deal_applications(status)
+        """)
+
+        # Deal contracts (accepted deals)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS deal_contracts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                deal_id UUID NOT NULL REFERENCES brand_deals(id) ON DELETE CASCADE,
+                application_id UUID NOT NULL REFERENCES deal_applications(id) ON DELETE CASCADE,
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                agency_id UUID NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+                agreed_rate DECIMAL(12, 2) NOT NULL,
+                agreed_currency VARCHAR(10) DEFAULT 'USD',
+                agreed_deliverables JSONB DEFAULT '[]',
+                terms TEXT,
+                contract_document_url TEXT,
+                start_date DATE,
+                end_date DATE,
+                status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'completed', 'cancelled', 'disputed')),
+                total_paid DECIMAL(12, 2) DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_contracts_deal_id ON deal_contracts(deal_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_contracts_creator_id ON deal_contracts(creator_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_contracts_agency_id ON deal_contracts(agency_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_contracts_status ON deal_contracts(status)
+        """)
+
+        # Contract payments (payment milestones)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS contract_payments (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                contract_id UUID NOT NULL REFERENCES deal_contracts(id) ON DELETE CASCADE,
+                amount DECIMAL(12, 2) NOT NULL,
+                currency VARCHAR(10) DEFAULT 'USD',
+                milestone_name VARCHAR(255),
+                due_date DATE,
+                paid_date DATE,
+                status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'invoiced', 'paid', 'overdue', 'cancelled')),
+                payment_method VARCHAR(100),
+                transaction_reference VARCHAR(255),
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_contract_payments_contract_id ON contract_payments(contract_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_contract_payments_status ON contract_payments(status)
+        """)
+
+        # Creator-Deal matches (AI-generated match scores)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS creator_deal_matches (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                deal_id UUID NOT NULL REFERENCES brand_deals(id) ON DELETE CASCADE,
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                overall_score FLOAT NOT NULL,
+                niche_score FLOAT,
+                audience_score FLOAT,
+                engagement_score FLOAT,
+                budget_fit_score FLOAT,
+                match_reasoning TEXT,
+                breakdown JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(deal_id, creator_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_creator_deal_matches_deal_id ON creator_deal_matches(deal_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_creator_deal_matches_creator_id ON creator_deal_matches(creator_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_creator_deal_matches_overall_score ON creator_deal_matches(overall_score DESC)
+        """)
+
+        print("[DB] Creator/Agency tables initialized")
 
         # Create default chat rooms if none exist
         room_exists = await conn.fetchval("SELECT COUNT(*) FROM chat_rooms")
