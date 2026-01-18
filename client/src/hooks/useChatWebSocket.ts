@@ -86,16 +86,12 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
       setIsReconnecting(true);
     }
 
-    const ws = new WebSocket(getChatWebSocketUrl());
+    // Pass token as query parameter (server expects it)
+    const wsUrl = `${getChatWebSocketUrl()}?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      // Send authentication token as first message
-      const currentToken = getChatAccessToken();
-      if (currentToken) {
-        ws.send(JSON.stringify({ type: 'auth', token: currentToken }));
-      }
-
       setIsConnected(true);
       setIsReconnecting(false);
       reconnectAttemptsRef.current = 0; // Reset attempts on successful connection
