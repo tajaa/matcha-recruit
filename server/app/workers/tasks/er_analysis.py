@@ -290,8 +290,47 @@ def run_discrepancy_analysis(self, case_id: str) -> dict[str, Any]:
 # Policy Check
 # ===========================================
 
-async def _run_policy_check(case_id: str, policy_document_id: str) -> dict[str, Any]:
-    """Run policy violation check."""
+async def _get_company_policies(conn, case_id: str) -> list[dict]:
+    """Get all active policies for the company that owns this ER case."""
+    # Get the company_id from the user who created the case
+    company_id = await conn.fetchval(
+        """
+        SELECT COALESCE(cl.company_id, (SELECT id FROM companies ORDER BY created_at LIMIT 1))
+        FROM er_cases ec
+        LEFT JOIN users u ON ec.created_by = u.id
+        LEFT JOIN clients cl ON u.id = cl.user_id
+        WHERE ec.id = $1
+        """,
+        case_id,
+    )
+
+    if not company_id:
+        return []
+
+    # Get all active policies for this company
+    rows = await conn.fetch(
+        """
+        SELECT id, title, content, file_url
+        FROM policies
+        WHERE company_id = $1 AND status = 'active'
+        ORDER BY title
+        """,
+        company_id,
+    )
+
+    return [
+        {
+            "id": str(row["id"]),
+            "title": row["title"],
+            "text": row["content"] or "",
+        }
+        for row in rows
+        if row["content"]  # Only include policies with content
+    ]
+
+
+async def _run_policy_check(case_id: str) -> dict[str, Any]:
+    """Run policy violation check against all company policies."""
     from app.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
@@ -313,28 +352,25 @@ async def _run_policy_check(case_id: str, policy_document_id: str) -> dict[str, 
             task_type="policy_check",
             entity_id=case_id,
             progress=1,
-            total=3,
-            message="Loading policy and evidence documents...",
+            total=4,
+            message="Loading company policies...",
         )
 
-        # Get policy document
-        policy_row = await conn.fetchrow(
-            """
-            SELECT id, filename, scrubbed_text
-            FROM er_case_documents
-            WHERE id = $1 AND processing_status = 'completed'
-            """,
-            policy_document_id,
+        # Get all company policies
+        policies = await _get_company_policies(conn, case_id)
+
+        if not policies:
+            raise ValueError("No active policies found for this company. Please add policies in the Policies section.")
+
+        # Progress: Loading evidence
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="policy_check",
+            entity_id=case_id,
+            progress=2,
+            total=4,
+            message=f"Found {len(policies)} policies. Loading evidence documents...",
         )
-
-        if not policy_row:
-            raise ValueError("Policy document not found or not processed")
-
-        policy_doc = {
-            "id": str(policy_row["id"]),
-            "filename": policy_row["filename"],
-            "text": policy_row["scrubbed_text"],
-        }
 
         # Get evidence documents
         evidence_docs = await _get_documents_for_analysis(conn, case_id, exclude_type="policy")
@@ -347,26 +383,36 @@ async def _run_policy_check(case_id: str, policy_document_id: str) -> dict[str, 
             channel=f"er_case:{case_id}",
             task_type="policy_check",
             entity_id=case_id,
-            progress=2,
-            total=3,
-            message=f"Checking {len(evidence_docs)} documents against policy...",
+            progress=3,
+            total=4,
+            message=f"Checking {len(evidence_docs)} documents against {len(policies)} policies...",
         )
 
+        # Combine all policies into one document for analysis
+        combined_policy = {
+            "id": "combined_policies",
+            "filename": "Company Policies",
+            "text": "\n\n---\n\n".join([
+                f"## {p['title']}\n\n{p['text']}"
+                for p in policies
+            ]),
+        }
+
         # Run analysis
-        result = analyzer.check_policy_violations_sync(policy_doc, evidence_docs)
+        result = analyzer.check_policy_violations_sync(combined_policy, evidence_docs)
 
         # Progress: Saving results
         publish_task_progress(
             channel=f"er_case:{case_id}",
             task_type="policy_check",
             entity_id=case_id,
-            progress=3,
-            total=3,
+            progress=4,
+            total=4,
             message="Saving analysis results...",
         )
 
-        # Save result
-        source_doc_ids = [policy_document_id] + [d["id"] for d in evidence_docs]
+        # Save result with policy IDs as source
+        source_doc_ids = [p["id"] for p in policies] + [d["id"] for d in evidence_docs]
         await _save_analysis_result(
             conn,
             case_id,
@@ -378,7 +424,7 @@ async def _run_policy_check(case_id: str, policy_document_id: str) -> dict[str, 
         return {
             "case_id": case_id,
             "violations_found": len(result.get("violations", [])),
-            "policies_applicable": len(result.get("policies_potentially_applicable", [])),
+            "policies_checked": len(policies),
         }
 
     finally:
@@ -386,10 +432,10 @@ async def _run_policy_check(case_id: str, policy_document_id: str) -> dict[str, 
 
 
 @celery_app.task(bind=True, max_retries=3)
-def run_policy_check(self, case_id: str, policy_document_id: str) -> dict[str, Any]:
+def run_policy_check(self, case_id: str) -> dict[str, Any]:
     """Celery task for policy check."""
     try:
-        result = asyncio.run(_run_policy_check(case_id, policy_document_id))
+        result = asyncio.run(_run_policy_check(case_id))
 
         publish_task_complete(
             channel=f"er_case:{case_id}",

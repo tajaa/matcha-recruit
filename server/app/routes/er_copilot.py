@@ -963,28 +963,11 @@ async def get_discrepancies(
 @router.post("/{case_id}/analysis/policy-check", response_model=TaskStatusResponse)
 async def run_policy_check(
     case_id: UUID,
-    policy_document_id: UUID,
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Run policy violation check. Queues async task or runs synchronously."""
+    """Run policy violation check against all company policies. Queues async task or runs synchronously."""
     async with get_connection() as conn:
-        # Verify policy document exists and is type 'policy'
-        policy_doc = await conn.fetchrow(
-            """
-            SELECT id FROM er_case_documents
-            WHERE id = $1 AND case_id = $2 AND document_type = 'policy' AND processing_status = 'completed'
-            """,
-            policy_document_id,
-            case_id,
-        )
-
-        if not policy_doc:
-            raise HTTPException(
-                status_code=400,
-                detail="Policy document not found or not processed.",
-            )
-
         # Verify we have evidence documents
         evidence_count = await conn.fetchval(
             """
@@ -1006,7 +989,7 @@ async def run_policy_check(
             str(current_user.id),
             "analysis_requested",
             "policy_check",
-            str(policy_document_id),
+            None,
             {},
             request.client.host if request.client else None,
         )
@@ -1019,7 +1002,7 @@ async def run_policy_check(
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
-        task = run_policy_check_task.delay(str(case_id), str(policy_document_id))
+        task = run_policy_check_task.delay(str(case_id))
         celery_available = True
         logger.info(f"Queued policy check for case {case_id}, task_id={task.id}")
         return TaskStatusResponse(
@@ -1035,7 +1018,7 @@ async def run_policy_check(
         try:
             from ..workers.tasks.er_analysis import _run_policy_check
             logger.info(f"Starting synchronous policy check for case {case_id}")
-            result = await _run_policy_check(str(case_id), str(policy_document_id))
+            result = await _run_policy_check(str(case_id))
             logger.info(f"Policy check completed for case {case_id}: {result}")
             return TaskStatusResponse(
                 task_id=None,

@@ -1185,8 +1185,8 @@ export const erCopilot = {
   getDiscrepancies: (caseId: string): Promise<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string }> =>
     request<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string }>(`/er/cases/${caseId}/analysis/discrepancies`),
 
-  runPolicyCheck: (caseId: string, policyDocumentId: string): Promise<ERTaskStatus> =>
-    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/policy-check?policy_document_id=${policyDocumentId}`, {
+  runPolicyCheck: (caseId: string): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/policy-check`, {
       method: 'POST',
     }),
 

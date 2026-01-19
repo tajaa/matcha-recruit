@@ -336,15 +336,10 @@ export function ERCaseDetail() {
 
   const handleRunPolicyCheck = async () => {
     if (!id) return;
-    const policyDoc = documents.find(d => d.document_type === 'policy' && d.processing_status === 'completed');
-    if (!policyDoc) {
-      alert('Please upload a policy document first.');
-      return;
-    }
     setAnalysisLoading('policy');
     setAnalysisProgress({ step: 'Starting analysis...' });
     try {
-      await erCopilot.runPolicyCheck(id, policyDoc.id);
+      await erCopilot.runPolicyCheck(id);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('policy');
       if (!success && analysisLoading === 'policy') {
@@ -736,7 +731,7 @@ export function ERCaseDetail() {
                 <div className="flex justify-end">
                   <button
                     onClick={handleRunPolicyCheck}
-                    disabled={analysisLoading === 'policy' || !uploadedDocs.find(d => d.document_type === 'policy')}
+                    disabled={analysisLoading === 'policy'}
                     className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
                   >
                     {analysisLoading === 'policy' ? 'Checking...' : 'Run Policy Check'}
@@ -759,27 +754,19 @@ export function ERCaseDetail() {
                           <span className="text-[10px] text-zinc-500">{analysisProgress.detail}</span>
                         )}
                       </div>
-                    ) : !uploadedDocs.find(d => d.document_type === 'policy') ? (
-                      <div>
-                        <p className="mb-2">Upload a policy document to run compliance check.</p>
-                        <p className="text-[10px] text-zinc-500">
-                          The policy check compares evidence against your company policies
-                          to identify potential violations.
-                        </p>
-                      </div>
                     ) : violationSummary ? (
                       <div>
                         <p className="mb-2">No policy violations identified.</p>
                         <p className="text-[10px] text-zinc-500">
-                          Evidence was reviewed against the uploaded policy document.
-                          No clear violations of stated policies were found.
+                          Evidence was reviewed against all active company policies.
+                          No clear violations were found.
                         </p>
                       </div>
                     ) : (
                       <div>
                         <p className="mb-2">No policy check run yet.</p>
                         <p className="text-[10px] text-zinc-500">
-                          Click "Run Policy Check" to compare evidence against the uploaded policy.
+                          Click "Run Policy Check" to compare evidence against all active company policies.
                         </p>
                       </div>
                     )}
