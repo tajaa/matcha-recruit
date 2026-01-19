@@ -1073,10 +1073,16 @@ async def update_payment(
             payment_id,
         )
 
-        # Update total_paid on contract if payment is marked as paid
+        # Update total_paid on contract if payment status changes to/from paid
         if update.status == "paid" and payment["status"] != "paid":
             await conn.execute(
                 "UPDATE deal_contracts SET total_paid = total_paid + $1 WHERE id = $2",
+                payment["amount"],
+                payment["contract_id"],
+            )
+        elif payment["status"] == "paid" and update.status and update.status != "paid":
+            await conn.execute(
+                "UPDATE deal_contracts SET total_paid = total_paid - $1 WHERE id = $2",
                 payment["amount"],
                 payment["contract_id"],
             )

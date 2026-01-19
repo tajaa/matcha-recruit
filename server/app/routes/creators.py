@@ -430,6 +430,15 @@ async def update_revenue_entry(
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
 
+        # Validate stream_id ownership if being updated
+        if "stream_id" in update_data and update_data["stream_id"]:
+            stream = await conn.fetchrow(
+                "SELECT id FROM revenue_streams WHERE id = $1 AND creator_id = $2",
+                update_data["stream_id"], creator["id"]
+            )
+            if not stream:
+                raise HTTPException(status_code=404, detail="Revenue stream not found")
+
         set_clauses = [f"{k} = ${i+1}" for i, k in enumerate(update_data.keys())]
 
         row = await conn.fetchrow(
@@ -619,34 +628,65 @@ async def get_revenue_dashboard(
         year_start = today.replace(month=1, day=1)
 
         async def get_summary(start: date, end: date) -> RevenueSummary:
-            # Get revenue totals
+            # Get revenue total
             revenue_row = await conn.fetchrow(
-                """SELECT COALESCE(SUM(amount), 0) as total,
-                          COALESCE(jsonb_object_agg(
-                              COALESCE(rs.category, 'uncategorized'),
-                              cat_sum
-                          ), '{}'::jsonb) as by_category
-                   FROM revenue_entries re
-                   LEFT JOIN revenue_streams rs ON re.stream_id = rs.id
-                   LEFT JOIN LATERAL (
-                       SELECT SUM(re2.amount) as cat_sum
-                       FROM revenue_entries re2
-                       LEFT JOIN revenue_streams rs2 ON re2.stream_id = rs2.id
-                       WHERE re2.creator_id = $1 AND re2.date >= $2 AND re2.date <= $3
-                       AND COALESCE(rs2.category, 'uncategorized') = COALESCE(rs.category, 'uncategorized')
-                       GROUP BY COALESCE(rs2.category, 'uncategorized')
-                   ) cat ON true
-                   WHERE re.creator_id = $1 AND re.date >= $2 AND re.date <= $3""",
+                """SELECT COALESCE(SUM(amount), 0) as total
+                   FROM revenue_entries
+                   WHERE creator_id = $1 AND date >= $2 AND date <= $3""",
                 creator["id"], start, end
             )
 
-            # Get expense totals
+            # Get expense total
             expense_row = await conn.fetchrow(
                 """SELECT COALESCE(SUM(amount), 0) as total
                    FROM creator_expenses
                    WHERE creator_id = $1 AND date >= $2 AND date <= $3""",
                 creator["id"], start, end
             )
+
+            # Get revenue by category
+            rev_by_cat_rows = await conn.fetch(
+                """SELECT COALESCE(rs.category, 'uncategorized') as category,
+                          SUM(re.amount) as total
+                   FROM revenue_entries re
+                   LEFT JOIN revenue_streams rs ON re.stream_id = rs.id
+                   WHERE re.creator_id = $1 AND re.date >= $2 AND re.date <= $3
+                   GROUP BY COALESCE(rs.category, 'uncategorized')""",
+                creator["id"], start, end
+            )
+            revenue_by_category = {
+                row["category"]: Decimal(str(row["total"]))
+                for row in rev_by_cat_rows
+            }
+
+            # Get revenue by stream
+            rev_by_stream_rows = await conn.fetch(
+                """SELECT COALESCE(rs.name, 'No Stream') as stream_name,
+                          SUM(re.amount) as total
+                   FROM revenue_entries re
+                   LEFT JOIN revenue_streams rs ON re.stream_id = rs.id
+                   WHERE re.creator_id = $1 AND re.date >= $2 AND re.date <= $3
+                   GROUP BY rs.id, rs.name""",
+                creator["id"], start, end
+            )
+            revenue_by_stream = {
+                row["stream_name"]: Decimal(str(row["total"]))
+                for row in rev_by_stream_rows
+            }
+
+            # Get expenses by category
+            exp_by_cat_rows = await conn.fetch(
+                """SELECT COALESCE(category, 'uncategorized') as category,
+                          SUM(amount) as total
+                   FROM creator_expenses
+                   WHERE creator_id = $1 AND date >= $2 AND date <= $3
+                   GROUP BY category""",
+                creator["id"], start, end
+            )
+            expenses_by_category = {
+                row["category"]: Decimal(str(row["total"]))
+                for row in exp_by_cat_rows
+            }
 
             total_revenue = Decimal(str(revenue_row["total"] or 0))
             total_expenses = Decimal(str(expense_row["total"] or 0))
@@ -655,9 +695,9 @@ async def get_revenue_dashboard(
                 total_revenue=total_revenue,
                 total_expenses=total_expenses,
                 net_income=total_revenue - total_expenses,
-                revenue_by_category={},
-                revenue_by_stream={},
-                expenses_by_category={},
+                revenue_by_category=revenue_by_category,
+                revenue_by_stream=revenue_by_stream,
+                expenses_by_category=expenses_by_category,
                 period_start=start,
                 period_end=end,
             )
