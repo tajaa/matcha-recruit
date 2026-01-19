@@ -19,6 +19,12 @@ export function Login() {
     switch (role) {
       case 'candidate':
         return '/app/jobs';
+      case 'creator':
+        return '/app/creator';
+      case 'agency':
+        return '/app/agency';
+      case 'employee':
+        return '/app/portal';
       case 'admin':
       case 'client':
       default:
