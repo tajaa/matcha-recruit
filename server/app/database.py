@@ -1723,6 +1723,310 @@ async def init_db():
 
         print("[DB] Creator/Agency tables initialized")
 
+        # ===========================================
+        # Campaign Platform Tables (Limit Order System)
+        # ===========================================
+
+        # Contract templates (for generating agreements)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS contract_templates (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                agency_id UUID REFERENCES agencies(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                template_type VARCHAR(50) CHECK (template_type IN ('sponsorship', 'affiliate', 'content', 'ambassador', 'custom')),
+                content TEXT NOT NULL,
+                variables JSONB DEFAULT '[]',
+                is_default BOOLEAN DEFAULT false,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_contract_templates_agency_id ON contract_templates(agency_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_contract_templates_type ON contract_templates(template_type)
+        """)
+
+        # Campaigns (the "limit order" system)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS campaigns (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                agency_id UUID NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+                brand_name VARCHAR(255) NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                deliverables JSONB NOT NULL DEFAULT '[]',
+                timeline JSONB DEFAULT '{}',
+                total_budget DECIMAL(12, 2) NOT NULL,
+                upfront_percent INTEGER DEFAULT 30,
+                completion_percent INTEGER DEFAULT 70,
+                platform_fee_percent DECIMAL(5, 2) DEFAULT 10,
+                max_creators INTEGER DEFAULT 1,
+                accepted_count INTEGER DEFAULT 0,
+                status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'open', 'active', 'completed', 'cancelled')),
+                contract_template_id UUID REFERENCES contract_templates(id) ON DELETE SET NULL,
+                expires_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_campaigns_agency_id ON campaigns(agency_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status)
+        """)
+
+        # Campaign offers to specific creators
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS campaign_offers (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                offered_amount DECIMAL(12, 2) NOT NULL,
+                custom_message TEXT,
+                status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'viewed', 'accepted', 'declined', 'expired', 'taken')),
+                creator_counter_amount DECIMAL(12, 2),
+                creator_notes TEXT,
+                viewed_at TIMESTAMP,
+                responded_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(campaign_id, creator_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_campaign_offers_campaign_id ON campaign_offers(campaign_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_campaign_offers_creator_id ON campaign_offers(creator_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_campaign_offers_status ON campaign_offers(status)
+        """)
+
+        # Campaign payments (escrow tracking)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS campaign_payments (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                payment_type VARCHAR(20) CHECK (payment_type IN ('upfront', 'completion', 'milestone', 'affiliate')),
+                amount DECIMAL(12, 2) NOT NULL,
+                platform_fee DECIMAL(12, 2),
+                status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'held', 'released', 'refunded', 'failed')),
+                stripe_payment_intent_id VARCHAR(255),
+                stripe_transfer_id VARCHAR(255),
+                charged_at TIMESTAMP,
+                released_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_campaign_payments_campaign_id ON campaign_payments(campaign_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_campaign_payments_creator_id ON campaign_payments(creator_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_campaign_payments_status ON campaign_payments(status)
+        """)
+
+        # Affiliate tracking links
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS affiliate_links (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL,
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                agency_id UUID NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+                short_code VARCHAR(20) UNIQUE NOT NULL,
+                destination_url TEXT NOT NULL,
+                product_name VARCHAR(255),
+                commission_percent DECIMAL(5, 2) DEFAULT 10,
+                platform_percent DECIMAL(5, 2) DEFAULT 5,
+                click_count INTEGER DEFAULT 0,
+                conversion_count INTEGER DEFAULT 0,
+                total_sales DECIMAL(12, 2) DEFAULT 0,
+                total_commission DECIMAL(12, 2) DEFAULT 0,
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_affiliate_links_short_code ON affiliate_links(short_code)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_affiliate_links_creator_id ON affiliate_links(creator_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_affiliate_links_agency_id ON affiliate_links(agency_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_affiliate_links_campaign_id ON affiliate_links(campaign_id)
+        """)
+
+        # Affiliate click/conversion events
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS affiliate_events (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                link_id UUID NOT NULL REFERENCES affiliate_links(id) ON DELETE CASCADE,
+                event_type VARCHAR(20) CHECK (event_type IN ('click', 'conversion')),
+                sale_amount DECIMAL(12, 2),
+                commission_amount DECIMAL(12, 2),
+                ip_address VARCHAR(45),
+                user_agent TEXT,
+                referrer TEXT,
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_affiliate_events_link_id ON affiliate_events(link_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_affiliate_events_type ON affiliate_events(event_type)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_affiliate_events_created_at ON affiliate_events(created_at)
+        """)
+
+        # Creator valuations (cached worth estimates)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS creator_valuations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+                estimated_value_min DECIMAL(12, 2),
+                estimated_value_max DECIMAL(12, 2),
+                factors JSONB DEFAULT '{}',
+                data_sources JSONB DEFAULT '[]',
+                confidence_score FLOAT,
+                calculated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(creator_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_creator_valuations_creator_id ON creator_valuations(creator_id)
+        """)
+
+        # Add Stripe columns to creators table
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'creators' AND column_name = 'stripe_account_id'
+                ) THEN
+                    ALTER TABLE creators ADD COLUMN stripe_account_id VARCHAR(255);
+                    ALTER TABLE creators ADD COLUMN stripe_onboarding_complete BOOLEAN DEFAULT false;
+                    ALTER TABLE creators ADD COLUMN stripe_payouts_enabled BOOLEAN DEFAULT false;
+                END IF;
+            END $$;
+        """)
+
+        # Add Stripe customer column to agencies table
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'agencies' AND column_name = 'stripe_customer_id'
+                ) THEN
+                    ALTER TABLE agencies ADD COLUMN stripe_customer_id VARCHAR(255);
+                END IF;
+            END $$;
+        """)
+
+        # Create default contract templates if none exist
+        template_exists = await conn.fetchval("SELECT COUNT(*) FROM contract_templates WHERE agency_id IS NULL")
+        if template_exists == 0:
+            await conn.execute("""
+                INSERT INTO contract_templates (agency_id, name, template_type, content, variables, is_default) VALUES
+                (NULL, 'Standard Sponsorship Agreement', 'sponsorship',
+                 'SPONSORSHIP AGREEMENT
+
+This Sponsorship Agreement ("Agreement") is entered into as of {{effective_date}} by and between:
+
+BRAND: {{brand_name}} ("Brand")
+CREATOR: {{creator_name}} ("Creator")
+
+1. CAMPAIGN DETAILS
+Campaign Title: {{campaign_title}}
+Campaign Description: {{campaign_description}}
+
+2. DELIVERABLES
+{{deliverables}}
+
+3. COMPENSATION
+Total Compensation: {{total_amount}} {{currency}}
+- Upfront Payment ({{upfront_percent}}%): {{upfront_amount}} {{currency}}
+- Completion Payment ({{completion_percent}}%): {{completion_amount}} {{currency}}
+
+4. TIMELINE
+Start Date: {{start_date}}
+End Date: {{end_date}}
+
+5. CONTENT GUIDELINES
+- Creator will follow all brand guidelines provided
+- All content must be approved before posting
+- Creator must disclose sponsored content per FTC guidelines
+
+6. INTELLECTUAL PROPERTY
+Brand grants Creator limited license to use brand assets for the campaign.
+Creator grants Brand license to repurpose campaign content.
+
+7. TERMINATION
+Either party may terminate with 14 days written notice.
+
+Agreed and accepted:
+
+Brand Representative: ___________________ Date: ___________
+Creator: ___________________ Date: ___________',
+                 '["effective_date", "brand_name", "creator_name", "campaign_title", "campaign_description", "deliverables", "total_amount", "currency", "upfront_percent", "upfront_amount", "completion_percent", "completion_amount", "start_date", "end_date"]',
+                 true),
+                (NULL, 'Affiliate Partnership Agreement', 'affiliate',
+                 'AFFILIATE PARTNERSHIP AGREEMENT
+
+This Affiliate Partnership Agreement ("Agreement") is entered into as of {{effective_date}}.
+
+PARTIES:
+Brand/Agency: {{brand_name}}
+Affiliate/Creator: {{creator_name}}
+
+1. PROGRAM DETAILS
+The Brand appoints Creator as a non-exclusive affiliate to promote:
+Product/Service: {{product_name}}
+
+2. COMMISSION STRUCTURE
+Commission Rate: {{commission_percent}}%
+Payment Terms: Monthly, net 30 days
+Minimum Payout: $50
+
+3. AFFILIATE LINKS
+Creator will receive unique tracking link(s) for all promotions.
+Tracking URL: {{affiliate_url}}
+
+4. CREATOR OBLIGATIONS
+- Promote products in good faith
+- Disclose affiliate relationship per FTC guidelines
+- Not engage in misleading advertising
+- Not use paid ads on brand terms without approval
+
+5. TERMINATION
+Either party may terminate with 7 days notice.
+Pending commissions will be paid within 30 days of termination.
+
+Agreed and accepted:
+
+Brand Representative: ___________________ Date: ___________
+Creator: ___________________ Date: ___________',
+                 '["effective_date", "brand_name", "creator_name", "product_name", "commission_percent", "affiliate_url"]',
+                 true)
+            """)
+            print("[DB] Created default contract templates")
+
+        print("[DB] Campaign platform tables initialized")
+
         # Create default chat rooms if none exist
         room_exists = await conn.fetchval("SELECT COUNT(*) FROM chat_rooms")
         if room_exists == 0:

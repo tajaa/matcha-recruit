@@ -72,10 +72,15 @@ const PlatformConnections = lazy(() => import('./pages/creator/PlatformConnectio
 const DealMarketplace = lazy(() => import('./pages/creator/DealMarketplace'));
 const MyApplications = lazy(() => import('./pages/creator/MyApplications'));
 const MyContracts = lazy(() => import('./pages/creator/MyContracts'));
+const CampaignOffers = lazy(() => import('./pages/creator/CampaignOffers').then(m => ({ default: m.CampaignOffers })));
+const OfferDetail = lazy(() => import('./pages/creator/CampaignOffers').then(m => ({ default: m.OfferDetail })));
+const AffiliateDashboard = lazy(() => import('./pages/creator/AffiliateDashboard'));
 
 // Agency Pages
 const AgencyDashboard = lazy(() => import('./pages/agency/AgencyDashboard'));
 const DealManager = lazy(() => import('./pages/agency/DealManager'));
+const CampaignManager = lazy(() => import('./pages/agency/CampaignManager'));
+const CampaignDetail = lazy(() => import('./pages/agency/CampaignDetail'));
 const CreatorDiscovery = lazy(() => import('./pages/agency/CreatorDiscovery'));
 const ApplicationReview = lazy(() => import('./pages/agency/ApplicationReview'));
 const ContractManager = lazy(() => import('./pages/agency/ContractManager'));
@@ -470,6 +475,30 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="creator/offers"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <CampaignOffers />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="creator/offers/:offerId"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <OfferDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="creator/affiliate"
+                element={
+                  <ProtectedRoute roles={['creator']}>
+                    <AffiliateDashboard />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Agency Routes */}
               <Route
@@ -485,6 +514,22 @@ function App() {
                 element={
                   <ProtectedRoute roles={['agency']}>
                     <DealManager />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="agency/campaigns"
+                element={
+                  <ProtectedRoute roles={['agency']}>
+                    <CampaignManager />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="agency/campaigns/:campaignId"
+                element={
+                  <ProtectedRoute roles={['agency']}>
+                    <CampaignDetail />
                   </ProtectedRoute>
                 }
               />

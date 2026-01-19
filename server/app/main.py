@@ -92,6 +92,7 @@ from .routes.employee_portal import router as employee_portal_router
 from .routes.employees import router as employees_router
 from .routes.invitations import router as invitations_router
 from .routes.chat import router as chat_router, ws_router as chat_ws_router
+from .routes.campaigns import router as campaigns_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(companies_router, prefix="/api/companies", tags=["companies"])
@@ -122,6 +123,7 @@ app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])
 app.include_router(creators_router, prefix="/api/creators", tags=["creators"])
 app.include_router(agencies_router, prefix="/api/agencies", tags=["agencies"])
 app.include_router(deals_router, prefix="/api/deals", tags=["deals"])
+app.include_router(campaigns_router, prefix="/api/campaigns", tags=["campaigns"])
 
 
 @app.get("/health")

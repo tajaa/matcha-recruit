@@ -123,6 +123,27 @@ import type {
   SearchRequest,
   SearchResult,
 } from '../types/leads';
+import type {
+  Campaign,
+  CampaignCreate,
+  CampaignUpdate,
+  CampaignWithOffers,
+  CampaignOffer,
+  CampaignOfferCreate,
+  CreatorOffer,
+  CampaignPayment,
+  AffiliateLink,
+  AffiliateLinkCreate,
+  AffiliateLinkUpdate,
+  AffiliateStats,
+  CreatorValuation,
+  ContractTemplate,
+  ContractTemplateCreate,
+  ContractTemplateUpdate,
+  GeneratedContract,
+  CampaignDashboardStats,
+  CreatorCampaignStats,
+} from '../types/campaigns';
 
 const API_BASE = 'http://localhost:8001/api';
 
@@ -2156,6 +2177,158 @@ export const authExtended = {
   },
 };
 
+// Campaigns API (Limit Order Deal System)
+export const campaigns = {
+  // Agency Campaign Management
+  create: (data: CampaignCreate) =>
+    request<Campaign>('/campaigns/agency/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  list: (status?: string) => {
+    const query = status ? `?status=${status}` : '';
+    return request<Campaign[]>(`/campaigns/agency/campaigns${query}`);
+  },
+
+  get: (campaignId: string) =>
+    request<CampaignWithOffers>(`/campaigns/agency/campaigns/${campaignId}`),
+
+  update: (campaignId: string, data: CampaignUpdate) =>
+    request<Campaign>(`/campaigns/agency/campaigns/${campaignId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  publish: (campaignId: string) =>
+    request<{ status: string; offers_sent: number }>(`/campaigns/agency/campaigns/${campaignId}/publish`, {
+      method: 'POST',
+    }),
+
+  cancel: (campaignId: string) =>
+    request<{ status: string }>(`/campaigns/agency/campaigns/${campaignId}/cancel`, {
+      method: 'POST',
+    }),
+
+  delete: (campaignId: string) =>
+    request<{ status: string }>(`/campaigns/agency/campaigns/${campaignId}`, {
+      method: 'DELETE',
+    }),
+
+  // Campaign Offers (Agency side)
+  addOffer: (campaignId: string, data: CampaignOfferCreate) =>
+    request<CampaignOffer>(`/campaigns/agency/campaigns/${campaignId}/offers`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  addBulkOffers: (campaignId: string, offers: CampaignOfferCreate[]) =>
+    request<CampaignOffer[]>(`/campaigns/agency/campaigns/${campaignId}/offers/bulk`, {
+      method: 'POST',
+      body: JSON.stringify({ offers }),
+    }),
+
+  removeOffer: (campaignId: string, creatorId: string) =>
+    request<{ status: string }>(`/campaigns/agency/campaigns/${campaignId}/offers/${creatorId}`, {
+      method: 'DELETE',
+    }),
+
+  // Campaign Payments (Agency side)
+  listPayments: (campaignId: string) =>
+    request<CampaignPayment[]>(`/campaigns/agency/campaigns/${campaignId}/payments`),
+
+  releasePayment: (paymentId: string, notes?: string) =>
+    request<{ status: string }>(`/campaigns/agency/payments/${paymentId}/release`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
+
+  // Agency Stats
+  getStats: () =>
+    request<CampaignDashboardStats>('/campaigns/agency/campaigns/stats'),
+
+  // Creator Offer Management
+  listMyOffers: (status?: string) => {
+    const query = status ? `?status=${status}` : '';
+    return request<CreatorOffer[]>(`/campaigns/creators/me/offers${query}`);
+  },
+
+  getMyOffer: (offerId: string) =>
+    request<CreatorOffer>(`/campaigns/creators/me/offers/${offerId}`),
+
+  acceptOffer: (offerId: string, notes?: string) =>
+    request<{ status: string; upfront_amount: number; message: string }>(`/campaigns/creators/me/offers/${offerId}/accept`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
+
+  declineOffer: (offerId: string, reason?: string) =>
+    request<{ status: string }>(`/campaigns/creators/me/offers/${offerId}/decline`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+
+  counterOffer: (offerId: string, counterAmount: number, notes?: string) =>
+    request<{ status: string; counter_amount: number }>(`/campaigns/creators/me/offers/${offerId}/counter`, {
+      method: 'POST',
+      body: JSON.stringify({ counter_amount: counterAmount, notes }),
+    }),
+
+  // Creator Payments
+  listMyPayments: (status?: string) => {
+    const query = status ? `?status=${status}` : '';
+    return request<CampaignPayment[]>(`/campaigns/creators/me/payments${query}`);
+  },
+
+  // Creator Stats
+  getMyStats: () =>
+    request<CreatorCampaignStats>('/campaigns/creators/me/campaigns/stats'),
+
+  // Affiliate Links
+  createAffiliateLink: (data: AffiliateLinkCreate) =>
+    request<AffiliateLink>('/campaigns/affiliate/links', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listAffiliateLinks: () =>
+    request<AffiliateLink[]>('/campaigns/affiliate/links'),
+
+  getAffiliateLinkStats: (linkId: string) =>
+    request<AffiliateStats>(`/campaigns/affiliate/links/${linkId}/stats`),
+
+  // Creator Valuation
+  getValuation: (creatorId: string) =>
+    request<CreatorValuation>(`/campaigns/creators/${creatorId}/valuation`),
+
+  refreshMyValuation: (includePlatformData?: boolean) =>
+    request<CreatorValuation>('/campaigns/creators/me/valuation/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ include_platform_data: includePlatformData ?? true }),
+    }),
+
+  // Contract Templates
+  listTemplates: () =>
+    request<ContractTemplate[]>('/campaigns/contracts/templates'),
+
+  createTemplate: (data: ContractTemplateCreate) =>
+    request<ContractTemplate>('/campaigns/contracts/templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateTemplate: (templateId: string, data: ContractTemplateUpdate) =>
+    request<ContractTemplate>(`/campaigns/contracts/templates/${templateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  generateContract: (campaignId: string, creatorId: string) =>
+    request<GeneratedContract>(`/campaigns/agency/campaigns/${campaignId}/contract/generate?creator_id=${creatorId}`, {
+      method: 'POST',
+    }),
+};
+
 // Combined API object for convenient imports
 export const api = {
   auth,
@@ -2185,4 +2358,5 @@ export const api = {
   creators,
   agencies,
   deals,
+  campaigns,
 };
