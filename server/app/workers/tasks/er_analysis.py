@@ -172,11 +172,11 @@ async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
 
     conn = await get_db_connection()
     try:
-        # Get transcript documents only
-        documents = await _get_documents_for_analysis(conn, case_id, document_type="transcript")
+        # Get all documents except policy
+        documents = await _get_documents_for_analysis(conn, case_id, exclude_type="policy")
 
         if len(documents) < 2:
-            raise ValueError("Need at least 2 transcript documents for discrepancy analysis")
+            raise ValueError("Need at least 2 documents for discrepancy analysis")
 
         # Run analysis
         result = analyzer.detect_discrepancies_sync(documents)

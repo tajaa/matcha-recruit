@@ -557,10 +557,10 @@ export function ERCaseDetail() {
                 <div className="flex justify-end">
                   <button
                     onClick={handleGenerateDiscrepancies}
-                    disabled={analysisLoading === 'discrepancies' || uploadedDocs.filter(d => d.document_type === 'transcript').length < 2}
+                    disabled={analysisLoading === 'discrepancies' || uploadedDocs.filter(d => d.document_type !== 'policy').length < 2}
                     className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
                   >
-                    {analysisLoading === 'discrepancies' ? 'Analyzing...' : 'Analyze Transcripts'}
+                    {analysisLoading === 'discrepancies' ? 'Analyzing...' : 'Analyze Documents'}
                   </button>
                 </div>
 
