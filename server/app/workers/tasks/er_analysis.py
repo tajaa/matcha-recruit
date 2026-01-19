@@ -85,12 +85,14 @@ async def _run_timeline_analysis(case_id: str) -> dict[str, Any]:
     from app.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
+    import os
     settings = load_settings()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
     analyzer = ERAnalyzer(
-        api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-        model="gemini-3.0-flash-preview",
+        api_key=api_key,
+        model=settings.analysis_model,
     )
 
     conn = await get_db_connection()
@@ -158,12 +160,14 @@ async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
     from app.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
+    import os
     settings = load_settings()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
     analyzer = ERAnalyzer(
-        api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-        model="gemini-3.0-flash-preview",
+        api_key=api_key,
+        model=settings.analysis_model,
     )
 
     conn = await get_db_connection()
@@ -231,12 +235,14 @@ async def _run_policy_check(case_id: str, policy_document_id: str) -> dict[str, 
     from app.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
+    import os
     settings = load_settings()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
     analyzer = ERAnalyzer(
-        api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-        model="gemini-3.0-flash-preview",
+        api_key=api_key,
+        model=settings.analysis_model,
     )
 
     conn = await get_db_connection()
@@ -323,12 +329,14 @@ async def _generate_summary_report(case_id: str, generated_by: str) -> dict[str,
     from app.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
+    import os
     settings = load_settings()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
     analyzer = ERAnalyzer(
-        api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-        model="gemini-3.0-flash-preview",
+        api_key=api_key,
+        model=settings.analysis_model,
     )
 
     conn = await get_db_connection()
@@ -443,12 +451,14 @@ async def _generate_determination_letter(
     from app.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
+    import os
     settings = load_settings()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
     analyzer = ERAnalyzer(
-        api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-        model="gemini-3.0-flash-preview",
+        api_key=api_key,
+        model=settings.analysis_model,
     )
 
     conn = await get_db_connection()

@@ -764,7 +764,7 @@ async def generate_timeline(
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Generate timeline analysis. Queues async task."""
+    """Generate timeline analysis. Queues async task or runs synchronously."""
     async with get_connection() as conn:
         # Verify case exists and has documents
         doc_count = await conn.fetchval(
@@ -789,17 +789,40 @@ async def generate_timeline(
             request.client.host if request.client else None,
         )
 
-    # Queue analysis task
+    # Try to queue analysis task via Celery, fall back to sync
+    celery_available = False
     try:
         from ..workers.tasks.er_analysis import run_timeline_analysis
+        from ..workers.celery_app import celery_app
+        ping_responses = celery_app.control.ping(timeout=1)
+        if not ping_responses:
+            raise RuntimeError("No Celery workers responded to ping")
         task = run_timeline_analysis.delay(str(case_id))
+        celery_available = True
+        logger.info(f"Queued timeline analysis for case {case_id}, task_id={task.id}")
         return TaskStatusResponse(
             task_id=task.id,
             status="queued",
             message="Timeline analysis queued",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to queue task: {str(e)}")
+        logger.warning(f"Celery unavailable ({e}), running timeline analysis synchronously")
+
+    # Fallback: run synchronously
+    if not celery_available:
+        try:
+            from ..workers.tasks.er_analysis import _run_timeline_analysis
+            logger.info(f"Starting synchronous timeline analysis for case {case_id}")
+            result = await _run_timeline_analysis(str(case_id))
+            logger.info(f"Timeline analysis completed for case {case_id}: {result}")
+            return TaskStatusResponse(
+                task_id=None,
+                status="completed",
+                message=f"Timeline analysis completed: {result.get('events_found', 0)} events found",
+            )
+        except Exception as sync_error:
+            logger.error(f"Timeline analysis failed for case {case_id}: {sync_error}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Timeline analysis failed: {str(sync_error)}")
 
 
 @router.get("/{case_id}/analysis/timeline")
@@ -843,7 +866,7 @@ async def generate_discrepancies(
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Generate discrepancy analysis. Queues async task."""
+    """Generate discrepancy analysis. Queues async task or runs synchronously."""
     async with get_connection() as conn:
         doc_count = await conn.fetchval(
             "SELECT COUNT(*) FROM er_case_documents WHERE case_id = $1 AND processing_status = 'completed'",
@@ -867,16 +890,40 @@ async def generate_discrepancies(
             request.client.host if request.client else None,
         )
 
+    # Try to queue analysis task via Celery, fall back to sync
+    celery_available = False
     try:
         from ..workers.tasks.er_analysis import run_discrepancy_analysis
+        from ..workers.celery_app import celery_app
+        ping_responses = celery_app.control.ping(timeout=1)
+        if not ping_responses:
+            raise RuntimeError("No Celery workers responded to ping")
         task = run_discrepancy_analysis.delay(str(case_id))
+        celery_available = True
+        logger.info(f"Queued discrepancy analysis for case {case_id}, task_id={task.id}")
         return TaskStatusResponse(
             task_id=task.id,
             status="queued",
             message="Discrepancy analysis queued",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to queue task: {str(e)}")
+        logger.warning(f"Celery unavailable ({e}), running discrepancy analysis synchronously")
+
+    # Fallback: run synchronously
+    if not celery_available:
+        try:
+            from ..workers.tasks.er_analysis import _run_discrepancy_analysis
+            logger.info(f"Starting synchronous discrepancy analysis for case {case_id}")
+            result = await _run_discrepancy_analysis(str(case_id))
+            logger.info(f"Discrepancy analysis completed for case {case_id}: {result}")
+            return TaskStatusResponse(
+                task_id=None,
+                status="completed",
+                message=f"Discrepancy analysis completed: {result.get('discrepancies_found', 0)} discrepancies found",
+            )
+        except Exception as sync_error:
+            logger.error(f"Discrepancy analysis failed for case {case_id}: {sync_error}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Discrepancy analysis failed: {str(sync_error)}")
 
 
 @router.get("/{case_id}/analysis/discrepancies")
@@ -920,7 +967,7 @@ async def run_policy_check(
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Run policy violation check. Queues async task."""
+    """Run policy violation check. Queues async task or runs synchronously."""
     async with get_connection() as conn:
         # Verify policy document exists and is type 'policy'
         policy_doc = await conn.fetchrow(
@@ -964,16 +1011,40 @@ async def run_policy_check(
             request.client.host if request.client else None,
         )
 
+    # Try to queue analysis task via Celery, fall back to sync
+    celery_available = False
     try:
         from ..workers.tasks.er_analysis import run_policy_check as run_policy_check_task
+        from ..workers.celery_app import celery_app
+        ping_responses = celery_app.control.ping(timeout=1)
+        if not ping_responses:
+            raise RuntimeError("No Celery workers responded to ping")
         task = run_policy_check_task.delay(str(case_id), str(policy_document_id))
+        celery_available = True
+        logger.info(f"Queued policy check for case {case_id}, task_id={task.id}")
         return TaskStatusResponse(
             task_id=task.id,
             status="queued",
             message="Policy check queued",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to queue task: {str(e)}")
+        logger.warning(f"Celery unavailable ({e}), running policy check synchronously")
+
+    # Fallback: run synchronously
+    if not celery_available:
+        try:
+            from ..workers.tasks.er_analysis import _run_policy_check
+            logger.info(f"Starting synchronous policy check for case {case_id}")
+            result = await _run_policy_check(str(case_id), str(policy_document_id))
+            logger.info(f"Policy check completed for case {case_id}: {result}")
+            return TaskStatusResponse(
+                task_id=None,
+                status="completed",
+                message=f"Policy check completed: {result.get('violations_found', 0)} violations found",
+            )
+        except Exception as sync_error:
+            logger.error(f"Policy check failed for case {case_id}: {sync_error}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Policy check failed: {str(sync_error)}")
 
 
 @router.get("/{case_id}/analysis/policy-check")
@@ -1073,7 +1144,7 @@ async def generate_summary_report(
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Generate investigation summary report."""
+    """Generate investigation summary report. Queues async task or runs synchronously."""
     async with get_connection() as conn:
         await log_audit(
             conn,
@@ -1086,16 +1157,40 @@ async def generate_summary_report(
             request.client.host if request.client else None,
         )
 
+    # Try to queue task via Celery, fall back to sync
+    celery_available = False
     try:
         from ..workers.tasks.er_analysis import generate_summary_report as generate_summary_task
+        from ..workers.celery_app import celery_app
+        ping_responses = celery_app.control.ping(timeout=1)
+        if not ping_responses:
+            raise RuntimeError("No Celery workers responded to ping")
         task = generate_summary_task.delay(str(case_id), str(current_user.id))
+        celery_available = True
+        logger.info(f"Queued summary report for case {case_id}, task_id={task.id}")
         return TaskStatusResponse(
             task_id=task.id,
             status="queued",
             message="Summary report generation queued",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to queue task: {str(e)}")
+        logger.warning(f"Celery unavailable ({e}), generating summary report synchronously")
+
+    # Fallback: run synchronously
+    if not celery_available:
+        try:
+            from ..workers.tasks.er_analysis import _generate_summary_report
+            logger.info(f"Starting synchronous summary report generation for case {case_id}")
+            result = await _generate_summary_report(str(case_id), str(current_user.id))
+            logger.info(f"Summary report generated for case {case_id}: {result}")
+            return TaskStatusResponse(
+                task_id=None,
+                status="completed",
+                message="Summary report generated successfully",
+            )
+        except Exception as sync_error:
+            logger.error(f"Summary report generation failed for case {case_id}: {sync_error}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Summary report generation failed: {str(sync_error)}")
 
 
 @router.post("/{case_id}/reports/determination", response_model=TaskStatusResponse)
@@ -1105,7 +1200,7 @@ async def generate_determination_letter(
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Generate determination letter."""
+    """Generate determination letter. Queues async task or runs synchronously."""
     if not report_request.determination:
         raise HTTPException(
             status_code=400,
@@ -1131,20 +1226,48 @@ async def generate_determination_letter(
             request.client.host if request.client else None,
         )
 
+    # Try to queue task via Celery, fall back to sync
+    celery_available = False
     try:
         from ..workers.tasks.er_analysis import generate_determination_letter as generate_determination_task
+        from ..workers.celery_app import celery_app
+        ping_responses = celery_app.control.ping(timeout=1)
+        if not ping_responses:
+            raise RuntimeError("No Celery workers responded to ping")
         task = generate_determination_task.delay(
             str(case_id),
             report_request.determination,
             str(current_user.id),
         )
+        celery_available = True
+        logger.info(f"Queued determination letter for case {case_id}, task_id={task.id}")
         return TaskStatusResponse(
             task_id=task.id,
             status="queued",
             message="Determination letter generation queued",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to queue task: {str(e)}")
+        logger.warning(f"Celery unavailable ({e}), generating determination letter synchronously")
+
+    # Fallback: run synchronously
+    if not celery_available:
+        try:
+            from ..workers.tasks.er_analysis import _generate_determination_letter
+            logger.info(f"Starting synchronous determination letter generation for case {case_id}")
+            result = await _generate_determination_letter(
+                str(case_id),
+                report_request.determination,
+                str(current_user.id),
+            )
+            logger.info(f"Determination letter generated for case {case_id}: {result}")
+            return TaskStatusResponse(
+                task_id=None,
+                status="completed",
+                message="Determination letter generated successfully",
+            )
+        except Exception as sync_error:
+            logger.error(f"Determination letter generation failed for case {case_id}: {sync_error}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Determination letter generation failed: {str(sync_error)}")
 
 
 @router.get("/{case_id}/reports/{report_type}")

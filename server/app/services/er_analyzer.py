@@ -218,7 +218,7 @@ class ERAnalyzer:
         api_key: Optional[str] = None,
         vertex_project: Optional[str] = None,
         vertex_location: str = "us-central1",
-        model: str = "gemini-3-flash-preview",
+        model: str = "gemini-2.5-flash",
     ):
         """
         Initialize the ER analyzer.

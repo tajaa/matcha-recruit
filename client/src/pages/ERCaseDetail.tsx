@@ -301,7 +301,7 @@ export function ERCaseDetail() {
               {erCase.status.replace('_', ' ')}
             </span>
           </div>
-          <h1 className="text-2xl font-light text-zinc-900 tracking-tight">{erCase.title}</h1>
+          <h1 className="text-2xl font-light text-zinc-900 dark:text-zinc-100 tracking-tight">{erCase.title}</h1>
         </div>
         <div className="w-40">
           <select
@@ -338,7 +338,7 @@ export function ERCaseDetail() {
               )}
               <button
                 onClick={() => setShowUploadModal(true)}
-                className="text-[10px] text-zinc-900 hover:text-zinc-600 flex items-center gap-1 uppercase tracking-wide font-medium"
+                className="text-[10px] text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 flex items-center gap-1 uppercase tracking-wide font-medium"
               >
                 <Upload size={10} />
                 Upload
@@ -373,7 +373,7 @@ export function ERCaseDetail() {
                           <span className="text-[10px] text-red-500">Failed</span>
                         )}
                       </div>
-                      <p className="text-xs text-zinc-900 truncate hover:text-zinc-700 cursor-pointer" title={doc.filename}>{doc.filename}</p>
+                      <p className="text-xs text-zinc-900 dark:text-zinc-100 truncate hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer" title={doc.filename}>{doc.filename}</p>
                       {doc.processing_error && (
                         <p className="text-[10px] text-red-400 truncate" title={doc.processing_error}>{doc.processing_error}</p>
                       )}
@@ -436,14 +436,14 @@ export function ERCaseDetail() {
                   <button
                     onClick={handleGenerateTimeline}
                     disabled={analysisLoading === 'timeline' || uploadedDocs.length === 0}
-                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 hover:text-zinc-600 disabled:opacity-50"
+                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
                   >
                     {analysisLoading === 'timeline' ? 'Generating...' : 'Regenerate Analysis'}
                   </button>
                 </div>
 
                 {timelineSummary && (
-                  <div className="text-sm text-zinc-600 leading-relaxed font-serif">
+                  <div className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed font-serif">
                     {timelineSummary}
                   </div>
                 )}
@@ -458,7 +458,7 @@ export function ERCaseDetail() {
                       <div key={i} className="relative pl-6">
                         <div className="absolute left-[-3px] top-1.5 w-1.5 h-1.5 rounded-full bg-zinc-300" />
                         <div className="flex items-center gap-3 mb-1">
-                          <span className="text-xs font-medium text-zinc-900">
+                          <span className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
                             {event.date} {event.time && <span className="text-zinc-400 font-normal">at {event.time}</span>}
                           </span>
                           <span className={`text-[9px] uppercase tracking-wide font-medium ${
@@ -469,7 +469,7 @@ export function ERCaseDetail() {
                             {event.confidence}
                           </span>
                         </div>
-                        <p className="text-zinc-800 text-sm mb-2">{event.description}</p>
+                        <p className="text-zinc-800 dark:text-zinc-200 text-sm mb-2">{event.description}</p>
                         
                         <div className="flex flex-wrap gap-2 mb-2">
                           {event.participants.map(p => (
@@ -512,14 +512,14 @@ export function ERCaseDetail() {
                   <button
                     onClick={handleGenerateDiscrepancies}
                     disabled={analysisLoading === 'discrepancies' || uploadedDocs.filter(d => d.document_type === 'transcript').length < 2}
-                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 hover:text-zinc-600 disabled:opacity-50"
+                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
                   >
                     {analysisLoading === 'discrepancies' ? 'Analyzing...' : 'Analyze Transcripts'}
                   </button>
                 </div>
 
                 {discrepancySummary && (
-                  <div className="text-sm text-zinc-600 leading-relaxed font-serif">
+                  <div className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed font-serif">
                     {discrepancySummary}
                   </div>
                 )}
@@ -544,7 +544,7 @@ export function ERCaseDetail() {
                           <span className="text-[10px] text-zinc-500 uppercase tracking-wide">{disc.type}</span>
                         </div>
                         
-                        <p className="text-zinc-900 text-sm font-medium mb-4">{disc.description}</p>
+                        <p className="text-zinc-900 dark:text-zinc-100 text-sm font-medium mb-4">{disc.description}</p>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
                           <div>
@@ -578,14 +578,14 @@ export function ERCaseDetail() {
                   <button
                     onClick={handleRunPolicyCheck}
                     disabled={analysisLoading === 'policy' || !uploadedDocs.find(d => d.document_type === 'policy')}
-                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 hover:text-zinc-600 disabled:opacity-50"
+                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
                   >
                     {analysisLoading === 'policy' ? 'Checking...' : 'Run Policy Check'}
                   </button>
                 </div>
 
                 {violationSummary && (
-                  <div className="text-sm text-zinc-600 leading-relaxed font-serif">
+                  <div className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed font-serif">
                     {violationSummary}
                   </div>
                 )}
@@ -597,7 +597,7 @@ export function ERCaseDetail() {
                 ) : (
                   <div className="space-y-8">
                     {violations.map((v, i) => (
-                      <div key={i} className="border-b border-zinc-100 pb-8 last:border-0 last:pb-0">
+                      <div key={i} className="border-b border-zinc-100 dark:border-zinc-800 pb-8 last:border-0 last:pb-0">
                         <div className="flex items-center gap-2 mb-2">
                           <span className={`text-[10px] uppercase tracking-wide font-medium ${
                             v.severity === 'major' ? 'text-red-600' : 'text-amber-600'
@@ -605,17 +605,17 @@ export function ERCaseDetail() {
                             {v.severity} Violation
                           </span>
                         </div>
-                        
-                        <h4 className="text-zinc-900 text-sm font-medium mb-2">{v.policy_section}</h4>
+
+                        <h4 className="text-zinc-900 dark:text-zinc-100 text-sm font-medium mb-2">{v.policy_section}</h4>
                         <div className="mb-4">
-                          <p className="text-xs text-zinc-500 italic">"{v.policy_text}"</p>
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400 italic">"{v.policy_text}"</p>
                         </div>
-                        
-                        <div className="space-y-3 pl-3 border-l-2 border-zinc-100">
+
+                        <div className="space-y-3 pl-3 border-l-2 border-zinc-100 dark:border-zinc-700">
                           {v.evidence.map((e, j) => (
                             <div key={j}>
-                              <p className="text-xs text-zinc-700 mb-1">"{e.quote}"</p>
-                              <p className="text-[10px] text-zinc-500 uppercase tracking-wide">→ {e.how_it_violates}</p>
+                              <p className="text-xs text-zinc-700 dark:text-zinc-300 mb-1">"{e.quote}"</p>
+                              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">→ {e.how_it_violates}</p>
                             </div>
                           ))}
                         </div>
