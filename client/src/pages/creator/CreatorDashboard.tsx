@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   DollarSign,
@@ -8,10 +8,13 @@ import {
   ArrowUpRight,
   Activity,
   Wallet,
-  Receipt
+  Receipt,
+  User,
+  Camera,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import type { RevenueOverview, PlatformConnection } from '../../types/creator';
+import type { RevenueOverview, PlatformConnection, Creator } from '../../types/creator';
 import type { DealApplication } from '../../types/deals';
 
 export function CreatorDashboard() {
@@ -19,7 +22,11 @@ export function CreatorDashboard() {
   const [overview, setOverview] = useState<RevenueOverview | null>(null);
   const [applications, setApplications] = useState<DealApplication[]>([]);
   const [connections, setConnections] = useState<PlatformConnection[]>([]);
+  const [profile, setProfile] = useState<Creator | null>(null);
   const [loading, setLoading] = useState(true);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [syncingProfile, setSyncingProfile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadDashboard();
@@ -27,18 +34,48 @@ export function CreatorDashboard() {
 
   const loadDashboard = async () => {
     try {
-      const [overviewRes, appsRes, connectionsRes] = await Promise.all([
+      const [overviewRes, appsRes, connectionsRes, profileRes] = await Promise.all([
         api.creators.getDashboard(),
         api.deals.listMyApplications(),
         api.creators.listPlatformConnections(),
+        api.creators.getMyProfile(),
       ]);
       setOverview(overviewRes);
       setApplications(appsRes);
       setConnections(connectionsRes);
+      setProfile(profileRes);
     } catch (err) {
       console.error('Failed to load dashboard:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingImage(true);
+    try {
+      const updated = await api.creators.uploadProfileImage(file);
+      setProfile(updated);
+    } catch (err) {
+      console.error('Failed to upload image:', err);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleSyncProfile = async () => {
+    setSyncingProfile(true);
+    try {
+      const updated = await api.creators.syncProfileFromPlatforms();
+      setProfile(updated);
+    } catch (err: any) {
+      console.error('Failed to sync profile:', err);
+      alert(err.message || 'Failed to sync profile');
+    } finally {
+      setSyncingProfile(false);
     }
   };
 
@@ -220,8 +257,76 @@ export function CreatorDashboard() {
           )}
         </div>
 
-        {/* Platform Connections & Quick Actions */}
+        {/* Profile, Platform Connections & Quick Actions */}
         <div className="space-y-8">
+          {/* Profile Widget */}
+          <div className="border border-white/10 bg-zinc-900/30 p-6 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-[50px] pointer-events-none" />
+
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">My Profile</h2>
+              <User className="w-4 h-4 text-emerald-500" />
+            </div>
+
+            {/* Profile Image */}
+            <div className="flex flex-col items-center mb-4">
+              <div className="relative group/avatar">
+                {profile?.profile_image_url ? (
+                  <img
+                    src={profile.profile_image_url}
+                    alt={profile.display_name}
+                    className="w-20 h-20 rounded-full object-cover border-2 border-white/10"
+                  />
+                ) : (
+                  <div className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center border-2 border-white/10">
+                    <User className="w-8 h-8 text-zinc-600" />
+                  </div>
+                )}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingImage}
+                  className="absolute bottom-0 right-0 p-1.5 bg-white text-black rounded-full hover:bg-zinc-200 transition-colors disabled:opacity-50"
+                >
+                  {uploadingImage ? (
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Camera className="w-3 h-3" />
+                  )}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+              </div>
+              <div className="mt-2 text-sm text-white font-medium">
+                {profile?.display_name || 'Your Name'}
+              </div>
+              {profile?.metrics && (profile.metrics as any).total_followers > 0 && (
+                <div className="text-[10px] text-zinc-500">
+                  {((profile.metrics as any).total_followers || 0).toLocaleString()} total followers
+                </div>
+              )}
+            </div>
+
+            {/* Sync Button */}
+            <button
+              onClick={handleSyncProfile}
+              disabled={syncingProfile || connections.length === 0}
+              className="w-full py-2 border border-white/10 text-[10px] uppercase tracking-widest text-zinc-400 hover:text-white hover:border-white/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <RefreshCw className={`w-3 h-3 ${syncingProfile ? 'animate-spin' : ''}`} />
+              {syncingProfile ? 'Syncing...' : 'Sync from Platforms'}
+            </button>
+            {connections.length === 0 && (
+              <p className="text-[10px] text-zinc-600 text-center mt-2">
+                Connect platforms first to sync profile
+              </p>
+            )}
+          </div>
+
           {/* Platform Connections Widget */}
           <div className="border border-white/10 bg-zinc-900/30 p-6 relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-[50px] pointer-events-none" />

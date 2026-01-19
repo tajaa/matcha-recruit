@@ -37,6 +37,7 @@ from ..models.creator import (
     RevenueOverview,
     MonthlyRevenue,
 )
+from ..services.storage import get_storage
 
 router = APIRouter()
 
@@ -114,6 +115,156 @@ async def update_my_creator_profile(
 
         if not row:
             raise HTTPException(status_code=404, detail="Creator not found")
+
+        return row_to_creator_response(row)
+
+
+@router.post("/me/profile-image", response_model=CreatorResponse)
+async def upload_profile_image(
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_creator),
+):
+    """Upload a profile image for the current creator."""
+    # Validate file type
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}"
+        )
+
+    # Validate file size (max 5MB)
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Max 5MB")
+
+    # Upload to S3
+    storage = get_storage()
+    image_url = await storage.upload_file(
+        file_bytes=contents,
+        filename=file.filename or "profile.jpg",
+        prefix="creator-profiles",
+        content_type=file.content_type,
+    )
+
+    # Update creator profile
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE creators
+            SET profile_image_url = $1, updated_at = NOW()
+            WHERE user_id = $2
+            RETURNING *
+            """,
+            image_url,
+            current_user.id,
+        )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Creator not found")
+
+        return row_to_creator_response(row)
+
+
+@router.post("/me/sync-profile", response_model=CreatorResponse)
+async def sync_profile_from_platforms(
+    current_user: CurrentUser = Depends(require_creator),
+):
+    """Auto-populate creator profile from connected social platforms."""
+    async with get_connection() as conn:
+        # Get creator record
+        creator = await conn.fetchrow(
+            "SELECT * FROM creators WHERE user_id = $1",
+            current_user.id,
+        )
+        if not creator:
+            raise HTTPException(status_code=404, detail="Creator not found")
+
+        # Get all platform connections
+        platforms = await conn.fetch(
+            """
+            SELECT platform, platform_username, platform_data
+            FROM creator_platform_connections
+            WHERE creator_id = $1 AND sync_status = 'synced'
+            """,
+            creator["id"],
+        )
+
+        if not platforms:
+            raise HTTPException(
+                status_code=400,
+                detail="No synced platforms found. Connect your social accounts first."
+            )
+
+        # Aggregate metrics from all platforms
+        total_followers = 0
+        total_engagement = 0
+        platform_count = 0
+        social_handles = {}
+        platform_metrics = {}
+
+        for p in platforms:
+            platform_name = p["platform"]
+            username = p["platform_username"]
+            data = parse_jsonb(p["platform_data"]) or {}
+
+            if username:
+                social_handles[platform_name] = username
+
+            # Extract metrics from platform data
+            followers = data.get("followers_count") or data.get("subscriber_count") or data.get("followers") or 0
+            engagement = data.get("engagement_rate") or 0
+
+            if followers > 0:
+                total_followers += followers
+                platform_count += 1
+
+            if engagement > 0:
+                total_engagement += engagement
+
+            platform_metrics[platform_name] = {
+                "followers": followers,
+                "engagement_rate": engagement,
+                "username": username,
+                **{k: v for k, v in data.items() if k not in ["access_token", "refresh_token"]}
+            }
+
+        # Calculate average engagement
+        avg_engagement = total_engagement / platform_count if platform_count > 0 else 0
+
+        # Build aggregated metrics
+        metrics = {
+            "total_followers": total_followers,
+            "platform_count": platform_count,
+            "avg_engagement_rate": round(avg_engagement, 2),
+            "platforms": platform_metrics,
+        }
+
+        # Auto-generate bio if empty
+        current_bio = creator["bio"]
+        if not current_bio and platform_count > 0:
+            platform_names = list(social_handles.keys())
+            if len(platform_names) == 1:
+                current_bio = f"Content creator on {platform_names[0].title()}"
+            else:
+                current_bio = f"Content creator on {', '.join(p.title() for p in platform_names[:-1])} and {platform_names[-1].title()}"
+
+        # Update creator profile
+        row = await conn.fetchrow(
+            """
+            UPDATE creators
+            SET social_handles = $1,
+                metrics = $2,
+                bio = COALESCE(NULLIF($3, ''), bio),
+                updated_at = NOW()
+            WHERE id = $4
+            RETURNING *
+            """,
+            json.dumps(social_handles),
+            json.dumps(metrics),
+            current_bio,
+            creator["id"],
+        )
 
         return row_to_creator_response(row)
 

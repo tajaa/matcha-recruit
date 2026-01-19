@@ -1807,6 +1807,26 @@ export const creators = {
       body: JSON.stringify(data),
     }),
 
+  uploadProfileImage: async (file: File): Promise<Creator> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`${API_BASE}/creators/me/profile-image`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${getAccessToken()}`,
+      },
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+    return response.json();
+  },
+
+  syncProfileFromPlatforms: () =>
+    request<Creator>('/creators/me/sync-profile', { method: 'POST' }),
+
   getPublicProfile: (creatorId: string) =>
     request<CreatorPublic>(`/creators/public/${creatorId}`),
 

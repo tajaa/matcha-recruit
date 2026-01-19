@@ -82,6 +82,7 @@ const DealManager = lazy(() => import('./pages/agency/DealManager'));
 const CampaignManager = lazy(() => import('./pages/agency/CampaignManager'));
 const CampaignDetail = lazy(() => import('./pages/agency/CampaignDetail'));
 const CreatorDiscovery = lazy(() => import('./pages/agency/CreatorDiscovery'));
+const CreatorProfile = lazy(() => import('./pages/agency/CreatorProfile'));
 const ApplicationReview = lazy(() => import('./pages/agency/ApplicationReview'));
 const ContractManager = lazy(() => import('./pages/agency/ContractManager'));
 
@@ -538,6 +539,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['agency']}>
                     <CreatorDiscovery />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="agency/creators/:creatorId"
+                element={
+                  <ProtectedRoute roles={['agency']}>
+                    <CreatorProfile />
                   </ProtectedRoute>
                 }
               />
