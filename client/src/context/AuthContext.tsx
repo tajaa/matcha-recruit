@@ -91,9 +91,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (data: LoginRequest) => {
     const result = await auth.login(data);
+    // Set user immediately from login response
     setUser(result.user);
-    await loadUser(); // Load full profile
-    return result.user; // Return user for immediate use
+
+    // Try to load full profile, but don't fail login if this errors
+    try {
+      const profileData = await auth.me();
+      setUser({
+        id: profileData.user.id,
+        email: profileData.user.email,
+        role: profileData.user.role,
+        is_active: true,
+        created_at: '',
+        last_login: null,
+      });
+      setProfile(profileData.profile);
+      setBetaFeatures(profileData.user.beta_features || {});
+      setInterviewPrepTokens(profileData.user.interview_prep_tokens || 0);
+      setAllowedInterviewRoles(profileData.user.allowed_interview_roles || []);
+    } catch (err) {
+      // Profile load failed, but login succeeded - keep the basic user info
+      console.warn('Failed to load full profile after login:', err);
+    }
+
+    return result.user;
   };
 
   const logout = async () => {
@@ -105,13 +126,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const registerClient = async (data: ClientRegister) => {
     const result = await auth.registerClient(data);
     setUser(result.user);
-    await loadUser();
+    // Try to load full profile, but don't fail registration if this errors
+    try {
+      await loadUser();
+    } catch (err) {
+      console.warn('Failed to load full profile after registration:', err);
+    }
   };
 
   const registerCandidate = async (data: CandidateRegister) => {
     const result = await auth.registerCandidate(data);
     setUser(result.user);
-    await loadUser();
+    // Try to load full profile, but don't fail registration if this errors
+    try {
+      await loadUser();
+    } catch (err) {
+      console.warn('Failed to load full profile after registration:', err);
+    }
   };
 
   const hasRole = (...roles: UserRole[]) => {
