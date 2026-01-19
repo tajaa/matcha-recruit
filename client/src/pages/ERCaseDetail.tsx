@@ -72,6 +72,7 @@ export function ERCaseDetail() {
   const [violations, setViolations] = useState<PolicyViolation[]>([]);
   const [violationSummary, setViolationSummary] = useState<string>('');
   const [analysisLoading, setAnalysisLoading] = useState<string | null>(null);
+  const [analysisProgress, setAnalysisProgress] = useState<{ step: string; detail?: string } | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -132,6 +133,69 @@ export function ERCaseDetail() {
   useEffect(() => {
     fetchAnalysis(activeTab);
   }, [activeTab, fetchAnalysis]);
+
+  // WebSocket subscription for real-time analysis updates
+  useEffect(() => {
+    if (!id) return;
+
+    const wsUrl = `ws://localhost:8001/ws/notifications`;
+    console.log('[ERCaseDetail] Connecting to WebSocket:', wsUrl);
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('[ERCaseDetail] WebSocket connected, subscribing to channel:', `er_case:${id}`);
+      ws.send(JSON.stringify({ action: 'subscribe', channel: `er_case:${id}` }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('[ERCaseDetail] WebSocket message received:', data);
+
+        if (data.type === 'task_progress') {
+          setAnalysisProgress({
+            step: data.message || 'Processing...',
+            detail: data.total > 0 ? `Step ${data.progress}/${data.total}` : undefined,
+          });
+        } else if (data.type === 'task_complete') {
+          // Map task_type to tab and fetch new data
+          const taskTypeToTab: Record<string, AnalysisTab> = {
+            timeline_analysis: 'timeline',
+            discrepancy_analysis: 'discrepancies',
+            policy_check: 'policy',
+          };
+          const tab = taskTypeToTab[data.task_type];
+          if (tab) {
+            fetchAnalysis(tab);
+          }
+          setAnalysisLoading(null);
+          setAnalysisProgress(null);
+        } else if (data.type === 'task_error') {
+          console.error('[ERCaseDetail] Analysis failed:', data.error);
+          setAnalysisLoading(null);
+          setAnalysisProgress(null);
+        }
+      } catch (err) {
+        console.error('[ERCaseDetail] Failed to parse WebSocket message:', err);
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error('[ERCaseDetail] WebSocket error:', err);
+    };
+
+    ws.onclose = (event) => {
+      console.log('[ERCaseDetail] WebSocket closed:', event.code, event.reason);
+    };
+
+    return () => {
+      console.log('[ERCaseDetail] Cleaning up WebSocket');
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'unsubscribe', channel: `er_case:${id}` }));
+      }
+      ws.close();
+    };
+  }, [id, fetchAnalysis]);
 
   const handleUpload = async (files: File[]) => {
     if (!id || files.length === 0) return;
@@ -233,53 +297,65 @@ export function ERCaseDetail() {
   const handleGenerateTimeline = async () => {
     if (!id) return;
     setAnalysisLoading('timeline');
+    setAnalysisProgress({ step: 'Starting analysis...' });
     try {
       await erCopilot.generateTimeline(id);
+      // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('timeline');
-      if (!success) {
+      if (!success && analysisLoading === 'timeline') {
         console.error('Timeline analysis timed out');
+        setAnalysisLoading(null);
+        setAnalysisProgress(null);
       }
     } catch (err) {
       console.error('Failed to generate timeline:', err);
-    } finally {
       setAnalysisLoading(null);
+      setAnalysisProgress(null);
     }
   };
 
   const handleGenerateDiscrepancies = async () => {
     if (!id) return;
     setAnalysisLoading('discrepancies');
+    setAnalysisProgress({ step: 'Starting analysis...' });
     try {
       await erCopilot.generateDiscrepancies(id);
+      // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('discrepancies');
-      if (!success) {
+      if (!success && analysisLoading === 'discrepancies') {
         console.error('Discrepancy analysis timed out');
+        setAnalysisLoading(null);
+        setAnalysisProgress(null);
       }
     } catch (err) {
       console.error('Failed to generate discrepancies:', err);
-    } finally {
       setAnalysisLoading(null);
+      setAnalysisProgress(null);
     }
   };
 
   const handleRunPolicyCheck = async () => {
     if (!id) return;
-    const policyDoc = uploadedDocs.find(d => d.document_type === 'policy');
+    const policyDoc = documents.find(d => d.document_type === 'policy' && d.processing_status === 'completed');
     if (!policyDoc) {
       alert('Please upload a policy document first.');
       return;
     }
     setAnalysisLoading('policy');
+    setAnalysisProgress({ step: 'Starting analysis...' });
     try {
       await erCopilot.runPolicyCheck(id, policyDoc.id);
+      // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('policy');
-      if (!success) {
+      if (!success && analysisLoading === 'policy') {
         console.error('Policy check timed out');
+        setAnalysisLoading(null);
+        setAnalysisProgress(null);
       }
     } catch (err) {
       console.error('Failed to run policy check:', err);
-    } finally {
       setAnalysisLoading(null);
+      setAnalysisProgress(null);
     }
   };
 
@@ -491,11 +567,18 @@ export function ERCaseDetail() {
                     {analysisLoading === 'timeline' ? (
                       <div className="flex flex-col items-center gap-3">
                         <RefreshCw size={20} className="animate-spin text-zinc-500" />
-                        <span>Analyzing documents and reconstructing timeline...</span>
-                        <span className="text-[10px] text-zinc-500">This may take up to a minute</span>
+                        <span>{analysisProgress?.step || 'Analyzing documents and reconstructing timeline...'}</span>
+                        {analysisProgress?.detail && (
+                          <span className="text-[10px] text-zinc-500">{analysisProgress.detail}</span>
+                        )}
                       </div>
                     ) : (
-                      'No timeline data generated.'
+                      <div>
+                        <p className="mb-2">No timeline generated yet.</p>
+                        <p className="text-[10px] text-zinc-500">
+                          Click "Regenerate Analysis" to reconstruct a timeline from your uploaded documents.
+                        </p>
+                      </div>
                     )}
                   </div>
                 ) : (
@@ -575,11 +658,33 @@ export function ERCaseDetail() {
                     {analysisLoading === 'discrepancies' ? (
                       <div className="flex flex-col items-center gap-3">
                         <RefreshCw size={20} className="animate-spin text-zinc-500" />
-                        <span>Comparing statements and detecting discrepancies...</span>
-                        <span className="text-[10px] text-zinc-500">This may take up to a minute</span>
+                        <span>{analysisProgress?.step || 'Comparing statements and detecting discrepancies...'}</span>
+                        {analysisProgress?.detail && (
+                          <span className="text-[10px] text-zinc-500">{analysisProgress.detail}</span>
+                        )}
+                      </div>
+                    ) : discrepancySummary ? (
+                      <div>
+                        <p className="mb-2">No conflicting statements detected.</p>
+                        <p className="text-[10px] text-zinc-500">
+                          Analyzed {uploadedDocs.filter(d => d.document_type !== 'policy').length} documents.
+                          All witness accounts appear consistent on key facts.
+                        </p>
+                      </div>
+                    ) : uploadedDocs.filter(d => d.document_type !== 'policy').length < 2 ? (
+                      <div>
+                        <p className="mb-2">Upload at least 2 non-policy documents to run analysis.</p>
+                        <p className="text-[10px] text-zinc-500">
+                          Discrepancy detection compares statements across multiple documents.
+                        </p>
                       </div>
                     ) : (
-                      'No discrepancies detected or analysis not run.'
+                      <div>
+                        <p className="mb-2">No analysis run yet.</p>
+                        <p className="text-[10px] text-zinc-500">
+                          Click "Analyze Documents" to compare statements and detect discrepancies.
+                        </p>
+                      </div>
                     )}
                   </div>
                 ) : (
@@ -649,11 +754,34 @@ export function ERCaseDetail() {
                     {analysisLoading === 'policy' ? (
                       <div className="flex flex-col items-center gap-3">
                         <RefreshCw size={20} className="animate-spin text-zinc-500" />
-                        <span>Checking evidence against policy documents...</span>
-                        <span className="text-[10px] text-zinc-500">This may take up to a minute</span>
+                        <span>{analysisProgress?.step || 'Checking evidence against policy documents...'}</span>
+                        {analysisProgress?.detail && (
+                          <span className="text-[10px] text-zinc-500">{analysisProgress.detail}</span>
+                        )}
+                      </div>
+                    ) : !uploadedDocs.find(d => d.document_type === 'policy') ? (
+                      <div>
+                        <p className="mb-2">Upload a policy document to run compliance check.</p>
+                        <p className="text-[10px] text-zinc-500">
+                          The policy check compares evidence against your company policies
+                          to identify potential violations.
+                        </p>
+                      </div>
+                    ) : violationSummary ? (
+                      <div>
+                        <p className="mb-2">No policy violations identified.</p>
+                        <p className="text-[10px] text-zinc-500">
+                          Evidence was reviewed against the uploaded policy document.
+                          No clear violations of stated policies were found.
+                        </p>
                       </div>
                     ) : (
-                      'No violations detected or check not run.'
+                      <div>
+                        <p className="mb-2">No policy check run yet.</p>
+                        <p className="text-[10px] text-zinc-500">
+                          Click "Run Policy Check" to compare evidence against the uploaded policy.
+                        </p>
+                      </div>
                     )}
                   </div>
                 ) : (

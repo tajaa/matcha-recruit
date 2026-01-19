@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from ..celery_app import celery_app
-from ..notifications import publish_task_complete, publish_task_error
+from ..notifications import publish_task_complete, publish_task_error, publish_task_progress
 from ..utils import get_db_connection
 
 
@@ -97,14 +97,44 @@ async def _run_timeline_analysis(case_id: str) -> dict[str, Any]:
 
     conn = await get_db_connection()
     try:
+        # Progress: Loading documents
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="timeline_analysis",
+            entity_id=case_id,
+            progress=1,
+            total=3,
+            message="Loading documents...",
+        )
+
         # Get all processed documents (transcripts and evidence)
         documents = await _get_documents_for_analysis(conn, case_id, exclude_type="policy")
 
         if not documents:
             raise ValueError("No processed documents found for timeline analysis")
 
+        # Progress: Analyzing documents
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="timeline_analysis",
+            entity_id=case_id,
+            progress=2,
+            total=3,
+            message=f"Reconstructing timeline from {len(documents)} documents...",
+        )
+
         # Run analysis
         result = analyzer.reconstruct_timeline_sync(documents)
+
+        # Progress: Saving results
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="timeline_analysis",
+            entity_id=case_id,
+            progress=3,
+            total=3,
+            message="Saving analysis results...",
+        )
 
         # Save result
         source_doc_ids = [d["id"] for d in documents]
@@ -172,14 +202,44 @@ async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
 
     conn = await get_db_connection()
     try:
+        # Progress: Loading documents
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="discrepancy_analysis",
+            entity_id=case_id,
+            progress=1,
+            total=3,
+            message="Loading documents...",
+        )
+
         # Get all documents except policy
         documents = await _get_documents_for_analysis(conn, case_id, exclude_type="policy")
 
         if len(documents) < 2:
             raise ValueError("Need at least 2 documents for discrepancy analysis")
 
+        # Progress: Analyzing documents
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="discrepancy_analysis",
+            entity_id=case_id,
+            progress=2,
+            total=3,
+            message=f"Analyzing {len(documents)} documents for discrepancies...",
+        )
+
         # Run analysis
         result = analyzer.detect_discrepancies_sync(documents)
+
+        # Progress: Saving results
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="discrepancy_analysis",
+            entity_id=case_id,
+            progress=3,
+            total=3,
+            message="Saving analysis results...",
+        )
 
         # Save result
         source_doc_ids = [d["id"] for d in documents]
@@ -247,6 +307,16 @@ async def _run_policy_check(case_id: str, policy_document_id: str) -> dict[str, 
 
     conn = await get_db_connection()
     try:
+        # Progress: Loading documents
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="policy_check",
+            entity_id=case_id,
+            progress=1,
+            total=3,
+            message="Loading policy and evidence documents...",
+        )
+
         # Get policy document
         policy_row = await conn.fetchrow(
             """
@@ -272,8 +342,28 @@ async def _run_policy_check(case_id: str, policy_document_id: str) -> dict[str, 
         if not evidence_docs:
             raise ValueError("No evidence documents found for policy check")
 
+        # Progress: Checking for violations
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="policy_check",
+            entity_id=case_id,
+            progress=2,
+            total=3,
+            message=f"Checking {len(evidence_docs)} documents against policy...",
+        )
+
         # Run analysis
         result = analyzer.check_policy_violations_sync(policy_doc, evidence_docs)
+
+        # Progress: Saving results
+        publish_task_progress(
+            channel=f"er_case:{case_id}",
+            task_type="policy_check",
+            entity_id=case_id,
+            progress=3,
+            total=3,
+            message="Saving analysis results...",
+        )
 
         # Save result
         source_doc_ids = [policy_document_id] + [d["id"] for d in evidence_docs]
