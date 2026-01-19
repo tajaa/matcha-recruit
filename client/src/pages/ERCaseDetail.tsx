@@ -201,12 +201,44 @@ export function ERCaseDetail() {
 
   const hasUnprocessedDocs = documents.some(d => d.processing_status === 'pending' || d.processing_status === 'failed');
 
+  const pollForAnalysis = useCallback(async (type: AnalysisTab, maxAttempts = 30) => {
+    // Poll every 2 seconds for up to 60 seconds
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      try {
+        if (type === 'timeline') {
+          const data = await erCopilot.getTimeline(id!);
+          setTimeline(data.analysis.events || []);
+          setTimelineSummary(data.analysis.timeline_summary || '');
+          setTimelineGaps(data.analysis.gaps_identified || []);
+          return true;
+        } else if (type === 'discrepancies') {
+          const data = await erCopilot.getDiscrepancies(id!);
+          setDiscrepancies(data.analysis.discrepancies || []);
+          setDiscrepancySummary(data.analysis.summary || '');
+          return true;
+        } else if (type === 'policy') {
+          const data = await erCopilot.getPolicyCheck(id!);
+          setViolations(data.analysis.violations || []);
+          setViolationSummary(data.analysis.summary || '');
+          return true;
+        }
+      } catch {
+        // Not ready yet, continue polling
+      }
+    }
+    return false;
+  }, [id]);
+
   const handleGenerateTimeline = async () => {
     if (!id) return;
     setAnalysisLoading('timeline');
     try {
       await erCopilot.generateTimeline(id);
-      setTimeout(() => fetchAnalysis('timeline'), 5000);
+      const success = await pollForAnalysis('timeline');
+      if (!success) {
+        console.error('Timeline analysis timed out');
+      }
     } catch (err) {
       console.error('Failed to generate timeline:', err);
     } finally {
@@ -219,7 +251,10 @@ export function ERCaseDetail() {
     setAnalysisLoading('discrepancies');
     try {
       await erCopilot.generateDiscrepancies(id);
-      setTimeout(() => fetchAnalysis('discrepancies'), 5000);
+      const success = await pollForAnalysis('discrepancies');
+      if (!success) {
+        console.error('Discrepancy analysis timed out');
+      }
     } catch (err) {
       console.error('Failed to generate discrepancies:', err);
     } finally {
@@ -237,7 +272,10 @@ export function ERCaseDetail() {
     setAnalysisLoading('policy');
     try {
       await erCopilot.runPolicyCheck(id, policyDoc.id);
-      setTimeout(() => fetchAnalysis('policy'), 5000);
+      const success = await pollForAnalysis('policy');
+      if (!success) {
+        console.error('Policy check timed out');
+      }
     } catch (err) {
       console.error('Failed to run policy check:', err);
     } finally {
@@ -450,7 +488,15 @@ export function ERCaseDetail() {
 
                 {timeline.length === 0 ? (
                   <div className="text-center py-12 text-zinc-400 text-xs">
-                    No timeline data generated.
+                    {analysisLoading === 'timeline' ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <RefreshCw size={20} className="animate-spin text-zinc-500" />
+                        <span>Analyzing documents and reconstructing timeline...</span>
+                        <span className="text-[10px] text-zinc-500">This may take up to a minute</span>
+                      </div>
+                    ) : (
+                      'No timeline data generated.'
+                    )}
                   </div>
                 ) : (
                   <div className="relative pl-2 space-y-8 border-l border-zinc-200 ml-2">
@@ -526,7 +572,15 @@ export function ERCaseDetail() {
 
                 {discrepancies.length === 0 ? (
                   <div className="text-center py-12 text-zinc-400 text-xs">
-                    No discrepancies detected or analysis not run.
+                    {analysisLoading === 'discrepancies' ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <RefreshCw size={20} className="animate-spin text-zinc-500" />
+                        <span>Comparing statements and detecting discrepancies...</span>
+                        <span className="text-[10px] text-zinc-500">This may take up to a minute</span>
+                      </div>
+                    ) : (
+                      'No discrepancies detected or analysis not run.'
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-8">
@@ -592,7 +646,15 @@ export function ERCaseDetail() {
 
                 {violations.length === 0 ? (
                   <div className="text-center py-12 text-zinc-400 text-xs">
-                    No violations detected or check not run.
+                    {analysisLoading === 'policy' ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <RefreshCw size={20} className="animate-spin text-zinc-500" />
+                        <span>Checking evidence against policy documents...</span>
+                        <span className="text-[10px] text-zinc-500">This may take up to a minute</span>
+                      </div>
+                    ) : (
+                      'No violations detected or check not run.'
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-8">
