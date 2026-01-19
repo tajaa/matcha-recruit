@@ -16,7 +16,7 @@ import type { AffiliateLink, AffiliateStats } from '../../types/campaigns';
 export function AffiliateDashboard() {
   const [links, setLinks] = useState<AffiliateLink[]>([]);
   const [selectedLink, setSelectedLink] = useState<AffiliateLink | null>(null);
-  const [stats, setStats] = useState<AffiliateStats | null>(null);
+  const [_stats, setStats] = useState<AffiliateStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -77,7 +77,6 @@ export function AffiliateDashboard() {
   // Calculate totals
   const totalClicks = links.reduce((sum, l) => sum + l.click_count, 0);
   const totalConversions = links.reduce((sum, l) => sum + l.conversion_count, 0);
-  const totalSales = links.reduce((sum, l) => sum + l.total_sales, 0);
   const totalCommission = links.reduce((sum, l) => sum + l.total_commission, 0);
   const overallConversionRate = totalClicks > 0 ? totalConversions / totalClicks : 0;
 

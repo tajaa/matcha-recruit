@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
+import { HelpCircle, X } from 'lucide-react';
 
 interface NavItem {
   path: string;
@@ -9,6 +10,7 @@ interface NavItem {
   roles: UserRole[];
   icon: React.ReactNode;
   betaFeature?: string;
+  helpText?: string;
 }
 
 interface NavSection {
@@ -234,6 +236,172 @@ const navSections: NavSection[] = [
       },
     ],
   },
+  {
+    title: 'Creator Hub',
+    roles: ['creator'],
+    items: [
+      {
+        path: '/app/creator',
+        label: 'Dashboard',
+        roles: ['creator'],
+        helpText: 'Your central hub showing earnings overview, active deals, and quick actions.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/creator/offers',
+        label: 'Campaign Offers',
+        roles: ['creator'],
+        helpText: 'View and respond to campaign offers from agencies. Accept, decline, or counter-offer with your own rate.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/creator/deals',
+        label: 'Browse Deals',
+        roles: ['creator'],
+        helpText: 'Discover open brand deals and sponsorship opportunities. Apply to campaigns that match your audience.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/creator/applications',
+        label: 'My Applications',
+        roles: ['creator'],
+        helpText: 'Track the status of your deal applications. See which ones are pending, approved, or need action.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/creator/contracts',
+        label: 'My Contracts',
+        roles: ['creator'],
+        helpText: 'View and manage your active contracts. Track deliverables, deadlines, and payment status.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/creator/affiliate',
+        label: 'Affiliate Links',
+        roles: ['creator'],
+        helpText: 'Manage your affiliate tracking links. Monitor clicks, conversions, and commission earnings in real-time.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/creator/revenue',
+        label: 'Revenue',
+        roles: ['creator'],
+        helpText: 'Track all your income sources including sponsorships, affiliate earnings, and platform revenue.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/creator/platforms',
+        label: 'Platforms',
+        roles: ['creator'],
+        helpText: 'Connect your social media accounts to automatically sync follower counts and engagement metrics.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    title: 'Agency',
+    roles: ['agency'],
+    items: [
+      {
+        path: '/app/agency',
+        label: 'Dashboard',
+        roles: ['agency'],
+        helpText: 'Overview of your agency activity including active campaigns, pending applications, and recent contracts.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/agency/campaigns',
+        label: 'Campaigns',
+        roles: ['agency'],
+        helpText: 'Create and manage brand campaigns. Set budgets, deliverables, and invite creators to participate.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/agency/deals',
+        label: 'Deal Manager',
+        roles: ['agency'],
+        helpText: 'Create open deals that creators can apply to. Set requirements, compensation, and review applications.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/agency/creators',
+        label: 'Find Creators',
+        roles: ['agency'],
+        helpText: 'Search and discover creators by niche, follower count, engagement rate, and platform.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/agency/applications',
+        label: 'Applications',
+        roles: ['agency'],
+        helpText: 'Review creator applications for your deals. Approve, reject, or request more information.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/agency/contracts',
+        label: 'Contracts',
+        roles: ['agency'],
+        helpText: 'Manage active contracts with creators. Track deliverables, approve content, and process payments.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        ),
+      },
+    ],
+  },
 ];
 
 // Flatten for mobile menu and legacy compatibility
@@ -242,7 +410,7 @@ const allNavItems: NavItem[] = navSections.flatMap(section => section.items);
 const settingsItem: NavItem = {
   path: '/app/settings',
   label: 'Settings',
-  roles: ['admin', 'client', 'candidate', 'employee'],
+  roles: ['admin', 'client', 'candidate', 'employee', 'creator', 'agency'],
   icon: (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -276,19 +444,54 @@ export function Layout() {
     navigate('/login');
   };
 
+  const [activeHelp, setActiveHelp] = useState<string | null>(null);
+
   const NavLink = ({ item }: { item: NavItem }) => {
     const isActive = location.pathname === item.path;
+    const showingHelp = activeHelp === item.path;
+
     return (
-      <Link
-        to={item.path}
-        className={`flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
-            ? 'text-white bg-zinc-800 border-l-2 border-white'
-            : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
-          }`}
-      >
-        {item.icon}
-        <span>{item.label}</span>
-      </Link>
+      <div className="relative group">
+        <div className="flex items-center">
+          <Link
+            to={item.path}
+            className={`flex-1 flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
+                ? 'text-white bg-zinc-800 border-l-2 border-white'
+                : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
+              }`}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </Link>
+          {item.helpText && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveHelp(showingHelp ? null : item.path);
+              }}
+              className="p-1 mr-1 text-zinc-600 hover:text-zinc-400 transition-colors opacity-0 group-hover:opacity-100"
+              title="Learn more"
+            >
+              <HelpCircle className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+        {item.helpText && showingHelp && (
+          <div className="absolute left-full top-0 ml-2 w-64 p-3 bg-zinc-900 border border-white/10 shadow-xl z-50 animate-in fade-in slide-in-from-left-2 duration-200">
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <span className="text-[10px] uppercase tracking-widest text-white font-bold">{item.label}</span>
+              <button
+                onClick={() => setActiveHelp(null)}
+                className="text-zinc-500 hover:text-white transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            <p className="text-xs text-zinc-400 leading-relaxed">{item.helpText}</p>
+          </div>
+        )}
+      </div>
     );
   };
 

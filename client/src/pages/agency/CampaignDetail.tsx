@@ -20,8 +20,6 @@ import {
 import { api } from '../../api/client';
 import type {
   CampaignWithOffers,
-  CampaignOffer,
-  CampaignOfferCreate,
   OfferStatus,
 } from '../../types/campaigns';
 import type { CreatorPublic } from '../../types/creator';
@@ -65,7 +63,7 @@ export function CampaignDetail() {
       const res = await api.creators.search({ query: searchQuery });
       // Filter out creators who already have an offer
       const existingCreatorIds = new Set(campaign?.offers.map(o => o.creator_id) || []);
-      setSearchResults(res.filter(c => !existingCreatorIds.has(c.id)));
+      setSearchResults(res.filter((c: CreatorPublic) => !existingCreatorIds.has(c.id)));
     } catch (err) {
       console.error('Failed to search creators:', err);
     } finally {

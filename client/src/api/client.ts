@@ -134,7 +134,6 @@ import type {
   CampaignPayment,
   AffiliateLink,
   AffiliateLinkCreate,
-  AffiliateLinkUpdate,
   AffiliateStats,
   CreatorValuation,
   ContractTemplate,
@@ -1810,6 +1809,13 @@ export const creators = {
 
   getPublicProfile: (creatorId: string) =>
     request<CreatorPublic>(`/creators/public/${creatorId}`),
+
+  search: (params: { query: string; limit?: number }) => {
+    const searchParams = new URLSearchParams();
+    searchParams.append('query', params.query);
+    if (params.limit) searchParams.append('limit', params.limit.toString());
+    return request<CreatorPublic[]>(`/agencies/creators/search?${searchParams.toString()}`);
+  },
 
   discover: (params?: {
     niches?: string;
