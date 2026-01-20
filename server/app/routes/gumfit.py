@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Literal
 from uuid import UUID, uuid4
 import secrets
+import json
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from pydantic import BaseModel, EmailStr
@@ -13,6 +14,21 @@ from ..models.auth import CurrentUser
 from ..dependencies import require_gumfit_admin
 
 router = APIRouter()
+
+
+def parse_json_field(value) -> list:
+    """Parse a JSON field that might be a string or already a list."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return []
 
 
 # ============================================================================
@@ -228,7 +244,7 @@ async def list_creators(
                 profile_image_url=row["profile_image_url"],
                 is_verified=row["is_verified"],
                 is_public=row["is_public"],
-                niches=row["niches"] or [],
+                niches=parse_json_field(row["niches"]),
                 total_followers=row["total_followers"],
                 created_at=row["created_at"],
             )
@@ -321,7 +337,7 @@ async def list_agencies(
                 logo_url=row["logo_url"],
                 agency_type=row["agency_type"],
                 is_verified=row["is_verified"],
-                industries=row["industries"] or [],
+                industries=parse_json_field(row["industries"]),
                 member_count=row["member_count"],
                 created_at=row["created_at"],
             )
