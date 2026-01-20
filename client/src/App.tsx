@@ -5,6 +5,7 @@ import { Layout, ProtectedRoute } from './components';
 
 // Static imports for critical path (landing + auth)
 import { Landing } from './pages/Landing';
+import { GumFitLanding } from './pages/GumFitLanding';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Unauthorized } from './pages/Unauthorized';
@@ -120,6 +121,7 @@ function App() {
             <Routes>
               {/* Public routes */}
               <Route path="/" element={<Landing />} />
+              <Route path="/gumfit-landing" element={<GumFitLanding />} />
               <Route path="/for-candidates" element={<ForCandidates />} />
               <Route path="/work-with-us" element={<WorkWithUs />} />
               <Route path="/login" element={<Login />} />
