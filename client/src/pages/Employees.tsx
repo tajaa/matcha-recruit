@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAccessToken } from '../api/client';
-import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight } from 'lucide-react';
+import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8001/api';
 
@@ -47,6 +47,7 @@ export default function Employees() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [invitingId, setInvitingId] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   const fetchEmployees = async () => {
     try {
@@ -193,14 +194,100 @@ export default function Employees() {
             Manage personnel and access rights
           </p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
-        >
-          <Plus size={14} />
-          Add Employee
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowHelp(!showHelp)}
+            className={`flex items-center gap-2 px-4 py-2 border text-xs font-bold uppercase tracking-wider transition-colors ${
+              showHelp
+                ? 'border-white/30 text-white bg-zinc-800'
+                : 'border-white/10 text-zinc-400 hover:text-white hover:border-white/20'
+            }`}
+          >
+            <HelpCircle size={14} />
+            Help
+            <ChevronDown size={12} className={`transition-transform ${showHelp ? 'rotate-180' : ''}`} />
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+          >
+            <Plus size={14} />
+            Add Employee
+          </button>
+        </div>
       </div>
+
+      {/* Help Panel */}
+      {showHelp && (
+        <div className="bg-zinc-900/50 border border-white/10 rounded-sm overflow-hidden">
+          <div className="p-6 space-y-6">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Getting Started with Employee Management</h3>
+                <p className="text-xs text-zinc-500 mt-1">Learn how to manage your team and onboarding tasks</p>
+              </div>
+              <button onClick={() => setShowHelp(false)} className="text-zinc-500 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xs font-bold">1</div>
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">Add Employees</h4>
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed pl-8">
+                  Click "Add Employee" to create a new team member record. Enter their name, email, work state, and start date. The employee won't have system access until you send an invitation.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xs font-bold">2</div>
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">Send Invitations</h4>
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed pl-8">
+                  Click "Send Invite" to email the employee a link to create their account and access the employee portal. You can resend invitations if needed.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xs font-bold">3</div>
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">View Employee Details</h4>
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed pl-8">
+                  Click on any employee row to view their full profile, including personal info, employment details, and their onboarding checklist progress.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xs font-bold">4</div>
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">Manage Onboarding</h4>
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed pl-8">
+                  In the employee detail view, assign onboarding tasks from your templates. Track completion, mark tasks done, and add notes. Tasks can be assigned to the employee or HR/manager.
+                </p>
+              </div>
+            </div>
+
+            <div className="border-t border-white/10 pt-4">
+              <p className="text-xs text-zinc-500">
+                <span className="text-zinc-400 font-medium">Tip:</span> Set up your onboarding task templates in{' '}
+                <button
+                  onClick={() => navigate('/app/onboarding-templates')}
+                  className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
+                >
+                  HR Tools → Onboarding
+                </button>{' '}
+                to streamline new employee setup.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Error message */}
       {error && (
