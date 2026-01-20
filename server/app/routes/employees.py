@@ -472,3 +472,531 @@ async def resend_invitation(
 ):
     """Resend invitation email (creates new token)."""
     return await send_invitation(employee_id, current_user)
+
+
+# ================================
+# Employee Onboarding Tasks
+# ================================
+
+class EmployeeOnboardingTaskResponse(BaseModel):
+    id: UUID
+    employee_id: UUID
+    task_id: Optional[UUID]
+    title: str
+    description: Optional[str]
+    category: str
+    is_employee_task: bool
+    due_date: Optional[str]
+    status: str
+    completed_at: Optional[datetime]
+    completed_by: Optional[UUID]
+    notes: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AssignOnboardingTasksRequest(BaseModel):
+    task_ids: Optional[List[UUID]] = None  # Template task IDs to assign
+    custom_tasks: Optional[List[dict]] = None  # Custom tasks: {title, description, category, is_employee_task, due_date}
+
+
+class UpdateOnboardingTaskRequest(BaseModel):
+    status: Optional[str] = None  # pending, completed, skipped
+    notes: Optional[str] = None
+
+
+@router.get("/{employee_id}/onboarding", response_model=List[EmployeeOnboardingTaskResponse])
+async def get_employee_onboarding_tasks(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get all onboarding tasks for an employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify employee belongs to company
+        employee = await conn.fetchrow(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id
+        )
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        rows = await conn.fetch(
+            """
+            SELECT * FROM employee_onboarding_tasks
+            WHERE employee_id = $1
+            ORDER BY
+                CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
+                category, due_date, created_at
+            """,
+            employee_id
+        )
+
+        return [
+            EmployeeOnboardingTaskResponse(
+                id=row["id"],
+                employee_id=row["employee_id"],
+                task_id=row["task_id"],
+                title=row["title"],
+                description=row["description"],
+                category=row["category"],
+                is_employee_task=row["is_employee_task"],
+                due_date=str(row["due_date"]) if row["due_date"] else None,
+                status=row["status"],
+                completed_at=row["completed_at"],
+                completed_by=row["completed_by"],
+                notes=row["notes"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+
+@router.post("/{employee_id}/onboarding", response_model=List[EmployeeOnboardingTaskResponse])
+async def assign_onboarding_tasks(
+    employee_id: UUID,
+    request: AssignOnboardingTasksRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Assign onboarding tasks to an employee from templates or custom tasks."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify employee belongs to company
+        employee = await conn.fetchrow(
+            "SELECT id, start_date FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id
+        )
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        start_date = employee["start_date"] or datetime.now().date()
+        assigned_tasks = []
+
+        # Assign from template tasks
+        if request.task_ids:
+            for task_id in request.task_ids:
+                template = await conn.fetchrow(
+                    "SELECT * FROM onboarding_tasks WHERE id = $1 AND org_id = $2 AND is_active = true",
+                    task_id, company_id
+                )
+                if template:
+                    due_date = start_date + timedelta(days=template["due_days"])
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO employee_onboarding_tasks
+                        (employee_id, task_id, title, description, category, is_employee_task, due_date)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        RETURNING *
+                        """,
+                        employee_id, task_id, template["title"], template["description"],
+                        template["category"], template["is_employee_task"], due_date
+                    )
+                    assigned_tasks.append(row)
+
+        # Assign custom tasks
+        if request.custom_tasks:
+            for task in request.custom_tasks:
+                due_date = None
+                if task.get("due_date"):
+                    try:
+                        due_date = datetime.strptime(task["due_date"], "%Y-%m-%d").date()
+                    except ValueError:
+                        pass
+
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO employee_onboarding_tasks
+                    (employee_id, title, description, category, is_employee_task, due_date)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING *
+                    """,
+                    employee_id, task.get("title", "Custom Task"),
+                    task.get("description"), task.get("category", "admin"),
+                    task.get("is_employee_task", False), due_date
+                )
+                assigned_tasks.append(row)
+
+        return [
+            EmployeeOnboardingTaskResponse(
+                id=row["id"],
+                employee_id=row["employee_id"],
+                task_id=row["task_id"],
+                title=row["title"],
+                description=row["description"],
+                category=row["category"],
+                is_employee_task=row["is_employee_task"],
+                due_date=str(row["due_date"]) if row["due_date"] else None,
+                status=row["status"],
+                completed_at=row["completed_at"],
+                completed_by=row["completed_by"],
+                notes=row["notes"],
+                created_at=row["created_at"],
+            )
+            for row in assigned_tasks
+        ]
+
+
+@router.post("/{employee_id}/onboarding/assign-all")
+async def assign_all_onboarding_templates(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Assign all active onboarding templates to an employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify employee belongs to company
+        employee = await conn.fetchrow(
+            "SELECT id, start_date FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id
+        )
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        start_date = employee["start_date"] or datetime.now().date()
+
+        # Get all active templates
+        templates = await conn.fetch(
+            "SELECT * FROM onboarding_tasks WHERE org_id = $1 AND is_active = true ORDER BY category, sort_order",
+            company_id
+        )
+
+        # Check if employee already has tasks
+        existing = await conn.fetchval(
+            "SELECT COUNT(*) FROM employee_onboarding_tasks WHERE employee_id = $1",
+            employee_id
+        )
+        if existing > 0:
+            raise HTTPException(status_code=400, detail="Employee already has onboarding tasks assigned")
+
+        count = 0
+        for template in templates:
+            due_date = start_date + timedelta(days=template["due_days"])
+            await conn.execute(
+                """
+                INSERT INTO employee_onboarding_tasks
+                (employee_id, task_id, title, description, category, is_employee_task, due_date)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                employee_id, template["id"], template["title"], template["description"],
+                template["category"], template["is_employee_task"], due_date
+            )
+            count += 1
+
+        return {"message": f"Assigned {count} onboarding tasks", "count": count}
+
+
+@router.patch("/{employee_id}/onboarding/{task_id}", response_model=EmployeeOnboardingTaskResponse)
+async def update_employee_onboarding_task(
+    employee_id: UUID,
+    task_id: UUID,
+    request: UpdateOnboardingTaskRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update an employee's onboarding task status."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify employee belongs to company
+        employee = await conn.fetchrow(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id
+        )
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        # Verify task exists
+        task = await conn.fetchrow(
+            "SELECT * FROM employee_onboarding_tasks WHERE id = $1 AND employee_id = $2",
+            task_id, employee_id
+        )
+        if not task:
+            raise HTTPException(status_code=404, detail="Onboarding task not found")
+
+        # Build update query
+        updates = []
+        values = []
+        param_num = 1
+
+        if request.status is not None:
+            if request.status not in ["pending", "completed", "skipped"]:
+                raise HTTPException(status_code=400, detail="Invalid status")
+            updates.append(f"status = ${param_num}")
+            values.append(request.status)
+            param_num += 1
+
+            # Set completed_at and completed_by if marking as completed
+            if request.status == "completed":
+                updates.append(f"completed_at = NOW()")
+                updates.append(f"completed_by = ${param_num}")
+                values.append(current_user.id)
+                param_num += 1
+            elif request.status == "pending":
+                updates.append("completed_at = NULL")
+                updates.append("completed_by = NULL")
+
+        if request.notes is not None:
+            updates.append(f"notes = ${param_num}")
+            values.append(request.notes)
+            param_num += 1
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        updates.append("updated_at = NOW()")
+
+        query = f"""
+            UPDATE employee_onboarding_tasks
+            SET {', '.join(updates)}
+            WHERE id = ${param_num}
+            RETURNING *
+        """
+        values.append(task_id)
+
+        row = await conn.fetchrow(query, *values)
+
+        return EmployeeOnboardingTaskResponse(
+            id=row["id"],
+            employee_id=row["employee_id"],
+            task_id=row["task_id"],
+            title=row["title"],
+            description=row["description"],
+            category=row["category"],
+            is_employee_task=row["is_employee_task"],
+            due_date=str(row["due_date"]) if row["due_date"] else None,
+            status=row["status"],
+            completed_at=row["completed_at"],
+            completed_by=row["completed_by"],
+            notes=row["notes"],
+            created_at=row["created_at"],
+        )
+
+
+@router.delete("/{employee_id}/onboarding/{task_id}")
+async def delete_employee_onboarding_task(
+    employee_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Remove an onboarding task from an employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify employee belongs to company
+        employee = await conn.fetchrow(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id
+        )
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        result = await conn.execute(
+            "DELETE FROM employee_onboarding_tasks WHERE id = $1 AND employee_id = $2",
+            task_id, employee_id
+        )
+
+        if result == "DELETE 0":
+            raise HTTPException(status_code=404, detail="Onboarding task not found")
+
+        return {"message": "Onboarding task removed"}
+
+
+# ================================
+# Admin PTO Management
+# ================================
+
+class PTORequestAdminResponse(BaseModel):
+    id: UUID
+    employee_id: UUID
+    employee_name: str
+    employee_email: str
+    start_date: str
+    end_date: str
+    hours: float
+    reason: Optional[str]
+    request_type: str
+    status: str
+    approved_by: Optional[UUID]
+    approved_at: Optional[datetime]
+    denial_reason: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PTORequestActionRequest(BaseModel):
+    action: str  # approve, deny
+    denial_reason: Optional[str] = None
+
+
+class PTOSummaryStats(BaseModel):
+    pending_count: int
+    upcoming_time_off: int  # Number of approved requests in next 30 days
+
+
+@router.get("/pto/requests", response_model=List[PTORequestAdminResponse])
+async def list_pto_requests(
+    status: Optional[str] = None,  # pending, approved, denied, cancelled
+    employee_id: Optional[UUID] = None,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List all PTO requests for the company."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        query = """
+            SELECT pr.*, e.first_name, e.last_name, e.email
+            FROM pto_requests pr
+            JOIN employees e ON pr.employee_id = e.id
+            WHERE e.org_id = $1
+        """
+        params = [company_id]
+        param_num = 2
+
+        if status:
+            query += f" AND pr.status = ${param_num}"
+            params.append(status)
+            param_num += 1
+
+        if employee_id:
+            query += f" AND pr.employee_id = ${param_num}"
+            params.append(employee_id)
+            param_num += 1
+
+        query += " ORDER BY pr.created_at DESC"
+
+        rows = await conn.fetch(query, *params)
+
+        return [
+            PTORequestAdminResponse(
+                id=row["id"],
+                employee_id=row["employee_id"],
+                employee_name=f"{row['first_name']} {row['last_name']}",
+                employee_email=row["email"],
+                start_date=str(row["start_date"]),
+                end_date=str(row["end_date"]),
+                hours=float(row["hours"]),
+                reason=row["reason"],
+                request_type=row["request_type"],
+                status=row["status"],
+                approved_by=row["approved_by"],
+                approved_at=row["approved_at"],
+                denial_reason=row.get("denial_reason"),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+
+@router.get("/pto/summary", response_model=PTOSummaryStats)
+async def get_pto_summary_stats(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get PTO summary stats for the dashboard."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Count pending requests
+        pending_count = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM pto_requests pr
+            JOIN employees e ON pr.employee_id = e.id
+            WHERE e.org_id = $1 AND pr.status = 'pending'
+            """,
+            company_id
+        )
+
+        # Count upcoming approved time off in next 30 days
+        upcoming_count = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM pto_requests pr
+            JOIN employees e ON pr.employee_id = e.id
+            WHERE e.org_id = $1
+            AND pr.status = 'approved'
+            AND pr.start_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
+            """,
+            company_id
+        )
+
+        return PTOSummaryStats(
+            pending_count=pending_count or 0,
+            upcoming_time_off=upcoming_count or 0
+        )
+
+
+@router.patch("/pto/requests/{request_id}")
+async def handle_pto_request(
+    request_id: UUID,
+    request: PTORequestActionRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Approve or deny a PTO request."""
+    company_id = await get_client_company_id(current_user)
+
+    if request.action not in ["approve", "deny"]:
+        raise HTTPException(status_code=400, detail="Invalid action. Must be 'approve' or 'deny'")
+
+    async with get_connection() as conn:
+        # Verify request exists and belongs to company employee
+        pto_request = await conn.fetchrow(
+            """
+            SELECT pr.*, e.org_id FROM pto_requests pr
+            JOIN employees e ON pr.employee_id = e.id
+            WHERE pr.id = $1 AND e.org_id = $2
+            """,
+            request_id, company_id
+        )
+
+        if not pto_request:
+            raise HTTPException(status_code=404, detail="PTO request not found")
+
+        if pto_request["status"] != "pending":
+            raise HTTPException(status_code=400, detail="Can only approve/deny pending requests")
+
+        # Get admin's employee ID if they have one
+        admin_employee = await conn.fetchrow(
+            "SELECT id FROM employees WHERE user_id = $1",
+            current_user.id
+        )
+        approved_by = admin_employee["id"] if admin_employee else None
+
+        if request.action == "approve":
+            await conn.execute(
+                """
+                UPDATE pto_requests
+                SET status = 'approved', approved_by = $1, approved_at = NOW(), updated_at = NOW()
+                WHERE id = $2
+                """,
+                approved_by, request_id
+            )
+
+            # Update PTO balance used hours
+            await conn.execute(
+                """
+                UPDATE pto_balances
+                SET used_hours = used_hours + $1, updated_at = NOW()
+                WHERE employee_id = $2 AND year = EXTRACT(YEAR FROM CURRENT_DATE)
+                """,
+                pto_request["hours"], pto_request["employee_id"]
+            )
+
+            return {"message": "PTO request approved", "status": "approved"}
+        else:
+            if not request.denial_reason:
+                raise HTTPException(status_code=400, detail="Denial reason is required")
+
+            await conn.execute(
+                """
+                UPDATE pto_requests
+                SET status = 'denied', denial_reason = $1, approved_by = $2, approved_at = NOW(), updated_at = NOW()
+                WHERE id = $3
+                """,
+                request.denial_reason, approved_by, request_id
+            )
+
+            return {"message": "PTO request denied", "status": "denied"}

@@ -94,6 +94,7 @@ from .routes.invitations import router as invitations_router
 from .routes.chat import router as chat_router, ws_router as chat_ws_router
 from .routes.campaigns import router as campaigns_router
 from .routes.gumfit import router as gumfit_router
+from .routes.onboarding import router as onboarding_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(companies_router, prefix="/api/companies", tags=["companies"])
@@ -126,6 +127,7 @@ app.include_router(agencies_router, prefix="/api/agencies", tags=["agencies"])
 app.include_router(deals_router, prefix="/api/deals", tags=["deals"])
 app.include_router(campaigns_router, prefix="/api/campaigns", tags=["campaigns"])
 app.include_router(gumfit_router, prefix="/api/gumfit", tags=["gumfit-admin"])
+app.include_router(onboarding_router, prefix="/api/onboarding", tags=["onboarding"])
 
 
 @app.get("/health")

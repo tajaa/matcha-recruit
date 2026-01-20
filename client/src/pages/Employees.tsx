@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getAccessToken } from '../api/client';
-import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock } from 'lucide-react';
+import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8001/api';
 
@@ -30,6 +31,7 @@ interface NewEmployee {
 }
 
 export default function Employees() {
+  const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -267,7 +269,11 @@ export default function Employees() {
            </div>
 
           {employees.map((employee) => (
-            <div key={employee.id} className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 md:px-6 flex flex-col md:flex-row md:items-center gap-4">
+            <div
+              key={employee.id}
+              onClick={() => navigate(`/app/employees/${employee.id}`)}
+              className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 md:px-6 flex flex-col md:flex-row md:items-center gap-4 cursor-pointer"
+            >
               <div className="flex items-center min-w-0 flex-1">
                 <div className="flex-shrink-0">
                   <div className="h-10 w-10 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-white font-bold text-xs">
@@ -283,7 +289,7 @@ export default function Employees() {
                   <p className="text-xs text-zinc-500 font-mono truncate">{employee.email}</p>
                 </div>
               </div>
-              
+
               <div className="flex items-center justify-between md:justify-end gap-4 md:gap-8 w-full md:w-auto">
                  <div className="text-right">
                     <p className="text-xs text-zinc-400 font-mono">{employee.work_state || '—'}</p>
@@ -296,11 +302,11 @@ export default function Employees() {
                  <div className="flex justify-end w-32">
                     {getStatusBadge(employee)}
                  </div>
-                 
+
                  <div className="w-32 flex justify-end">
                     {!employee.user_id && !employee.termination_date && (
                       <button
-                        onClick={() => handleSendInvite(employee.id)}
+                        onClick={(e) => { e.stopPropagation(); handleSendInvite(employee.id); }}
                         disabled={invitingId === employee.id}
                         className="inline-flex items-center px-3 py-1.5 border border-white/10 text-[10px] font-bold uppercase tracking-wider rounded text-zinc-300 hover:text-white hover:border-white/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-zinc-900"
                       >
@@ -313,6 +319,9 @@ export default function Employees() {
                         )}
                       </button>
                     )}
+                 </div>
+                 <div className="w-8 flex justify-end">
+                    <ChevronRight size={16} className="text-zinc-600 group-hover:text-zinc-400" />
                  </div>
               </div>
             </div>

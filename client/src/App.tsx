@@ -49,6 +49,9 @@ const TestBot = lazy(() => import('./pages/TestBot').then(m => ({ default: m.Tes
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
+const EmployeeDetail = lazy(() => import('./pages/EmployeeDetail'));
+const OnboardingTemplates = lazy(() => import('./pages/OnboardingTemplates'));
+const PTOManagement = lazy(() => import('./pages/PTOManagement'));
 const AcceptInvitation = lazy(() => import('./pages/AcceptInvitation'));
 
 // Employee Portal Pages
@@ -57,6 +60,7 @@ const PortalDocuments = lazy(() => import('./pages/portal/PortalDocuments'));
 const PortalPTO = lazy(() => import('./pages/portal/PortalPTO'));
 const PortalPolicies = lazy(() => import('./pages/portal/PortalPolicies'));
 const PortalProfile = lazy(() => import('./pages/portal/PortalProfile'));
+const PortalOnboarding = lazy(() => import('./pages/portal/PortalOnboarding'));
 
 // Chat Pages (separate auth system)
 const ChatLogin = lazy(() => import('./pages/chat/ChatLogin'));
@@ -243,6 +247,30 @@ function App() {
                 }
               />
               <Route
+                path="employees/:employeeId"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <EmployeeDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="onboarding-templates"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <OnboardingTemplates />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="pto"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <PTOManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="blog"
                 element={
                   <ProtectedRoute roles={['admin']}>
@@ -424,6 +452,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['employee']}>
                     <PortalProfile />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="portal/onboarding"
+                element={
+                  <ProtectedRoute roles={['employee']}>
+                    <PortalOnboarding />
                   </ProtectedRoute>
                 }
               />

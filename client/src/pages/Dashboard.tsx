@@ -1,8 +1,36 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert } from 'lucide-react';
+import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar } from 'lucide-react';
+import { getAccessToken } from '../api/client';
+
+const API_BASE = 'http://localhost:8001/api';
+
+interface PTOSummary {
+  pending_count: number;
+  upcoming_time_off: number;
+}
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const [ptoSummary, setPtoSummary] = useState<PTOSummary | null>(null);
+
+  useEffect(() => {
+    const fetchPtoSummary = async () => {
+      try {
+        const token = getAccessToken();
+        const response = await fetch(`${API_BASE}/employees/pto/summary`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setPtoSummary(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch PTO summary:', err);
+      }
+    };
+    fetchPtoSummary();
+  }, []);
 
   const stats = [
     { label: 'Active Policies', value: '14', change: '+2 this week', icon: FileText, color: 'text-emerald-500' },
@@ -156,6 +184,19 @@ export function Dashboard() {
            <div className="border border-white/10 bg-zinc-900/30 p-6">
               <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em] mb-4">Pending Actions</h2>
               <div className="space-y-3">
+                 {ptoSummary && ptoSummary.pending_count > 0 && (
+                   <div
+                     onClick={() => navigate('/app/pto')}
+                     className="p-3 bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 cursor-pointer hover:bg-amber-500/20 transition-colors"
+                   >
+                      <Calendar className="w-4 h-4 text-amber-500 mt-0.5" />
+                      <div className="flex-1">
+                         <div className="text-xs text-amber-200 font-medium mb-1">PTO Requests Pending</div>
+                         <div className="text-[10px] text-amber-500/70">{ptoSummary.pending_count} request{ptoSummary.pending_count !== 1 ? 's' : ''} awaiting approval</div>
+                      </div>
+                      <ArrowUpRight className="w-4 h-4 text-amber-500 ml-auto" />
+                   </div>
+                 )}
                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 flex items-start gap-3">
                     <div className="mt-1 w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
                     <div>
@@ -166,6 +207,24 @@ export function Dashboard() {
                  </div>
               </div>
            </div>
+
+           {/* Upcoming Time Off */}
+           {ptoSummary && ptoSummary.upcoming_time_off > 0 && (
+             <div className="border border-white/10 bg-zinc-900/30 p-6">
+                <div className="flex items-center justify-between mb-4">
+                   <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Upcoming Time Off</h2>
+                   <Calendar className="w-4 h-4 text-zinc-500" />
+                </div>
+                <div className="text-3xl font-light text-white mb-2">{ptoSummary.upcoming_time_off}</div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">employees out in next 30 days</div>
+                <button
+                  onClick={() => navigate('/app/pto')}
+                  className="mt-4 w-full text-center py-2 border border-white/10 text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white hover:border-white/30 transition-colors"
+                >
+                  View Calendar
+                </button>
+             </div>
+           )}
         </div>
       </div>
     </div>
