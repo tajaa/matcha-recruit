@@ -36,7 +36,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/offer-letters',
+        path: '/app/matcha/offer-letters',
         label: 'Offer Letters',
         roles: ['admin', 'client'],
         icon: (
@@ -46,7 +46,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/policies',
+        path: '/app/matcha/policies',
         label: 'Policies',
         roles: ['admin', 'client'],
         icon: (
@@ -56,7 +56,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/compliance',
+        path: '/app/matcha/compliance',
         label: 'Compliance',
         roles: ['admin', 'client'],
         icon: (
@@ -66,7 +66,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/employees',
+        path: '/app/matcha/employees',
         label: 'Employees',
         roles: ['admin', 'client'],
         icon: (
@@ -96,7 +96,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/tutor-metrics',
+        path: '/app/admin/tutor-metrics',
         label: 'Tutor Metrics',
         roles: ['admin'],
         icon: (
@@ -106,7 +106,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/test-bot',
+        path: '/app/admin/test-bot',
         label: 'Test Bot',
         roles: ['admin'],
         icon: (
@@ -122,7 +122,7 @@ const navSections: NavSection[] = [
     roles: ['admin', 'client'],
     items: [
       {
-        path: '/app/er-copilot',
+        path: '/app/matcha/er-copilot',
         label: 'ER Copilot',
         roles: ['admin', 'client'],
         icon: (
@@ -162,7 +162,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/pto',
+        path: '/app/matcha/pto',
         label: 'Time Off',
         roles: ['admin', 'client'],
         icon: (
@@ -172,7 +172,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/onboarding-templates',
+        path: '/app/matcha/onboarding-templates',
         label: 'Onboarding',
         roles: ['admin', 'client'],
         icon: (
@@ -188,7 +188,7 @@ const navSections: NavSection[] = [
     roles: ['admin'],
     items: [
       {
-        path: '/app/blog',
+        path: '/app/admin/blog',
         label: 'Blog',
         roles: ['admin'],
         icon: (
@@ -271,7 +271,7 @@ const navSections: NavSection[] = [
     roles: ['creator'],
     items: [
       {
-        path: '/app/creator',
+        path: '/app/gumfit',
         label: 'Dashboard',
         roles: ['creator'],
         helpText: 'Your central hub showing earnings overview, active deals, and quick actions.',
@@ -282,7 +282,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/creator/offers',
+        path: '/app/gumfit/offers',
         label: 'Campaign Offers',
         roles: ['creator'],
         helpText: 'View and respond to campaign offers from agencies. Accept, decline, or counter-offer with your own rate.',
@@ -293,7 +293,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/creator/deals',
+        path: '/app/gumfit/deals',
         label: 'Browse Deals',
         roles: ['creator'],
         helpText: 'Discover open brand deals and sponsorship opportunities. Apply to campaigns that match your audience.',
@@ -304,7 +304,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/creator/applications',
+        path: '/app/gumfit/applications',
         label: 'My Applications',
         roles: ['creator'],
         helpText: 'Track the status of your deal applications. See which ones are pending, approved, or need action.',
@@ -315,7 +315,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/creator/contracts',
+        path: '/app/gumfit/contracts',
         label: 'My Contracts',
         roles: ['creator'],
         helpText: 'View and manage your active contracts. Track deliverables, deadlines, and payment status.',
@@ -326,7 +326,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/creator/affiliate',
+        path: '/app/gumfit/affiliate',
         label: 'Affiliate Links',
         roles: ['creator'],
         helpText: 'Manage your affiliate tracking links. Monitor clicks, conversions, and commission earnings in real-time.',
@@ -337,7 +337,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/creator/revenue',
+        path: '/app/gumfit/revenue',
         label: 'Revenue',
         roles: ['creator'],
         helpText: 'Track all your income sources including sponsorships, affiliate earnings, and platform revenue.',
@@ -348,7 +348,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/creator/platforms',
+        path: '/app/gumfit/platforms',
         label: 'Platforms',
         roles: ['creator'],
         helpText: 'Connect your social media accounts to automatically sync follower counts and engagement metrics.',
@@ -365,7 +365,7 @@ const navSections: NavSection[] = [
     roles: ['agency'],
     items: [
       {
-        path: '/app/agency',
+        path: '/app/gumfit/agency',
         label: 'Dashboard',
         roles: ['agency'],
         helpText: 'Overview of your agency activity including active campaigns, pending applications, and recent contracts.',
@@ -376,7 +376,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/agency/campaigns',
+        path: '/app/gumfit/agency/campaigns',
         label: 'Campaigns',
         roles: ['agency'],
         helpText: 'Create and manage brand campaigns. Set budgets, deliverables, and invite creators to participate.',
@@ -387,7 +387,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/agency/deals',
+        path: '/app/gumfit/agency/deals',
         label: 'Deal Manager',
         roles: ['agency'],
         helpText: 'Create open deals that creators can apply to. Set requirements, compensation, and review applications.',
@@ -398,7 +398,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/agency/creators',
+        path: '/app/gumfit/agency/creators',
         label: 'Find Creators',
         roles: ['agency'],
         helpText: 'Search and discover creators by niche, follower count, engagement rate, and platform.',
@@ -409,7 +409,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/agency/applications',
+        path: '/app/gumfit/agency/applications',
         label: 'Applications',
         roles: ['agency'],
         helpText: 'Review creator applications for your deals. Approve, reject, or request more information.',
@@ -420,7 +420,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/agency/contracts',
+        path: '/app/gumfit/agency/contracts',
         label: 'Contracts',
         roles: ['agency'],
         helpText: 'Manage active contracts with creators. Track deliverables, approve content, and process payments.',
@@ -437,7 +437,7 @@ const navSections: NavSection[] = [
     roles: ['gumfit_admin'],
     items: [
       {
-        path: '/app/gumfit',
+        path: '/app/gumfit/admin',
         label: 'Dashboard',
         roles: ['gumfit_admin'],
         helpText: 'Overview of all GumFit creators, agencies, and platform activity.',
@@ -448,7 +448,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/gumfit/creators',
+        path: '/app/gumfit/admin/creators',
         label: 'Creators',
         roles: ['gumfit_admin'],
         helpText: 'View and manage all creators on the platform. Review profiles, verify accounts, and track metrics.',
@@ -459,7 +459,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/gumfit/agencies',
+        path: '/app/gumfit/admin/agencies',
         label: 'Agencies',
         roles: ['gumfit_admin'],
         helpText: 'View and manage all agencies. Verify businesses, review profiles, and monitor activity.',
@@ -470,7 +470,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/gumfit/users',
+        path: '/app/gumfit/admin/users',
         label: 'Users',
         roles: ['gumfit_admin'],
         helpText: 'Manage all platform users. View accounts, edit permissions, and handle user issues.',
@@ -481,7 +481,7 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/gumfit/invites',
+        path: '/app/gumfit/admin/invites',
         label: 'Invites',
         roles: ['gumfit_admin'],
         helpText: 'Send invitations to creators and agencies to join the platform.',

@@ -224,7 +224,7 @@ export default function EmployeeDetail() {
     return (
       <div className="text-center py-24">
         <p className="text-zinc-500">Employee not found</p>
-        <button onClick={() => navigate('/app/employees')} className="text-white underline mt-4">
+        <button onClick={() => navigate('/app/matcha/employees')} className="text-white underline mt-4">
           Back to Directory
         </button>
       </div>
@@ -236,7 +236,7 @@ export default function EmployeeDetail() {
       {/* Header */}
       <div className="flex items-center gap-4 border-b border-white/10 pb-8">
         <button
-          onClick={() => navigate('/app/employees')}
+          onClick={() => navigate('/app/matcha/employees')}
           className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded transition-colors"
         >
           <ArrowLeft size={20} />

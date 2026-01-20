@@ -410,7 +410,7 @@ export function TutorMetrics() {
              sessions.map((session) => (
                <div
                   key={session.id}
-                  onClick={() => navigate(`/app/tutor-metrics/${session.id}`)}
+                  onClick={() => navigate(`/app/admin/tutor-metrics/${session.id}`)}
                   className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 px-6 flex items-center gap-4 cursor-pointer"
                >
                   <div className="flex-1">

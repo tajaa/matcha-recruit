@@ -47,7 +47,7 @@ export function BlogCommentsAdmin() {
       {/* Header */}
       <div>
         <button
-          onClick={() => navigate('/app/blog')}
+          onClick={() => navigate('/app/admin/blog')}
           className="text-xs text-zinc-500 hover:text-zinc-900 mb-4 flex items-center gap-1 uppercase tracking-wider transition-colors"
         >
           <ChevronLeft size={12} />
@@ -94,7 +94,7 @@ export function BlogCommentsAdmin() {
                 <div className="w-48 shrink-0">
                   {comment.post_title && (
                     <Link
-                      to={`/app/blog/${comment.post_id}`}
+                      to={`/app/admin/blog/${comment.post_id}`}
                       className="inline-flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-zinc-900 transition-colors uppercase font-medium tracking-wider"
                     >
                       {comment.post_title}

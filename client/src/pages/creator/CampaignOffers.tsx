@@ -183,7 +183,7 @@ export function CampaignOffers() {
             return (
               <div
                 key={offer.id}
-                onClick={() => navigate(`/app/creator/offers/${offer.id}`)}
+                onClick={() => navigate(`/app/gumfit/offers/${offer.id}`)}
                 className="border border-white/10 bg-zinc-900/30 p-6 hover:bg-white/5 transition-colors cursor-pointer group"
               >
                 <div className="flex items-start justify-between gap-4">
@@ -329,7 +329,7 @@ export function OfferDetail() {
     try {
       const result = await api.campaigns.acceptOffer(offerId!);
       alert(`Offer accepted! Upfront payment of ${formatCurrency(result.upfront_amount)} will be processed.`);
-      navigate('/app/creator/offers');
+      navigate('/app/gumfit/offers');
     } catch (err: unknown) {
       const error = err as Error;
       alert(error.message || 'Failed to accept offer');
@@ -342,7 +342,7 @@ export function OfferDetail() {
     setDeclining(true);
     try {
       await api.campaigns.declineOffer(offerId!, declineReason || undefined);
-      navigate('/app/creator/offers');
+      navigate('/app/gumfit/offers');
     } catch (err) {
       console.error('Failed to decline offer:', err);
     } finally {
@@ -404,7 +404,7 @@ export function OfferDetail() {
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Back button */}
       <button
-        onClick={() => navigate('/app/creator/offers')}
+        onClick={() => navigate('/app/gumfit/offers')}
         className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />

@@ -123,7 +123,7 @@ export function DealMarketplace() {
         </div>
         <div className="flex gap-4">
           <button
-            onClick={() => navigate('/app/creator/applications')}
+            onClick={() => navigate('/app/gumfit/applications')}
             className="px-6 py-3 border border-white/20 hover:bg-white hover:text-black text-xs font-mono uppercase tracking-widest transition-all"
           >
             My Applications
@@ -191,7 +191,7 @@ export function DealMarketplace() {
           {filteredDeals.map((deal) => (
             <div
               key={deal.id}
-              onClick={() => navigate(`/app/creator/deals/${deal.id}`)}
+              onClick={() => navigate(`/app/gumfit/deals/${deal.id}`)}
               className="border border-white/10 bg-zinc-900/30 p-6 hover:border-white/30 hover:bg-zinc-800/50 transition-all cursor-pointer group"
             >
               {/* Header */}

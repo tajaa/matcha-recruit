@@ -55,13 +55,13 @@ export function Dashboard() {
         </div>
         <div className="flex gap-4">
           <button 
-            onClick={() => navigate('/app/policies/new')}
+            onClick={() => navigate('/app/matcha/policies/new')}
             className="px-6 py-3 border border-white/20 hover:bg-white hover:text-black text-xs font-mono uppercase tracking-widest transition-all"
           >
             New Policy
           </button>
           <button 
-            onClick={() => navigate('/app/offer-letters')}
+            onClick={() => navigate('/app/matcha/offer-letters')}
             className="px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-mono uppercase tracking-widest transition-all font-bold"
           >
             Create Offer
@@ -186,7 +186,7 @@ export function Dashboard() {
               <div className="space-y-3">
                  {ptoSummary && ptoSummary.pending_count > 0 && (
                    <div
-                     onClick={() => navigate('/app/pto')}
+                     onClick={() => navigate('/app/matcha/pto')}
                      className="p-3 bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 cursor-pointer hover:bg-amber-500/20 transition-colors"
                    >
                       <Calendar className="w-4 h-4 text-amber-500 mt-0.5" />
@@ -218,7 +218,7 @@ export function Dashboard() {
                 <div className="text-3xl font-light text-white mb-2">{ptoSummary.upcoming_time_off}</div>
                 <div className="text-[10px] text-zinc-500 uppercase tracking-wider">employees out in next 30 days</div>
                 <button
-                  onClick={() => navigate('/app/pto')}
+                  onClick={() => navigate('/app/matcha/pto')}
                   className="mt-4 w-full text-center py-2 border border-white/10 text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white hover:border-white/30 transition-colors"
                 >
                   View Calendar

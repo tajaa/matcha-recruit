@@ -80,7 +80,7 @@ export function PolicyDetail() {
     if (!confirm('Are you sure you want to delete this policy?')) return;
     try {
       await policies.delete(id!);
-      navigate('/app/policies');
+      navigate('/app/matcha/policies');
     } catch (error) {
       console.error('Failed to delete policy:', error);
     }
@@ -182,7 +182,7 @@ export function PolicyDetail() {
       <div className="flex items-start justify-between">
         <div className="space-y-4">
           <button 
-            onClick={() => navigate('/app/policies')}
+            onClick={() => navigate('/app/matcha/policies')}
             className="text-[10px] text-zinc-500 hover:text-zinc-900 transition-colors uppercase tracking-wider flex items-center gap-1"
           >
             <ChevronLeft size={12} /> Back to Policies
@@ -205,7 +205,7 @@ export function PolicyDetail() {
             Delete
           </button>
           <button
-            onClick={() => navigate(`/app/policies/${id}/edit`)}
+            onClick={() => navigate(`/app/matcha/policies/${id}/edit`)}
             className="flex items-center gap-1.5 text-[10px] text-zinc-600 hover:text-zinc-900 uppercase tracking-wider font-medium px-3 py-2 transition-colors border border-zinc-200 hover:border-zinc-300"
           >
             <Pencil size={12} />

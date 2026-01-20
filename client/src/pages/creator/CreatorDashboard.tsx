@@ -149,13 +149,13 @@ export function CreatorDashboard() {
         </div>
         <div className="flex gap-4">
           <button
-            onClick={() => navigate('/app/creator/revenue')}
+            onClick={() => navigate('/app/gumfit/revenue')}
             className="px-6 py-3 border border-white/20 hover:bg-white hover:text-black text-xs font-mono uppercase tracking-widest transition-all"
           >
             View Revenue
           </button>
           <button
-            onClick={() => navigate('/app/creator/deals')}
+            onClick={() => navigate('/app/gumfit/deals')}
             className="px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-mono uppercase tracking-widest transition-all font-bold"
           >
             Browse Deals
@@ -206,7 +206,7 @@ export function CreatorDashboard() {
                 <Briefcase className="w-8 h-8 mx-auto mb-3 opacity-50" />
                 <p className="text-sm">No applications yet</p>
                 <button
-                  onClick={() => navigate('/app/creator/deals')}
+                  onClick={() => navigate('/app/gumfit/deals')}
                   className="mt-4 text-xs text-emerald-400 hover:text-emerald-300"
                 >
                   Browse available deals →
@@ -217,7 +217,7 @@ export function CreatorDashboard() {
                 <div
                   key={app.id}
                   className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors group cursor-pointer"
-                  onClick={() => navigate(`/app/creator/applications/${app.id}`)}
+                  onClick={() => navigate(`/app/gumfit/applications/${app.id}`)}
                 >
                   <div className="flex items-center gap-4">
                     <div className={`w-2 h-2 rounded-full ${
@@ -248,7 +248,7 @@ export function CreatorDashboard() {
           {applications.length > 0 && (
             <div className="p-4 border-t border-white/10 bg-white/5">
               <button
-                onClick={() => navigate('/app/creator/applications')}
+                onClick={() => navigate('/app/gumfit/applications')}
                 className="w-full text-center text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors"
               >
                 View All Applications
@@ -341,7 +341,7 @@ export function CreatorDashboard() {
                 <div className="text-center py-4">
                   <p className="text-xs text-zinc-500 mb-3">No platforms connected</p>
                   <button
-                    onClick={() => navigate('/app/creator/platforms')}
+                    onClick={() => navigate('/app/gumfit/platforms')}
                     className="text-xs text-blue-400 hover:text-blue-300"
                   >
                     Connect platforms →
@@ -369,7 +369,7 @@ export function CreatorDashboard() {
 
             {connections.length > 0 && (
               <button
-                onClick={() => navigate('/app/creator/platforms')}
+                onClick={() => navigate('/app/gumfit/platforms')}
                 className="mt-4 w-full py-2 border border-white/10 text-[10px] uppercase tracking-widest text-zinc-400 hover:text-white hover:border-white/30 transition-all"
               >
                 Manage Connections
@@ -382,7 +382,7 @@ export function CreatorDashboard() {
             <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em] mb-4">Quick Actions</h2>
             <div className="space-y-3">
               <button
-                onClick={() => navigate('/app/creator/revenue/new')}
+                onClick={() => navigate('/app/gumfit/revenue/new')}
                 className="w-full p-3 bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3 hover:bg-emerald-500/20 transition-colors text-left"
               >
                 <DollarSign className="w-4 h-4 text-emerald-500" />
@@ -394,7 +394,7 @@ export function CreatorDashboard() {
               </button>
 
               <button
-                onClick={() => navigate('/app/creator/expenses/new')}
+                onClick={() => navigate('/app/gumfit/expenses/new')}
                 className="w-full p-3 bg-amber-500/10 border border-amber-500/20 flex items-center gap-3 hover:bg-amber-500/20 transition-colors text-left"
               >
                 <Receipt className="w-4 h-4 text-amber-500" />

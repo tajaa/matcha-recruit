@@ -111,13 +111,13 @@ export function AgencyDashboard() {
         </div>
         <div className="flex gap-4">
           <button
-            onClick={() => navigate('/app/agency/creators')}
+            onClick={() => navigate('/app/gumfit/agency/creators')}
             className="px-6 py-3 border border-white/20 hover:bg-white hover:text-black text-xs font-mono uppercase tracking-widest transition-all"
           >
             Find Creators
           </button>
           <button
-            onClick={() => navigate('/app/agency/deals/new')}
+            onClick={() => navigate('/app/gumfit/agency/deals/new')}
             className="px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-mono uppercase tracking-widest transition-all font-bold flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
@@ -163,7 +163,7 @@ export function AgencyDashboard() {
                 <Briefcase className="w-8 h-8 mx-auto mb-3 opacity-50" />
                 <p className="text-sm">No deals yet</p>
                 <button
-                  onClick={() => navigate('/app/agency/deals/new')}
+                  onClick={() => navigate('/app/gumfit/agency/deals/new')}
                   className="mt-4 text-xs text-emerald-400 hover:text-emerald-300"
                 >
                   Create your first deal →
@@ -173,7 +173,7 @@ export function AgencyDashboard() {
               deals.slice(0, 5).map((deal) => (
                 <div
                   key={deal.id}
-                  onClick={() => navigate(`/app/agency/deals/${deal.id}`)}
+                  onClick={() => navigate(`/app/gumfit/agency/deals/${deal.id}`)}
                   className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors group cursor-pointer"
                 >
                   <div className="flex items-center gap-4">
@@ -202,7 +202,7 @@ export function AgencyDashboard() {
           {deals.length > 0 && (
             <div className="p-4 border-t border-white/10 bg-white/5">
               <button
-                onClick={() => navigate('/app/agency/deals')}
+                onClick={() => navigate('/app/gumfit/agency/deals')}
                 className="w-full text-center text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors"
               >
                 View All Deals
@@ -227,7 +227,7 @@ export function AgencyDashboard() {
               recentApplications.map((app) => (
                 <div
                   key={app.id}
-                  onClick={() => navigate(`/app/agency/applications/${app.id}`)}
+                  onClick={() => navigate(`/app/gumfit/agency/applications/${app.id}`)}
                   className="p-4 hover:bg-white/5 transition-colors cursor-pointer group"
                 >
                   <div className="flex items-center justify-between mb-2">
@@ -250,7 +250,7 @@ export function AgencyDashboard() {
           {recentApplications.length > 0 && (
             <div className="p-4 border-t border-white/10 bg-white/5">
               <button
-                onClick={() => navigate('/app/agency/applications')}
+                onClick={() => navigate('/app/gumfit/agency/applications')}
                 className="w-full text-center text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors"
               >
                 Review All
@@ -276,7 +276,7 @@ export function AgencyDashboard() {
             contracts.map((contract) => (
               <div
                 key={contract.id}
-                onClick={() => navigate(`/app/agency/contracts/${contract.id}`)}
+                onClick={() => navigate(`/app/gumfit/agency/contracts/${contract.id}`)}
                 className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors group cursor-pointer"
               >
                 <div className="flex items-center gap-4">
@@ -302,7 +302,7 @@ export function AgencyDashboard() {
         {contracts.length > 0 && (
           <div className="p-4 border-t border-white/10 bg-white/5">
             <button
-              onClick={() => navigate('/app/agency/contracts')}
+              onClick={() => navigate('/app/gumfit/agency/contracts')}
               className="w-full text-center text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors"
             >
               Manage Contracts

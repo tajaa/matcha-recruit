@@ -243,7 +243,7 @@ export function CreatorDiscovery() {
               {/* Actions */}
               <div className="flex items-center gap-2 mt-4">
                 <button
-                  onClick={() => navigate(`/app/agency/creators/${creator.id}`)}
+                  onClick={() => navigate(`/app/gumfit/agency/creators/${creator.id}`)}
                   className="flex-1 px-4 py-2 border border-white/20 text-xs font-mono uppercase tracking-widest hover:bg-white/5 transition-colors flex items-center justify-center gap-2"
                 >
                   View Profile

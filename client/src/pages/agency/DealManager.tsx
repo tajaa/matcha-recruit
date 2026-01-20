@@ -245,7 +245,7 @@ export function DealManager() {
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <h3
-                        onClick={() => navigate(`/app/agency/deals/${deal.id}`)}
+                        onClick={() => navigate(`/app/gumfit/agency/deals/${deal.id}`)}
                         className="text-lg font-medium text-white hover:text-emerald-400 cursor-pointer transition-colors"
                       >
                         {deal.title}
@@ -299,13 +299,13 @@ export function DealManager() {
                     {actionMenu === deal.id && (
                       <div className="absolute right-0 top-full mt-2 w-48 bg-zinc-800 border border-white/10 shadow-xl z-10">
                         <button
-                          onClick={() => navigate(`/app/agency/deals/${deal.id}`)}
+                          onClick={() => navigate(`/app/gumfit/agency/deals/${deal.id}`)}
                           className="w-full px-4 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 flex items-center gap-2"
                         >
                           <Eye className="w-4 h-4" /> View Details
                         </button>
                         <button
-                          onClick={() => navigate(`/app/agency/deals/${deal.id}/edit`)}
+                          onClick={() => navigate(`/app/gumfit/agency/deals/${deal.id}/edit`)}
                           className="w-full px-4 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 flex items-center gap-2"
                         >
                           <Edit className="w-4 h-4" /> Edit

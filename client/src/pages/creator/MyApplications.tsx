@@ -119,7 +119,7 @@ export function MyApplications() {
           </h1>
         </div>
         <button
-          onClick={() => navigate('/app/creator/deals')}
+          onClick={() => navigate('/app/gumfit/deals')}
           className="px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-mono uppercase tracking-widest transition-all font-bold"
         >
           Browse Deals
@@ -195,7 +195,7 @@ export function MyApplications() {
             <FileText className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
             <p className="text-zinc-400 mb-2">No applications found</p>
             <button
-              onClick={() => navigate('/app/creator/deals')}
+              onClick={() => navigate('/app/gumfit/deals')}
               className="text-xs text-blue-400 hover:text-blue-300"
             >
               Browse available deals →
@@ -255,7 +255,7 @@ export function MyApplications() {
 
                     <div className="flex flex-col items-end gap-2">
                       <button
-                        onClick={() => navigate(`/app/creator/deals/${app.deal_id}`)}
+                        onClick={() => navigate(`/app/gumfit/deals/${app.deal_id}`)}
                         className="p-2 border border-white/20 hover:bg-white/5 transition-colors"
                       >
                         <ArrowUpRight className="w-4 h-4 text-zinc-400" />

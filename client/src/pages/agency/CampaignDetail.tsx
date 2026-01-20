@@ -192,7 +192,7 @@ export function CampaignDetail() {
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Back button */}
       <button
-        onClick={() => navigate('/app/agency/campaigns')}
+        onClick={() => navigate('/app/gumfit/agency/campaigns')}
         className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />

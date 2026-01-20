@@ -398,7 +398,7 @@ export function ERCaseDetail() {
       <div className="flex items-start justify-between">
         <div>
           <button
-            onClick={() => navigate('/app/er-copilot')}
+            onClick={() => navigate('/app/matcha/er-copilot')}
             className="text-xs text-zinc-500 hover:text-zinc-900 mb-4 flex items-center gap-1 uppercase tracking-wider"
           >
             <ChevronLeft size={12} />

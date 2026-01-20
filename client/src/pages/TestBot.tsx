@@ -71,7 +71,7 @@ export function TestBot() {
   const handleEndSession = () => {
     disconnect();
     if (interviewId) {
-      navigate(`/app/test-bot/analysis/${interviewId}`);
+      navigate(`/app/analysis/${interviewId}`);
     }
     setInterviewId(null);
   };

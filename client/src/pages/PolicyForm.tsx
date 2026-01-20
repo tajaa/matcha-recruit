@@ -75,7 +75,7 @@ export function PolicyForm() {
         });
       }
 
-      navigate('/app/policies');
+      navigate('/app/matcha/policies');
     } catch (error) {
       console.error('Failed to save policy:', error);
     } finally {

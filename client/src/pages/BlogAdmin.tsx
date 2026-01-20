@@ -88,14 +88,14 @@ export function BlogAdmin() {
         </div>
         <div className="flex items-center gap-4">
           <Link
-            to="/app/blog/comments"
+            to="/app/admin/blog/comments"
             className="text-[10px] text-zinc-400 hover:text-white uppercase tracking-wider font-medium flex items-center gap-1.5 transition-colors border border-white/10 px-3 py-2 hover:border-white/30"
           >
             <MessageSquare size={14} />
             Comments
           </Link>
           <button
-            onClick={() => navigate('/app/blog/new')}
+            onClick={() => navigate('/app/admin/blog/new')}
             className="px-6 py-2 bg-white text-black text-xs font-bold hover:bg-zinc-200 uppercase tracking-wider transition-colors"
           >
             New Post
@@ -129,7 +129,7 @@ export function BlogAdmin() {
         <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
           <div className="text-xs text-zinc-500 mb-4 font-mono uppercase tracking-wider">NO POSTS FOUND</div>
           <button
-            onClick={() => navigate('/app/blog/new')}
+            onClick={() => navigate('/app/admin/blog/new')}
             className="text-xs text-white hover:text-zinc-300 font-bold uppercase tracking-wider underline underline-offset-4"
           >
             Create your first post
@@ -150,7 +150,7 @@ export function BlogAdmin() {
             <div 
               key={post.id} 
               className="group flex items-center gap-4 py-4 px-4 cursor-pointer bg-zinc-950 hover:bg-zinc-900 transition-colors"
-              onClick={() => navigate(`/app/blog/${post.slug}`)}
+              onClick={() => navigate(`/app/admin/blog/${post.slug}`)}
             >
               <div className="w-4 flex justify-center">
                 <div className={`w-1.5 h-1.5 rounded-full ${statusDotColors[post.status] || 'bg-zinc-700'}`} />

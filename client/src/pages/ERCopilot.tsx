@@ -72,7 +72,7 @@ export function ERCopilot() {
       const created = await erCopilot.createCase(formData);
       setShowCreateModal(false);
       setFormData({ title: '', description: '' });
-      navigate(`/app/er-copilot/${created.id}`);
+      navigate(`/app/matcha/er-copilot/${created.id}`);
     } catch (err) {
       console.error('Failed to create case:', err);
     } finally {
@@ -147,7 +147,7 @@ export function ERCopilot() {
             <div 
               key={erCase.id} 
               className="group flex items-center gap-4 py-4 px-4 cursor-pointer bg-zinc-950 hover:bg-zinc-900 transition-colors"
-              onClick={() => navigate(`/app/er-copilot/${erCase.id}`)}
+              onClick={() => navigate(`/app/matcha/er-copilot/${erCase.id}`)}
             >
               <div className="w-8 flex justify-center">
                  <div className={`w-1.5 h-1.5 rounded-full ${STATUS_DOTS[erCase.status] || 'bg-zinc-700'}`} />

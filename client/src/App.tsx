@@ -150,7 +150,7 @@ function App() {
             <Route path="/outreach/:token/screening" element={<OutreachScreening />} />
 
             {/* Admin Shortcuts */}
-            <Route path="/admin/blogs/drafts" element={<Navigate to="/app/blog?status=draft" replace />} />
+            <Route path="/admin/blogs/drafts" element={<Navigate to="/app/admin/blog?status=draft" replace />} />
 
             {/* Direct screening invite (handles auth internally) */}
             <Route path="/screening/:token" element={<ScreeningLanding />} />
@@ -198,8 +198,9 @@ function App() {
                 }
               />
 
+              {/* HR Routes */}
               <Route
-                path="offer-letters"
+                path="matcha/offer-letters"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <OfferLetters />
@@ -207,7 +208,7 @@ function App() {
                 }
               />
               <Route
-                path="policies"
+                path="matcha/policies"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <Policies />
@@ -215,7 +216,7 @@ function App() {
                 }
               />
               <Route
-                path="policies/new"
+                path="matcha/policies/new"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <PolicyForm />
@@ -223,7 +224,7 @@ function App() {
                 }
               />
               <Route
-                path="policies/:id"
+                path="matcha/policies/:id"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <PolicyDetail />
@@ -231,7 +232,7 @@ function App() {
                 }
               />
               <Route
-                path="policies/:id/edit"
+                path="matcha/policies/:id/edit"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <PolicyForm />
@@ -239,7 +240,7 @@ function App() {
                 }
               />
               <Route
-                path="compliance"
+                path="matcha/compliance"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <Compliance />
@@ -247,7 +248,7 @@ function App() {
                 }
               />
               <Route
-                path="employees"
+                path="matcha/employees"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <Employees />
@@ -255,7 +256,7 @@ function App() {
                 }
               />
               <Route
-                path="employees/:employeeId"
+                path="matcha/employees/:employeeId"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <EmployeeDetail />
@@ -263,7 +264,7 @@ function App() {
                 }
               />
               <Route
-                path="onboarding-templates"
+                path="matcha/onboarding-templates"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <OnboardingTemplates />
@@ -271,7 +272,7 @@ function App() {
                 }
               />
               <Route
-                path="pto"
+                path="matcha/pto"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <PTOManagement />
@@ -279,7 +280,25 @@ function App() {
                 }
               />
               <Route
-                path="blog"
+                path="matcha/er-copilot"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <ERCopilot />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/er-copilot/:id"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <ERCaseDetail />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Admin Routes */}
+              <Route
+                path="admin/blog"
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <BlogAdmin />
@@ -287,7 +306,7 @@ function App() {
                 }
               />
               <Route
-                path="blog/new"
+                path="admin/blog/new"
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <BlogEditor />
@@ -295,7 +314,7 @@ function App() {
                 }
               />
               <Route
-                path="blog/:slug"
+                path="admin/blog/:slug"
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <BlogEditor />
@@ -303,32 +322,18 @@ function App() {
                 }
               />
               <Route
-                path="blog/comments"
+                path="admin/blog/comments"
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <BlogCommentsAdmin />
                   </ProtectedRoute>
                 }
               />
-
-
-
-
-
-
               <Route
-                path="test-bot"
+                path="admin/test-bot"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <TestBot />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="tutor"
-                element={
-                  <ProtectedRoute roles={['admin', 'candidate']}>
-                    <Tutor />
                   </ProtectedRoute>
                 }
               />
@@ -340,9 +345,8 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-
               <Route
-                path="tutor-metrics"
+                path="admin/tutor-metrics"
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <TutorMetrics />
@@ -350,29 +354,27 @@ function App() {
                 }
               />
               <Route
-                path="tutor-metrics/:id"
+                path="admin/tutor-metrics/:id"
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <TutorSessionDetail />
                   </ProtectedRoute>
                 }
               />
+
+
+
+              {/* Interview Prep Routes */}
               <Route
-                path="er-copilot"
+                path="tutor"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <ERCopilot />
+                  <ProtectedRoute roles={['admin', 'candidate']}>
+                    <Tutor />
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="er-copilot/:id"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <ERCaseDetail />
-                  </ProtectedRoute>
-                }
-              />
+
+              {/* Incident Response Routes */}
               <Route
                 path="ir"
                 element={
@@ -474,7 +476,7 @@ function App() {
 
               {/* Creator Routes */}
               <Route
-                path="creator"
+                path="gumfit"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <CreatorDashboard />
@@ -482,7 +484,7 @@ function App() {
                 }
               />
               <Route
-                path="creator/revenue"
+                path="gumfit/revenue"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <RevenueDashboard />
@@ -490,7 +492,7 @@ function App() {
                 }
               />
               <Route
-                path="creator/expenses"
+                path="gumfit/expenses"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <ExpenseTracker />
@@ -498,7 +500,7 @@ function App() {
                 }
               />
               <Route
-                path="creator/platforms"
+                path="gumfit/platforms"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <PlatformConnections />
@@ -506,7 +508,7 @@ function App() {
                 }
               />
               <Route
-                path="creator/deals"
+                path="gumfit/deals"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <DealMarketplace />
@@ -514,7 +516,7 @@ function App() {
                 }
               />
               <Route
-                path="creator/applications"
+                path="gumfit/applications"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <MyApplications />
@@ -522,7 +524,7 @@ function App() {
                 }
               />
               <Route
-                path="creator/contracts"
+                path="gumfit/contracts"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <MyContracts />
@@ -530,7 +532,7 @@ function App() {
                 }
               />
               <Route
-                path="creator/offers"
+                path="gumfit/offers"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <CampaignOffers />
@@ -538,7 +540,7 @@ function App() {
                 }
               />
               <Route
-                path="creator/offers/:offerId"
+                path="gumfit/offers/:offerId"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <OfferDetail />
@@ -546,7 +548,7 @@ function App() {
                 }
               />
               <Route
-                path="creator/affiliate"
+                path="gumfit/affiliate"
                 element={
                   <ProtectedRoute roles={['creator']}>
                     <AffiliateDashboard />
@@ -556,7 +558,7 @@ function App() {
 
               {/* Agency Routes */}
               <Route
-                path="agency"
+                path="gumfit/agency"
                 element={
                   <ProtectedRoute roles={['agency']}>
                     <AgencyDashboard />
@@ -622,7 +624,7 @@ function App() {
 
               {/* GumFit Admin Routes */}
               <Route
-                path="gumfit"
+                path="gumfit/admin"
                 element={
                   <ProtectedRoute roles={['gumfit_admin']}>
                     <GumFitDashboard />
@@ -630,7 +632,7 @@ function App() {
                 }
               />
               <Route
-                path="gumfit/creators"
+                path="gumfit/admin/creators"
                 element={
                   <ProtectedRoute roles={['gumfit_admin']}>
                     <GumFitCreators />
@@ -638,7 +640,7 @@ function App() {
                 }
               />
               <Route
-                path="gumfit/agencies"
+                path="gumfit/admin/agencies"
                 element={
                   <ProtectedRoute roles={['gumfit_admin']}>
                     <GumFitAgencies />
@@ -646,7 +648,7 @@ function App() {
                 }
               />
               <Route
-                path="gumfit/users"
+                path="gumfit/admin/users"
                 element={
                   <ProtectedRoute roles={['gumfit_admin']}>
                     <GumFitUsers />
@@ -654,7 +656,7 @@ function App() {
                 }
               />
               <Route
-                path="gumfit/invites"
+                path="gumfit/admin/invites"
                 element={
                   <ProtectedRoute roles={['gumfit_admin']}>
                     <GumFitInvites />

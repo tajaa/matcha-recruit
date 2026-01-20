@@ -71,7 +71,7 @@ export function ApplicationReview() {
           : deal.deliverables,
       });
 
-      navigate('/app/agency/contracts');
+      navigate('/app/gumfit/agency/contracts');
     } catch (err) {
       console.error('Failed to create contract:', err);
     }

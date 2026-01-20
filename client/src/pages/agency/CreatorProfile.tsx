@@ -86,7 +86,7 @@ export function CreatorProfile() {
       <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
         <p className="text-zinc-400">{error || 'Creator not found'}</p>
         <button
-          onClick={() => navigate('/app/agency/creators')}
+          onClick={() => navigate('/app/gumfit/agency/creators')}
           className="text-sm text-blue-400 hover:text-blue-300"
         >
           Back to Creator Discovery
@@ -109,7 +109,7 @@ export function CreatorProfile() {
       {/* Header */}
       <div className="flex items-center gap-4">
         <button
-          onClick={() => navigate('/app/agency/creators')}
+          onClick={() => navigate('/app/gumfit/agency/creators')}
           className="p-2 hover:bg-white/10 transition-colors"
         >
           <ArrowLeft className="w-5 h-5 text-zinc-400" />
@@ -270,14 +270,14 @@ export function CreatorProfile() {
             </h3>
             <div className="space-y-3">
               <button
-                onClick={() => navigate(`/app/agency/campaigns?invite=${creator.id}`)}
+                onClick={() => navigate(`/app/gumfit/agency/campaigns?invite=${creator.id}`)}
                 className="w-full py-3 bg-white text-black text-xs uppercase tracking-widest font-bold hover:bg-zinc-200 transition-colors flex items-center justify-center gap-2"
               >
                 <Send className="w-4 h-4" />
                 Invite to Campaign
               </button>
               <button
-                onClick={() => navigate(`/app/agency/deals?invite=${creator.id}`)}
+                onClick={() => navigate(`/app/gumfit/agency/deals?invite=${creator.id}`)}
                 className="w-full py-3 bg-white/10 text-white text-xs uppercase tracking-widest hover:bg-white/20 transition-colors"
               >
                 Send Deal Offer

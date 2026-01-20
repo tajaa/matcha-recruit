@@ -107,10 +107,10 @@ export function BlogEditor() {
       const payload = buildPayload();
       if (isEditing && postId) {
         const updated = await blogs.update(postId, payload);
-        navigate(`/app/blog/${updated.slug}`);
+        navigate(`/app/admin/blog/${updated.slug}`);
       } else {
         const created = await blogs.create(payload);
-        navigate(`/app/blog/${created.slug}`);
+        navigate(`/app/admin/blog/${created.slug}`);
       }
     } catch (error) {
       console.error('Failed to save blog post:', error);
@@ -145,7 +145,7 @@ export function BlogEditor() {
       <div className="flex items-start justify-between border-b border-white/10 pb-8">
         <div>
           <button
-            onClick={() => navigate('/app/blog')}
+            onClick={() => navigate('/app/admin/blog')}
             className="text-xs text-zinc-500 hover:text-white mb-4 flex items-center gap-1 uppercase tracking-wider transition-colors"
           >
             <ChevronLeft size={12} />
@@ -317,7 +317,7 @@ export function BlogEditor() {
         <div className="flex justify-end gap-4 pt-10 border-t border-white/10 pb-20">
           <button
             type="button"
-            onClick={() => navigate('/app/blog')}
+            onClick={() => navigate('/app/admin/blog')}
             className="px-6 py-3 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors border border-transparent hover:border-zinc-800"
           >
             Discard Changes

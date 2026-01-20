@@ -20,9 +20,9 @@ export function Login() {
       case 'candidate':
         return '/app/jobs';
       case 'creator':
-        return '/app/creator';
+        return '/app/gumfit';
       case 'agency':
-        return '/app/agency';
+        return '/app/gumfit/agency';
       case 'employee':
         return '/app/portal';
       case 'gumfit_admin':

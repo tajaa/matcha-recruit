@@ -57,7 +57,7 @@ export function ComplianceWidget() {
                         Add your business locations to automatically track compliance requirements like minimum wage, workers' comp, and tax rates.
                     </p>
                     <Link
-                        to="/app/compliance"
+                        to="/app/matcha/compliance"
                         className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border border-zinc-200 text-sm font-medium transition-colors"
                     >
                         <Plus size={16} />
@@ -81,7 +81,7 @@ export function ComplianceWidget() {
                     </div>
                 </div>
                 <Link
-                    to="/app/compliance"
+                    to="/app/matcha/compliance"
                     className="flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 transition-colors"
                 >
                     View All

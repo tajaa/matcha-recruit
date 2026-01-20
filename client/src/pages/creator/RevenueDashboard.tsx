@@ -123,7 +123,7 @@ export function RevenueDashboard() {
             New Stream
           </button>
           <button
-            onClick={() => navigate('/app/creator/revenue/new')}
+            onClick={() => navigate('/app/gumfit/revenue/new')}
             className="px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-mono uppercase tracking-widest transition-all font-bold"
           >
             Log Revenue
@@ -263,7 +263,7 @@ export function RevenueDashboard() {
                 <DollarSign className="w-8 h-8 mx-auto mb-3 opacity-50" />
                 <p className="text-sm mb-4">No revenue entries yet</p>
                 <button
-                  onClick={() => navigate('/app/creator/revenue/new')}
+                  onClick={() => navigate('/app/gumfit/revenue/new')}
                   className="text-xs text-emerald-400 hover:text-emerald-300"
                 >
                   Log your first revenue →

@@ -277,7 +277,7 @@ export default function Employees() {
               <p className="text-xs text-zinc-500">
                 <span className="text-zinc-400 font-medium">Tip:</span> Set up your onboarding task templates in{' '}
                 <button
-                  onClick={() => navigate('/app/onboarding-templates')}
+                  onClick={() => navigate('/app/matcha/onboarding-templates')}
                   className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
                 >
                   HR Tools → Onboarding
@@ -358,7 +358,7 @@ export default function Employees() {
           {employees.map((employee) => (
             <div
               key={employee.id}
-              onClick={() => navigate(`/app/employees/${employee.id}`)}
+              onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
               className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 md:px-6 flex flex-col md:flex-row md:items-center gap-4 cursor-pointer"
             >
               <div className="flex items-center min-w-0 flex-1">

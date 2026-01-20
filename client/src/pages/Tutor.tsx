@@ -143,7 +143,7 @@ export function Tutor() {
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button 
-               onClick={() => navigate(`/app/tutor-metrics/${interviewId}`)}
+               onClick={() => navigate(`/app/admin/tutor-metrics/${interviewId}`)}
                className="bg-white text-black hover:bg-zinc-200 font-bold uppercase tracking-wider"
             >
               View Analysis
@@ -159,7 +159,7 @@ export function Tutor() {
         </div>
         
         <div className="text-center">
-           <Link to="/app/tutor-metrics" className="text-xs text-zinc-500 hover:text-white uppercase tracking-widest border-b border-transparent hover:border-white pb-0.5 transition-all">
+           <Link to="/app/admin/tutor-metrics" className="text-xs text-zinc-500 hover:text-white uppercase tracking-widest border-b border-transparent hover:border-white pb-0.5 transition-all">
              View All Sessions
            </Link>
         </div>
