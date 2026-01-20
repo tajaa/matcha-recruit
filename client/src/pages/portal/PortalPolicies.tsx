@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileText, Search, AlertCircle, ChevronRight, X } from 'lucide-react';
+import { FileText, Search, AlertCircle, ChevronRight, X, ExternalLink } from 'lucide-react';
 import { portalApi } from '../../api/portal';
 
 interface Policy {
@@ -7,6 +7,7 @@ interface Policy {
   title: string;
   description: string | null;
   content: string | null;
+  file_url: string | null;
   version: string;
   created_at: string | null;
 }
@@ -165,17 +166,48 @@ export function PortalPolicies() {
                   </div>
                 </div>
               ) : fullPolicy ? (
-                <div>
+                <div className="space-y-6">
                   {fullPolicy.description && (
-                    <p className="text-zinc-600 mb-4">{fullPolicy.description}</p>
+                    <p className="text-zinc-600">{fullPolicy.description}</p>
                   )}
-                  <div className="prose prose-zinc max-w-none">
-                    {fullPolicy.content ? (
-                      <div className="whitespace-pre-wrap text-sm text-zinc-700">{fullPolicy.content}</div>
-                    ) : (
-                      <p className="text-zinc-500 italic">No content available</p>
-                    )}
-                  </div>
+
+                  {/* Document link - shown prominently when available */}
+                  {fullPolicy.file_url && (
+                    <a
+                      href={fullPolicy.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-4 p-4 bg-zinc-50 border border-zinc-200 rounded-lg hover:border-zinc-300 hover:bg-zinc-100 transition-colors group"
+                    >
+                      <div className="w-10 h-10 bg-white border border-zinc-200 rounded-lg flex items-center justify-center">
+                        <FileText size={20} className="text-zinc-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-zinc-900 group-hover:text-zinc-700">View Policy Document</div>
+                        <div className="text-xs text-zinc-500 font-mono truncate mt-0.5">
+                          {fullPolicy.file_url.split('/').pop()}
+                        </div>
+                      </div>
+                      <ExternalLink size={16} className="text-zinc-400 group-hover:text-zinc-600" />
+                    </a>
+                  )}
+
+                  {/* Text content - secondary when document exists */}
+                  {fullPolicy.content && (
+                    <div>
+                      {fullPolicy.file_url && (
+                        <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">Additional Notes</h3>
+                      )}
+                      <div className="prose prose-zinc max-w-none">
+                        <div className="whitespace-pre-wrap text-sm text-zinc-700">{fullPolicy.content}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Empty state */}
+                  {!fullPolicy.file_url && !fullPolicy.content && (
+                    <p className="text-zinc-500 italic">No content available</p>
+                  )}
                 </div>
               ) : null}
             </div>

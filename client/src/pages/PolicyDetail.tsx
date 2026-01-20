@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { policies, candidates } from '../api/client';
 import type { Policy, PolicySignature, SignatureRequest } from '../types';
-import { ChevronLeft, Trash2, Plus, X } from 'lucide-react';
+import { ChevronLeft, Trash2, Plus, X, FileText, ExternalLink } from 'lucide-react';
 
 interface CandidateOption {
   id: string;
@@ -204,15 +204,59 @@ export function PolicyDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
         <div className="lg:col-span-2 space-y-8">
-          <div className="border-b border-zinc-200 pb-2">
-            <h2 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Policy Content</h2>
-          </div>
-          
-          <div className="prose prose-zinc max-w-none">
-            <div className="text-zinc-800 text-sm font-serif leading-relaxed whitespace-pre-wrap">
-              {policy.content}
+          {/* Document Section - Shown prominently when file is uploaded */}
+          {policy.file_url && (
+            <div className="space-y-4">
+              <div className="border-b border-zinc-200 pb-2">
+                <h2 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Policy Document</h2>
+              </div>
+              <a
+                href={policy.file_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-4 p-6 bg-zinc-50 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-100 transition-colors group"
+              >
+                <div className="w-12 h-12 bg-white border border-zinc-200 flex items-center justify-center">
+                  <FileText size={24} className="text-zinc-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-zinc-900 group-hover:text-zinc-700">View Policy Document</div>
+                  <div className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">
+                    {policy.file_url.split('/').pop()}
+                  </div>
+                </div>
+                <ExternalLink size={16} className="text-zinc-400 group-hover:text-zinc-600" />
+              </a>
             </div>
-          </div>
+          )}
+
+          {/* Text Content Section */}
+          {policy.content && (
+            <div className="space-y-4">
+              <div className="border-b border-zinc-200 pb-2">
+                <h2 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+                  {policy.file_url ? 'Additional Notes' : 'Policy Content'}
+                </h2>
+              </div>
+              <div className="prose prose-zinc max-w-none">
+                <div className="text-zinc-800 text-sm font-serif leading-relaxed whitespace-pre-wrap">
+                  {policy.content}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state if neither exists */}
+          {!policy.file_url && !policy.content && (
+            <div className="space-y-4">
+              <div className="border-b border-zinc-200 pb-2">
+                <h2 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Policy Content</h2>
+              </div>
+              <div className="py-8 text-center text-zinc-400 text-xs">
+                No content or document uploaded.
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="space-y-12">
