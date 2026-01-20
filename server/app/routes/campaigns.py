@@ -593,7 +593,7 @@ async def list_my_offers(
             JOIN campaigns c ON co.campaign_id = c.id
             JOIN agencies a ON c.agency_id = a.id
             LEFT JOIN creator_valuations cv ON cv.creator_id = co.creator_id
-            WHERE co.creator_id = $1 AND c.status = 'open'
+            WHERE co.creator_id = $1 AND c.status IN ('open', 'active')
         """
         params = [creator["id"]]
 

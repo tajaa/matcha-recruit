@@ -154,7 +154,7 @@ async def require_employee_record(
     """Require the current user to be an employee with a valid employee record."""
     async with get_connection() as conn:
         employee = await conn.fetchrow(
-            """SELECT id, org_id, email, first_name, last_name, work_state,
+            """SELECT id, org_id, user_id, email, first_name, last_name, work_state,
                       employment_type, start_date, termination_date, manager_id,
                       phone, address, emergency_contact, created_at, updated_at
                FROM employees WHERE user_id = $1""",
