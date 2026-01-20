@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { policies, candidates } from '../api/client';
 import type { Policy, PolicySignature, SignatureRequest } from '../types';
-import { ChevronLeft, Trash2, Plus, X, FileText, ExternalLink } from 'lucide-react';
+import { ChevronLeft, Trash2, Plus, X, FileText, ExternalLink, Pencil, CheckCircle, Archive } from 'lucide-react';
 
 interface CandidateOption {
   id: string;
@@ -83,6 +83,17 @@ export function PolicyDetail() {
       navigate('/app/policies');
     } catch (error) {
       console.error('Failed to delete policy:', error);
+    }
+  };
+
+  const handleStatusChange = async (newStatus: 'active' | 'archived') => {
+    const action = newStatus === 'active' ? 'activate' : 'archive';
+    if (!confirm(`Are you sure you want to ${action} this policy?`)) return;
+    try {
+      await policies.update(id!, { status: newStatus });
+      setPolicy({ ...policy!, status: newStatus });
+    } catch (error) {
+      console.error('Failed to update policy status:', error);
     }
   };
 
@@ -187,13 +198,38 @@ export function PolicyDetail() {
           </div>
         </div>
         <div className="flex gap-3">
-          <button 
+          <button
             onClick={handleDelete}
             className="text-[10px] text-zinc-400 hover:text-red-600 uppercase tracking-wider font-medium px-3 py-2 transition-colors"
           >
             Delete
           </button>
-          <button 
+          <button
+            onClick={() => navigate(`/app/policies/${id}/edit`)}
+            className="flex items-center gap-1.5 text-[10px] text-zinc-600 hover:text-zinc-900 uppercase tracking-wider font-medium px-3 py-2 transition-colors border border-zinc-200 hover:border-zinc-300"
+          >
+            <Pencil size={12} />
+            Edit
+          </button>
+          {policy.status === 'draft' && (
+            <button
+              onClick={() => handleStatusChange('active')}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] uppercase tracking-wider font-medium px-4 py-2 transition-colors"
+            >
+              <CheckCircle size={12} />
+              Activate
+            </button>
+          )}
+          {policy.status === 'active' && (
+            <button
+              onClick={() => handleStatusChange('archived')}
+              className="flex items-center gap-1.5 text-[10px] text-zinc-600 hover:text-zinc-900 uppercase tracking-wider font-medium px-3 py-2 transition-colors border border-zinc-200 hover:border-zinc-300"
+            >
+              <Archive size={12} />
+              Archive
+            </button>
+          )}
+          <button
             onClick={() => { loadCandidates(); setShowSignatureModal(true); }}
             className="bg-zinc-900 hover:bg-zinc-800 text-white text-[10px] uppercase tracking-wider font-medium px-4 py-2 transition-colors"
           >

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { policies } from '../api/client';
 import type { Policy, PolicyStatus } from '../types';
-import { ChevronRight, FileText, Plus } from 'lucide-react';
+import { ChevronRight, FileText, Plus, Pencil, CheckCircle, MoreHorizontal } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export function Policies() {
@@ -31,6 +31,18 @@ export function Policies() {
 
   const handleFilterChange = (status: string) => {
     setFilterStatus(status as PolicyStatus | '');
+  };
+
+  const handleActivate = async (e: React.MouseEvent, policyId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm('Activate this policy?')) return;
+    try {
+      await policies.update(policyId, { status: 'active' });
+      loadPolicies(filterStatus);
+    } catch (error) {
+      console.error('Failed to activate policy:', error);
+    }
   };
 
   const statusColors: Record<PolicyStatus, string> = {
@@ -110,6 +122,7 @@ export function Policies() {
             <div className="w-24 text-center">Version</div>
             <div className="w-24 text-center">Signed</div>
             <div className="w-32 text-center">Status</div>
+            <div className="w-28 text-center">Actions</div>
             <div className="w-8"></div>
           </div>
 
@@ -144,7 +157,30 @@ export function Policies() {
               <div className={`w-32 text-center text-[10px] font-bold uppercase tracking-wider ${statusColors[policy.status]}`}>
                 {policy.status}
               </div>
-              
+
+              <div className="w-28 flex justify-center gap-2">
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    navigate(`/app/policies/${policy.id}/edit`);
+                  }}
+                  className="p-1.5 text-zinc-600 hover:text-white hover:bg-white/10 transition-colors rounded"
+                  title="Edit policy"
+                >
+                  <Pencil size={14} />
+                </button>
+                {policy.status === 'draft' && (
+                  <button
+                    onClick={(e) => handleActivate(e, policy.id)}
+                    className="p-1.5 text-emerald-600 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors rounded"
+                    title="Activate policy"
+                  >
+                    <CheckCircle size={14} />
+                  </button>
+                )}
+              </div>
+
               <div className="w-8 flex justify-center text-zinc-600 group-hover:text-white transition-colors">
                 <ChevronRight size={14} />
               </div>

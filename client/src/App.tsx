@@ -231,6 +231,14 @@ function App() {
                 }
               />
               <Route
+                path="policies/:id/edit"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <PolicyForm />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="compliance"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
