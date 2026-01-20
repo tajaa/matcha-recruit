@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getAccessToken } from '../api/client';
 import {
   Calendar, Clock, CheckCircle, XCircle, AlertTriangle
@@ -39,7 +39,7 @@ export default function PTOManagement() {
   const [denialReason, setDenialReason] = useState('');
   const [processing, setProcessing] = useState<string | null>(null);
 
-  const fetchRequests = async () => {
+  const fetchRequests = useCallback(async () => {
     try {
       const token = getAccessToken();
       const url = filter ? `${API_BASE}/employees/pto/requests?status=${filter}` : `${API_BASE}/employees/pto/requests`;
@@ -54,9 +54,9 @@ export default function PTOManagement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
 
-  const fetchSummary = async () => {
+  const fetchSummary = useCallback(async () => {
     try {
       const token = getAccessToken();
       const response = await fetch(`${API_BASE}/employees/pto/summary`, {
@@ -68,12 +68,12 @@ export default function PTOManagement() {
     } catch (err) {
       console.error('Failed to fetch summary:', err);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchRequests();
     fetchSummary();
-  }, [filter]);
+  }, [fetchRequests, fetchSummary]);
 
   const handleApprove = async (requestId: string) => {
     setProcessing(requestId);
@@ -179,9 +179,9 @@ export default function PTOManagement() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="max-w-5xl mx-auto space-y-12">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/10 pb-8">
+      <div className="flex justify-between items-start border-b border-white/10 pb-8">
         <div>
           <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Time Off Requests</h1>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
@@ -234,10 +234,9 @@ export default function PTOManagement() {
         </div>
       )}
 
-      {/* Filter tabs */}
-      <div className="border-b border-white/10">
-        <nav className="-mb-px flex space-x-8">
-          {[
+      {/* Filter Tabs */}
+      <div className="flex gap-8 border-b border-white/10 pb-px">
+        {[
             { value: 'pending', label: 'Pending' },
             { value: 'approved', label: 'Approved' },
             { value: 'denied', label: 'Denied' },
@@ -246,33 +245,29 @@ export default function PTOManagement() {
             <button
               key={tab.value}
               onClick={() => setFilter(tab.value)}
-              className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+              className={`pb-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2 ${
                 filter === tab.value
                   ? 'border-white text-white'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-800'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-300'
               }`}
             >
               {tab.label}
             </button>
           ))}
-        </nav>
       </div>
 
       {/* Requests list */}
       {requests.length === 0 ? (
         <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
-          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-            <Calendar size={24} className="text-zinc-600" />
-          </div>
-          <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">No requests found</h3>
-          <p className="text-zinc-500 text-xs font-mono">
+          <div className="text-xs text-zinc-500 mb-4 font-mono uppercase tracking-wider">NO REQUESTS FOUND</div>
+          <p className="text-zinc-500 text-xs">
             {filter === 'pending' ? 'No pending requests to review.' : 'No PTO requests match your filter.'}
           </p>
         </div>
       ) : (
         <div className="space-y-px bg-white/10 border border-white/10">
           {/* Table Header */}
-          <div className="hidden md:flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
+          <div className="hidden md:flex items-center gap-4 py-3 px-4 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
             <div className="flex-1">Employee</div>
             <div className="w-24 text-center">Type</div>
             <div className="w-40 text-center">Dates</div>
@@ -284,7 +279,7 @@ export default function PTOManagement() {
           {requests.map((request) => (
             <div
               key={request.id}
-              className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 md:px-6 flex flex-col md:flex-row md:items-center gap-4"
+              className="group bg-zinc-950 hover:bg-zinc-900 transition-colors py-4 px-4 flex flex-col md:flex-row md:items-center gap-4"
             >
               <div className="flex items-center min-w-0 flex-1">
                 <div className="flex-shrink-0">
@@ -296,7 +291,7 @@ export default function PTOManagement() {
                   <p className="text-sm font-bold text-white truncate group-hover:text-zinc-200">
                     {request.employee_name}
                   </p>
-                  <p className="text-xs text-zinc-500 font-mono truncate">{request.employee_email}</p>
+                  <p className="text-[10px] text-zinc-500 font-mono truncate">{request.employee_email}</p>
                 </div>
               </div>
 
