@@ -25,6 +25,8 @@ export function Login() {
         return '/app/agency';
       case 'employee':
         return '/app/portal';
+      case 'gumfit_admin':
+        return '/app/gumfit';
       case 'admin':
       case 'client':
       default:

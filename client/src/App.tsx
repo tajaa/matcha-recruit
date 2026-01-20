@@ -86,6 +86,13 @@ const CreatorProfile = lazy(() => import('./pages/agency/CreatorProfile'));
 const ApplicationReview = lazy(() => import('./pages/agency/ApplicationReview'));
 const ContractManager = lazy(() => import('./pages/agency/ContractManager'));
 
+// GumFit Admin Pages
+const GumFitDashboard = lazy(() => import('./pages/gumfit/GumFitDashboard'));
+const GumFitCreators = lazy(() => import('./pages/gumfit/GumFitCreators'));
+const GumFitAgencies = lazy(() => import('./pages/gumfit/GumFitAgencies'));
+const GumFitUsers = lazy(() => import('./pages/gumfit/GumFitUsers'));
+const GumFitInvites = lazy(() => import('./pages/gumfit/GumFitInvites'));
+
 // Loading fallback
 function PageLoader() {
   return (
@@ -563,6 +570,48 @@ function App() {
                 element={
                   <ProtectedRoute roles={['agency']}>
                     <ContractManager />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* GumFit Admin Routes */}
+              <Route
+                path="gumfit"
+                element={
+                  <ProtectedRoute roles={['gumfit_admin']}>
+                    <GumFitDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="gumfit/creators"
+                element={
+                  <ProtectedRoute roles={['gumfit_admin']}>
+                    <GumFitCreators />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="gumfit/agencies"
+                element={
+                  <ProtectedRoute roles={['gumfit_admin']}>
+                    <GumFitAgencies />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="gumfit/users"
+                element={
+                  <ProtectedRoute roles={['gumfit_admin']}>
+                    <GumFitUsers />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="gumfit/invites"
+                element={
+                  <ProtectedRoute roles={['gumfit_admin']}>
+                    <GumFitInvites />
                   </ProtectedRoute>
                 }
               />

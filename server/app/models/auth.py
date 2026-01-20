@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr
 from decimal import Decimal
 
-UserRole = Literal["admin", "client", "candidate", "employee", "creator", "agency"]
+UserRole = Literal["admin", "client", "candidate", "employee", "creator", "agency", "gumfit_admin"]
 
 
 class UserBase(BaseModel):

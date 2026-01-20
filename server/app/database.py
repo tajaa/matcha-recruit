@@ -110,12 +110,12 @@ async def init_db():
                 ) THEN
                     ALTER TABLE users DROP CONSTRAINT users_role_check;
                     ALTER TABLE users ADD CONSTRAINT users_role_check
-                        CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency'));
+                        CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency', 'gumfit_admin'));
                 END IF;
             EXCEPTION WHEN undefined_object THEN
                 -- Constraint doesn't exist, add it
                 ALTER TABLE users ADD CONSTRAINT users_role_check
-                    CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency'));
+                    CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency', 'gumfit_admin'));
             END $$;
         """)
 
@@ -1560,6 +1560,36 @@ async def init_db():
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_agency_members_user_id ON agency_members(user_id)
+        """)
+
+        # ===========================================
+        # GumFit Admin Tables
+        # ===========================================
+
+        # GumFit invites (platform invitations to creators/agencies)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS gumfit_invites (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                email VARCHAR(255) NOT NULL,
+                invite_type VARCHAR(20) NOT NULL CHECK (invite_type IN ('creator', 'agency')),
+                token VARCHAR(255) NOT NULL UNIQUE,
+                message TEXT,
+                status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'expired')),
+                created_by UUID REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT NOW(),
+                expires_at TIMESTAMP NOT NULL,
+                accepted_at TIMESTAMP,
+                accepted_by UUID REFERENCES users(id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_gumfit_invites_email ON gumfit_invites(email)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_gumfit_invites_token ON gumfit_invites(token)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_gumfit_invites_status ON gumfit_invites(status)
         """)
 
         # ===========================================

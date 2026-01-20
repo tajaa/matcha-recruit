@@ -2355,6 +2355,144 @@ export const campaigns = {
     }),
 };
 
+// GumFit Admin API
+export interface GumFitStats {
+  total_creators: number;
+  total_agencies: number;
+  total_users: number;
+  pending_invites: number;
+  active_campaigns: number;
+  recent_signups: number;
+}
+
+export interface GumFitCreator {
+  id: string;
+  display_name: string;
+  email: string;
+  profile_image_url: string | null;
+  is_verified: boolean;
+  is_public: boolean;
+  niches: string[];
+  total_followers: number;
+  created_at: string;
+}
+
+export interface GumFitAgency {
+  id: string;
+  agency_name: string;
+  slug: string;
+  email: string;
+  logo_url: string | null;
+  agency_type: string;
+  is_verified: boolean;
+  industries: string[];
+  member_count: number;
+  created_at: string;
+}
+
+export interface GumFitUser {
+  id: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  last_login: string | null;
+  profile_name: string | null;
+}
+
+export interface GumFitInvite {
+  id: string;
+  email: string;
+  invite_type: 'creator' | 'agency';
+  status: 'pending' | 'accepted' | 'expired';
+  message: string | null;
+  created_at: string;
+  expires_at: string;
+  accepted_at: string | null;
+}
+
+export interface GumFitInviteCreate {
+  email: string;
+  invite_type: 'creator' | 'agency';
+  message?: string;
+}
+
+export const gumfit = {
+  // Stats
+  getStats: () =>
+    request<GumFitStats>('/gumfit/stats'),
+
+  // Creators
+  listCreators: (params?: { search?: string; verified?: boolean; skip?: number; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.verified !== undefined) query.set('verified', String(params.verified));
+    if (params?.skip !== undefined) query.set('skip', String(params.skip));
+    if (params?.limit !== undefined) query.set('limit', String(params.limit));
+    const queryStr = query.toString();
+    return request<{ creators: GumFitCreator[]; total: number }>(`/gumfit/creators${queryStr ? `?${queryStr}` : ''}`);
+  },
+
+  toggleCreatorVerification: (creatorId: string, verified: boolean) =>
+    request<{ success: boolean; is_verified: boolean }>(`/gumfit/creators/${creatorId}/verify?verified=${verified}`, {
+      method: 'PATCH',
+    }),
+
+  // Agencies
+  listAgencies: (params?: { search?: string; verified?: boolean; skip?: number; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.verified !== undefined) query.set('verified', String(params.verified));
+    if (params?.skip !== undefined) query.set('skip', String(params.skip));
+    if (params?.limit !== undefined) query.set('limit', String(params.limit));
+    const queryStr = query.toString();
+    return request<{ agencies: GumFitAgency[]; total: number }>(`/gumfit/agencies${queryStr ? `?${queryStr}` : ''}`);
+  },
+
+  toggleAgencyVerification: (agencyId: string, verified: boolean) =>
+    request<{ success: boolean; is_verified: boolean }>(`/gumfit/agencies/${agencyId}/verify?verified=${verified}`, {
+      method: 'PATCH',
+    }),
+
+  // Users
+  listUsers: (params?: { search?: string; role?: 'creator' | 'agency'; skip?: number; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.role) query.set('role', params.role);
+    if (params?.skip !== undefined) query.set('skip', String(params.skip));
+    if (params?.limit !== undefined) query.set('limit', String(params.limit));
+    const queryStr = query.toString();
+    return request<{ users: GumFitUser[]; total: number }>(`/gumfit/users${queryStr ? `?${queryStr}` : ''}`);
+  },
+
+  toggleUserActive: (userId: string, isActive: boolean) =>
+    request<{ success: boolean; is_active: boolean }>(`/gumfit/users/${userId}/active?is_active=${isActive}`, {
+      method: 'PATCH',
+    }),
+
+  // Invites
+  listInvites: (params?: { search?: string; invite_status?: 'pending' | 'accepted' | 'expired'; skip?: number; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.invite_status) query.set('invite_status', params.invite_status);
+    if (params?.skip !== undefined) query.set('skip', String(params.skip));
+    if (params?.limit !== undefined) query.set('limit', String(params.limit));
+    const queryStr = query.toString();
+    return request<{ invites: GumFitInvite[]; total: number }>(`/gumfit/invites${queryStr ? `?${queryStr}` : ''}`);
+  },
+
+  sendInvite: (data: GumFitInviteCreate) =>
+    request<GumFitInvite>('/gumfit/invites', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  resendInvite: (inviteId: string) =>
+    request<{ success: boolean; expires_at: string }>(`/gumfit/invites/${inviteId}/resend`, {
+      method: 'POST',
+    }),
+};
+
 // Combined API object for convenient imports
 export const api = {
   auth,
@@ -2385,4 +2523,5 @@ export const api = {
   agencies,
   deals,
   campaigns,
+  gumfit,
 };
