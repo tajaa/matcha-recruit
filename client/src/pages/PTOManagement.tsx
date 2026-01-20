@@ -4,7 +4,7 @@ import {
   Calendar, Clock, CheckCircle, XCircle, AlertTriangle
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
 interface PTORequest {
   id: string;

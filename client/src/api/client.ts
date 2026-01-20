@@ -144,7 +144,7 @@ import type {
   CreatorCampaignStats,
 } from '../types/campaigns';
 
-const API_BASE = 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
 // Token storage helpers
 const TOKEN_KEY = 'matcha_access_token';
@@ -956,12 +956,13 @@ export const screening = {
   },
 
   start: async (token: string, userEmail: string): Promise<OutreachInterviewStart> => {
-    const response = await fetch(`${API_BASE}/screening/${token}/start?user_email=${encodeURIComponent(userEmail)}`, {
+    const response = await fetch(`${API_BASE}/screening/${token}/start`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${getAccessToken()}`,
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ user_email: userEmail }),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Failed to start screening' }));
@@ -1031,11 +1032,13 @@ export const tutorMetrics = {
 
 // WebSocket URL helper
 export function getInterviewWSUrl(interviewId: string): string {
-  return `ws://localhost:8001/api/ws/interview/${interviewId}`;
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+  const wsBase = apiBase.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+  return `${wsBase}/ws/interview/${interviewId}`;
 }
 
 // Public Jobs API (no auth required)
-const JOBS_BASE = 'http://localhost:8001/api/job-board';
+const JOBS_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:8001/api'}/job-board`;
 
 export const publicJobs = {
   list: async (filters?: {

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { getAccessToken } from '../api/client';
 import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
 interface Employee {
   id: string;

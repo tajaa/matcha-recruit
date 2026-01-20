@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { getAccessToken } from '../api/client';
 import { Plus, X, Edit2, Trash2, CheckCircle, FileText, Laptop, GraduationCap, Settings, AlertTriangle } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
 interface OnboardingTemplate {
   id: string;

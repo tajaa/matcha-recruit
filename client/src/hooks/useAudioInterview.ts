@@ -221,7 +221,9 @@ export function useAudioInterview(
   const connect = useCallback(() => {
     if (wsRef.current) return;
 
-    const ws = new WebSocket(`ws://localhost:8001/api/ws/interview/${interviewId}`);
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+    const wsBase = apiBase.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+    const ws = new WebSocket(`${wsBase}/ws/interview/${interviewId}`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {

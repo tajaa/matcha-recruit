@@ -6,7 +6,7 @@ import {
   Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
 interface Employee {
   id: string;

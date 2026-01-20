@@ -138,7 +138,10 @@ export function ERCaseDetail() {
   useEffect(() => {
     if (!id) return;
 
-    const wsUrl = `ws://localhost:8001/ws/notifications`;
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+    const wsHost = apiBase.replace(/^https?:\/\//, '').replace(/\/api$/, '');
+    const wsProtocol = apiBase.startsWith('https') ? 'wss' : 'ws';
+    const wsUrl = `${wsProtocol}://${wsHost}/ws/notifications`;
     console.log('[ERCaseDetail] Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
 
