@@ -15,7 +15,7 @@ from ..utils import get_db_connection
 
 async def _aggregate_culture(company_id: str) -> dict[str, Any]:
     """Aggregate culture data from interviews into company profile."""
-    from app.services.culture_analyzer import CultureAnalyzer
+    from app.matcha.services.culture_analyzer import CultureAnalyzer
     from app.config import load_settings
 
     settings = load_settings()

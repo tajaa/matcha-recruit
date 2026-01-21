@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings, load_settings
 from .database import close_pool, init_db, init_pool
-from .services.notification_manager import (
+from .core.services.notification_manager import (
     close_notification_manager,
     get_notification_manager,
     init_notification_manager,
@@ -61,73 +61,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Import and include routers
-from .routes import (
-    auth_router,
-    bulk_import_router,
-    candidates_router,
-    companies_router,
-    contact_router,
-    interviews_router,
-    ir_incidents_router,
-    job_search_router,
-    matching_router,
-    openings_router,
-    outreach_router,
-    positions_router,
-    projects_router,
-    public_jobs_router,
-    offer_letters_router,
-    creators_router,
-    agencies_router,
-    deals_router,
-)
-from .routes.leads_agent import router as leads_agent_router
-from .routes.er_copilot import router as er_copilot_router
-from .routes.policies import router as policies_router
-from .routes.public_signatures import router as public_signatures_router
-from .routes.compliance import router as compliance_router
-from .routes.blog import router as blog_router
-from .routes.employee_portal import router as employee_portal_router
-from .routes.employees import router as employees_router
-from .routes.invitations import router as invitations_router
-from .routes.chat import router as chat_router, ws_router as chat_ws_router
-from .routes.campaigns import router as campaigns_router
-from .routes.gumfit import router as gumfit_router
-from .routes.onboarding import router as onboarding_router
+# Import and include domain routers
+from .core.routes import core_router, chat_ws_router
+from .matcha.routes import matcha_router
+from .gummfit.routes import gummfit_router
 
-app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
-app.include_router(companies_router, prefix="/api/companies", tags=["companies"])
-app.include_router(candidates_router, prefix="/api/candidates", tags=["candidates"])
-app.include_router(interviews_router, prefix="/api", tags=["interviews"])
-app.include_router(matching_router, prefix="/api", tags=["matching"])
-app.include_router(positions_router, prefix="/api/positions", tags=["positions"])
-app.include_router(bulk_import_router, prefix="/api/bulk", tags=["bulk-import"])
-app.include_router(job_search_router, prefix="/api/jobs", tags=["job-search"])
-app.include_router(openings_router, prefix="/api/openings", tags=["openings"])
-app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
-app.include_router(outreach_router, prefix="/api", tags=["outreach"])
-app.include_router(public_jobs_router, prefix="/api/job-board", tags=["public-jobs"])
-app.include_router(contact_router, prefix="/api/contact", tags=["contact"])
-app.include_router(er_copilot_router, prefix="/api/er/cases", tags=["er-copilot"])
-app.include_router(ir_incidents_router, prefix="/api/ir/incidents", tags=["ir-incidents"])
-app.include_router(leads_agent_router, prefix="/api/leads-agent", tags=["leads-agent"])
-app.include_router(policies_router, prefix="/api", tags=["policies"])
-app.include_router(public_signatures_router, prefix="/api", tags=["public-signatures"])
-app.include_router(offer_letters_router, prefix="/api/offer-letters", tags=["offer-letters"])
-app.include_router(compliance_router, prefix="/api/compliance", tags=["compliance"])
-app.include_router(blog_router, prefix="/api/blogs", tags=["blog"])
-app.include_router(employee_portal_router, prefix="/api/v1/portal", tags=["employee-portal"])
-app.include_router(employees_router, prefix="/api/employees", tags=["employees"])
-app.include_router(invitations_router, prefix="/api/invitations", tags=["invitations"])
-app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+# Mount domain routers
+app.include_router(core_router, prefix="/api")
+app.include_router(matcha_router, prefix="/api")
+app.include_router(gummfit_router, prefix="/api")
+
+# WebSocket routes (separate prefix)
 app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])
-app.include_router(creators_router, prefix="/api/creators", tags=["creators"])
-app.include_router(agencies_router, prefix="/api/agencies", tags=["agencies"])
-app.include_router(deals_router, prefix="/api/deals", tags=["deals"])
-app.include_router(campaigns_router, prefix="/api/campaigns", tags=["campaigns"])
-app.include_router(gumfit_router, prefix="/api/gumfit", tags=["gumfit-admin"])
-app.include_router(onboarding_router, prefix="/api/onboarding", tags=["onboarding"])
 
 
 @app.get("/health")

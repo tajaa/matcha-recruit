@@ -23,10 +23,10 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
     5. Generate embeddings
     6. Store chunks with embeddings
     """
-    from app.services.storage import get_storage
-    from app.services.er_document_parser import ERDocumentParser
-    from app.services.pii_scrubber import PIIScrubber
-    from app.services.embedding_service import EmbeddingService
+    from app.core.services.storage import get_storage
+    from app.matcha.services.er_document_parser import ERDocumentParser
+    from app.core.services.pii_scrubber import PIIScrubber
+    from app.core.services.embedding_service import EmbeddingService
     from app.config import load_settings
 
     settings = load_settings()

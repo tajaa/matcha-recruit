@@ -19,7 +19,7 @@ async def _match_candidates(
     candidate_ids: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Run matching for candidates against company culture profile."""
-    from app.services.candidate_matcher import CandidateMatcher
+    from app.matcha.services.candidate_matcher import CandidateMatcher
     from app.config import load_settings
 
     settings = load_settings()
@@ -117,7 +117,7 @@ async def _match_position_candidates(
     candidate_ids: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Run matching for candidates against position requirements."""
-    from app.services.position_matcher import PositionMatcher
+    from app.matcha.services.position_matcher import PositionMatcher
     from app.config import load_settings
 
     settings = load_settings()

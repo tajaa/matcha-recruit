@@ -1,47 +1,91 @@
-from .companies import router as companies_router
-from .interviews import router as interviews_router
-from .candidates import router as candidates_router
-from .matching import router as matching_router
-from .positions import router as positions_router
-from .bulk_import import router as bulk_import_router
-from .job_search import router as job_search_router
-from .auth import router as auth_router
-from .openings import router as openings_router
-from .projects import router as projects_router
-from .outreach import router as outreach_router
-from .public_jobs import router as public_jobs_router
-from .contact import router as contact_router
-from .ir_incidents import router as ir_incidents_router
-from .policies import router as policies_router
-from .public_signatures import router as public_signatures_router
-from .offer_letters import router as offer_letters_router
-from .compliance import router as compliance_router
-from .blog import router as blog_router
-from .creators import router as creators_router
-from .agencies import router as agencies_router
-from .deals import router as deals_router
+"""
+DEPRECATED: Routes have been reorganized into domains.
+
+- Core routes: server/app/core/routes/
+- Matcha (HR/Recruiting) routes: server/app/matcha/routes/
+- Gummfit (Creator Agency) routes: server/app/gummfit/routes/
+
+These re-exports are provided for backward compatibility.
+"""
+
+# Core routes
+from ..core.routes import (
+    auth_router,
+    blog_router,
+    policies_router,
+    public_signatures_router,
+    compliance_router,
+    bulk_import_router,
+    chat_router,
+    chat_ws_router,
+    contact_router,
+    projects_router,
+    outreach_router,
+    leads_agent_router,
+)
+
+# Matcha routes
+from ..matcha.routes import (
+    companies_router,
+    positions_router,
+    candidates_router,
+    interviews_router,
+    employees_router,
+    employee_portal_router,
+    onboarding_router,
+    invitations_router,
+    offer_letters_router,
+    openings_router,
+    matching_router,
+    er_copilot_router,
+    ir_incidents_router,
+    job_search_router,
+    public_jobs_router,
+)
+
+# Gummfit routes
+from ..gummfit.routes import (
+    creators_router,
+    agencies_router,
+    deals_router,
+    campaigns_router,
+    gumfit_router,
+)
 
 __all__ = [
-    "companies_router",
-    "interviews_router",
-    "candidates_router",
-    "matching_router",
-    "positions_router",
-    "bulk_import_router",
-    "job_search_router",
+    # Core
     "auth_router",
-    "openings_router",
-    "projects_router",
-    "outreach_router",
-    "public_jobs_router",
-    "contact_router",
-    "ir_incidents_router",
+    "blog_router",
     "policies_router",
     "public_signatures_router",
-    "offer_letters_router",
     "compliance_router",
-    "blog_router",
+    "bulk_import_router",
+    "chat_router",
+    "chat_ws_router",
+    "contact_router",
+    "projects_router",
+    "outreach_router",
+    "leads_agent_router",
+    # Matcha
+    "companies_router",
+    "positions_router",
+    "candidates_router",
+    "interviews_router",
+    "employees_router",
+    "employee_portal_router",
+    "onboarding_router",
+    "invitations_router",
+    "offer_letters_router",
+    "openings_router",
+    "matching_router",
+    "er_copilot_router",
+    "ir_incidents_router",
+    "job_search_router",
+    "public_jobs_router",
+    # Gummfit
     "creators_router",
     "agencies_router",
     "deals_router",
+    "campaigns_router",
+    "gumfit_router",
 ]

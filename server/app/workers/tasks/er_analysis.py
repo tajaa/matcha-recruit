@@ -82,7 +82,7 @@ async def _save_analysis_result(
 
 async def _run_timeline_analysis(case_id: str) -> dict[str, Any]:
     """Run timeline reconstruction analysis."""
-    from app.services.er_analyzer import ERAnalyzer
+    from app.matcha.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
     import os
@@ -187,7 +187,7 @@ def run_timeline_analysis(self, case_id: str) -> dict[str, Any]:
 
 async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
     """Run discrepancy detection analysis."""
-    from app.services.er_analyzer import ERAnalyzer
+    from app.matcha.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
     import os
@@ -331,7 +331,7 @@ async def _get_company_policies(conn, case_id: str) -> list[dict]:
 
 async def _run_policy_check(case_id: str) -> dict[str, Any]:
     """Run policy violation check against all company policies."""
-    from app.services.er_analyzer import ERAnalyzer
+    from app.matcha.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
     import os
@@ -462,7 +462,7 @@ def run_policy_check(self, case_id: str) -> dict[str, Any]:
 
 async def _generate_summary_report(case_id: str, generated_by: str) -> dict[str, Any]:
     """Generate investigation summary report."""
-    from app.services.er_analyzer import ERAnalyzer
+    from app.matcha.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
     import os
@@ -584,7 +584,7 @@ async def _generate_determination_letter(
     generated_by: str,
 ) -> dict[str, Any]:
     """Generate determination letter."""
-    from app.services.er_analyzer import ERAnalyzer
+    from app.matcha.services.er_analyzer import ERAnalyzer
     from app.config import load_settings
 
     import os
