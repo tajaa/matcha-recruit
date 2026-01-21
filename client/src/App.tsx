@@ -97,6 +97,7 @@ const GumFitCreators = lazy(() => import('./pages/gumfit/GumFitCreators'));
 const GumFitAgencies = lazy(() => import('./pages/gumfit/GumFitAgencies'));
 const GumFitUsers = lazy(() => import('./pages/gumfit/GumFitUsers'));
 const GumFitInvites = lazy(() => import('./pages/gumfit/GumFitInvites'));
+const GumFitAssets = lazy(() => import('./pages/gumfit/GumFitAssets'));
 
 // Loading fallback
 function PageLoader() {
@@ -660,6 +661,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['gumfit_admin']}>
                     <GumFitInvites />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="gumfit/admin/assets"
+                element={
+                  <ProtectedRoute roles={['gumfit_admin']}>
+                    <GumFitAssets />
                   </ProtectedRoute>
                 }
               />

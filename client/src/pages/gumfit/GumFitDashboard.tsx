@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, Building2, UserPlus, Mail, TrendingUp, Activity } from 'lucide-react';
+import { Users, Building2, UserPlus, Mail, TrendingUp, Activity, Image } from 'lucide-react';
 import { api } from '../../api/client';
 import type { GumFitStats } from '../../api/client';
 
@@ -152,6 +152,13 @@ export function GumFitDashboard() {
             >
               <Building2 className="w-4 h-4 text-zinc-400" />
               <span className="text-sm text-white">View Agencies</span>
+            </Link>
+            <Link
+              to="/app/gumfit/admin/assets"
+              className="flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              <Image className="w-4 h-4 text-zinc-400" />
+              <span className="text-sm text-white">Manage Assets</span>
             </Link>
           </div>
         </div>

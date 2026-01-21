@@ -2420,6 +2420,32 @@ export interface GumFitInviteCreate {
   message?: string;
 }
 
+export interface GumFitAsset {
+  id: string;
+  name: string;
+  url: string;
+  category: string;
+  file_type: string | null;
+  file_size: number | null;
+  width: number | null;
+  height: number | null;
+  alt_text: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GumFitAssetUpdate {
+  name?: string;
+  category?: string;
+  alt_text?: string;
+}
+
+export interface GumFitAssetCategory {
+  value: string;
+  label: string;
+}
+
 export const gumfit = {
   // Stats
   getStats: () =>
@@ -2494,6 +2520,61 @@ export const gumfit = {
     request<{ success: boolean; expires_at: string }>(`/gumfit/invites/${inviteId}/resend`, {
       method: 'POST',
     }),
+
+  // Assets
+  listAssets: (params?: { category?: string; search?: string; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.category) query.set('category', params.category);
+    if (params?.search) query.set('search', params.search);
+    if (params?.limit !== undefined) query.set('limit', String(params.limit));
+    if (params?.offset !== undefined) query.set('offset', String(params.offset));
+    const queryStr = query.toString();
+    return request<{ assets: GumFitAsset[]; total: number }>(`/gumfit/assets${queryStr ? `?${queryStr}` : ''}`);
+  },
+
+  getAsset: (assetId: string) =>
+    request<GumFitAsset>(`/gumfit/assets/${assetId}`),
+
+  uploadAsset: async (file: File, name: string, category: string = 'general', altText?: string): Promise<GumFitAsset> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', name);
+    formData.append('category', category);
+    if (altText) formData.append('alt_text', altText);
+
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/gumfit/assets/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return response.json();
+  },
+
+  updateAsset: (assetId: string, update: GumFitAssetUpdate) =>
+    request<GumFitAsset>(`/gumfit/assets/${assetId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(update),
+    }),
+
+  deleteAsset: (assetId: string) =>
+    request<{ status: string; id: string }>(`/gumfit/assets/${assetId}`, {
+      method: 'DELETE',
+    }),
+
+  listAssetCategories: () =>
+    request<{ categories: GumFitAssetCategory[] }>('/gumfit/assets/categories/list'),
 };
 
 // Combined API object for convenient imports
