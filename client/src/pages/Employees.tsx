@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAccessToken } from '../api/client';
-import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown } from 'lucide-react';
+import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -30,6 +30,14 @@ interface NewEmployee {
   start_date: string;
 }
 
+interface OnboardingProgress {
+  employee_id: string;
+  total: number;
+  completed: number;
+  pending: number;
+  has_onboarding: boolean;
+}
+
 export default function Employees() {
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -48,6 +56,12 @@ export default function Employees() {
   const [submitting, setSubmitting] = useState(false);
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [onboardingProgress, setOnboardingProgress] = useState<Record<string, OnboardingProgress>>({});
+  const [showOnboardingPrompt, setShowOnboardingPrompt] = useState(false);
+  const [newEmployeeId, setNewEmployeeId] = useState<string | null>(null);
+  const [newEmployeeName, setNewEmployeeName] = useState<string>('');
+  const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
+  const [assigningOnboarding, setAssigningOnboarding] = useState(false);
 
   const fetchEmployees = async () => {
     try {
@@ -73,8 +87,27 @@ export default function Employees() {
     }
   };
 
+  const fetchOnboardingProgress = async () => {
+    try {
+      const token = getAccessToken();
+      const response = await fetch(`${API_BASE}/employees/onboarding-progress`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch onboarding progress');
+
+      const data = await response.json();
+      setOnboardingProgress(data);
+    } catch (err) {
+      console.error('Failed to fetch onboarding progress:', err);
+    }
+  };
+
   useEffect(() => {
     fetchEmployees();
+    fetchOnboardingProgress();
   }, [filter]);
 
   const handleAddEmployee = async (e: React.FormEvent) => {
@@ -97,7 +130,13 @@ export default function Employees() {
         throw new Error(data.detail || 'Failed to add employee');
       }
 
+      const createdEmployee = await response.json();
+
       setShowAddModal(false);
+      setNewEmployeeId(createdEmployee.id);
+      setNewEmployeeName(`${newEmployee.first_name} ${newEmployee.last_name}`);
+      setShowOnboardingPrompt(true);
+
       setNewEmployee({
         email: '',
         first_name: '',
@@ -107,10 +146,39 @@ export default function Employees() {
         start_date: new Date().toISOString().split('T')[0],
       });
       fetchEmployees();
+      fetchOnboardingProgress();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleAssignOnboarding = async () => {
+    if (!newEmployeeId) return;
+
+    setAssigningOnboarding(true);
+    try {
+      const token = getAccessToken();
+      const response = await fetch(`${API_BASE}/employees/${newEmployeeId}/onboarding/assign-all`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to assign onboarding');
+      }
+
+      setShowOnboardingPrompt(false);
+      navigate(`/app/matcha/employees/${newEmployeeId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      setShowOnboardingPrompt(false);
+    } finally {
+      setAssigningOnboarding(false);
     }
   };
 
@@ -207,6 +275,38 @@ export default function Employees() {
             Help
             <ChevronDown size={12} className={`transition-transform ${showHelp ? 'rotate-180' : ''}`} />
           </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
+              className={`flex items-center gap-2 px-4 py-2 border text-xs font-bold uppercase tracking-wider transition-colors ${
+                showSettingsDropdown
+                  ? 'border-white/30 text-white bg-zinc-800'
+                  : 'border-white/10 text-zinc-400 hover:text-white hover:border-white/20'
+              }`}
+            >
+              <Settings size={14} />
+            </button>
+            {showSettingsDropdown && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowSettingsDropdown(false)}
+                />
+                <div className="absolute right-0 mt-2 w-56 bg-zinc-900 border border-white/10 shadow-xl z-20">
+                  <button
+                    onClick={() => {
+                      setShowSettingsDropdown(false);
+                      navigate('/app/matcha/onboarding-templates');
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                  >
+                    <ClipboardCheck size={14} />
+                    Onboarding Templates
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
@@ -275,12 +375,12 @@ export default function Employees() {
 
             <div className="border-t border-white/10 pt-4">
               <p className="text-xs text-zinc-500">
-                <span className="text-zinc-400 font-medium">Tip:</span> Set up your onboarding task templates in{' '}
+                <span className="text-zinc-400 font-medium">Tip:</span> Set up your onboarding task templates via the{' '}
                 <button
                   onClick={() => navigate('/app/matcha/onboarding-templates')}
                   className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
                 >
-                  HR Tools → Onboarding
+                  Settings (gear icon) → Onboarding Templates
                 </button>{' '}
                 to streamline new employee setup.
               </p>
@@ -351,6 +451,7 @@ export default function Employees() {
               <div className="flex-1">Name / Email</div>
               <div className="w-32 text-right">Work State</div>
               <div className="w-32 text-right">Type</div>
+              <div className="w-36 text-right">Onboarding</div>
               <div className="w-32 text-right">Status</div>
               <div className="w-32"></div>
            </div>
@@ -385,6 +486,25 @@ export default function Employees() {
                     <p className="text-[10px] text-zinc-500 uppercase tracking-wider">
                       {employee.employment_type?.replace('_', ' ') || '—'}
                     </p>
+                 </div>
+                 <div className="w-36 flex justify-end">
+                    {onboardingProgress[employee.id]?.has_onboarding ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-500 rounded-full transition-all"
+                            style={{
+                              width: `${(onboardingProgress[employee.id].completed / onboardingProgress[employee.id].total) * 100}%`,
+                            }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-zinc-400 font-mono">
+                          {onboardingProgress[employee.id].completed}/{onboardingProgress[employee.id].total}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Not started</span>
+                    )}
                  </div>
                  <div className="flex justify-end w-32">
                     {getStatusBadge(employee)}
@@ -550,6 +670,56 @@ export default function Employees() {
                   </div>
               </form>
             </div>
+        </div>
+      )}
+
+      {/* Onboarding Prompt Modal */}
+      {showOnboardingPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-white/10">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 text-emerald-400" />
+                </div>
+                <h3 className="text-xl font-bold text-white uppercase tracking-tight">Employee Added</h3>
+              </div>
+              <p className="text-sm text-zinc-400 mt-3">
+                <span className="text-white font-medium">{newEmployeeName}</span> has been added to your directory.
+              </p>
+            </div>
+
+            <div className="p-6">
+              <p className="text-xs text-zinc-500 uppercase tracking-wider mb-4">
+                Would you like to assign the onboarding checklist?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowOnboardingPrompt(false);
+                    setNewEmployeeId(null);
+                  }}
+                  className="flex-1 px-4 py-3 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-xs font-bold uppercase tracking-wider transition-colors"
+                >
+                  Skip for Now
+                </button>
+                <button
+                  onClick={handleAssignOnboarding}
+                  disabled={assigningOnboarding}
+                  className="flex-1 px-4 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {assigningOnboarding ? (
+                    <span className="animate-pulse">Assigning...</span>
+                  ) : (
+                    <>
+                      <ClipboardCheck size={14} />
+                      Assign Checklist
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

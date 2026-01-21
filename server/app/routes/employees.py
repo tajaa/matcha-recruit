@@ -76,6 +76,49 @@ class InvitationResponse(BaseModel):
     created_at: datetime
 
 
+class OnboardingProgressItem(BaseModel):
+    employee_id: UUID
+    total: int
+    completed: int
+    pending: int
+    has_onboarding: bool
+
+
+@router.get("/onboarding-progress")
+async def get_bulk_onboarding_progress(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get onboarding progress for all employees in a single query (avoids N+1)."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                e.id as employee_id,
+                COUNT(eot.id)::int as total,
+                COUNT(CASE WHEN eot.status = 'completed' THEN 1 END)::int as completed,
+                COUNT(CASE WHEN eot.status = 'pending' THEN 1 END)::int as pending
+            FROM employees e
+            LEFT JOIN employee_onboarding_tasks eot ON eot.employee_id = e.id
+            WHERE e.org_id = $1
+            GROUP BY e.id
+            """,
+            company_id
+        )
+
+        return {
+            str(row["employee_id"]): OnboardingProgressItem(
+                employee_id=row["employee_id"],
+                total=row["total"],
+                completed=row["completed"],
+                pending=row["pending"],
+                has_onboarding=row["total"] > 0,
+            )
+            for row in rows
+        }
+
+
 @router.get("", response_model=List[EmployeeListResponse])
 async def list_employees(
     status: Optional[str] = None,  # active, terminated, invited
