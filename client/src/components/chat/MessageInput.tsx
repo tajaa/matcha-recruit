@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
+import { useState, useRef, type KeyboardEvent } from 'react';
 import { Send } from 'lucide-react';
 
 interface MessageInputProps {
@@ -11,29 +11,18 @@ interface MessageInputProps {
 export function MessageInput({ onSendMessage, onTyping, disabled, disabledReason }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const typingTimeoutRef = useRef<number | null>(null);
-
-  // Cleanup typing timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-    };
-  }, []);
+  const lastTypingSentRef = useRef(0);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessage(e.target.value);
 
     // Send typing indicator (throttled)
     if (onTyping) {
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
+      const now = Date.now();
+      if (now - lastTypingSentRef.current >= 1000) {
+        onTyping();
+        lastTypingSentRef.current = now;
       }
-      onTyping();
-      typingTimeoutRef.current = window.setTimeout(() => {
-        typingTimeoutRef.current = null;
-      }, 1000);
     }
 
     // Auto-resize textarea

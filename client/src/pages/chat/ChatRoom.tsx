@@ -25,6 +25,7 @@ export default function ChatRoom() {
   const [isMember, setIsMember] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInCall, setIsInCall] = useState(false);
+  const handleCloseCall = useCallback(() => setIsInCall(false), []);
 
   // Track if messages have been loaded to prevent race condition
   const messagesLoadedRef = useRef(false);
@@ -352,7 +353,7 @@ export default function ChatRoom() {
         <VideoCall
           roomName={room.slug}
           displayName={user ? `${user.first_name} ${user.last_name}` : 'Guest'}
-          onClose={() => setIsInCall(false)}
+          onClose={handleCloseCall}
         />
       ) : (
         <>

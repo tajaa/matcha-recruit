@@ -40,11 +40,17 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
   const reconnectAttemptsRef = useRef(0);
   const optionsRef = useRef(options);
   const connectRef = useRef<(() => void) | undefined>(undefined);
+  const shouldReconnectRef = useRef(true);
 
   // Keep options ref updated
   optionsRef.current = options;
 
   const scheduleReconnect = useCallback(() => {
+    if (!shouldReconnectRef.current) {
+      setIsReconnecting(false);
+      return;
+    }
+
     // Attempt to reconnect with exponential backoff if we have a token
     if (getChatAccessToken()) {
       setIsReconnecting(true);
@@ -69,6 +75,13 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
     const token = getChatAccessToken();
     if (!token) {
       return;
+    }
+
+    shouldReconnectRef.current = true;
+
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
     }
 
     // Don't reconnect if already connected
@@ -179,6 +192,8 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}): UseChat
   connectRef.current = connect;
 
   const disconnect = useCallback(() => {
+    shouldReconnectRef.current = false;
+
     // Clear reconnect timeout
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);

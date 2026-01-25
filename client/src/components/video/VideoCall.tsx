@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, memo } from 'react';
 import { X, Maximize2, Minimize2 } from 'lucide-react';
 
 // Declare JitsiMeetExternalAPI on window
@@ -32,7 +32,7 @@ interface VideoCallProps {
   onClose: () => void;
 }
 
-export function VideoCall({ roomName, displayName, onClose }: VideoCallProps) {
+export const VideoCall = memo(function VideoCall({ roomName, displayName, onClose }: VideoCallProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -201,4 +201,4 @@ export function VideoCall({ roomName, displayName, onClose }: VideoCallProps) {
       />
     </div>
   );
-}
+});
