@@ -131,6 +131,17 @@ class StorageService:
         Returns:
             True if deleted, False if not found
         """
+        # Handle CloudFront URLs - convert back to S3 path
+        if self.cloudfront_domain and path.startswith(f"https://{self.cloudfront_domain}/"):
+            if not self.s3_client or not self.bucket:
+                return False
+            key = path[len(f"https://{self.cloudfront_domain}/"):]
+            try:
+                self.s3_client.delete_object(Bucket=self.bucket, Key=key)
+                return True
+            except ClientError:
+                return False
+
         if path.startswith("s3://"):
             if not self.s3_client:
                 return False

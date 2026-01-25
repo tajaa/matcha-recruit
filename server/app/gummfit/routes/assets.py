@@ -214,11 +214,8 @@ async def delete_asset(
         # Delete from storage
         storage = get_storage()
         try:
-            # Extract filename from URL and delete
             url = row["url"]
-            if "gumfit-assets/" in url:
-                filename = url.split("gumfit-assets/")[-1]
-                await storage.delete_file(f"gumfit-assets/{filename}")
+            await storage.delete_file(url)
         except Exception:
             pass  # Don't fail if storage delete fails
 
