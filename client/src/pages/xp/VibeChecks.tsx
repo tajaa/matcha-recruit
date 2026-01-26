@@ -313,7 +313,7 @@ export default function VibeChecks() {
                     {response.comment && (
                       <p className="text-sm text-zinc-400 mt-2">{response.comment}</p>
                     )}
-                    {response.sentiment_analysis?.themes?.length > 0 && (
+                    {response.sentiment_analysis?.themes && response.sentiment_analysis.themes.length > 0 && (
                       <div className="flex gap-2 mt-2 flex-wrap">
                         {response.sentiment_analysis.themes.map((theme, i) => (
                           <span
