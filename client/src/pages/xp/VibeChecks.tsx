@@ -289,7 +289,7 @@ export default function VibeChecks() {
             <div className="p-8 text-center text-xs text-zinc-500 uppercase tracking-wider animate-pulse">
               Loading responses...
             </div>
-          ) : responses.length === 0 ? (
+          ) : !responses || responses.length === 0 ? (
             <div className="p-8 text-center text-sm text-zinc-500">
               No responses yet
             </div>
@@ -312,7 +312,7 @@ export default function VibeChecks() {
                     {response.comment && (
                       <p className="text-sm text-zinc-400 mt-2">{response.comment}</p>
                     )}
-                    {response.sentiment_analysis && response.sentiment_analysis.themes.length > 0 && (
+                    {response.sentiment_analysis?.themes?.length > 0 && (
                       <div className="flex gap-2 mt-2 flex-wrap">
                         {response.sentiment_analysis.themes.map((theme, i) => (
                           <span
