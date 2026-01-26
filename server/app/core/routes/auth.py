@@ -9,7 +9,7 @@ from uuid import UUID
 from ..models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
     AdminRegister, ClientRegister, CandidateRegister, EmployeeRegister,
-    CreatorRegister, AgencyRegister,
+    CreatorRegister, AgencyRegister, BusinessRegister,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
     CreatorProfile, AgencyProfile, CurrentUser,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
@@ -210,6 +210,75 @@ async def register_client(request: ClientRegister):
                 last_login=None
             )
         )
+
+
+@router.post("/register/business", response_model=TokenResponse)
+async def register_business(request: BusinessRegister):
+    """
+    Register a new business with first admin/client user.
+    This creates:
+    1. A new company
+    2. A client user linked to that company
+    3. Returns auth tokens for immediate login
+
+    This is the recommended registration flow for new businesses.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            # Check if email already exists
+            existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already registered")
+
+            # Step 1: Create company (owner_id will be set after user creation)
+            company = await conn.fetchrow(
+                """INSERT INTO companies (name, industry, size)
+                   VALUES ($1, $2, $3)
+                   RETURNING id, name""",
+                request.company_name, request.industry, request.company_size
+            )
+            company_id = company["id"]
+
+            # Step 2: Create user with 'client' role
+            password_hash = hash_password(request.password)
+            user = await conn.fetchrow(
+                """INSERT INTO users (email, password_hash, role)
+                   VALUES ($1, $2, 'client')
+                   RETURNING id, email, role, is_active, created_at""",
+                request.email, password_hash
+            )
+
+            # Step 3: Create client profile linked to company
+            await conn.execute(
+                """INSERT INTO clients (user_id, company_id, name, phone, job_title)
+                   VALUES ($1, $2, $3, $4, $5)""",
+                user["id"], company_id, request.name, request.phone, request.job_title
+            )
+
+            # Step 4: Update company.owner_id to link back to user
+            await conn.execute(
+                "UPDATE companies SET owner_id = $1 WHERE id = $2",
+                user["id"], company_id
+            )
+
+            # Generate tokens
+            settings = get_settings()
+            access_token = create_access_token(user["id"], user["email"], user["role"])
+            refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+
+            return TokenResponse(
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_in=settings.jwt_access_token_expire_minutes * 60,
+                user=UserResponse(
+                    id=user["id"],
+                    email=user["email"],
+                    role=user["role"],
+                    is_active=user["is_active"],
+                    created_at=user["created_at"],
+                    last_login=None
+                )
+            )
 
 
 @router.post("/register/employee", response_model=TokenResponse)

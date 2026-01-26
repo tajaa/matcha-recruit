@@ -107,3 +107,41 @@ async def require_interview_prep_access(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Interview prep is not available for your account type."
     )
+
+
+async def verify_manager_access(
+    current_user,
+    target_employee_id: UUID
+) -> bool:
+    """
+    Check if current user is manager of target employee or has admin/client role.
+
+    Args:
+        current_user: Current authenticated user
+        target_employee_id: UUID of the employee to check access for
+
+    Returns:
+        bool: True if user has access, False otherwise
+    """
+    # Admins and clients have access to all employees in their org
+    if current_user.role in ["admin", "client"]:
+        return True
+
+    # For employees, check if they're the manager
+    async with get_connection() as conn:
+        # Get current user's employee record
+        current_emp = await conn.fetchrow(
+            "SELECT id FROM employees WHERE user_id = $1",
+            current_user.id
+        )
+
+        if not current_emp:
+            return False
+
+        # Check if target employee reports to current user
+        is_manager = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM employees WHERE id = $1 AND manager_id = $2)",
+            target_employee_id, current_emp["id"]
+        )
+
+        return bool(is_manager)

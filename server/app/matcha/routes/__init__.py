@@ -17,6 +17,7 @@ from .er_copilot import router as er_copilot_router
 from .ir_incidents import router as ir_incidents_router
 from .job_search import router as job_search_router
 from .public_jobs import router as public_jobs_router
+from .xp_admin import router as xp_admin_router
 
 # Create main Matcha router
 matcha_router = APIRouter()
@@ -37,6 +38,7 @@ matcha_router.include_router(er_copilot_router, prefix="/er/cases", tags=["er-co
 matcha_router.include_router(ir_incidents_router, prefix="/ir/incidents", tags=["ir-incidents"])
 matcha_router.include_router(job_search_router, prefix="/jobs", tags=["job-search"])
 matcha_router.include_router(public_jobs_router, prefix="/job-board", tags=["public-jobs"])
+matcha_router.include_router(xp_admin_router, tags=["employee-experience"])
 
 # Export individual routers for backwards compatibility
 __all__ = [
@@ -56,4 +58,5 @@ __all__ = [
     "ir_incidents_router",
     "job_search_router",
     "public_jobs_router",
+    "xp_admin_router",
 ]

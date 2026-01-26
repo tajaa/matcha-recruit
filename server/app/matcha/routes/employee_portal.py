@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Request
 from pydantic import BaseModel
 
 from ...database import get_connection
+from ...config import get_settings
 from ...core.models.auth import CurrentUser
 from ..models.employee import (
     EmployeeResponse, EmployeeUpdate, ProfileUpdateRequest,
@@ -24,6 +25,12 @@ from ..models.employee import (
     PTOSummary,
     EmployeeDocumentResponse, EmployeeDocumentListResponse, SignDocumentRequest,
     PortalDashboard, PortalTasks, PendingTask
+)
+from ..models.xp import (
+    VibeCheckSubmit, VibeCheckResponse, VibeCheckListResponse,
+    ENPSSubmit, ENPSSurveyResponse,
+    SelfAssessmentSubmit, ManagerReviewSubmit,
+    PerformanceReviewResponse
 )
 from ...core.dependencies import get_current_user
 from ..dependencies import require_employee, require_employee_record
@@ -805,3 +812,347 @@ async def complete_onboarding_task(
             "task_id": str(task_id),
             "status": "completed"
         }
+
+
+# ================================
+# XP Features - Vibe Checks
+# ================================
+
+
+@router.post("/vibe-checks", response_model=VibeCheckResponse)
+async def submit_vibe_check(
+    submission: VibeCheckSubmit,
+    employee: dict = Depends(require_employee_record)
+):
+    """Submit a vibe check response with real-time AI analysis."""
+    import json
+    from ..services.vibe_analyzer import VibeAnalyzer
+
+    async with get_connection() as conn:
+        # Check if vibe checks are enabled
+        config = await conn.fetchrow(
+            "SELECT * FROM vibe_check_configs WHERE org_id = $1 AND enabled = true",
+            employee["org_id"]
+        )
+
+        if not config:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Vibe checks are not enabled for your organization"
+            )
+
+        # Real-time sentiment analysis (if comment provided)
+        sentiment_result = None
+        if submission.comment:
+            try:
+                settings = get_settings()
+                analyzer = VibeAnalyzer(api_key=settings.gemini_api_key)
+                sentiment_result = await analyzer.analyze_sentiment(submission.comment)
+            except Exception as e:
+                print(f"[VibeCheck] Sentiment analysis failed: {e}")
+                # Continue without sentiment analysis
+
+        # Store response (employee_id NULL if anonymous)
+        employee_id = None if config["is_anonymous"] else employee["id"]
+
+        result = await conn.fetchrow(
+            """
+            INSERT INTO vibe_check_responses
+            (org_id, employee_id, mood_rating, comment, custom_responses, sentiment_analysis)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+            """,
+            employee["org_id"],
+            employee_id,
+            submission.mood_rating,
+            submission.comment,
+            json.dumps(submission.custom_responses or {}),
+            json.dumps(sentiment_result) if sentiment_result else None
+        )
+
+        return VibeCheckResponse(**result)
+
+
+@router.get("/vibe-checks/history", response_model=VibeCheckListResponse)
+async def get_my_vibe_history(
+    limit: int = 30,
+    offset: int = 0,
+    employee: dict = Depends(require_employee_record)
+):
+    """Get employee's own vibe check history."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM vibe_check_responses
+            WHERE employee_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3
+            """,
+            employee["id"], limit, offset
+        )
+
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM vibe_check_responses WHERE employee_id = $1",
+            employee["id"]
+        )
+
+        return VibeCheckListResponse(
+            responses=[VibeCheckResponse(**r) for r in rows],
+            total=total
+        )
+
+
+# ================================
+# XP Features - eNPS Surveys
+# ================================
+
+
+@router.get("/enps/surveys/active", response_model=list[ENPSSurveyResponse])
+async def get_active_enps_surveys(
+    employee: dict = Depends(require_employee_record)
+):
+    """Get active eNPS surveys for employee to respond to."""
+    async with get_connection() as conn:
+        today = date.today()
+
+        rows = await conn.fetch(
+            """
+            SELECT s.* FROM enps_surveys s
+            LEFT JOIN enps_responses r ON s.id = r.survey_id AND r.employee_id = $1
+            WHERE s.org_id = $2
+            AND s.status = 'active'
+            AND s.start_date <= $3
+            AND s.end_date >= $3
+            AND r.id IS NULL
+            ORDER BY s.start_date DESC
+            """,
+            employee["id"], employee["org_id"], today
+        )
+
+        return [ENPSSurveyResponse(**r) for r in rows]
+
+
+@router.post("/enps/surveys/{survey_id}/respond")
+async def submit_enps_response(
+    survey_id: UUID,
+    submission: ENPSSubmit,
+    employee: dict = Depends(require_employee_record)
+):
+    """Submit eNPS response with real-time theme extraction."""
+    import json
+    from ..services.enps_analyzer import ENPSAnalyzer
+
+    async with get_connection() as conn:
+        # Get survey
+        survey = await conn.fetchrow(
+            "SELECT * FROM enps_surveys WHERE id = $1 AND status = 'active'",
+            survey_id
+        )
+
+        if not survey:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Survey not found or is not active"
+            )
+
+        # Check if already responded
+        existing = await conn.fetchval(
+            "SELECT id FROM enps_responses WHERE survey_id = $1 AND employee_id = $2",
+            survey_id, employee["id"]
+        )
+
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You have already responded to this survey"
+            )
+
+        # Determine category
+        if submission.score >= 9:
+            category = "promoter"
+        elif submission.score <= 6:
+            category = "detractor"
+        else:
+            category = "passive"
+
+        # Real-time AI theme extraction (if reason provided)
+        sentiment_result = None
+        if submission.reason:
+            try:
+                settings = get_settings()
+                analyzer = ENPSAnalyzer(api_key=settings.gemini_api_key)
+                sentiment_result = await analyzer.extract_themes_from_reason(
+                    submission.reason, submission.score, category
+                )
+            except Exception as e:
+                print(f"[eNPS] Theme extraction failed: {e}")
+                # Continue without theme analysis
+
+        # Store response (employee_id NULL if anonymous)
+        employee_id = None if survey["is_anonymous"] else employee["id"]
+
+        await conn.execute(
+            """
+            INSERT INTO enps_responses (survey_id, employee_id, score, reason, category, sentiment_analysis)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            survey_id, employee_id, submission.score, submission.reason, category,
+            json.dumps(sentiment_result) if sentiment_result else None
+        )
+
+        return {"message": "Response submitted successfully", "status": "submitted"}
+
+
+# ================================
+# XP Features - Performance Reviews
+# ================================
+
+
+@router.get("/reviews/pending", response_model=list[PerformanceReviewResponse])
+async def get_pending_reviews(
+    employee: dict = Depends(require_employee_record)
+):
+    """Get pending performance reviews for employee (either as reviewee or reviewer)."""
+    async with get_connection() as conn:
+        # Get reviews where employee is the reviewee or the manager
+        rows = await conn.fetch(
+            """
+            SELECT * FROM performance_reviews
+            WHERE (employee_id = $1 OR manager_id = $1)
+            AND status IN ('pending', 'self_submitted')
+            ORDER BY created_at DESC
+            """,
+            employee["id"]
+        )
+
+        return [PerformanceReviewResponse(**r) for r in rows]
+
+
+@router.post("/reviews/{review_id}/self-assessment")
+async def submit_self_assessment(
+    review_id: UUID,
+    submission: SelfAssessmentSubmit,
+    employee: dict = Depends(require_employee_record)
+):
+    """Employee submits self-assessment for a performance review."""
+    import json
+
+    async with get_connection() as conn:
+        # Get review
+        review = await conn.fetchrow(
+            "SELECT * FROM performance_reviews WHERE id = $1 AND employee_id = $2",
+            review_id, employee["id"]
+        )
+
+        if not review:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Review not found"
+            )
+
+        if review["status"] not in ["pending"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Self-assessment already submitted"
+            )
+
+        # Update review
+        await conn.execute(
+            """
+            UPDATE performance_reviews
+            SET self_ratings = $1, self_comments = $2, self_submitted_at = NOW(), status = 'self_submitted'
+            WHERE id = $3
+            """,
+            json.dumps(submission.self_ratings),
+            submission.self_comments,
+            review_id
+        )
+
+        return {"message": "Self-assessment submitted successfully"}
+
+
+@router.post("/reviews/{review_id}/manager-review")
+async def submit_manager_review(
+    review_id: UUID,
+    submission: ManagerReviewSubmit,
+    employee: dict = Depends(require_employee_record)
+):
+    """Manager submits review for a direct report with AI analysis."""
+    import json
+    from ..services.review_analyzer import ReviewAnalyzer
+
+    async with get_connection() as conn:
+        # Get review - must be manager
+        review = await conn.fetchrow(
+            "SELECT * FROM performance_reviews WHERE id = $1 AND manager_id = $2",
+            review_id, employee["id"]
+        )
+
+        if not review:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Review not found or you are not the manager"
+            )
+
+        if review["status"] not in ["self_submitted"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Self-assessment must be submitted first"
+            )
+
+        # Get template categories for AI analysis
+        cycle = await conn.fetchrow(
+            "SELECT template_id FROM review_cycles WHERE id = $1",
+            review["cycle_id"]
+        )
+
+        template_categories = []
+        if cycle and cycle["template_id"]:
+            template = await conn.fetchrow(
+                "SELECT categories FROM review_templates WHERE id = $1",
+                cycle["template_id"]
+            )
+            if template:
+                template_categories = json.loads(template["categories"]) if isinstance(template["categories"], str) else template["categories"]
+
+        # Run AI analysis
+        ai_analysis = None
+        if review["self_ratings"] and submission.manager_ratings:
+            try:
+                settings = get_settings()
+                analyzer = ReviewAnalyzer(api_key=settings.gemini_api_key)
+
+                self_ratings = json.loads(review["self_ratings"]) if isinstance(review["self_ratings"], str) else review["self_ratings"]
+
+                ai_analysis = await analyzer.analyze_review_alignment(
+                    self_ratings=self_ratings,
+                    manager_ratings=submission.manager_ratings,
+                    template_categories=template_categories,
+                    self_comments=review["self_comments"],
+                    manager_comments=submission.manager_comments
+                )
+            except Exception as e:
+                print(f"[Review] AI analysis failed: {e}")
+                # Continue without AI analysis
+
+        # Update review
+        await conn.execute(
+            """
+            UPDATE performance_reviews
+            SET manager_ratings = $1,
+                manager_comments = $2,
+                manager_overall_rating = $3,
+                manager_submitted_at = NOW(),
+                ai_analysis = $4,
+                status = 'completed',
+                completed_at = NOW()
+            WHERE id = $5
+            """,
+            json.dumps(submission.manager_ratings),
+            submission.manager_comments,
+            submission.manager_overall_rating,
+            json.dumps(ai_analysis) if ai_analysis else None,
+            review_id
+        )
+
+        return {"message": "Manager review submitted successfully"}

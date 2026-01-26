@@ -102,6 +102,24 @@ class AgencyRegister(BaseModel):
     industries: Optional[list[str]] = None
 
 
+class BusinessRegister(BaseModel):
+    """
+    Unified business registration - creates company + first client/admin user.
+    This is the recommended way for new businesses to register.
+    """
+    # Company info
+    company_name: str
+    industry: Optional[str] = None
+    company_size: Optional[str] = None  # e.g., "1-10", "11-50", etc.
+
+    # First admin user info
+    email: EmailStr
+    password: str
+    name: str
+    phone: Optional[str] = None
+    job_title: Optional[str] = None
+
+
 # Profile models
 class AdminProfile(BaseModel):
     id: UUID
