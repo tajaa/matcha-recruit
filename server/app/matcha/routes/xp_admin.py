@@ -209,12 +209,20 @@ async def get_vibe_analytics(
                 COUNT(*) as total_responses,
                 AVG(v.mood_rating)::DECIMAL(3,2) as avg_mood,
                 AVG((v.sentiment_analysis->>'sentiment_score')::DECIMAL)::DECIMAL(3,2) as avg_sentiment,
-                COUNT(DISTINCT v.employee_id) as unique_respondents,
-                COUNT(DISTINCT e.id) as total_employees
+                COUNT(DISTINCT v.employee_id) as unique_respondents
             FROM vibe_check_responses v
-            LEFT JOIN employees e ON v.employee_id = e.id
             WHERE v.org_id = $1
             AND v.created_at >= {since_clause}
+            {manager_filter if not manager_id else "AND v.employee_id IN (SELECT id FROM employees WHERE org_id = $1 AND manager_id = $2)"}
+            """,
+            *params,
+        )
+
+        # Get total employee count from employees table
+        total_employees = await conn.fetchval(
+            f"""
+            SELECT COUNT(*) FROM employees
+            WHERE org_id = $1
             {manager_filter}
             """,
             *params,
@@ -229,11 +237,10 @@ async def get_vibe_analytics(
                 AVG((v.sentiment_analysis->>'sentiment_score')::DECIMAL) as avg_sentiment
             FROM vibe_check_responses v
             CROSS JOIN LATERAL jsonb_array_elements_text(v.sentiment_analysis->'themes') as theme
-            LEFT JOIN employees e ON v.employee_id = e.id
             WHERE v.org_id = $1
             AND v.created_at >= {since_clause}
             AND v.sentiment_analysis IS NOT NULL
-            {manager_filter}
+            {manager_filter if not manager_id else "AND v.employee_id IN (SELECT id FROM employees WHERE org_id = $1 AND manager_id = $2)"}
             GROUP BY theme
             ORDER BY frequency DESC
             LIMIT 10
@@ -243,9 +250,9 @@ async def get_vibe_analytics(
 
         response_rate = (
             Decimal(stats["unique_respondents"])
-            / Decimal(stats["total_employees"])
+            / Decimal(total_employees)
             * 100
-            if stats["total_employees"] and stats["total_employees"] > 0
+            if total_employees and total_employees > 0
             else Decimal(0)
         )
 
@@ -291,15 +298,20 @@ async def get_vibe_responses(
             *params,
         )
 
-        # Get total count
+        # Get total count with correct parameters
+        count_params = [org_id]
+        count_employee_filter = ""
+        if employee_id:
+            count_employee_filter = "AND employee_id = $2"
+            count_params.append(employee_id)
+
         total = await conn.fetchval(
             f"""
             SELECT COUNT(*) FROM vibe_check_responses
             WHERE org_id = $1
-            {employee_filter}
+            {count_employee_filter}
             """,
-            org_id,
-            employee_id if employee_id else None,
+            *count_params,
         )
 
         return VibeCheckListResponse(

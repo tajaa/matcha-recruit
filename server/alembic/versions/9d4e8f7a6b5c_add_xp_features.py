@@ -1,8 +1,8 @@
 """add_xp_features
 
-Revision ID: 43cb78875e31
-Revises: 8a9b0c1d2e3f
-Create Date: 2026-01-25 19:21:08.710460
+Revision ID: 9d4e8f7a6b5c
+Revises: f66269e69a70
+Create Date: 2026-01-26 00:00:00.000000
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '43cb78875e31'
-down_revision: Union[str, Sequence[str], None] = '8a9b0c1d2e3f'
+revision: str = '9d4e8f7a6b5c'
+down_revision: Union[str, Sequence[str], None] = 'f66269e69a70'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
