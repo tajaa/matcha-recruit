@@ -99,6 +99,12 @@ const GumFitUsers = lazy(() => import('./pages/gumfit/GumFitUsers'));
 const GumFitInvites = lazy(() => import('./pages/gumfit/GumFitInvites'));
 const GumFitAssets = lazy(() => import('./pages/gumfit/GumFitAssets'));
 
+// Employee Experience (XP) Pages
+const XPDashboard = lazy(() => import('./pages/xp/Dashboard'));
+const VibeChecks = lazy(() => import('./pages/xp/VibeChecks'));
+const ENPS = lazy(() => import('./pages/xp/ENPS'));
+const PerformanceReviews = lazy(() => import('./pages/xp/Reviews'));
+
 // Loading fallback
 function PageLoader() {
   return (
@@ -280,6 +286,41 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+
+              {/* Employee Experience (XP) Routes */}
+              <Route
+                path="xp/dashboard"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <XPDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="xp/vibe-checks"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <VibeChecks />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="xp/enps"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <ENPS />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="xp/reviews"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <PerformanceReviews />
+                  </ProtectedRoute>
+                }
+              />
+
               <Route
                 path="matcha/er-copilot"
                 element={
