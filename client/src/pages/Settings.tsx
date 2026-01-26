@@ -34,6 +34,21 @@ function getStrengthLabel(score: number): { label: string; color: string } {
   return { label: 'EXCELLENT', color: 'text-white' };
 }
 
+function getRoleDisplayName(role: string | undefined): string {
+  if (!role) return 'Unknown';
+
+  const roleMap: { [key: string]: string } = {
+    admin: 'Master Admin',
+    client: 'Company Admin',
+    employee: 'Employee',
+    candidate: 'Candidate',
+    creator: 'Creator',
+    agency: 'Agency',
+  };
+
+  return roleMap[role] || role.charAt(0).toUpperCase() + role.slice(1);
+}
+
 export function Settings() {
   const { user, profile, refreshUser } = useAuth();
 
@@ -173,7 +188,7 @@ export function Settings() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-600">Role</span>
-              <span className="text-sm text-white uppercase tracking-wider">{user?.role}</span>
+              <span className="text-sm text-white uppercase tracking-wider">{getRoleDisplayName(user?.role)}</span>
             </div>
           </div>
         </div>
