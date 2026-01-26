@@ -1,4 +1,4 @@
-import { vi, type Mock } from 'vitest';
+import { vi, expect, type Mock } from 'vitest';
 
 type MockResponse = {
   ok: boolean;
@@ -56,7 +56,7 @@ export function mockFetchNetworkError(message = 'Network error'): Mock {
  */
 export function mockFetchSequence(responses: Array<{ data: unknown; status?: number; ok?: boolean }>): Mock {
   const mock = vi.fn();
-  responses.forEach((response, index) => {
+  responses.forEach((response) => {
     const { data, status = 200, ok = true } = response;
     mock.mockResolvedValueOnce(createMockResponse(data, status, ok));
   });
@@ -87,8 +87,9 @@ export function expectFetchCalledWith(urlPattern: string | RegExp, options?: Par
   const mock = getFetchMock();
   expect(mock).toHaveBeenCalled();
 
-  const calls = mock.mock.calls;
-  const matchingCall = calls.find(([url]: [string]) => {
+  const calls = mock.mock.calls as Array<[string, RequestInit?]>;
+  const matchingCall = calls.find((call) => {
+    const url = call[0];
     if (typeof urlPattern === 'string') {
       return url.includes(urlPattern);
     }
