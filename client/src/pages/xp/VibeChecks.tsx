@@ -214,31 +214,31 @@ export default function VibeChecks() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 border border-white/10">
               <StatCard
                 label="Avg Mood Rating"
-                value={analytics.avg_mood_rating.toFixed(1)}
-                subtext={getMoodLabel(Math.round(analytics.avg_mood_rating))}
+                value={analytics.avg_mood_rating?.toFixed(1) ?? '—'}
+                subtext={analytics.avg_mood_rating ? getMoodLabel(Math.round(analytics.avg_mood_rating)) : 'No data'}
                 icon={Smile}
-                color={getMoodColor(analytics.avg_mood_rating)}
+                color={analytics.avg_mood_rating ? getMoodColor(analytics.avg_mood_rating) : 'text-zinc-500'}
               />
               <StatCard
                 label="Response Rate"
-                value={`${Math.round(analytics.response_rate)}%`}
-                subtext={`${analytics.total_responses} responses`}
+                value={analytics.response_rate != null ? `${Math.round(analytics.response_rate)}%` : '—'}
+                subtext={`${analytics.total_responses ?? 0} responses`}
                 icon={Users}
                 color="text-emerald-400"
               />
               <StatCard
                 label="Total Responses"
-                value={analytics.total_responses}
+                value={analytics.total_responses ?? 0}
                 subtext="This period"
                 icon={MessageCircle}
                 color="text-white"
               />
               <StatCard
                 label="Avg Sentiment"
-                value={analytics.avg_sentiment_score.toFixed(2)}
-                subtext={analytics.avg_sentiment_score > 0 ? 'Positive' : analytics.avg_sentiment_score < 0 ? 'Negative' : 'Neutral'}
+                value={analytics.avg_sentiment_score?.toFixed(2) ?? '—'}
+                subtext={analytics.avg_sentiment_score != null ? (analytics.avg_sentiment_score > 0 ? 'Positive' : analytics.avg_sentiment_score < 0 ? 'Negative' : 'Neutral') : 'No data'}
                 icon={TrendingUp}
-                color={getSentimentColor(analytics.avg_sentiment_score)}
+                color={analytics.avg_sentiment_score != null ? getSentimentColor(analytics.avg_sentiment_score) : 'text-zinc-500'}
               />
             </div>
 
@@ -249,8 +249,8 @@ export default function VibeChecks() {
                 <TrendChart
                   data={analytics.trend_data.map(d => ({
                     date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                    value: d.avg_mood,
-                    label: `${d.avg_mood.toFixed(1)} / 5.0`
+                    value: d.avg_mood ?? 0,
+                    label: `${d.avg_mood?.toFixed(1) ?? '—'} / 5.0`
                   }))}
                   color="#34d399"
                 />
