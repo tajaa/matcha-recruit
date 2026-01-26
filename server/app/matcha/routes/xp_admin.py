@@ -385,14 +385,17 @@ async def list_enps_surveys(
             *params,
         )
 
+        count_params = [org_id]
+        if status:
+            count_params.append(status)
+
         total = await conn.fetchval(
             f"""
             SELECT COUNT(*) FROM enps_surveys
             WHERE org_id = $1
             {status_filter}
             """,
-            org_id,
-            status if status else None,
+            *count_params,
         )
 
         return ENPSSurveyListResponse(
@@ -700,14 +703,17 @@ async def list_review_cycles(
             *params,
         )
 
+        count_params = [org_id]
+        if status:
+            count_params.append(status)
+
         total = await conn.fetchval(
             f"""
             SELECT COUNT(*) FROM review_cycles
             WHERE org_id = $1
             {status_filter}
             """,
-            org_id,
-            status if status else None,
+            *count_params,
         )
 
         return ReviewCycleListResponse(

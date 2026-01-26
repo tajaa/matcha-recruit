@@ -56,7 +56,8 @@ export const vibeChecksApi = {
   getResponses: async (limit = 50, offset = 0, employeeId?: string): Promise<VibeCheckResponse[]> => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (employeeId) params.append('employee_id', employeeId);
-    return fetchWithAuth(`${API_BASE}/v1/xp/vibe-checks/responses?${params}`);
+    const response = await fetchWithAuth(`${API_BASE}/v1/xp/vibe-checks/responses?${params}`);
+    return response.responses || [];
   },
 
   submitResponse: async (data: { mood_rating: number; comment?: string }): Promise<VibeCheckResponse> => {
@@ -75,7 +76,8 @@ export const vibeChecksApi = {
 export const enpsApi = {
   getSurveys: async (status?: string): Promise<ENPSSurvey[]> => {
     const params = status ? `?status=${status}` : '';
-    return fetchWithAuth(`${API_BASE}/v1/xp/enps/surveys${params}`);
+    const response = await fetchWithAuth(`${API_BASE}/v1/xp/enps/surveys${params}`);
+    return response.surveys || [];
   },
 
   getSurvey: async (id: string): Promise<ENPSSurvey> => {
@@ -115,7 +117,8 @@ export const enpsApi = {
 // Performance Reviews API
 export const reviewsApi = {
   getTemplates: async (): Promise<ReviewTemplate[]> => {
-    return fetchWithAuth(`${API_BASE}/v1/xp/reviews/templates`);
+    const response = await fetchWithAuth(`${API_BASE}/v1/xp/reviews/templates`);
+    return response.templates || [];
   },
 
   getTemplate: async (id: string): Promise<ReviewTemplate> => {
@@ -137,7 +140,8 @@ export const reviewsApi = {
   },
 
   getCycles: async (): Promise<ReviewCycle[]> => {
-    return fetchWithAuth(`${API_BASE}/v1/xp/reviews/cycles`);
+    const response = await fetchWithAuth(`${API_BASE}/v1/xp/reviews/cycles`);
+    return response.cycles || [];
   },
 
   getCycle: async (id: string): Promise<ReviewCycle> => {
