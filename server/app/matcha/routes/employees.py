@@ -2,12 +2,17 @@
 Admin routes for employee management.
 Allows admins/clients to create, update, delete employees and send invitations.
 """
+import asyncio
+import csv
+import io
+import re
 import secrets
 from datetime import datetime, timedelta
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query, Body
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr
 
 from ...database import get_connection
@@ -76,6 +81,136 @@ class InvitationResponse(BaseModel):
     expires_at: datetime
     created_at: datetime
 
+
+class BulkEmployeeCSVUpload(BaseModel):
+    """Model for CSV upload response."""
+    total_rows: int
+    created: int
+    failed: int
+    errors: list[dict]  # [{row: int, email: str, error: str}]
+    employee_ids: list[UUID]
+
+
+class BulkInviteResponse(BaseModel):
+    """Model for bulk invitation response."""
+    sent: int
+    failed: int
+    total: int
+    errors: list[dict]
+
+
+class InvitationStatusItem(BaseModel):
+    """Model for invitation status item."""
+    employee_id: UUID
+    email: str
+    first_name: str
+    last_name: str
+    invitation_id: Optional[UUID]
+    status: Optional[str]
+    created_at: Optional[datetime]
+    expires_at: Optional[datetime]
+    accepted_at: Optional[datetime]
+    invited_by_email: Optional[str]
+
+
+class InvitationStatusSummary(BaseModel):
+    """Model for invitation status summary."""
+    statistics: dict
+    invitations: list[InvitationStatusItem]
+    total: int
+
+
+# ================================
+# Helper Functions
+# ================================
+
+async def send_single_invitation(
+    employee_id: UUID,
+    org_id: UUID,
+    invited_by: UUID,
+    conn=None
+) -> dict:
+    """
+    Shared function to send invitation to a single employee.
+    Used by both individual invite endpoint and bulk invite endpoint.
+
+    Returns: {"invitation_id": UUID, "token": str, "expires_at": datetime}
+    """
+    should_close = False
+    if conn is None:
+        conn = await get_connection().__aenter__()
+        should_close = True
+
+    try:
+        # Get employee
+        employee = await conn.fetchrow(
+            "SELECT * FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, org_id
+        )
+
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        if employee["user_id"]:
+            raise HTTPException(status_code=400, detail="Employee already has an account")
+
+        # Check for existing pending invitation
+        existing = await conn.fetchrow(
+            """
+            SELECT * FROM employee_invitations
+            WHERE employee_id = $1 AND status = 'pending' AND expires_at > NOW()
+            """,
+            employee_id
+        )
+
+        if existing:
+            # Cancel existing invitation
+            await conn.execute(
+                "UPDATE employee_invitations SET status = 'cancelled' WHERE id = $1",
+                existing["id"]
+            )
+
+        # Generate new invitation token
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.utcnow() + timedelta(days=7)
+
+        # Create invitation record
+        invitation = await conn.fetchrow(
+            """
+            INSERT INTO employee_invitations (org_id, employee_id, invited_by, token, expires_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, employee_id, token, status, expires_at, created_at
+            """,
+            org_id, employee_id, invited_by, token, expires_at
+        )
+
+        # Get company name for email
+        company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", org_id)
+        company_name = company["name"] if company else "Your Company"
+
+        # Send invitation email
+        email_service = EmailService()
+        await email_service.send_employee_invitation_email(
+            to_email=employee["email"],
+            to_name=f"{employee['first_name']} {employee['last_name']}",
+            company_name=company_name,
+            token=token,
+            expires_at=expires_at,
+        )
+
+        return {
+            "invitation_id": invitation["id"],
+            "token": invitation["token"],
+            "expires_at": invitation["expires_at"]
+        }
+    finally:
+        if should_close:
+            await conn.close()
+
+
+# ================================
+# Endpoints
+# ================================
 
 class OnboardingProgressItem(BaseModel):
     employee_id: UUID
@@ -443,60 +578,12 @@ async def send_invitation(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
-        # Get employee
-        employee = await conn.fetchrow(
-            "SELECT * FROM employees WHERE id = $1 AND org_id = $2",
-            employee_id, company_id
-        )
+        result = await send_single_invitation(employee_id, company_id, current_user.id, conn)
 
-        if not employee:
-            raise HTTPException(status_code=404, detail="Employee not found")
-
-        if employee["user_id"]:
-            raise HTTPException(status_code=400, detail="Employee already has an account")
-
-        # Check for existing pending invitation
-        existing = await conn.fetchrow(
-            """
-            SELECT * FROM employee_invitations
-            WHERE employee_id = $1 AND status = 'pending' AND expires_at > NOW()
-            """,
-            employee_id
-        )
-
-        if existing:
-            # Cancel existing invitation
-            await conn.execute(
-                "UPDATE employee_invitations SET status = 'cancelled' WHERE id = $1",
-                existing["id"]
-            )
-
-        # Generate new invitation token
-        token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(days=7)
-
-        # Create invitation record
+        # Fetch the full invitation record for response
         invitation = await conn.fetchrow(
-            """
-            INSERT INTO employee_invitations (org_id, employee_id, invited_by, token, expires_at)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, employee_id, token, status, expires_at, created_at
-            """,
-            company_id, employee_id, current_user.id, token, expires_at
-        )
-
-        # Get company name for email
-        company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
-        company_name = company["name"] if company else "Your Company"
-
-        # Send invitation email
-        email_service = EmailService()
-        await email_service.send_employee_invitation_email(
-            to_email=employee["email"],
-            to_name=f"{employee['first_name']} {employee['last_name']}",
-            company_name=company_name,
-            token=token,
-            expires_at=expires_at,
+            "SELECT * FROM employee_invitations WHERE id = $1",
+            result["invitation_id"]
         )
 
         return InvitationResponse(
@@ -516,6 +603,368 @@ async def resend_invitation(
 ):
     """Resend invitation email (creates new token)."""
     return await send_invitation(employee_id, current_user)
+
+
+# ================================
+# Bulk Upload & Invitation Endpoints
+# ================================
+
+@router.get("/bulk-upload/template")
+async def download_bulk_upload_template(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """
+    Download CSV template for bulk employee upload.
+
+    Returns CSV file with:
+    - Column headers
+    - Sample data row
+    - Comments explaining each field
+    """
+    # Create CSV in memory
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=[
+        'email', 'first_name', 'last_name', 'work_state',
+        'employment_type', 'start_date', 'manager_email', 'job_title', 'phone'
+    ])
+    writer.writeheader()
+
+    # Add example row
+    writer.writerow({
+        'email': 'jane.doe@example.com',
+        'first_name': 'Jane',
+        'last_name': 'Doe',
+        'work_state': 'CA',
+        'employment_type': 'full_time',
+        'start_date': '2026-02-01',
+        'manager_email': 'manager@example.com',
+        'job_title': 'Software Engineer',
+        'phone': '555-1234'
+    })
+
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=employee_bulk_upload_template.csv"}
+    )
+
+
+@router.post("/bulk-upload", response_model=BulkEmployeeCSVUpload)
+async def bulk_upload_employees_csv(
+    file: UploadFile = File(..., description="CSV file with employee data"),
+    send_invitations: bool = Query(True, description="Send invitation emails immediately"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """
+    Upload CSV file to create employees and optionally send invitations.
+
+    CSV Format (required columns):
+    - email (required)
+    - first_name (required)
+    - last_name (required)
+
+    CSV Format (optional columns):
+    - work_state (e.g., "CA", "NY")
+    - employment_type (full_time, part_time, contractor)
+    - start_date (YYYY-MM-DD format)
+    - manager_email (must be existing employee email)
+    - job_title
+    - phone
+    """
+    company_id = await get_client_company_id(current_user)
+
+    # Validate file format
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="File must be a CSV")
+
+    # Check file size (10MB max)
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+
+    # Parse CSV
+    try:
+        csv_content = contents.decode('utf-8')
+        csv_reader = csv.DictReader(io.StringIO(csv_content))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid CSV format: {str(e)}")
+
+    # Validate required columns
+    required_columns = ['email', 'first_name', 'last_name']
+    if not csv_reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV file is empty")
+
+    missing_columns = [col for col in required_columns if col not in csv_reader.fieldnames]
+    if missing_columns:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required columns: {', '.join(missing_columns)}"
+        )
+
+    # Process rows
+    created = 0
+    failed = 0
+    errors = []
+    employee_ids = []
+
+    async with get_connection() as conn:
+        for row_num, row in enumerate(csv_reader, start=2):  # Start at 2 to account for header
+            try:
+                # Validate email format
+                email = row.get('email', '').strip()
+                if not email:
+                    errors.append({
+                        "row": row_num,
+                        "email": email,
+                        "error": "Email is required"
+                    })
+                    failed += 1
+                    continue
+
+                # Basic email validation
+                if not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email):
+                    errors.append({
+                        "row": row_num,
+                        "email": email,
+                        "error": "Invalid email format"
+                    })
+                    failed += 1
+                    continue
+
+                # Check if email already exists
+                existing = await conn.fetchval(
+                    "SELECT id FROM employees WHERE org_id = $1 AND email = $2",
+                    company_id, email
+                )
+                if existing:
+                    errors.append({
+                        "row": row_num,
+                        "email": email,
+                        "error": "Employee with this email already exists"
+                    })
+                    failed += 1
+                    continue
+
+                # Validate required fields
+                first_name = row.get('first_name', '').strip()
+                last_name = row.get('last_name', '').strip()
+
+                if not first_name or not last_name:
+                    errors.append({
+                        "row": row_num,
+                        "email": email,
+                        "error": "First name and last name are required"
+                    })
+                    failed += 1
+                    continue
+
+                # Parse optional fields
+                work_state = row.get('work_state', '').strip() or None
+                employment_type = row.get('employment_type', '').strip() or None
+                job_title = row.get('job_title', '').strip() or None
+                phone = row.get('phone', '').strip() or None
+
+                # Parse start_date
+                start_date = None
+                if row.get('start_date', '').strip():
+                    try:
+                        start_date = datetime.strptime(row['start_date'].strip(), "%Y-%m-%d").date()
+                    except ValueError:
+                        # Log warning but continue
+                        pass
+
+                # Resolve manager_email to manager_id
+                manager_id = None
+                if row.get('manager_email', '').strip():
+                    manager = await conn.fetchrow(
+                        "SELECT id FROM employees WHERE org_id = $1 AND email = $2",
+                        company_id, row['manager_email'].strip()
+                    )
+                    if manager:
+                        manager_id = manager['id']
+
+                # Create employee record
+                employee = await conn.fetchrow(
+                    """
+                    INSERT INTO employees (
+                        org_id, email, first_name, last_name, work_state,
+                        employment_type, start_date, manager_id, phone
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    RETURNING id
+                    """,
+                    company_id, email, first_name, last_name, work_state,
+                    employment_type, start_date, manager_id, phone
+                )
+
+                employee_ids.append(employee['id'])
+                created += 1
+
+                # Send invitation if requested
+                if send_invitations:
+                    try:
+                        await send_single_invitation(
+                            employee['id'],
+                            company_id,
+                            current_user.id,
+                            conn
+                        )
+                    except Exception as e:
+                        # Log error but don't fail the employee creation
+                        errors.append({
+                            "row": row_num,
+                            "email": email,
+                            "error": f"Employee created but invitation failed: {str(e)}"
+                        })
+
+            except Exception as e:
+                errors.append({
+                    "row": row_num,
+                    "email": row.get('email', ''),
+                    "error": str(e)
+                })
+                failed += 1
+
+    # Check if there were any rows
+    if created == 0 and failed == 0:
+        raise HTTPException(status_code=400, detail="No data rows found in CSV")
+
+    return BulkEmployeeCSVUpload(
+        total_rows=created + failed,
+        created=created,
+        failed=failed,
+        errors=errors,
+        employee_ids=employee_ids
+    )
+
+
+@router.post("/bulk-invite", response_model=BulkInviteResponse)
+async def send_bulk_invitations(
+    employee_ids: list[UUID] = Body(..., description="List of employee IDs to send invitations to"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """
+    Send invitation emails to multiple employees at once.
+
+    Use this to send invitations to employees who were created without immediate invitation,
+    or to resend invitations to multiple employees.
+
+    Returns:
+    - sent: count of successfully sent invitations
+    - failed: count of failed sends
+    - errors: list of errors for failed sends
+    """
+    company_id = await get_client_company_id(current_user)
+
+    sent = 0
+    failed = 0
+    errors = []
+
+    # Rate limiting: batch in groups of 10, with 1 second delay between batches
+    BATCH_SIZE = 10
+
+    async with get_connection() as conn:
+        for i in range(0, len(employee_ids), BATCH_SIZE):
+            batch = employee_ids[i:i + BATCH_SIZE]
+
+            # Process batch
+            for employee_id in batch:
+                try:
+                    await send_single_invitation(employee_id, company_id, current_user.id, conn)
+                    sent += 1
+                except Exception as e:
+                    failed += 1
+                    errors.append({
+                        "employee_id": str(employee_id),
+                        "error": str(e)
+                    })
+
+            # Delay between batches to avoid overwhelming email service
+            if i + BATCH_SIZE < len(employee_ids):
+                await asyncio.sleep(1)
+
+    return BulkInviteResponse(
+        sent=sent,
+        failed=failed,
+        total=len(employee_ids),
+        errors=errors
+    )
+
+
+@router.get("/invitations/status", response_model=InvitationStatusSummary)
+async def get_invitation_status_summary(
+    status: Optional[str] = Query(None, regex="^(pending|accepted|expired|cancelled)$"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """
+    Get summary of all employee invitations with status breakdown.
+
+    Useful for tracking onboarding progress and identifying employees who haven't accepted.
+    """
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Base query
+        status_filter = ""
+        params = [company_id]
+
+        if status:
+            status_filter = "AND i.status = $2"
+            params.append(status)
+
+        # Get invitation summaries
+        rows = await conn.fetch(f"""
+            SELECT
+                e.id as employee_id,
+                e.email,
+                e.first_name,
+                e.last_name,
+                i.id as invitation_id,
+                i.status,
+                i.created_at,
+                i.expires_at,
+                i.accepted_at,
+                u.email as invited_by_email
+            FROM employees e
+            LEFT JOIN employee_invitations i ON e.id = i.employee_id
+            LEFT JOIN users u ON i.invited_by = u.id
+            WHERE e.org_id = $1
+            {status_filter}
+            ORDER BY i.created_at DESC
+        """, *params)
+
+        # Calculate statistics
+        stats = await conn.fetchrow("""
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'pending') as pending,
+                COUNT(*) FILTER (WHERE status = 'accepted') as accepted,
+                COUNT(*) FILTER (WHERE status = 'expired') as expired,
+                COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled
+            FROM employee_invitations i
+            JOIN employees e ON i.employee_id = e.id
+            WHERE e.org_id = $1
+        """, company_id)
+
+        return InvitationStatusSummary(
+            statistics=dict(stats) if stats else {},
+            invitations=[
+                InvitationStatusItem(
+                    employee_id=row["employee_id"],
+                    email=row["email"],
+                    first_name=row["first_name"],
+                    last_name=row["last_name"],
+                    invitation_id=row["invitation_id"],
+                    status=row["status"],
+                    created_at=row["created_at"],
+                    expires_at=row["expires_at"],
+                    accepted_at=row["accepted_at"],
+                    invited_by_email=row["invited_by_email"]
+                )
+                for row in rows
+            ],
+            total=len(rows)
+        )
 
 
 # ================================
