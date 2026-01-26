@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAccessToken } from '../api/client';
-import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck } from 'lucide-react';
+import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download, Users } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -62,6 +62,14 @@ export default function Employees() {
   const [newEmployeeName, setNewEmployeeName] = useState<string>('');
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   const [assigningOnboarding, setAssigningOnboarding] = useState(false);
+
+  // Bulk upload state
+  const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<any>(null);
+  const [sendInvitationsOnUpload, setSendInvitationsOnUpload] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
 
   const fetchEmployees = async () => {
     try {
@@ -207,6 +215,95 @@ export default function Employees() {
     }
   };
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const token = getAccessToken();
+      const response = await fetch(`${API_BASE}/employees/bulk-upload/template`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) throw new Error('Failed to download template');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'employee_bulk_upload_template.csv';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download template');
+    }
+  };
+
+  const handleBulkUpload = async () => {
+    if (!uploadFile) return;
+
+    setUploadLoading(true);
+    setUploadResult(null);
+
+    try {
+      const token = getAccessToken();
+      const formData = new FormData();
+      formData.append('file', uploadFile);
+
+      const response = await fetch(
+        `${API_BASE}/employees/bulk-upload?send_invitations=${sendInvitationsOnUpload}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to upload CSV');
+      }
+
+      const result = await response.json();
+      setUploadResult(result);
+      fetchEmployees();
+      fetchOnboardingProgress();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload CSV');
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
+  const handleFileSelect = (file: File | null) => {
+    if (file && file.type === 'text/csv') {
+      setUploadFile(file);
+      setUploadResult(null);
+    } else if (file) {
+      setError('Please select a CSV file');
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    handleFileSelect(file);
+  };
+
   const getStatusBadge = (employee: Employee) => {
     if (employee.termination_date) {
       return (
@@ -307,6 +404,13 @@ export default function Employees() {
               </>
             )}
           </div>
+          <button
+            onClick={() => setShowBulkUploadModal(true)}
+            className="flex items-center gap-2 px-4 py-2 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-xs font-bold uppercase tracking-wider transition-colors"
+          >
+            <Upload size={14} />
+            Bulk Upload
+          </button>
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
@@ -719,6 +823,236 @@ export default function Employees() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Upload Modal */}
+      {showBulkUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-2xl bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
+              <div>
+                <h3 className="text-xl font-bold text-white uppercase tracking-tight">Bulk Upload Employees</h3>
+                <p className="text-xs text-zinc-500 mt-1">Upload a CSV file to add multiple employees at once</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowBulkUploadModal(false);
+                  setUploadFile(null);
+                  setUploadResult(null);
+                }}
+                className="text-zinc-500 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {!uploadResult ? (
+                <div className="space-y-6">
+                  {/* Download Template Button */}
+                  <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded">
+                    <div className="flex items-start gap-3">
+                      <Download className="text-emerald-400 mt-0.5" size={16} />
+                      <div className="flex-1">
+                        <h4 className="text-sm font-bold text-white uppercase tracking-wide mb-1">Step 1: Download Template</h4>
+                        <p className="text-xs text-zinc-400 mb-3">
+                          Get the CSV template with the correct format and column headers.
+                        </p>
+                        <button
+                          onClick={handleDownloadTemplate}
+                          className="inline-flex items-center gap-2 px-4 py-2 border border-white/10 text-zinc-300 hover:text-white hover:border-white/20 text-xs font-bold uppercase tracking-wider transition-colors"
+                        >
+                          <Download size={12} />
+                          Download Template
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Upload Area */}
+                  <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded">
+                    <div className="flex items-start gap-3 mb-4">
+                      <Upload className="text-emerald-400 mt-0.5" size={16} />
+                      <div className="flex-1">
+                        <h4 className="text-sm font-bold text-white uppercase tracking-wide mb-1">Step 2: Upload CSV</h4>
+                        <p className="text-xs text-zinc-400">
+                          Drag and drop your CSV file or click to browse.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      className={`border-2 border-dashed rounded p-8 text-center transition-colors ${
+                        isDragging
+                          ? 'border-emerald-500 bg-emerald-500/5'
+                          : uploadFile
+                          ? 'border-emerald-500/30 bg-emerald-500/5'
+                          : 'border-zinc-700 bg-zinc-900/30 hover:border-zinc-600'
+                      }`}
+                    >
+                      {uploadFile ? (
+                        <div className="space-y-3">
+                          <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
+                          <div>
+                            <p className="text-sm font-medium text-white">{uploadFile.name}</p>
+                            <p className="text-xs text-zinc-500 mt-1">
+                              {(uploadFile.size / 1024).toFixed(2)} KB
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setUploadFile(null)}
+                            className="text-xs text-zinc-400 hover:text-white uppercase tracking-wider"
+                          >
+                            Remove File
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <Upload className="w-10 h-10 text-zinc-600 mx-auto" />
+                          <div>
+                            <p className="text-sm font-medium text-zinc-300">Drop your CSV file here</p>
+                            <p className="text-xs text-zinc-500 mt-1">or</p>
+                          </div>
+                          <label className="inline-block">
+                            <input
+                              type="file"
+                              accept=".csv"
+                              onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+                              className="hidden"
+                            />
+                            <span className="inline-flex items-center gap-2 px-4 py-2 border border-white/10 text-zinc-300 hover:text-white hover:border-white/20 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer">
+                              Browse Files
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Options */}
+                  {uploadFile && (
+                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded">
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          id="send-invites"
+                          checked={sendInvitationsOnUpload}
+                          onChange={(e) => setSendInvitationsOnUpload(e.target.checked)}
+                          className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
+                        />
+                        <label htmlFor="send-invites" className="text-sm text-white cursor-pointer">
+                          Send invitation emails automatically
+                        </label>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-2 ml-7">
+                        Employees will receive an email to set up their account and access the portal.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Upload Results */
+                <div className="space-y-4">
+                  <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded">
+                    <div className="flex items-center gap-3 mb-4">
+                      <CheckCircle className="text-emerald-400" size={24} />
+                      <div>
+                        <h4 className="text-lg font-bold text-white uppercase tracking-wide">Upload Complete</h4>
+                        <p className="text-xs text-zinc-400 mt-1">
+                          {uploadResult.created} of {uploadResult.total_rows} employees created successfully
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4 mt-6">
+                      <div className="bg-zinc-900 border border-zinc-800 p-4 rounded text-center">
+                        <div className="text-2xl font-bold text-emerald-400">{uploadResult.created}</div>
+                        <div className="text-xs text-zinc-500 uppercase tracking-wider mt-1">Created</div>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 p-4 rounded text-center">
+                        <div className="text-2xl font-bold text-red-400">{uploadResult.failed}</div>
+                        <div className="text-xs text-zinc-500 uppercase tracking-wider mt-1">Failed</div>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 p-4 rounded text-center">
+                        <div className="text-2xl font-bold text-zinc-400">{uploadResult.total_rows}</div>
+                        <div className="text-xs text-zinc-500 uppercase tracking-wider mt-1">Total</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {uploadResult.errors && uploadResult.errors.length > 0 && (
+                    <div className="bg-red-500/5 border border-red-500/20 rounded p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <AlertTriangle className="text-red-400" size={16} />
+                        <h5 className="text-sm font-bold text-red-400 uppercase tracking-wide">
+                          Errors ({uploadResult.errors.length})
+                        </h5>
+                      </div>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {uploadResult.errors.map((err: any, idx: number) => (
+                          <div key={idx} className="bg-zinc-950/50 border border-red-500/10 p-3 rounded text-xs">
+                            <div className="flex items-center gap-2 text-red-400 font-medium mb-1">
+                              <span>Row {err.row}</span>
+                              {err.email && <span className="text-zinc-600">•</span>}
+                              {err.email && <span className="text-zinc-400 font-mono">{err.email}</span>}
+                            </div>
+                            <p className="text-zinc-500">{err.error}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      setShowBulkUploadModal(false);
+                      setUploadFile(null);
+                      setUploadResult(null);
+                    }}
+                    className="w-full px-4 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {!uploadResult && uploadFile && (
+              <div className="p-6 border-t border-white/10 flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowBulkUploadModal(false);
+                    setUploadFile(null);
+                    setUploadResult(null);
+                  }}
+                  className="px-4 py-2 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBulkUpload}
+                  disabled={uploadLoading || !uploadFile}
+                  className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {uploadLoading ? (
+                    <>
+                      <span className="w-3 h-3 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} />
+                      Upload Employees
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
