@@ -40,9 +40,10 @@ export default function VibeChecks() {
     try {
       setLoadingResponses(true);
       const data = await vibeChecksApi.getResponses(20, 0);
-      setResponses(data);
+      setResponses(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to fetch responses:', err);
+      setResponses([]);
     } finally {
       setLoadingResponses(false);
     }
