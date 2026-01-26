@@ -44,7 +44,7 @@ export default function PortalENPS() {
       return;
     }
 
-    if (!selectedSurvey) {
+    if (!currentSurvey) {
       setError('No survey selected');
       return;
     }
@@ -54,13 +54,13 @@ export default function PortalENPS() {
       setError(null);
       setSuccess(false);
 
-      await enpsApi.submitResponse(selectedSurvey.id, {
+      await enpsApi.submitResponse(currentSurvey.id, {
         score,
         reason: reason.trim() || undefined,
       });
 
       setSuccess(true);
-      setCompletedSurveyIds(prev => new Set(prev).add(selectedSurvey.id));
+      setCompletedSurveyIds(prev => new Set(prev).add(currentSurvey.id));
       setScore(-1);
       setReason('');
 

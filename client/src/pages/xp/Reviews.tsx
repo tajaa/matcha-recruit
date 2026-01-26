@@ -428,7 +428,7 @@ export default function PerformanceReviews() {
                     <StatCard
                       label="Completion Rate"
                       value={`${Math.round(cycleProgress.completion_rate)}%`}
-                      subtext={`${cycleProgress.completed} of ${cycleProgress.total} completed`}
+                      subtext={`${cycleProgress.completed} of ${cycleProgress.total_reviews} completed`}
                       icon={CheckCircle}
                       color="text-emerald-400"
                     />
@@ -465,21 +465,21 @@ export default function PerformanceReviews() {
                         {cycleProgress.completed > 0 && (
                           <div
                             className="bg-emerald-500 transition-all duration-500"
-                            style={{ width: `${(cycleProgress.completed / cycleProgress.total) * 100}%` }}
+                            style={{ width: `${(cycleProgress.completed / cycleProgress.total_reviews) * 100}%` }}
                             title={`${cycleProgress.completed} completed`}
                           />
                         )}
                         {cycleProgress.manager_submitted > 0 && (
                           <div
                             className="bg-purple-500 transition-all duration-500"
-                            style={{ width: `${(cycleProgress.manager_submitted / cycleProgress.total) * 100}%` }}
+                            style={{ width: `${(cycleProgress.manager_submitted / cycleProgress.total_reviews) * 100}%` }}
                             title={`${cycleProgress.manager_submitted} manager submitted`}
                           />
                         )}
                         {cycleProgress.self_submitted > 0 && (
                           <div
                             className="bg-blue-500 transition-all duration-500"
-                            style={{ width: `${(cycleProgress.self_submitted / cycleProgress.total) * 100}%` }}
+                            style={{ width: `${(cycleProgress.self_submitted / cycleProgress.total_reviews) * 100}%` }}
                             title={`${cycleProgress.self_submitted} self submitted`}
                           />
                         )}

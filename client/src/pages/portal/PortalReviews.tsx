@@ -78,8 +78,9 @@ export default function PortalReviews() {
     }
 
     // Validate that all criteria have ratings
-    const hasAllRatings = Object.values(selfRatings).every(r => r > 0);
-    if (!hasAllRatings && Object.keys(selfRatings).length === 0) {
+    const requiredCriteria = ['quality', 'productivity', 'teamwork', 'communication', 'initiative', 'growth'];
+    const missingRatings = requiredCriteria.filter(id => !selfRatings[id] || selfRatings[id] <= 0);
+    if (missingRatings.length > 0) {
       setError('Please provide ratings for all criteria');
       return;
     }

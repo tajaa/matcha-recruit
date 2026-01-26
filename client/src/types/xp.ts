@@ -119,8 +119,8 @@ export interface CycleProgress {
   self_submitted: number;
   manager_submitted: number;
   completed: number;
-  skipped: number;
-  total: number;
+  skipped?: number;
+  total_reviews: number;
   completion_rate: number;
 }
 
