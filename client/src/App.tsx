@@ -61,6 +61,7 @@ const PortalPTO = lazy(() => import('./pages/portal/PortalPTO'));
 const PortalPolicies = lazy(() => import('./pages/portal/PortalPolicies'));
 const PortalProfile = lazy(() => import('./pages/portal/PortalProfile'));
 const PortalOnboarding = lazy(() => import('./pages/portal/PortalOnboarding'));
+const PortalVibeCheck = lazy(() => import('./pages/portal/PortalVibeCheck'));
 
 // Chat Pages (separate auth system)
 const ChatLogin = lazy(() => import('./pages/chat/ChatLogin'));
@@ -512,6 +513,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['employee']}>
                     <PortalOnboarding />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="portal/vibe-check"
+                element={
+                  <ProtectedRoute roles={['employee']}>
+                    <PortalVibeCheck />
                   </ProtectedRoute>
                 }
               />
