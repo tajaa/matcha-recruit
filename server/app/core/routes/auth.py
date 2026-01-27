@@ -212,17 +212,19 @@ async def register_client(request: ClientRegister):
         )
 
 
-@router.post("/register/business", response_model=TokenResponse)
+@router.post("/register/business")
 async def register_business(request: BusinessRegister):
     """
     Register a new business with first admin/client user.
     This creates:
-    1. A new company
+    1. A new company with status='pending' (requires admin approval)
     2. A client user linked to that company
     3. Returns auth tokens for immediate login
 
-    This is the recommended registration flow for new businesses.
+    The business will need admin approval before accessing full features.
     """
+    from ..services.email import get_email_service
+
     async with get_connection() as conn:
         async with conn.transaction():
             # Check if email already exists
@@ -230,10 +232,10 @@ async def register_business(request: BusinessRegister):
             if existing:
                 raise HTTPException(status_code=400, detail="Email already registered")
 
-            # Step 1: Create company (owner_id will be set after user creation)
+            # Step 1: Create company with pending status
             company = await conn.fetchrow(
-                """INSERT INTO companies (name, industry, size)
-                   VALUES ($1, $2, $3)
+                """INSERT INTO companies (name, industry, size, status)
+                   VALUES ($1, $2, $3, 'pending')
                    RETURNING id, name""",
                 request.company_name, request.industry, request.company_size
             )
@@ -266,19 +268,29 @@ async def register_business(request: BusinessRegister):
             access_token = create_access_token(user["id"], user["email"], user["role"])
             refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
 
-            return TokenResponse(
-                access_token=access_token,
-                refresh_token=refresh_token,
-                expires_in=settings.jwt_access_token_expire_minutes * 60,
-                user=UserResponse(
-                    id=user["id"],
-                    email=user["email"],
-                    role=user["role"],
-                    is_active=user["is_active"],
-                    created_at=user["created_at"],
-                    last_login=None
-                )
+            # Send pending registration email
+            email_service = get_email_service()
+            await email_service.send_business_registration_pending_email(
+                to_email=user["email"],
+                to_name=request.name,
+                company_name=request.company_name
             )
+
+            return {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "expires_in": settings.jwt_access_token_expire_minutes * 60,
+                "user": {
+                    "id": str(user["id"]),
+                    "email": user["email"],
+                    "role": user["role"],
+                    "is_active": user["is_active"],
+                    "created_at": user["created_at"].isoformat() if user["created_at"] else None,
+                    "last_login": None
+                },
+                "company_status": "pending",
+                "message": "Your business registration is pending approval. You will be notified once it's reviewed."
+            }
 
 
 @router.post("/register/employee", response_model=TokenResponse)
@@ -551,6 +563,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
             profile = await conn.fetchrow(
                 """
                 SELECT c.id, c.user_id, c.company_id, comp.name as company_name,
+                       comp.status as company_status, comp.rejection_reason,
                        c.name, c.phone, c.job_title, c.created_at
                 FROM clients c
                 JOIN companies comp ON c.company_id = comp.id
@@ -565,6 +578,8 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "user_id": str(profile["user_id"]),
                     "company_id": str(profile["company_id"]),
                     "company_name": profile["company_name"],
+                    "company_status": profile["company_status"] or "approved",
+                    "rejection_reason": profile["rejection_reason"],
                     "name": profile["name"],
                     "phone": profile["phone"],
                     "job_title": profile["job_title"],

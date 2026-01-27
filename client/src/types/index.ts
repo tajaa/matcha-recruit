@@ -1626,3 +1626,27 @@ export interface OfferLetterUpdate {
   // Company logo
   company_logo_url?: string;
 }
+
+// Business Registration types
+export type BusinessRegistrationStatus = 'pending' | 'approved' | 'rejected';
+
+export interface BusinessRegistration {
+  id: string;
+  company_name: string;
+  industry: string | null;
+  company_size: string | null;
+  owner_email: string;
+  owner_name: string;
+  owner_phone: string | null;
+  owner_job_title: string | null;
+  status: BusinessRegistrationStatus;
+  rejection_reason: string | null;
+  approved_at: string | null;
+  approved_by_email: string | null;
+  created_at: string;
+}
+
+export interface BusinessRegistrationListResponse {
+  registrations: BusinessRegistration[];
+  total: number;
+}

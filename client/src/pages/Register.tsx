@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { Clock, Mail } from 'lucide-react';
 
 type RegistrationType = 'candidate' | 'business';
 
@@ -38,6 +39,7 @@ export function Register() {
   const [jobTitle, setJobTitle] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [registrationPending, setRegistrationPending] = useState(false);
 
   const { registerBusiness, registerCandidate } = useAuth();
   const navigate = useNavigate();
@@ -82,8 +84,8 @@ export function Register() {
           phone: phone || undefined,
           job_title: jobTitle || undefined,
         });
-        // Business users go to app
-        navigate(returnTo || '/app');
+        // Business registrations require approval - show pending message
+        setRegistrationPending(true);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
@@ -94,6 +96,76 @@ export function Register() {
 
   const inputClasses =
     'appearance-none block w-full px-3 py-2 border border-zinc-200 rounded-sm shadow-sm placeholder-zinc-400 focus:outline-none focus:border-zinc-400 focus:ring-0 sm:text-sm transition-colors';
+
+  // Show pending approval screen after successful business registration
+  if (registrationPending) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
+        <div className="sm:mx-auto sm:w-full sm:max-w-md">
+          <Link to="/" className="flex items-center justify-center gap-2 mb-6">
+            <div className="w-2 h-2 rounded-full bg-zinc-900" />
+            <span className="text-sm font-medium tracking-widest uppercase text-zinc-900">
+              Matcha
+            </span>
+          </Link>
+        </div>
+
+        <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-[420px]">
+          <div className="bg-white py-8 px-4 border border-zinc-200 shadow-sm sm:rounded-sm sm:px-10">
+            <div className="text-center mb-6">
+              <div className="w-12 h-12 mx-auto mb-4 bg-amber-50 border border-amber-200 rounded-full flex items-center justify-center">
+                <Clock size={24} className="text-amber-600" />
+              </div>
+              <h2 className="text-xl font-medium text-zinc-900 mb-2">Registration Pending</h2>
+              <p className="text-sm text-zinc-600">{companyName}</p>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-sm p-4 mb-6">
+              <div className="flex items-center gap-2 text-amber-700 text-xs font-medium uppercase tracking-wider mb-2">
+                <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                Under Review
+              </div>
+              <p className="text-zinc-700 text-sm leading-relaxed">
+                Your business registration has been submitted and is awaiting approval. You'll receive an email once it's reviewed.
+              </p>
+            </div>
+
+            <div className="space-y-3 text-sm text-zinc-600 mb-6">
+              <div className="flex items-start gap-3">
+                <div className="w-5 h-5 bg-zinc-100 border border-zinc-200 rounded-full flex items-center justify-center text-xs text-zinc-500 font-medium shrink-0 mt-0.5">1</div>
+                <p>Our team reviews your registration within 1-2 business days</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-5 h-5 bg-zinc-100 border border-zinc-200 rounded-full flex items-center justify-center text-xs text-zinc-500 font-medium shrink-0 mt-0.5">2</div>
+                <p>You'll receive an email when your account is approved</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-5 h-5 bg-zinc-100 border border-zinc-200 rounded-full flex items-center justify-center text-xs text-zinc-500 font-medium shrink-0 mt-0.5">3</div>
+                <p>Once approved, log in to access all Matcha features</p>
+              </div>
+            </div>
+
+            <div className="bg-zinc-50 border border-zinc-200 rounded-sm p-3 mb-6">
+              <div className="flex items-center gap-2 text-zinc-600 text-xs">
+                <Mail size={14} />
+                <span>Questions? Contact us at </span>
+                <a href="mailto:support@hey-matcha.com" className="text-zinc-900 font-medium hover:underline">
+                  support@hey-matcha.com
+                </a>
+              </div>
+            </div>
+
+            <Link
+              to="/login"
+              className="w-full flex justify-center py-2.5 px-4 border border-zinc-200 rounded-sm text-xs font-medium uppercase tracking-wider text-zinc-700 bg-white hover:bg-zinc-50 transition-colors"
+            >
+              Go to Login
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">

@@ -1416,7 +1416,31 @@ export const adminBeta = {
       method: 'PUT',
       body: JSON.stringify({ roles }),
     }),
-  };
+};
+
+// Admin Business Registrations API
+import type { BusinessRegistration, BusinessRegistrationListResponse, BusinessRegistrationStatus } from '../types';
+
+export const adminBusinessRegistrations = {
+  list: (status?: BusinessRegistrationStatus): Promise<BusinessRegistrationListResponse> => {
+    const params = status ? `?status=${status}` : '';
+    return request<BusinessRegistrationListResponse>(`/admin/business-registrations${params}`);
+  },
+
+  get: (companyId: string): Promise<BusinessRegistration> =>
+    request<BusinessRegistration>(`/admin/business-registrations/${companyId}`),
+
+  approve: (companyId: string): Promise<{ status: string; message: string }> =>
+    request<{ status: string; message: string }>(`/admin/business-registrations/${companyId}/approve`, {
+      method: 'POST',
+    }),
+
+  reject: (companyId: string, reason: string): Promise<{ status: string; message: string }> =>
+    request<{ status: string; message: string }>(`/admin/business-registrations/${companyId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+};
 
 // Blog API
 export const blogs = {

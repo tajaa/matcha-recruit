@@ -839,6 +839,378 @@ Thank you for helping us build a better workplace!
             return False
 
 
+    async def send_business_registration_pending_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+    ) -> bool:
+        """Send an email confirming business registration is pending review.
+
+        Returns True if sent successfully, False otherwise.
+        """
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .status-card {{ background: linear-gradient(135deg, #fef3c7 0%, #fef9c3 100%); border-radius: 12px; padding: 30px; margin: 20px 0; text-align: center; border-left: 4px solid #f59e0b; }}
+        .status-icon {{ font-size: 48px; margin-bottom: 10px; }}
+        .company-name {{ font-size: 24px; font-weight: 700; color: #111; margin-bottom: 8px; }}
+        .info-box {{ background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>Thank you for registering <strong>{company_name}</strong> with Matcha!</p>
+
+            <div class="status-card">
+                <div class="status-icon">⏳</div>
+                <div class="company-name">{company_name}</div>
+                <p style="color: #92400e; margin: 0;">Registration Pending Review</p>
+            </div>
+
+            <div class="info-box">
+                <h3 style="margin-top: 0;">What happens next?</h3>
+                <ul style="margin: 0; padding-left: 20px;">
+                    <li>Our team will review your registration within 1-2 business days</li>
+                    <li>You'll receive an email once your account is approved</li>
+                    <li>Once approved, you'll have full access to all Matcha features</li>
+                </ul>
+            </div>
+
+            <p>In the meantime, you can log in to see your pending status. If you have any questions, feel free to reach out to our support team.</p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+Thank you for registering {company_name} with Matcha!
+
+Your business registration is currently pending review.
+
+What happens next?
+- Our team will review your registration within 1-2 business days
+- You'll receive an email once your account is approved
+- Once approved, you'll have full access to all Matcha features
+
+In the meantime, you can log in to see your pending status. If you have any questions, feel free to reach out to our support team.
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_name,
+                }
+            ],
+            "subject": f"Registration Pending: {company_name}",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent business registration pending email to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
+    async def send_business_approved_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+    ) -> bool:
+        """Send an email notifying that business registration was approved.
+
+        Returns True if sent successfully, False otherwise.
+        """
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        dashboard_url = f"{app_base_url}/app"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .status-card {{ background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-radius: 12px; padding: 30px; margin: 20px 0; text-align: center; border-left: 4px solid #22c55e; }}
+        .status-icon {{ font-size: 48px; margin-bottom: 10px; }}
+        .company-name {{ font-size: 24px; font-weight: 700; color: #111; margin-bottom: 8px; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 20px 0; font-size: 16px; }}
+        .btn:hover {{ background: #16a34a; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>Great news! Your business registration has been approved.</p>
+
+            <div class="status-card">
+                <div class="status-icon">✅</div>
+                <div class="company-name">{company_name}</div>
+                <p style="color: #166534; margin: 0;">Registration Approved!</p>
+            </div>
+
+            <p>You now have full access to all Matcha features:</p>
+            <ul>
+                <li>AI-powered candidate screening</li>
+                <li>Employee management tools</li>
+                <li>HR compliance features</li>
+                <li>And much more!</li>
+            </ul>
+
+            <p style="text-align: center;">
+                <a href="{dashboard_url}" class="btn">Go to Dashboard</a>
+            </p>
+
+            <p>Welcome to Matcha! We're excited to have you on board.</p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+Great news! Your business registration has been approved.
+
+{company_name} - Registration Approved!
+
+You now have full access to all Matcha features:
+- AI-powered candidate screening
+- Employee management tools
+- HR compliance features
+- And much more!
+
+Go to your dashboard: {dashboard_url}
+
+Welcome to Matcha! We're excited to have you on board.
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_name,
+                }
+            ],
+            "subject": f"Welcome to Matcha! {company_name} is Approved",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent business approved email to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
+    async def send_business_rejected_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        reason: str,
+    ) -> bool:
+        """Send an email notifying that business registration was rejected.
+
+        Returns True if sent successfully, False otherwise.
+        """
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .status-card {{ background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-radius: 12px; padding: 30px; margin: 20px 0; text-align: center; border-left: 4px solid #ef4444; }}
+        .status-icon {{ font-size: 48px; margin-bottom: 10px; }}
+        .company-name {{ font-size: 24px; font-weight: 700; color: #111; margin-bottom: 8px; }}
+        .reason-box {{ background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #6b7280; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>We've reviewed your business registration and unfortunately, we're unable to approve it at this time.</p>
+
+            <div class="status-card">
+                <div class="status-icon">❌</div>
+                <div class="company-name">{company_name}</div>
+                <p style="color: #991b1b; margin: 0;">Registration Not Approved</p>
+            </div>
+
+            <div class="reason-box">
+                <h4 style="margin-top: 0; color: #374151;">Reason:</h4>
+                <p style="margin-bottom: 0;">{reason}</p>
+            </div>
+
+            <p>If you believe this was a mistake or have additional information to provide, please contact our support team at <a href="mailto:support@hey-matcha.com">support@hey-matcha.com</a>.</p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+We've reviewed your business registration and unfortunately, we're unable to approve it at this time.
+
+{company_name} - Registration Not Approved
+
+Reason:
+{reason}
+
+If you believe this was a mistake or have additional information to provide, please contact our support team at support@hey-matcha.com.
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_name,
+                }
+            ],
+            "subject": f"Registration Update: {company_name}",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent business rejected email to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
+
 # Singleton instance
 _email_service: Optional[EmailService] = None
 

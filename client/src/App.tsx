@@ -46,6 +46,7 @@ const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
 const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 const BlogCommentsAdmin = lazy(() => import('./pages/BlogCommentsAdmin'));
 const TestBot = lazy(() => import('./pages/TestBot').then(m => ({ default: m.TestBot })));
+const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -387,6 +388,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <InterviewPrepAdmin />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="admin/business-registrations"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <BusinessRegistrations />
                   </ProtectedRoute>
                 }
               />

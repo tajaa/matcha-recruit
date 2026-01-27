@@ -26,11 +26,37 @@ async def get_client_company_id(
             return company_id
 
         if current_user.role == "client":
-            company_id = await conn.fetchval(
-                "SELECT company_id FROM clients WHERE user_id = $1",
+            # Get company with status check
+            company = await conn.fetchrow(
+                """
+                SELECT c.company_id, comp.status, comp.rejection_reason
+                FROM clients c
+                JOIN companies comp ON c.company_id = comp.id
+                WHERE c.user_id = $1
+                """,
                 current_user.id
             )
-            return company_id
+
+            if not company:
+                return None
+
+            # Check company approval status
+            company_status = company["status"] or "approved"
+
+            if company_status == "pending":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your business registration is pending approval. You will be notified once it's reviewed."
+                )
+
+            if company_status == "rejected":
+                reason = company["rejection_reason"] or "No reason provided"
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Your business registration was not approved. Reason: {reason}"
+                )
+
+            return company["company_id"]
 
         return None
 

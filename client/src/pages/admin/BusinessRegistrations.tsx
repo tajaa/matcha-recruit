@@ -1,0 +1,372 @@
+import { useState, useEffect, useCallback } from 'react';
+import { Button, Modal } from '../../components';
+import { adminBusinessRegistrations } from '../../api/client';
+import type { BusinessRegistration, BusinessRegistrationStatus } from '../../types';
+import { Building2, Mail, Phone, Briefcase, Calendar, CheckCircle, XCircle, Clock } from 'lucide-react';
+
+export function BusinessRegistrations() {
+  const [registrations, setRegistrations] = useState<BusinessRegistration[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<BusinessRegistrationStatus | 'all'>('pending');
+  const [error, setError] = useState<string | null>(null);
+
+  // Reject modal state
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [selectedRegistration, setSelectedRegistration] = useState<BusinessRegistration | null>(null);
+  const [processing, setProcessing] = useState(false);
+
+  const fetchRegistrations = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await adminBusinessRegistrations.list(
+        statusFilter === 'all' ? undefined : statusFilter
+      );
+      setRegistrations(data.registrations);
+    } catch (err) {
+      console.error('Failed to fetch registrations:', err);
+      setError('Failed to load business registrations');
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    fetchRegistrations();
+  }, [fetchRegistrations]);
+
+  const handleApprove = async (registration: BusinessRegistration) => {
+    try {
+      setProcessing(true);
+      await adminBusinessRegistrations.approve(registration.id);
+      // Update local state
+      setRegistrations(prev =>
+        prev.map(r =>
+          r.id === registration.id
+            ? { ...r, status: 'approved' as BusinessRegistrationStatus }
+            : r
+        )
+      );
+      // If we're filtering by pending, remove from list
+      if (statusFilter === 'pending') {
+        setRegistrations(prev => prev.filter(r => r.id !== registration.id));
+      }
+    } catch (err) {
+      console.error('Failed to approve:', err);
+      setError('Failed to approve registration');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const openRejectModal = (registration: BusinessRegistration) => {
+    setSelectedRegistration(registration);
+    setRejectReason('');
+    setRejectModalOpen(true);
+  };
+
+  const handleReject = async () => {
+    if (!selectedRegistration || !rejectReason.trim()) return;
+
+    try {
+      setProcessing(true);
+      await adminBusinessRegistrations.reject(selectedRegistration.id, rejectReason.trim());
+      // Update local state
+      setRegistrations(prev =>
+        prev.map(r =>
+          r.id === selectedRegistration.id
+            ? { ...r, status: 'rejected' as BusinessRegistrationStatus, rejection_reason: rejectReason.trim() }
+            : r
+        )
+      );
+      // If we're filtering by pending, remove from list
+      if (statusFilter === 'pending') {
+        setRegistrations(prev => prev.filter(r => r.id !== selectedRegistration.id));
+      }
+      setRejectModalOpen(false);
+    } catch (err) {
+      console.error('Failed to reject:', err);
+      setError('Failed to reject registration');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const getStatusBadge = (status: BusinessRegistrationStatus) => {
+    switch (status) {
+      case 'pending':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] uppercase tracking-wider font-bold">
+            <Clock size={12} />
+            Pending
+          </span>
+        );
+      case 'approved':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] uppercase tracking-wider font-bold">
+            <CheckCircle size={12} />
+            Approved
+          </span>
+        );
+      case 'rejected':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-500/10 text-red-400 border border-red-500/20 text-[10px] uppercase tracking-wider font-bold">
+            <XCircle size={12} />
+            Rejected
+          </span>
+        );
+    }
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-8">
+      {/* Header */}
+      <div className="flex justify-between items-end border-b border-white/10 pb-8">
+        <div>
+          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Business Registrations</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+            Review and approve new business accounts
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-xs text-zinc-400 font-mono">
+            <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+            {registrations.filter(r => r.status === 'pending').length} Pending
+          </div>
+        </div>
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex gap-2">
+        {(['pending', 'approved', 'rejected', 'all'] as const).map((status) => (
+          <button
+            key={status}
+            onClick={() => setStatusFilter(status)}
+            className={`px-4 py-2 text-xs uppercase tracking-wider font-bold border transition-colors ${
+              statusFilter === status
+                ? 'bg-white text-black border-white'
+                : 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
+            }`}
+          >
+            {status}
+          </button>
+        ))}
+      </div>
+
+      {/* Main Table */}
+      <div className="border border-white/10 bg-zinc-900/30">
+        {loading ? (
+          <div className="flex items-center justify-center py-24">
+            <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading registrations...</div>
+          </div>
+        ) : registrations.length === 0 ? (
+          <div className="text-center py-24 text-zinc-500 font-mono text-sm uppercase tracking-wider">
+            No {statusFilter !== 'all' ? statusFilter : ''} registrations found
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-white/10 bg-zinc-950">
+                  <th className="text-left px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                    Company
+                  </th>
+                  <th className="text-left px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                    Owner
+                  </th>
+                  <th className="text-center px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                    Status
+                  </th>
+                  <th className="text-left px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                    Registered
+                  </th>
+                  <th className="text-right px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {registrations.map((registration) => (
+                  <tr
+                    key={registration.id}
+                    className="border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950"
+                  >
+                    {/* Company Info */}
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                          <Building2 size={18} className="text-zinc-400" />
+                        </div>
+                        <div>
+                          <div className="text-sm text-white font-bold">
+                            {registration.company_name}
+                          </div>
+                          <div className="flex items-center gap-3 mt-1">
+                            {registration.industry && (
+                              <span className="text-[10px] text-zinc-500 font-mono">
+                                {registration.industry}
+                              </span>
+                            )}
+                            {registration.company_size && (
+                              <span className="text-[10px] text-zinc-600 font-mono">
+                                {registration.company_size}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Owner Info */}
+                    <td className="px-4 py-4">
+                      <div className="space-y-1">
+                        <div className="text-sm text-white">{registration.owner_name}</div>
+                        <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-mono">
+                          <Mail size={10} />
+                          {registration.owner_email}
+                        </div>
+                        {registration.owner_phone && (
+                          <div className="flex items-center gap-1 text-[10px] text-zinc-600 font-mono">
+                            <Phone size={10} />
+                            {registration.owner_phone}
+                          </div>
+                        )}
+                        {registration.owner_job_title && (
+                          <div className="flex items-center gap-1 text-[10px] text-zinc-600 font-mono">
+                            <Briefcase size={10} />
+                            {registration.owner_job_title}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-4 py-4 text-center">
+                      <div className="space-y-2">
+                        {getStatusBadge(registration.status)}
+                        {registration.status === 'rejected' && registration.rejection_reason && (
+                          <div className="text-[10px] text-red-400/70 max-w-[200px] truncate" title={registration.rejection_reason}>
+                            {registration.rejection_reason}
+                          </div>
+                        )}
+                        {registration.status === 'approved' && registration.approved_at && (
+                          <div className="text-[10px] text-zinc-600">
+                            {formatDate(registration.approved_at)}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Registered Date */}
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
+                        <Calendar size={12} />
+                        {formatDate(registration.created_at)}
+                      </div>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-6 py-4 text-right">
+                      {registration.status === 'pending' && (
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => handleApprove(registration)}
+                            disabled={processing}
+                            className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 px-3 py-1.5 text-[10px] uppercase tracking-wider"
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => openRejectModal(registration)}
+                            disabled={processing}
+                            className="bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 px-3 py-1.5 text-[10px] uppercase tracking-wider"
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Reject Modal */}
+      <Modal
+        isOpen={rejectModalOpen}
+        onClose={() => setRejectModalOpen(false)}
+        title="Reject Registration"
+      >
+        <div className="space-y-6">
+          {selectedRegistration && (
+            <div className="p-4 bg-zinc-900 border border-zinc-800">
+              <div className="text-sm text-white font-bold">{selectedRegistration.company_name}</div>
+              <div className="text-xs text-zinc-500 mt-1">{selectedRegistration.owner_name} &bull; {selectedRegistration.owner_email}</div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
+              Rejection Reason *
+            </label>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Please provide a reason for rejection..."
+              rows={4}
+              className="w-full bg-zinc-950 border border-zinc-800 text-white text-sm p-3 focus:outline-none focus:border-zinc-600 resize-none"
+            />
+            <p className="text-[10px] text-zinc-600 mt-2">
+              This reason will be included in the rejection email sent to the business owner.
+            </p>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <Button
+              variant="secondary"
+              onClick={() => setRejectModalOpen(false)}
+              className="flex-1 bg-transparent border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReject}
+              disabled={processing || !rejectReason.trim()}
+              className="flex-1 bg-red-500 text-white hover:bg-red-600 font-bold uppercase tracking-wider"
+            >
+              {processing ? 'Processing...' : 'Confirm Rejection'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+export default BusinessRegistrations;

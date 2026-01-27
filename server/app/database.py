@@ -139,8 +139,39 @@ async def init_db():
                 name VARCHAR(255) NOT NULL,
                 industry VARCHAR(100),
                 size VARCHAR(50),
+                owner_id UUID REFERENCES users(id),
+                status VARCHAR(20) DEFAULT 'approved',
+                approved_at TIMESTAMPTZ,
+                approved_by UUID REFERENCES users(id),
+                rejection_reason TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
+        """)
+
+        # Add status columns for existing companies tables (migration)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'status') THEN
+                    ALTER TABLE companies ADD COLUMN status VARCHAR(20) DEFAULT 'approved';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'approved_at') THEN
+                    ALTER TABLE companies ADD COLUMN approved_at TIMESTAMPTZ;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'approved_by') THEN
+                    ALTER TABLE companies ADD COLUMN approved_by UUID REFERENCES users(id);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'rejection_reason') THEN
+                    ALTER TABLE companies ADD COLUMN rejection_reason TEXT;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'owner_id') THEN
+                    ALTER TABLE companies ADD COLUMN owner_id UUID REFERENCES users(id);
+                END IF;
+            END $$;
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(status)
         """)
 
         # Clients table (linked to companies)
