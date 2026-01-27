@@ -797,9 +797,14 @@ export default function PerformanceReviews() {
               {/* Categories */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-                    Review Categories
-                  </label>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+                      Review Categories
+                    </label>
+                    <p className="text-[9px] text-zinc-600 mt-1">
+                      Category weights should total 100%
+                    </p>
+                  </div>
                   <button
                     type="button"
                     onClick={addCategory}
@@ -822,11 +827,16 @@ export default function PerformanceReviews() {
                         />
                       </div>
                       <div className="w-24">
+                        <label className="text-[9px] uppercase tracking-wider text-zinc-600 mb-1 block">
+                          Weight %
+                        </label>
                         <input
                           type="number"
                           value={category.weight}
                           onChange={(e) => updateCategory(category.id, { weight: parseInt(e.target.value) || 0 })}
-                          placeholder="Weight %"
+                          placeholder="0"
+                          min="0"
+                          max="100"
                           className="w-full bg-zinc-900 border border-white/10 text-white px-3 py-2 text-sm rounded focus:border-white/30 focus:outline-none"
                         />
                       </div>

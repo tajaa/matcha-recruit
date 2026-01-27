@@ -213,34 +213,43 @@ export default function VibeChecks() {
           <>
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 border border-white/10">
-              <StatCard
-                label="Avg Mood Rating"
-                value={analytics.avg_mood_rating?.toFixed(1) ?? '—'}
-                subtext={analytics.avg_mood_rating ? getMoodLabel(Math.round(analytics.avg_mood_rating)) : 'No data'}
-                icon={Smile}
-                color={analytics.avg_mood_rating ? getMoodColor(analytics.avg_mood_rating) : 'text-zinc-500'}
-              />
-              <StatCard
-                label="Response Rate"
-                value={analytics.response_rate != null ? `${Math.round(analytics.response_rate)}%` : '—'}
-                subtext={`${analytics.total_responses ?? 0} responses`}
-                icon={Users}
-                color="text-emerald-400"
-              />
-              <StatCard
-                label="Total Responses"
-                value={analytics.total_responses ?? 0}
-                subtext="This period"
-                icon={MessageCircle}
-                color="text-white"
-              />
-              <StatCard
-                label="Avg Sentiment"
-                value={analytics.avg_sentiment_score?.toFixed(2) ?? '—'}
-                subtext={analytics.avg_sentiment_score != null ? (analytics.avg_sentiment_score > 0 ? 'Positive' : analytics.avg_sentiment_score < 0 ? 'Negative' : 'Neutral') : 'No data'}
-                icon={TrendingUp}
-                color={analytics.avg_sentiment_score != null ? getSentimentColor(analytics.avg_sentiment_score) : 'text-zinc-500'}
-              />
+              {(() => {
+                const avgMood = analytics.avg_mood_rating != null ? Number(analytics.avg_mood_rating) : null;
+                const avgSentiment = analytics.avg_sentiment_score != null ? Number(analytics.avg_sentiment_score) : null;
+                const responseRate = analytics.response_rate != null ? Number(analytics.response_rate) : null;
+                return (
+                  <>
+                    <StatCard
+                      label="Avg Mood Rating"
+                      value={avgMood != null && !isNaN(avgMood) ? avgMood.toFixed(1) : '—'}
+                      subtext={avgMood != null && !isNaN(avgMood) ? getMoodLabel(Math.round(avgMood)) : 'No data'}
+                      icon={Smile}
+                      color={avgMood != null && !isNaN(avgMood) ? getMoodColor(avgMood) : 'text-zinc-500'}
+                    />
+                    <StatCard
+                      label="Response Rate"
+                      value={responseRate != null && !isNaN(responseRate) ? `${Math.round(responseRate)}%` : '—'}
+                      subtext={`${analytics.total_responses ?? 0} responses`}
+                      icon={Users}
+                      color="text-emerald-400"
+                    />
+                    <StatCard
+                      label="Total Responses"
+                      value={analytics.total_responses ?? 0}
+                      subtext="This period"
+                      icon={MessageCircle}
+                      color="text-white"
+                    />
+                    <StatCard
+                      label="Avg Sentiment"
+                      value={avgSentiment != null && !isNaN(avgSentiment) ? avgSentiment.toFixed(2) : '—'}
+                      subtext={avgSentiment != null && !isNaN(avgSentiment) ? (avgSentiment > 0 ? 'Positive' : avgSentiment < 0 ? 'Negative' : 'Neutral') : 'No data'}
+                      icon={TrendingUp}
+                      color={avgSentiment != null && !isNaN(avgSentiment) ? getSentimentColor(avgSentiment) : 'text-zinc-500'}
+                    />
+                  </>
+                );
+              })()}
             </div>
 
             {/* Trend Chart */}

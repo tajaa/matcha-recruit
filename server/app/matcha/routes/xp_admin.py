@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ...database import get_connection
 from ...config import get_settings
+from ...core.services.email import get_email_service
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ..models.xp import (
     # Vibe Checks
@@ -83,7 +84,7 @@ async def create_or_update_vibe_config(
             json.dumps(config.questions),
         )
 
-        return VibeCheckConfigResponse(**result)
+        return VibeCheckConfigResponse(**dict(result))
 
 
 @router.get("/vibe-checks/config", response_model=VibeCheckConfigResponse)
@@ -103,7 +104,7 @@ async def get_vibe_config(
         if not result:
             raise HTTPException(404, "Vibe check configuration not found")
 
-        return VibeCheckConfigResponse(**result)
+        return VibeCheckConfigResponse(**dict(result))
 
 
 @router.patch("/vibe-checks/config", response_model=VibeCheckConfigResponse)
@@ -161,7 +162,7 @@ async def update_vibe_config(
         if not result:
             raise HTTPException(404, "Vibe check configuration not found")
 
-        return VibeCheckConfigResponse(**result)
+        return VibeCheckConfigResponse(**dict(result))
 
 
 # ================================
@@ -315,7 +316,7 @@ async def get_vibe_responses(
         )
 
         return VibeCheckListResponse(
-            responses=[VibeCheckResponse(**r) for r in rows], total=total
+            responses=[VibeCheckResponse(**dict(r)) for r in rows], total=total
         )
 
 
@@ -352,7 +353,7 @@ async def create_enps_survey(
             current_user.id,
         )
 
-        return ENPSSurveyResponse(**result)
+        return ENPSSurveyResponse(**dict(result))
 
 
 @router.get("/enps/surveys", response_model=ENPSSurveyListResponse)
@@ -399,7 +400,7 @@ async def list_enps_surveys(
         )
 
         return ENPSSurveyListResponse(
-            surveys=[ENPSSurveyResponse(**r) for r in rows], total=total
+            surveys=[ENPSSurveyResponse(**dict(r)) for r in rows], total=total
         )
 
 
@@ -417,7 +418,7 @@ async def get_enps_survey(
         if not result:
             raise HTTPException(404, "Survey not found")
 
-        return ENPSSurveyResponse(**result)
+        return ENPSSurveyResponse(**dict(result))
 
 
 @router.patch("/enps/surveys/{survey_id}", response_model=ENPSSurveyResponse)
@@ -427,7 +428,23 @@ async def update_enps_survey(
     current_user=Depends(require_admin_or_client),
 ):
     """Update eNPS survey."""
+    # Data to collect for email notifications (if activating)
+    activation_data = None
+
     async with get_connection() as conn:
+        # Get current survey state to check if we're activating it
+        current_survey = await conn.fetchrow(
+            "SELECT status, org_id, title, description FROM enps_surveys WHERE id = $1",
+            survey_id,
+        )
+        if not current_survey:
+            raise HTTPException(404, "Survey not found")
+
+        is_activating = (
+            survey.status == "active"
+            and current_survey["status"] != "active"
+        )
+
         # Build dynamic update
         updates = []
         values = []
@@ -466,7 +483,64 @@ async def update_enps_survey(
         if not result:
             raise HTTPException(404, "Survey not found")
 
-        return ENPSSurveyResponse(**result)
+        # Collect data for email notifications while we have the connection
+        if is_activating:
+            org_id = current_survey["org_id"]
+
+            # Get organization name
+            org = await conn.fetchrow(
+                "SELECT name FROM organizations WHERE id = $1", org_id
+            )
+            company_name = org["name"] if org else "Your Company"
+
+            # Get all active employees with email
+            employees = await conn.fetch(
+                """
+                SELECT e.id, e.first_name, e.last_name, e.work_email
+                FROM employees e
+                WHERE e.org_id = $1
+                AND e.status = 'active'
+                AND e.work_email IS NOT NULL
+                """,
+                org_id,
+            )
+
+            # Store data for sending after connection is released
+            activation_data = {
+                "company_name": company_name,
+                "employees": [dict(e) for e in employees],
+                "survey_title": result["title"],
+                "survey_description": result["description"],
+            }
+
+        response = ENPSSurveyResponse(**dict(result))
+
+    # Send email notifications AFTER releasing the DB connection
+    if activation_data:
+        email_service = get_email_service()
+        settings = get_settings()
+        portal_url = f"{settings.app_base_url}/portal/surveys"
+
+        sent_count = 0
+        for emp in activation_data["employees"]:
+            employee_name = f"{emp['first_name']} {emp['last_name']}".strip() or "Team Member"
+            try:
+                success = await email_service.send_enps_survey_email(
+                    to_email=emp["work_email"],
+                    to_name=employee_name,
+                    company_name=activation_data["company_name"],
+                    survey_title=activation_data["survey_title"],
+                    survey_description=activation_data["survey_description"],
+                    portal_url=portal_url,
+                )
+                if success:
+                    sent_count += 1
+            except Exception as e:
+                print(f"[eNPS] Failed to send email to {emp['work_email']}: {e}")
+
+        print(f"[eNPS] Survey {survey_id} activated - sent {sent_count}/{len(activation_data['employees'])} notification emails")
+
+    return response
 
 
 @router.get("/enps/surveys/{survey_id}/results", response_model=ENPSResults)
@@ -603,7 +677,7 @@ async def create_review_template(
             json.dumps(template.categories),
         )
 
-        return ReviewTemplateResponse(**result)
+        return ReviewTemplateResponse(**dict(result))
 
 
 @router.get("/reviews/templates", response_model=ReviewTemplateListResponse)
@@ -636,7 +710,7 @@ async def list_review_templates(
         )
 
         return ReviewTemplateListResponse(
-            templates=[ReviewTemplateResponse(**r) for r in rows], total=total
+            templates=[ReviewTemplateResponse(**dict(r)) for r in rows], total=total
         )
 
 
@@ -670,7 +744,7 @@ async def create_review_cycle(
             cycle.template_id,
         )
 
-        return ReviewCycleResponse(**result)
+        return ReviewCycleResponse(**dict(result))
 
 
 @router.get("/reviews/cycles", response_model=ReviewCycleListResponse)
@@ -717,7 +791,7 @@ async def list_review_cycles(
         )
 
         return ReviewCycleListResponse(
-            cycles=[ReviewCycleResponse(**r) for r in rows], total=total
+            cycles=[ReviewCycleResponse(**dict(r)) for r in rows], total=total
         )
 
 
