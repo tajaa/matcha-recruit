@@ -61,14 +61,15 @@ export const vibeChecksApi = {
   },
 
   submitResponse: async (data: { mood_rating: number; comment?: string }): Promise<VibeCheckResponse> => {
-    return fetchWithAuth(`${API_BASE}/vibe-checks`, {
+    return fetchWithAuth(`${API_BASE}/v1/portal/vibe-checks`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   getHistory: async (): Promise<VibeCheckResponse[]> => {
-    return fetchWithAuth(`${API_BASE}/vibe-checks/history`);
+    const response = await fetchWithAuth(`${API_BASE}/v1/portal/vibe-checks/history`);
+    return response.responses || [];
   },
 };
 
@@ -103,11 +104,11 @@ export const enpsApi = {
   },
 
   getActiveSurveys: async (): Promise<ENPSSurvey[]> => {
-    return fetchWithAuth(`${API_BASE}/enps/surveys/active`);
+    return fetchWithAuth(`${API_BASE}/v1/portal/enps/surveys/active`);
   },
 
   submitResponse: async (surveyId: string, data: { score: number; reason?: string }): Promise<ENPSResponse> => {
-    return fetchWithAuth(`${API_BASE}/enps/surveys/${surveyId}/respond`, {
+    return fetchWithAuth(`${API_BASE}/v1/portal/enps/surveys/${surveyId}/respond`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -167,22 +168,22 @@ export const reviewsApi = {
   },
 
   getPendingReviews: async (): Promise<PerformanceReview[]> => {
-    return fetchWithAuth(`${API_BASE}/reviews/pending`);
+    return fetchWithAuth(`${API_BASE}/v1/portal/reviews/pending`);
   },
 
   getReview: async (id: string): Promise<PerformanceReview> => {
-    return fetchWithAuth(`${API_BASE}/reviews/${id}`);
+    return fetchWithAuth(`${API_BASE}/v1/portal/reviews/${id}`);
   },
 
   submitSelfAssessment: async (id: string, data: { self_ratings: Record<string, number>; self_comments?: string }): Promise<PerformanceReview> => {
-    return fetchWithAuth(`${API_BASE}/reviews/${id}/self-assessment`, {
+    return fetchWithAuth(`${API_BASE}/v1/portal/reviews/${id}/self-assessment`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   submitManagerReview: async (id: string, data: { manager_ratings: Record<string, number>; manager_comments?: string; manager_overall_rating: number }): Promise<PerformanceReview> => {
-    return fetchWithAuth(`${API_BASE}/reviews/${id}/manager-review`, {
+    return fetchWithAuth(`${API_BASE}/v1/portal/reviews/${id}/manager-review`, {
       method: 'POST',
       body: JSON.stringify(data),
     });

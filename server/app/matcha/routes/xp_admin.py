@@ -197,10 +197,12 @@ async def get_vibe_analytics(
             since_clause = "NOW() - INTERVAL '90 days'"
 
         # Build manager filter
-        manager_filter = ""
         params = [org_id]
+        manager_subquery = ""
+        employee_manager_filter = ""
         if manager_id:
-            manager_filter = "AND e.manager_id = $2"
+            manager_subquery = "AND v.employee_id IN (SELECT id FROM employees WHERE org_id = $1 AND manager_id = $2)"
+            employee_manager_filter = "AND manager_id = $2"
             params.append(manager_id)
 
         # Aggregate stats
@@ -214,7 +216,7 @@ async def get_vibe_analytics(
             FROM vibe_check_responses v
             WHERE v.org_id = $1
             AND v.created_at >= {since_clause}
-            {manager_filter if not manager_id else "AND v.employee_id IN (SELECT id FROM employees WHERE org_id = $1 AND manager_id = $2)"}
+            {manager_subquery}
             """,
             *params,
         )
@@ -224,7 +226,7 @@ async def get_vibe_analytics(
             f"""
             SELECT COUNT(*) FROM employees
             WHERE org_id = $1
-            {manager_filter}
+            {employee_manager_filter}
             """,
             *params,
         )
@@ -241,7 +243,7 @@ async def get_vibe_analytics(
             WHERE v.org_id = $1
             AND v.created_at >= {since_clause}
             AND v.sentiment_analysis IS NOT NULL
-            {manager_filter if not manager_id else "AND v.employee_id IN (SELECT id FROM employees WHERE org_id = $1 AND manager_id = $2)"}
+            {manager_subquery}
             GROUP BY theme
             ORDER BY frequency DESC
             LIMIT 10
@@ -386,15 +388,18 @@ async def list_enps_surveys(
             *params,
         )
 
+        # Use separate filter for count query (only has 1-2 params)
         count_params = [org_id]
+        count_status_filter = ""
         if status:
+            count_status_filter = "AND status = $2"
             count_params.append(status)
 
         total = await conn.fetchval(
             f"""
             SELECT COUNT(*) FROM enps_surveys
             WHERE org_id = $1
-            {status_filter}
+            {count_status_filter}
             """,
             *count_params,
         )
@@ -408,11 +413,16 @@ async def list_enps_surveys(
 async def get_enps_survey(
     survey_id: UUID,
     current_user=Depends(require_admin_or_client),
+    org_id: UUID = Depends(get_client_company_id),
 ):
     """Get specific eNPS survey."""
+    if not org_id:
+        raise HTTPException(400, "Organization not found")
+
     async with get_connection() as conn:
         result = await conn.fetchrow(
-            "SELECT * FROM enps_surveys WHERE id = $1", survey_id
+            "SELECT * FROM enps_surveys WHERE id = $1 AND org_id = $2",
+            survey_id, org_id
         )
 
         if not result:
@@ -426,16 +436,20 @@ async def update_enps_survey(
     survey_id: UUID,
     survey: ENPSSurveyUpdate,
     current_user=Depends(require_admin_or_client),
+    org_id: UUID = Depends(get_client_company_id),
 ):
     """Update eNPS survey."""
+    if not org_id:
+        raise HTTPException(400, "Organization not found")
+
     # Data to collect for email notifications (if activating)
     activation_data = None
 
     async with get_connection() as conn:
-        # Get current survey state to check if we're activating it
+        # Get current survey state to check if we're activating it (scoped by org)
         current_survey = await conn.fetchrow(
-            "SELECT status, org_id, title, description FROM enps_surveys WHERE id = $1",
-            survey_id,
+            "SELECT status, org_id, title, description FROM enps_surveys WHERE id = $1 AND org_id = $2",
+            survey_id, org_id,
         )
         if not current_survey:
             raise HTTPException(404, "Survey not found")
@@ -547,9 +561,21 @@ async def update_enps_survey(
 async def get_enps_results(
     survey_id: UUID,
     current_user=Depends(require_admin_or_client),
+    org_id: UUID = Depends(get_client_company_id),
 ):
     """Calculate eNPS score and theme analysis for a survey."""
+    if not org_id:
+        raise HTTPException(400, "Organization not found")
+
     async with get_connection() as conn:
+        # Verify survey belongs to org
+        survey_check = await conn.fetchval(
+            "SELECT id FROM enps_surveys WHERE id = $1 AND org_id = $2",
+            survey_id, org_id
+        )
+        if not survey_check:
+            raise HTTPException(404, "Survey not found")
+
         # Get all responses
         responses = await conn.fetch(
             "SELECT * FROM enps_responses WHERE survey_id = $1", survey_id
@@ -714,6 +740,95 @@ async def list_review_templates(
         )
 
 
+@router.get("/reviews/templates/{template_id}", response_model=ReviewTemplateResponse)
+async def get_review_template(
+    template_id: UUID,
+    current_user=Depends(require_admin_or_client),
+    org_id: UUID = Depends(get_client_company_id),
+):
+    """Get a specific review template."""
+    if not org_id:
+        raise HTTPException(400, "Organization not found")
+
+    async with get_connection() as conn:
+        result = await conn.fetchrow(
+            "SELECT * FROM review_templates WHERE id = $1 AND org_id = $2 AND is_active = true",
+            template_id, org_id
+        )
+
+        if not result:
+            raise HTTPException(404, "Template not found")
+
+        return ReviewTemplateResponse(**dict(result))
+
+
+@router.patch("/reviews/templates/{template_id}", response_model=ReviewTemplateResponse)
+async def update_review_template(
+    template_id: UUID,
+    template: ReviewTemplateUpdate,
+    current_user=Depends(require_admin_or_client),
+    org_id: UUID = Depends(get_client_company_id),
+):
+    """Update a review template."""
+    if not org_id:
+        raise HTTPException(400, "Organization not found")
+
+    async with get_connection() as conn:
+        # Verify template belongs to org
+        existing = await conn.fetchrow(
+            "SELECT * FROM review_templates WHERE id = $1 AND org_id = $2 AND is_active = true",
+            template_id, org_id
+        )
+        if not existing:
+            raise HTTPException(404, "Template not found")
+
+        # Build dynamic update
+        updates = []
+        values = []
+        param_count = 1
+
+        if template.name is not None:
+            updates.append(f"name = ${param_count}")
+            values.append(template.name)
+            param_count += 1
+
+        if template.description is not None:
+            updates.append(f"description = ${param_count}")
+            values.append(template.description)
+            param_count += 1
+
+        if template.categories is not None:
+            updates.append(f"categories = ${param_count}")
+            values.append(json.dumps(template.categories))
+            param_count += 1
+
+        if template.is_active is not None:
+            updates.append(f"is_active = ${param_count}")
+            values.append(template.is_active)
+            param_count += 1
+
+        if not updates:
+            raise HTTPException(400, "No fields to update")
+
+        values.append(template_id)
+        values.append(org_id)
+
+        result = await conn.fetchrow(
+            f"""
+            UPDATE review_templates
+            SET {', '.join(updates)}, updated_at = NOW()
+            WHERE id = ${param_count} AND org_id = ${param_count + 1}
+            RETURNING *
+            """,
+            *values,
+        )
+
+        if not result:
+            raise HTTPException(404, "Template not found")
+
+        return ReviewTemplateResponse(**dict(result))
+
+
 # ================================
 # Performance Reviews - Cycles
 # ================================
@@ -777,15 +892,18 @@ async def list_review_cycles(
             *params,
         )
 
+        # Use separate filter for count query (only has 1-2 params)
         count_params = [org_id]
+        count_status_filter = ""
         if status:
+            count_status_filter = "AND status = $2"
             count_params.append(status)
 
         total = await conn.fetchval(
             f"""
             SELECT COUNT(*) FROM review_cycles
             WHERE org_id = $1
-            {status_filter}
+            {count_status_filter}
             """,
             *count_params,
         )
@@ -795,15 +913,98 @@ async def list_review_cycles(
         )
 
 
+@router.get("/reviews/cycles/{cycle_id}", response_model=ReviewCycleResponse)
+async def get_review_cycle(
+    cycle_id: UUID,
+    current_user=Depends(require_admin_or_client),
+    org_id: UUID = Depends(get_client_company_id),
+):
+    """Get a specific review cycle."""
+    if not org_id:
+        raise HTTPException(400, "Organization not found")
+
+    async with get_connection() as conn:
+        result = await conn.fetchrow(
+            "SELECT * FROM review_cycles WHERE id = $1 AND org_id = $2",
+            cycle_id, org_id
+        )
+
+        if not result:
+            raise HTTPException(404, "Review cycle not found")
+
+        return ReviewCycleResponse(**dict(result))
+
+
+@router.patch("/reviews/cycles/{cycle_id}", response_model=ReviewCycleResponse)
+async def update_review_cycle(
+    cycle_id: UUID,
+    cycle: ReviewCycleUpdate,
+    current_user=Depends(require_admin_or_client),
+    org_id: UUID = Depends(get_client_company_id),
+):
+    """Update a review cycle."""
+    if not org_id:
+        raise HTTPException(400, "Organization not found")
+
+    async with get_connection() as conn:
+        # Verify cycle belongs to this org
+        existing = await conn.fetchrow(
+            "SELECT * FROM review_cycles WHERE id = $1 AND org_id = $2",
+            cycle_id, org_id
+        )
+        if not existing:
+            raise HTTPException(404, "Review cycle not found")
+
+        # Build dynamic update
+        updates = []
+        values = []
+        param_count = 1
+
+        for field in ["title", "description", "start_date", "end_date", "status", "template_id"]:
+            value = getattr(cycle, field, None)
+            if value is not None:
+                updates.append(f"{field} = ${param_count}")
+                values.append(value)
+                param_count += 1
+
+        if not updates:
+            raise HTTPException(400, "No fields to update")
+
+        values.append(cycle_id)
+        values.append(org_id)
+
+        result = await conn.fetchrow(
+            f"""
+            UPDATE review_cycles
+            SET {', '.join(updates)}, updated_at = NOW()
+            WHERE id = ${param_count} AND org_id = ${param_count + 1}
+            RETURNING *
+            """,
+            *values,
+        )
+
+        if not result:
+            raise HTTPException(404, "Review cycle not found")
+
+        return ReviewCycleResponse(**dict(result))
+
+
 @router.get("/reviews/cycles/{cycle_id}/progress", response_model=ReviewProgress)
 async def get_cycle_progress(
     cycle_id: UUID,
     current_user=Depends(require_admin_or_client),
+    org_id: UUID = Depends(get_client_company_id),
 ):
     """Get progress summary for a review cycle."""
+    if not org_id:
+        raise HTTPException(400, "Organization not found")
+
     async with get_connection() as conn:
-        # Verify cycle exists
-        cycle = await conn.fetchrow("SELECT * FROM review_cycles WHERE id = $1", cycle_id)
+        # Verify cycle exists and belongs to org
+        cycle = await conn.fetchrow(
+            "SELECT * FROM review_cycles WHERE id = $1 AND org_id = $2",
+            cycle_id, org_id
+        )
         if not cycle:
             raise HTTPException(404, "Review cycle not found")
 

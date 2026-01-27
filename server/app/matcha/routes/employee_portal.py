@@ -1028,6 +1028,30 @@ async def get_pending_reviews(
         return [PerformanceReviewResponse(**r) for r in rows]
 
 
+@router.get("/reviews/{review_id}", response_model=PerformanceReviewResponse)
+async def get_review(
+    review_id: UUID,
+    employee: dict = Depends(require_employee_record)
+):
+    """Get a specific performance review (employee must be reviewee or manager)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT * FROM performance_reviews
+            WHERE id = $1 AND (employee_id = $2 OR manager_id = $2)
+            """,
+            review_id, employee["id"]
+        )
+
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Review not found or access denied"
+            )
+
+        return PerformanceReviewResponse(**row)
+
+
 @router.post("/reviews/{review_id}/self-assessment")
 async def submit_self_assessment(
     review_id: UUID,
