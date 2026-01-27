@@ -533,7 +533,7 @@ async def update_enps_survey(
     if activation_data:
         email_service = get_email_service()
         settings = get_settings()
-        portal_url = f"{settings.app_base_url}/portal/surveys"
+        portal_url = f"{settings.app_base_url}/app/portal/enps"
 
         sent_count = 0
         for emp in activation_data["employees"]:

@@ -723,7 +723,7 @@ If you weren't expecting this invitation, please contact your HR administrator.
             return False
 
         app_base_url = self.settings.app_base_url
-        survey_url = portal_url or f"{app_base_url}/portal/surveys"
+        survey_url = portal_url or f"{app_base_url}/app/portal/enps"
 
         description_section = f"<p style='color: #6b7280;'>{survey_description}</p>" if survey_description else ""
 
