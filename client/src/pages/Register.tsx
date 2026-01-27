@@ -1,10 +1,29 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { companies } from '../api/client';
-import type { Company } from '../types';
 
-type RegistrationType = 'candidate' | 'client';
+type RegistrationType = 'candidate' | 'business';
+
+const INDUSTRY_OPTIONS = [
+  'Technology',
+  'Healthcare',
+  'Finance',
+  'Retail',
+  'Manufacturing',
+  'Education',
+  'Professional Services',
+  'Real Estate',
+  'Hospitality',
+  'Other',
+];
+
+const COMPANY_SIZE_OPTIONS = [
+  { value: '1-10', label: '1-10 employees' },
+  { value: '11-50', label: '11-50 employees' },
+  { value: '51-200', label: '51-200 employees' },
+  { value: '201-500', label: '201-500 employees' },
+  { value: '500+', label: '500+ employees' },
+];
 
 export function Register() {
   const [type, setType] = useState<RegistrationType>('candidate');
@@ -13,22 +32,17 @@ export function Register() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [companyId, setCompanyId] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [companySize, setCompanySize] = useState('');
   const [jobTitle, setJobTitle] = useState('');
-  const [companiesList, setCompaniesList] = useState<Company[]>([]);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const { registerClient, registerCandidate } = useAuth();
+  const { registerBusiness, registerCandidate } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('returnTo');
-
-  useEffect(() => {
-    if (type === 'client') {
-      companies.list().then(setCompaniesList).catch(console.error);
-    }
-  }, [type]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,26 +63,26 @@ export function Register() {
     try {
       if (type === 'candidate') {
         await registerCandidate({ email, password, name, phone: phone || undefined });
-      } else {
-        if (!companyId) {
-          setError('Please select a company');
-          setIsLoading(false);
-          return;
-        }
-        await registerClient({
-          email,
-          password,
-          name,
-          company_id: companyId,
-          phone: phone || undefined,
-          job_title: jobTitle || undefined,
-        });
-      }
-      // Candidates go through resume onboarding, clients go to app
-      if (type === 'candidate') {
+        // Candidates go through resume onboarding
         const destination = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
         navigate(`/onboarding/resume${destination}`);
       } else {
+        if (!companyName.trim()) {
+          setError('Please enter your company name');
+          setIsLoading(false);
+          return;
+        }
+        await registerBusiness({
+          company_name: companyName,
+          industry: industry || undefined,
+          company_size: companySize || undefined,
+          email,
+          password,
+          name,
+          phone: phone || undefined,
+          job_title: jobTitle || undefined,
+        });
+        // Business users go to app
         navigate(returnTo || '/app');
       }
     } catch (err) {
@@ -111,14 +125,14 @@ export function Register() {
             </button>
             <button
               type="button"
-              onClick={() => setType('client')}
+              onClick={() => setType('business')}
               className={`flex-1 pb-3 text-xs font-medium uppercase tracking-wider text-center transition-colors border-b-2 ${
-                type === 'client'
+                type === 'business'
                   ? 'border-zinc-900 text-zinc-900'
                   : 'border-transparent text-zinc-400 hover:text-zinc-600'
               }`}
             >
-              Client
+              Business
             </button>
           </div>
 
@@ -170,25 +184,58 @@ export function Register() {
               />
             </div>
 
-            {type === 'client' && (
+            {type === 'business' && (
               <>
                 <div>
                   <label className="block text-[10px] uppercase tracking-wider font-medium text-zinc-500 mb-1.5">
-                    Company
+                    Company Name
                   </label>
-                  <select
-                    value={companyId}
-                    onChange={(e) => setCompanyId(e.target.value)}
+                  <input
+                    type="text"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
                     required
-                    className={`${inputClasses} cursor-pointer`}
-                  >
-                    <option value="">Select a company</option>
-                    {companiesList.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    className={inputClasses}
+                    placeholder="Acme Corp"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider font-medium text-zinc-500 mb-1.5">
+                      Industry <span className="text-zinc-400 font-normal normal-case ml-1">(Optional)</span>
+                    </label>
+                    <select
+                      value={industry}
+                      onChange={(e) => setIndustry(e.target.value)}
+                      className={`${inputClasses} cursor-pointer`}
+                    >
+                      <option value="">Select industry</option>
+                      {INDUSTRY_OPTIONS.map((ind) => (
+                        <option key={ind} value={ind}>
+                          {ind}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider font-medium text-zinc-500 mb-1.5">
+                      Company Size <span className="text-zinc-400 font-normal normal-case ml-1">(Optional)</span>
+                    </label>
+                    <select
+                      value={companySize}
+                      onChange={(e) => setCompanySize(e.target.value)}
+                      className={`${inputClasses} cursor-pointer`}
+                    >
+                      <option value="">Select size</option>
+                      {COMPANY_SIZE_OPTIONS.map((size) => (
+                        <option key={size.value} value={size.value}>
+                          {size.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div>
@@ -200,7 +247,7 @@ export function Register() {
                     value={jobTitle}
                     onChange={(e) => setJobTitle(e.target.value)}
                     className={inputClasses}
-                    placeholder="Hiring Manager"
+                    placeholder="HR Manager"
                   />
                 </div>
               </>

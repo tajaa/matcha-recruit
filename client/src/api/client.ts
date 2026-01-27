@@ -25,6 +25,7 @@ import type {
   LoginRequest,
   ClientRegister,
   CandidateRegister,
+  BusinessRegister,
   CurrentUserResponse,
   Project,
   ProjectCreate,
@@ -284,6 +285,23 @@ export const auth = {
 
   registerCandidate: async (data: CandidateRegister): Promise<TokenResponse> => {
     const response = await fetch(`${API_BASE}/auth/register/candidate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(error.detail || 'Registration failed');
+    }
+
+    const result: TokenResponse = await response.json();
+    setTokens(result.access_token, result.refresh_token);
+    return result;
+  },
+
+  registerBusiness: async (data: BusinessRegister): Promise<TokenResponse> => {
+    const response = await fetch(`${API_BASE}/auth/register/business`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),

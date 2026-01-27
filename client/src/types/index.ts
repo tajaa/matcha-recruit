@@ -436,6 +436,17 @@ export interface CandidateRegister {
   phone?: string;
 }
 
+export interface BusinessRegister {
+  company_name: string;
+  industry?: string;
+  company_size?: string;
+  email: string;
+  password: string;
+  name: string;
+  phone?: string;
+  job_title?: string;
+}
+
 export interface AdminProfile {
   id: string;
   user_id: string;

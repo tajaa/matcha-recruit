@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
-import type { User, CurrentUserResponse, LoginRequest, ClientRegister, CandidateRegister, UserRole } from '../types';
+import type { User, CurrentUserResponse, LoginRequest, BusinessRegister, CandidateRegister, UserRole } from '../types';
 import { auth, getAccessToken, clearTokens } from '../api/client';
 
 interface AuthContextType {
@@ -12,7 +12,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: (data: LoginRequest) => Promise<User>;
   logout: () => Promise<void>;
-  registerClient: (data: ClientRegister) => Promise<void>;
+  registerBusiness: (data: BusinessRegister) => Promise<void>;
   registerCandidate: (data: CandidateRegister) => Promise<void>;
   hasRole: (...roles: UserRole[]) => boolean;
   hasBetaFeature: (feature: string) => boolean;
@@ -123,8 +123,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
   };
 
-  const registerClient = async (data: ClientRegister) => {
-    const result = await auth.registerClient(data);
+  const registerBusiness = async (data: BusinessRegister) => {
+    const result = await auth.registerBusiness(data);
     setUser(result.user);
     // Try to load full profile, but don't fail registration if this errors
     try {
@@ -170,7 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         login,
         logout,
-        registerClient,
+        registerBusiness,
         registerCandidate,
         hasRole,
         hasBetaFeature,
