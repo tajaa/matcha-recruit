@@ -4,7 +4,9 @@ Employee Experience (XP) Admin Routes
 Routes for managing Vibe Checks, eNPS Surveys, and Performance Reviews.
 Requires admin or client role.
 """
+import asyncio
 import json
+import logging
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional
@@ -43,6 +45,8 @@ from ..models.xp import (
     PerformanceReviewDetail,
     ReviewProgress,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/xp", tags=["Employee Experience"])
 
@@ -537,34 +541,41 @@ async def update_enps_survey(
 
     # Send email notifications AFTER releasing the DB connection
     if activation_data:
-        print(f"[eNPS] Survey {survey_id} activated - preparing to send emails to {len(activation_data['employees'])} employees")
+        logger.info(f"[eNPS] Survey {survey_id} activated - preparing to send emails to {len(activation_data['employees'])} employees")
         email_service = get_email_service()
         settings = get_settings()
         portal_url = f"{settings.app_base_url}/app/portal/enps"
 
         if not email_service.is_configured():
-            print(f"[eNPS] Warning: Email service not configured - skipping email notifications")
+            logger.warning(f"[eNPS] Email service not configured - skipping email notifications")
         else:
-            sent_count = 0
-            for emp in activation_data["employees"]:
-                employee_name = f"{emp['first_name']} {emp['last_name']}".strip() or "Team Member"
-                try:
-                    success = await email_service.send_enps_survey_email(
-                        to_email=emp["email"],
-                        to_name=employee_name,
-                        company_name=activation_data["company_name"],
-                        survey_title=activation_data["survey_title"],
-                        survey_description=activation_data["survey_description"],
-                        portal_url=portal_url,
-                    )
-                    if success:
-                        sent_count += 1
-                    else:
-                        print(f"[eNPS] Email to {emp['email']} returned false (may be unconfigured)")
-                except Exception as e:
-                    print(f"[eNPS] Failed to send email to {emp['email']}: {e}")
+            try:
+                sem = asyncio.Semaphore(5)
 
-            print(f"[eNPS] Survey {survey_id} - sent {sent_count}/{len(activation_data['employees'])} notification emails")
+                async def _send_email(emp):
+                    employee_name = f"{emp['first_name']} {emp['last_name']}".strip() or "Team Member"
+                    try:
+                        async with sem:
+                            success = await email_service.send_enps_survey_email(
+                                to_email=emp["email"],
+                                to_name=employee_name,
+                                company_name=activation_data["company_name"],
+                                survey_title=activation_data["survey_title"],
+                                survey_description=activation_data["survey_description"],
+                                portal_url=portal_url,
+                            )
+                        if not success:
+                            logger.warning(f"[eNPS] Email to {emp['email']} returned false")
+                        return success
+                    except Exception:
+                        logger.exception(f"[eNPS] Failed to send email to {emp['email']}")
+                        return False
+
+                results = await asyncio.gather(*[_send_email(emp) for emp in activation_data["employees"]])
+                sent_count = sum(1 for r in results if r)
+                logger.info(f"[eNPS] Survey {survey_id} - sent {sent_count}/{len(activation_data['employees'])} notification emails")
+            except Exception:
+                logger.exception(f"[eNPS] Unexpected error sending emails for survey {survey_id}")
 
     return response
 

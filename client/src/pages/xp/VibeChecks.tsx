@@ -312,7 +312,7 @@ export default function VibeChecks() {
                       <span className="text-2xl">{getMoodLabel(response.mood_rating).split(' ')[0]}</span>
                       <div>
                         <div className="text-sm text-white font-medium">
-                          {config?.is_anonymous ? 'Anonymous' : response.employee_name || 'Unknown Employee'}
+                          {response.employee_name || 'Unknown Employee'}
                         </div>
                         <div className="text-xs text-zinc-500 font-mono">
                           {new Date(response.created_at).toLocaleString()}
