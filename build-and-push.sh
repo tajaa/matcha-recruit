@@ -235,20 +235,34 @@ build_image() {
     # Build the image
     log_info "Starting Docker build..."
 
-    local cache_args=()
+    local build_args=(
+        --platform "$PLATFORM"
+        --load
+        "${tag_args[@]}"
+        --build-arg "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+        --build-arg "GIT_SHA=${git_sha}"
+        --build-arg "BUILDKIT_INLINE_CACHE=1"
+        -f "$dockerfile_path"
+    )
+
+    # Add cache flags unless --no-cache is set
     if [ "$NO_CACHE" = true ]; then
-        cache_args+=("--no-cache")
+        build_args+=("--no-cache")
         log_info "Building with --no-cache"
+    elif [ "$PUSH_TO_ECR" = true ]; then
+        # Use registry cache for cross-platform builds (requires ECR auth)
+        # image-manifest=true and oci-mediatypes=true required for ECR compatibility
+        build_args+=(
+            --cache-from "type=registry,ref=${image_uri}:buildcache"
+            --cache-to "type=registry,ref=${image_uri}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true"
+        )
+        log_info "Using registry cache: ${image_uri}:buildcache"
+    else
+        log_info "Local build - using default Docker cache"
     fi
 
     if docker buildx build \
-        --platform "$PLATFORM" \
-        --load \
-        "${tag_args[@]}" \
-        ${cache_args[@]+"${cache_args[@]}"} \
-        --build-arg "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-        --build-arg "GIT_SHA=${git_sha}" \
-        -f "$dockerfile_path" \
+        "${build_args[@]}" \
         "$context_dir"; then
         log_success "$name image built successfully"
     else

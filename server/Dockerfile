@@ -1,5 +1,6 @@
+# syntax=docker/dockerfile:1
 # Stage 1: Base image with system dependencies
-FROM --platform=linux/arm64 python:3.12-slim-bookworm as base
+FROM --platform=linux/arm64 python:3.12-slim-bookworm AS base
 
 # Install system dependencies (including WeasyPrint requirements)
 RUN apt-get update && apt-get install -y \
@@ -16,19 +17,20 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Stage 2: Dependencies installation
-FROM base as dependencies
+FROM base AS dependencies
 
 WORKDIR /app
 
 # Copy only requirements first for layer caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with BuildKit cache mount
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install -r requirements.txt
 
 # Stage 3: Runtime image
-FROM base as runtime
+FROM base AS runtime
 
 WORKDIR /app
 

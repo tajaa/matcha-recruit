@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Stage 1: Build stage
 FROM --platform=linux/arm64 node:20.19-alpine AS builder
 
@@ -6,8 +7,9 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --legacy-peer-deps
+# Install dependencies with BuildKit cache mount
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --legacy-peer-deps
 
 # Copy source code
 COPY . .
