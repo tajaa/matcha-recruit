@@ -11,17 +11,18 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr
 
 from ...database import get_connection
 from ...core.dependencies import get_current_user
-from ..dependencies import require_admin_or_client, get_client_company_id
+from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
 from ...core.services.email import EmailService
 
 router = APIRouter()
+pto_admin_router = APIRouter()
 
 
 # Request/Response Models
@@ -1332,7 +1333,7 @@ class PTOSummaryStats(BaseModel):
     upcoming_time_off: int  # Number of approved requests in next 30 days
 
 
-@router.get("/pto/requests", response_model=List[PTORequestAdminResponse])
+@pto_admin_router.get("/requests", response_model=List[PTORequestAdminResponse])
 async def list_pto_requests(
     status: Optional[str] = None,  # pending, approved, denied, cancelled
     employee_id: Optional[UUID] = None,
@@ -1386,7 +1387,7 @@ async def list_pto_requests(
         ]
 
 
-@router.get("/pto/summary", response_model=PTOSummaryStats)
+@pto_admin_router.get("/summary", response_model=PTOSummaryStats)
 async def get_pto_summary_stats(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -1422,7 +1423,7 @@ async def get_pto_summary_stats(
         )
 
 
-@router.patch("/pto/requests/{request_id}")
+@pto_admin_router.patch("/requests/{request_id}")
 async def handle_pto_request(
     request_id: UUID,
     request: PTORequestActionRequest,

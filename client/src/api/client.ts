@@ -1419,7 +1419,7 @@ export const adminBeta = {
 };
 
 // Admin Business Registrations API
-import type { BusinessRegistration, BusinessRegistrationListResponse, BusinessRegistrationStatus } from '../types';
+import type { BusinessRegistration, BusinessRegistrationListResponse, BusinessRegistrationStatus, CompanyWithFeatures, EnabledFeatures } from '../types';
 
 export const adminBusinessRegistrations = {
   list: (status?: BusinessRegistrationStatus): Promise<BusinessRegistrationListResponse> => {
@@ -1439,6 +1439,18 @@ export const adminBusinessRegistrations = {
     request<{ status: string; message: string }>(`/admin/business-registrations/${companyId}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    }),
+};
+
+// Company Features (Admin)
+export const adminCompanyFeatures = {
+  list: (): Promise<CompanyWithFeatures[]> =>
+    request<CompanyWithFeatures[]>('/admin/company-features'),
+
+  toggle: (companyId: string, feature: string, enabled: boolean): Promise<{ enabled_features: EnabledFeatures }> =>
+    request<{ enabled_features: EnabledFeatures }>(`/admin/company-features/${companyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ feature, enabled }),
     }),
 };
 

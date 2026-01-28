@@ -1,5 +1,6 @@
-"""Admin routes for business registration approval workflow."""
+"""Admin routes for business registration approval workflow and company feature management."""
 
+import json
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
@@ -12,6 +13,13 @@ from ..dependencies import require_admin
 from ..services.email import get_email_service
 
 router = APIRouter()
+
+# Known feature keys that can be toggled
+KNOWN_FEATURES = {
+    "offer_letters", "policies", "compliance", "employees",
+    "vibe_checks", "enps", "performance_reviews",
+    "er_copilot", "incidents", "time_off",
+}
 
 
 class BusinessRegistrationResponse(BaseModel):
@@ -266,3 +274,72 @@ async def reject_business_registration(
         )
 
         return {"status": "rejected", "message": f"Business '{company['name']}' has been rejected"}
+
+
+# =============================================================================
+# Company Feature Flags
+# =============================================================================
+
+class FeatureToggleRequest(BaseModel):
+    """Request model for toggling a company feature."""
+    feature: str
+    enabled: bool
+
+
+@router.get("/company-features", dependencies=[Depends(require_admin)])
+async def list_company_features():
+    """List all companies with their enabled features."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, name as company_name, industry, size, status,
+                   COALESCE(enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features
+            FROM companies
+            ORDER BY name
+            """
+        )
+
+        return [
+            {
+                "id": str(row["id"]),
+                "company_name": row["company_name"],
+                "industry": row["industry"],
+                "size": row["size"],
+                "status": row["status"] or "approved",
+                "enabled_features": json.loads(row["enabled_features"]) if isinstance(row["enabled_features"], str) else row["enabled_features"],
+            }
+            for row in rows
+        ]
+
+
+@router.patch("/company-features/{company_id}", dependencies=[Depends(require_admin)])
+async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest):
+    """Toggle a single feature on/off for a company."""
+    if request.feature not in KNOWN_FEATURES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown feature: {request.feature}. Valid features: {', '.join(sorted(KNOWN_FEATURES))}"
+        )
+
+    async with get_connection() as conn:
+        # Atomic JSONB update — no read-modify-write race
+        updated = await conn.fetchval(
+            """
+            UPDATE companies
+            SET enabled_features = jsonb_set(
+                COALESCE(enabled_features, '{"offer_letters": true}'::jsonb),
+                $1::text[],
+                $2::jsonb
+            )
+            WHERE id = $3
+            RETURNING enabled_features
+            """,
+            [request.feature],
+            json.dumps(request.enabled),
+            company_id,
+        )
+        if updated is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+        features = json.loads(updated) if isinstance(updated, str) else updated
+        return {"enabled_features": features}

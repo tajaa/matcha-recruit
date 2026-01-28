@@ -455,6 +455,8 @@ export interface AdminProfile {
   created_at: string;
 }
 
+export type EnabledFeatures = Record<string, boolean>;
+
 export interface ClientProfile {
   id: string;
   user_id: string;
@@ -465,6 +467,16 @@ export interface ClientProfile {
   job_title: string | null;
   email: string;
   created_at: string;
+  enabled_features?: EnabledFeatures;
+}
+
+export interface CompanyWithFeatures {
+  id: string;
+  company_name: string;
+  industry: string | null;
+  size: string | null;
+  status: string;
+  enabled_features: EnabledFeatures;
 }
 
 export interface CandidateAuthProfile {

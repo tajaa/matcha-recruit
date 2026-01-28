@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ...database import get_connection
 from ...config import get_settings
 from ...core.services.email import get_email_service
-from ..dependencies import require_admin_or_client, get_client_company_id
+from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ..models.xp import (
     # Vibe Checks
     VibeCheckConfigCreate,
@@ -50,13 +50,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/xp", tags=["Employee Experience"])
 
+# Per-feature dependencies for route-level gating
+_vibe_dep = [Depends(require_feature("vibe_checks"))]
+_enps_dep = [Depends(require_feature("enps"))]
+_reviews_dep = [Depends(require_feature("performance_reviews"))]
+
 
 # ================================
 # Vibe Checks - Configuration
 # ================================
 
 
-@router.post("/vibe-checks/config", response_model=VibeCheckConfigResponse)
+@router.post("/vibe-checks/config", response_model=VibeCheckConfigResponse, dependencies=_vibe_dep)
 async def create_or_update_vibe_config(
     config: VibeCheckConfigCreate,
     current_user=Depends(require_admin_or_client),
@@ -91,7 +96,7 @@ async def create_or_update_vibe_config(
         return VibeCheckConfigResponse(**dict(result))
 
 
-@router.get("/vibe-checks/config", response_model=VibeCheckConfigResponse)
+@router.get("/vibe-checks/config", response_model=VibeCheckConfigResponse, dependencies=_vibe_dep)
 async def get_vibe_config(
     current_user=Depends(require_admin_or_client),
     org_id: UUID = Depends(get_client_company_id),
@@ -111,7 +116,7 @@ async def get_vibe_config(
         return VibeCheckConfigResponse(**dict(result))
 
 
-@router.patch("/vibe-checks/config", response_model=VibeCheckConfigResponse)
+@router.patch("/vibe-checks/config", response_model=VibeCheckConfigResponse, dependencies=_vibe_dep)
 async def update_vibe_config(
     config: VibeCheckConfigUpdate,
     current_user=Depends(require_admin_or_client),
@@ -174,7 +179,7 @@ async def update_vibe_config(
 # ================================
 
 
-@router.get("/vibe-checks/analytics", response_model=VibeAnalytics)
+@router.get("/vibe-checks/analytics", response_model=VibeAnalytics, dependencies=_vibe_dep)
 async def get_vibe_analytics(
     period: str = Query("week", regex="^(week|month|quarter)$"),
     manager_id: Optional[UUID] = None,
@@ -273,7 +278,7 @@ async def get_vibe_analytics(
         )
 
 
-@router.get("/vibe-checks/responses", response_model=VibeCheckListResponse)
+@router.get("/vibe-checks/responses", response_model=VibeCheckListResponse, dependencies=_vibe_dep)
 async def get_vibe_responses(
     limit: int = Query(50, le=500),
     offset: int = 0,
@@ -337,7 +342,7 @@ async def get_vibe_responses(
 # ================================
 
 
-@router.post("/enps/surveys", response_model=ENPSSurveyResponse)
+@router.post("/enps/surveys", response_model=ENPSSurveyResponse, dependencies=_enps_dep)
 async def create_enps_survey(
     survey: ENPSSurveyCreate,
     current_user=Depends(require_admin_or_client),
@@ -368,7 +373,7 @@ async def create_enps_survey(
         return ENPSSurveyResponse(**dict(result))
 
 
-@router.get("/enps/surveys", response_model=ENPSSurveyListResponse)
+@router.get("/enps/surveys", response_model=ENPSSurveyListResponse, dependencies=_enps_dep)
 async def list_enps_surveys(
     limit: int = Query(50, le=100),
     offset: int = 0,
@@ -419,7 +424,7 @@ async def list_enps_surveys(
         )
 
 
-@router.get("/enps/surveys/{survey_id}", response_model=ENPSSurveyResponse)
+@router.get("/enps/surveys/{survey_id}", response_model=ENPSSurveyResponse, dependencies=_enps_dep)
 async def get_enps_survey(
     survey_id: UUID,
     current_user=Depends(require_admin_or_client),
@@ -441,7 +446,7 @@ async def get_enps_survey(
         return ENPSSurveyResponse(**dict(result))
 
 
-@router.patch("/enps/surveys/{survey_id}", response_model=ENPSSurveyResponse)
+@router.patch("/enps/surveys/{survey_id}", response_model=ENPSSurveyResponse, dependencies=_enps_dep)
 async def update_enps_survey(
     survey_id: UUID,
     survey: ENPSSurveyUpdate,
@@ -580,7 +585,7 @@ async def update_enps_survey(
     return response
 
 
-@router.get("/enps/surveys/{survey_id}/results", response_model=ENPSResults)
+@router.get("/enps/surveys/{survey_id}/results", response_model=ENPSResults, dependencies=_enps_dep)
 async def get_enps_results(
     survey_id: UUID,
     current_user=Depends(require_admin_or_client),
@@ -703,7 +708,7 @@ async def get_enps_results(
 # ================================
 
 
-@router.post("/reviews/templates", response_model=ReviewTemplateResponse)
+@router.post("/reviews/templates", response_model=ReviewTemplateResponse, dependencies=_reviews_dep)
 async def create_review_template(
     template: ReviewTemplateCreate,
     current_user=Depends(require_admin_or_client),
@@ -729,7 +734,7 @@ async def create_review_template(
         return ReviewTemplateResponse(**dict(result))
 
 
-@router.get("/reviews/templates", response_model=ReviewTemplateListResponse)
+@router.get("/reviews/templates", response_model=ReviewTemplateListResponse, dependencies=_reviews_dep)
 async def list_review_templates(
     limit: int = Query(50, le=100),
     offset: int = 0,
@@ -763,7 +768,7 @@ async def list_review_templates(
         )
 
 
-@router.get("/reviews/templates/{template_id}", response_model=ReviewTemplateResponse)
+@router.get("/reviews/templates/{template_id}", response_model=ReviewTemplateResponse, dependencies=_reviews_dep)
 async def get_review_template(
     template_id: UUID,
     current_user=Depends(require_admin_or_client),
@@ -785,7 +790,7 @@ async def get_review_template(
         return ReviewTemplateResponse(**dict(result))
 
 
-@router.patch("/reviews/templates/{template_id}", response_model=ReviewTemplateResponse)
+@router.patch("/reviews/templates/{template_id}", response_model=ReviewTemplateResponse, dependencies=_reviews_dep)
 async def update_review_template(
     template_id: UUID,
     template: ReviewTemplateUpdate,
@@ -857,7 +862,7 @@ async def update_review_template(
 # ================================
 
 
-@router.post("/reviews/cycles", response_model=ReviewCycleResponse)
+@router.post("/reviews/cycles", response_model=ReviewCycleResponse, dependencies=_reviews_dep)
 async def create_review_cycle(
     cycle: ReviewCycleCreate,
     current_user=Depends(require_admin_or_client),
@@ -885,7 +890,7 @@ async def create_review_cycle(
         return ReviewCycleResponse(**dict(result))
 
 
-@router.get("/reviews/cycles", response_model=ReviewCycleListResponse)
+@router.get("/reviews/cycles", response_model=ReviewCycleListResponse, dependencies=_reviews_dep)
 async def list_review_cycles(
     limit: int = Query(50, le=100),
     offset: int = 0,
@@ -936,7 +941,7 @@ async def list_review_cycles(
         )
 
 
-@router.get("/reviews/cycles/{cycle_id}", response_model=ReviewCycleResponse)
+@router.get("/reviews/cycles/{cycle_id}", response_model=ReviewCycleResponse, dependencies=_reviews_dep)
 async def get_review_cycle(
     cycle_id: UUID,
     current_user=Depends(require_admin_or_client),
@@ -958,7 +963,7 @@ async def get_review_cycle(
         return ReviewCycleResponse(**dict(result))
 
 
-@router.patch("/reviews/cycles/{cycle_id}", response_model=ReviewCycleResponse)
+@router.patch("/reviews/cycles/{cycle_id}", response_model=ReviewCycleResponse, dependencies=_reviews_dep)
 async def update_review_cycle(
     cycle_id: UUID,
     cycle: ReviewCycleUpdate,
@@ -1012,7 +1017,7 @@ async def update_review_cycle(
         return ReviewCycleResponse(**dict(result))
 
 
-@router.get("/reviews/cycles/{cycle_id}/progress", response_model=ReviewProgress)
+@router.get("/reviews/cycles/{cycle_id}/progress", response_model=ReviewProgress, dependencies=_reviews_dep)
 async def get_cycle_progress(
     cycle_id: UUID,
     current_user=Depends(require_admin_or_client),

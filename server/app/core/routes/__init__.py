@@ -1,6 +1,6 @@
 """Core routes aggregation."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from .auth import router as auth_router
 from .admin import router as admin_router
@@ -14,6 +14,7 @@ from .contact import router as contact_router
 from .projects import router as projects_router
 from .outreach import router as outreach_router
 from .leads_agent import router as leads_agent_router
+from ...matcha.dependencies import require_feature
 
 # Create main core router
 core_router = APIRouter()
@@ -22,9 +23,11 @@ core_router = APIRouter()
 core_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 core_router.include_router(admin_router, prefix="/admin", tags=["admin"])
 core_router.include_router(blog_router, prefix="/blogs", tags=["blog"])
-core_router.include_router(policies_router, tags=["policies"])
+core_router.include_router(policies_router, tags=["policies"],
+                           dependencies=[Depends(require_feature("policies"))])
 core_router.include_router(public_signatures_router, tags=["public-signatures"])
-core_router.include_router(compliance_router, prefix="/compliance", tags=["compliance"])
+core_router.include_router(compliance_router, prefix="/compliance", tags=["compliance"],
+                           dependencies=[Depends(require_feature("compliance"))])
 core_router.include_router(bulk_import_router, prefix="/bulk", tags=["bulk-import"])
 core_router.include_router(chat_router, prefix="/chat", tags=["chat"])
 core_router.include_router(contact_router, prefix="/contact", tags=["contact"])

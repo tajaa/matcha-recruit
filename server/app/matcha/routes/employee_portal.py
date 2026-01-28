@@ -33,9 +33,16 @@ from ..models.xp import (
     PerformanceReviewResponse
 )
 from ...core.dependencies import get_current_user
-from ..dependencies import require_employee, require_employee_record
+from ..dependencies import require_employee, require_employee_record, require_feature
 
 router = APIRouter()
+
+# Per-feature dependencies for portal routes
+_pto_dep = [Depends(require_feature("time_off"))]
+_policies_dep = [Depends(require_feature("policies"))]
+_vibe_dep = [Depends(require_feature("vibe_checks"))]
+_enps_dep = [Depends(require_feature("enps"))]
+_reviews_dep = [Depends(require_feature("performance_reviews"))]
 
 
 # ================================
@@ -182,6 +189,7 @@ async def get_pending_tasks(
     employee: dict = Depends(require_employee_record)
 ):
     """Get all pending tasks for the employee."""
+    import json as _json
     tasks = []
 
     async with get_connection() as conn:
@@ -204,27 +212,35 @@ async def get_pending_tasks(
                 created_at=doc["created_at"]
             ))
 
-        # Get pending PTO requests awaiting manager approval (for managers)
-        # This would show subordinates' requests if the employee is a manager
-        subordinate_requests = await conn.fetch(
-            """SELECT pr.id, pr.start_date, pr.end_date, pr.hours,
-                      e.first_name, e.last_name, pr.created_at
-               FROM pto_requests pr
-               JOIN employees e ON pr.employee_id = e.id
-               WHERE e.manager_id = $1 AND pr.status = 'pending'
-               ORDER BY pr.start_date ASC""",
-            employee["id"]
+        # Only show PTO approval tasks if time_off feature is enabled
+        features_row = await conn.fetchval(
+            """SELECT COALESCE(comp.enabled_features, '{"offer_letters": true}'::jsonb)
+               FROM companies comp WHERE comp.id = $1""",
+            employee["org_id"]
         )
+        features = _json.loads(features_row) if isinstance(features_row, str) else (features_row or {})
 
-        for req in subordinate_requests:
-            tasks.append(PendingTask(
-                id=req["id"],
-                task_type="pto_approval",
-                title=f"Review PTO: {req['first_name']} {req['last_name']}",
-                description=f"{req['hours']} hours from {req['start_date']} to {req['end_date']}",
-                due_date=req["start_date"],
-                created_at=req["created_at"]
-            ))
+        if features.get("time_off", False):
+            # Get pending PTO requests awaiting manager approval (for managers)
+            subordinate_requests = await conn.fetch(
+                """SELECT pr.id, pr.start_date, pr.end_date, pr.hours,
+                          e.first_name, e.last_name, pr.created_at
+                   FROM pto_requests pr
+                   JOIN employees e ON pr.employee_id = e.id
+                   WHERE e.manager_id = $1 AND pr.status = 'pending'
+                   ORDER BY pr.start_date ASC""",
+                employee["id"]
+            )
+
+            for req in subordinate_requests:
+                tasks.append(PendingTask(
+                    id=req["id"],
+                    task_type="pto_approval",
+                    title=f"Review PTO: {req['first_name']} {req['last_name']}",
+                    description=f"{req['hours']} hours from {req['start_date']} to {req['end_date']}",
+                    due_date=req["start_date"],
+                    created_at=req["created_at"]
+                ))
 
     return PortalTasks(tasks=tasks, total=len(tasks))
 
@@ -233,7 +249,7 @@ async def get_pending_tasks(
 # PTO Management
 # ================================
 
-@router.get("/me/pto", response_model=PTOSummary)
+@router.get("/me/pto", response_model=PTOSummary, dependencies=_pto_dep)
 async def get_pto_summary(
     employee: dict = Depends(require_employee_record)
 ):
@@ -331,7 +347,7 @@ async def get_pto_summary(
         )
 
 
-@router.post("/me/pto/request", response_model=PTORequestResponse)
+@router.post("/me/pto/request", response_model=PTORequestResponse, dependencies=_pto_dep)
 async def submit_pto_request(
     request: PTORequestCreate,
     employee: dict = Depends(require_employee_record)
@@ -407,7 +423,7 @@ async def submit_pto_request(
         )
 
 
-@router.delete("/me/pto/request/{request_id}")
+@router.delete("/me/pto/request/{request_id}", dependencies=_pto_dep)
 async def cancel_pto_request(
     request_id: UUID,
     employee: dict = Depends(require_employee_record)
@@ -604,7 +620,7 @@ async def sign_document(
 # Policy Search
 # ================================
 
-@router.get("/policies")
+@router.get("/policies", dependencies=_policies_dep)
 async def search_policies(
     q: Optional[str] = None,
     employee: dict = Depends(require_employee_record)
@@ -651,7 +667,7 @@ async def search_policies(
         }
 
 
-@router.get("/policies/{policy_id}")
+@router.get("/policies/{policy_id}", dependencies=_policies_dep)
 async def get_policy(
     policy_id: UUID,
     employee: dict = Depends(require_employee_record)
@@ -837,7 +853,7 @@ def get_next_week_start() -> datetime:
     return get_current_week_start() + timedelta(days=7)
 
 
-@router.get("/vibe-checks/status")
+@router.get("/vibe-checks/status", dependencies=_vibe_dep)
 async def get_vibe_check_status(
     employee: dict = Depends(require_employee_record)
 ):
@@ -884,7 +900,7 @@ async def get_vibe_check_status(
         }
 
 
-@router.post("/vibe-checks", response_model=VibeCheckResponse)
+@router.post("/vibe-checks", response_model=VibeCheckResponse, dependencies=_vibe_dep)
 async def submit_vibe_check(
     submission: VibeCheckSubmit,
     employee: dict = Depends(require_employee_record)
@@ -952,7 +968,7 @@ async def submit_vibe_check(
         return VibeCheckResponse(**dict(result))
 
 
-@router.get("/vibe-checks/history", response_model=VibeCheckListResponse)
+@router.get("/vibe-checks/history", response_model=VibeCheckListResponse, dependencies=_vibe_dep)
 async def get_my_vibe_history(
     limit: int = 30,
     offset: int = 0,
@@ -986,7 +1002,7 @@ async def get_my_vibe_history(
 # ================================
 
 
-@router.get("/enps/surveys/active", response_model=list[ENPSSurveyResponse])
+@router.get("/enps/surveys/active", response_model=list[ENPSSurveyResponse], dependencies=_enps_dep)
 async def get_active_enps_surveys(
     employee: dict = Depends(require_employee_record)
 ):
@@ -1011,7 +1027,7 @@ async def get_active_enps_surveys(
         return [ENPSSurveyResponse(**r) for r in rows]
 
 
-@router.post("/enps/surveys/{survey_id}/respond")
+@router.post("/enps/surveys/{survey_id}/respond", dependencies=_enps_dep)
 async def submit_enps_response(
     survey_id: UUID,
     submission: ENPSSubmit,
@@ -1087,7 +1103,7 @@ async def submit_enps_response(
 # ================================
 
 
-@router.get("/reviews/pending", response_model=list[PerformanceReviewResponse])
+@router.get("/reviews/pending", response_model=list[PerformanceReviewResponse], dependencies=_reviews_dep)
 async def get_pending_reviews(
     employee: dict = Depends(require_employee_record)
 ):
@@ -1107,7 +1123,7 @@ async def get_pending_reviews(
         return [PerformanceReviewResponse(**r) for r in rows]
 
 
-@router.get("/reviews/{review_id}", response_model=PerformanceReviewResponse)
+@router.get("/reviews/{review_id}", response_model=PerformanceReviewResponse, dependencies=_reviews_dep)
 async def get_review(
     review_id: UUID,
     employee: dict = Depends(require_employee_record)
@@ -1131,7 +1147,7 @@ async def get_review(
         return PerformanceReviewResponse(**row)
 
 
-@router.post("/reviews/{review_id}/self-assessment")
+@router.post("/reviews/{review_id}/self-assessment", dependencies=_reviews_dep)
 async def submit_self_assessment(
     review_id: UUID,
     submission: SelfAssessmentSubmit,
@@ -1174,7 +1190,7 @@ async def submit_self_assessment(
         return {"message": "Self-assessment submitted successfully"}
 
 
-@router.post("/reviews/{review_id}/manager-review")
+@router.post("/reviews/{review_id}/manager-review", dependencies=_reviews_dep)
 async def submit_manager_review(
     review_id: UUID,
     submission: ManagerReviewSubmit,

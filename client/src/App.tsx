@@ -47,6 +47,7 @@ const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 const BlogCommentsAdmin = lazy(() => import('./pages/BlogCommentsAdmin'));
 const TestBot = lazy(() => import('./pages/TestBot').then(m => ({ default: m.TestBot })));
 const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
+const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -213,7 +214,7 @@ function App() {
               <Route
                 path="matcha/offer-letters"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="offer_letters">
                     <OfferLetters />
                   </ProtectedRoute>
                 }
@@ -221,7 +222,7 @@ function App() {
               <Route
                 path="matcha/policies"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="policies">
                     <Policies />
                   </ProtectedRoute>
                 }
@@ -229,7 +230,7 @@ function App() {
               <Route
                 path="matcha/policies/new"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="policies">
                     <PolicyForm />
                   </ProtectedRoute>
                 }
@@ -237,7 +238,7 @@ function App() {
               <Route
                 path="matcha/policies/:id"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="policies">
                     <PolicyDetail />
                   </ProtectedRoute>
                 }
@@ -245,7 +246,7 @@ function App() {
               <Route
                 path="matcha/policies/:id/edit"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="policies">
                     <PolicyForm />
                   </ProtectedRoute>
                 }
@@ -253,7 +254,7 @@ function App() {
               <Route
                 path="matcha/compliance"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="compliance">
                     <Compliance />
                   </ProtectedRoute>
                 }
@@ -261,7 +262,7 @@ function App() {
               <Route
                 path="matcha/employees"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="employees">
                     <Employees />
                   </ProtectedRoute>
                 }
@@ -269,7 +270,7 @@ function App() {
               <Route
                 path="matcha/employees/:employeeId"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="employees">
                     <EmployeeDetail />
                   </ProtectedRoute>
                 }
@@ -277,7 +278,7 @@ function App() {
               <Route
                 path="matcha/onboarding-templates"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="employees">
                     <OnboardingTemplates />
                   </ProtectedRoute>
                 }
@@ -285,7 +286,7 @@ function App() {
               <Route
                 path="matcha/pto"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="time_off">
                     <PTOManagement />
                   </ProtectedRoute>
                 }
@@ -295,7 +296,7 @@ function App() {
               <Route
                 path="xp/dashboard"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} anyRequiredFeature={['vibe_checks', 'enps', 'performance_reviews']}>
                     <XPDashboard />
                   </ProtectedRoute>
                 }
@@ -303,7 +304,7 @@ function App() {
               <Route
                 path="xp/vibe-checks"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="vibe_checks">
                     <VibeChecks />
                   </ProtectedRoute>
                 }
@@ -311,7 +312,7 @@ function App() {
               <Route
                 path="xp/enps"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="enps">
                     <ENPS />
                   </ProtectedRoute>
                 }
@@ -319,7 +320,7 @@ function App() {
               <Route
                 path="xp/reviews"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="performance_reviews">
                     <PerformanceReviews />
                   </ProtectedRoute>
                 }
@@ -328,7 +329,7 @@ function App() {
               <Route
                 path="matcha/er-copilot"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="er_copilot">
                     <ERCopilot />
                   </ProtectedRoute>
                 }
@@ -336,7 +337,7 @@ function App() {
               <Route
                 path="matcha/er-copilot/:id"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="er_copilot">
                     <ERCaseDetail />
                   </ProtectedRoute>
                 }
@@ -400,6 +401,14 @@ function App() {
                 }
               />
               <Route
+                path="admin/company-features"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <CompanyFeatures />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="admin/tutor-metrics"
                 element={
                   <ProtectedRoute roles={['admin']}>
@@ -432,7 +441,7 @@ function App() {
               <Route
                 path="ir"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="incidents">
                     <IRDashboard />
                   </ProtectedRoute>
                 }
@@ -440,7 +449,7 @@ function App() {
               <Route
                 path="ir/incidents"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="incidents">
                     <IRList />
                   </ProtectedRoute>
                 }
@@ -448,7 +457,7 @@ function App() {
               <Route
                 path="ir/incidents/new"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="incidents">
                     <IRCreate />
                   </ProtectedRoute>
                 }
@@ -456,7 +465,7 @@ function App() {
               <Route
                 path="ir/incidents/:id"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="incidents">
                     <IRDetail />
                   </ProtectedRoute>
                 }
@@ -498,7 +507,7 @@ function App() {
               <Route
                 path="portal/pto"
                 element={
-                  <ProtectedRoute roles={['employee']}>
+                  <ProtectedRoute roles={['employee']} requiredFeature="time_off">
                     <PortalPTO />
                   </ProtectedRoute>
                 }
@@ -506,7 +515,7 @@ function App() {
               <Route
                 path="portal/policies"
                 element={
-                  <ProtectedRoute roles={['employee']}>
+                  <ProtectedRoute roles={['employee']} requiredFeature="policies">
                     <PortalPolicies />
                   </ProtectedRoute>
                 }
@@ -530,7 +539,7 @@ function App() {
               <Route
                 path="portal/vibe-check"
                 element={
-                  <ProtectedRoute roles={['employee']}>
+                  <ProtectedRoute roles={['employee']} requiredFeature="vibe_checks">
                     <PortalVibeCheck />
                   </ProtectedRoute>
                 }
@@ -538,7 +547,7 @@ function App() {
               <Route
                 path="portal/enps"
                 element={
-                  <ProtectedRoute roles={['employee']}>
+                  <ProtectedRoute roles={['employee']} requiredFeature="enps">
                     <PortalENPS />
                   </ProtectedRoute>
                 }
@@ -546,7 +555,7 @@ function App() {
               <Route
                 path="portal/reviews"
                 element={
-                  <ProtectedRoute roles={['employee']}>
+                  <ProtectedRoute roles={['employee']} requiredFeature="performance_reviews">
                     <PortalReviews />
                   </ProtectedRoute>
                 }

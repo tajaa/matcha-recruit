@@ -232,10 +232,10 @@ async def register_business(request: BusinessRegister):
             if existing:
                 raise HTTPException(status_code=400, detail="Email already registered")
 
-            # Step 1: Create company with pending status
+            # Step 1: Create company with pending status and default features
             company = await conn.fetchrow(
-                """INSERT INTO companies (name, industry, size, status)
-                   VALUES ($1, $2, $3, 'pending')
+                """INSERT INTO companies (name, industry, size, status, enabled_features)
+                   VALUES ($1, $2, $3, 'pending', '{"offer_letters": true}'::jsonb)
                    RETURNING id, name""",
                 request.company_name, request.industry, request.company_size
             )
@@ -564,6 +564,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                 """
                 SELECT c.id, c.user_id, c.company_id, comp.name as company_name,
                        comp.status as company_status, comp.rejection_reason,
+                       COALESCE(comp.enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features,
                        c.name, c.phone, c.job_title, c.created_at
                 FROM clients c
                 JOIN companies comp ON c.company_id = comp.id
@@ -580,6 +581,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "company_name": profile["company_name"],
                     "company_status": profile["company_status"] or "approved",
                     "rejection_reason": profile["rejection_reason"],
+                    "enabled_features": json.loads(profile["enabled_features"]) if isinstance(profile["enabled_features"], str) else profile["enabled_features"],
                     "name": profile["name"],
                     "phone": profile["phone"],
                     "job_title": profile["job_title"],
@@ -622,6 +624,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
             profile = await conn.fetchrow(
                 """
                 SELECT e.id, e.user_id, e.org_id, c.name as company_name,
+                       COALESCE(c.enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features,
                        e.first_name, e.last_name, e.email, e.work_state,
                        e.employment_type, e.start_date, e.manager_id, e.created_at
                 FROM employees e
@@ -637,6 +640,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "user_id": str(profile["user_id"]),
                     "company_id": str(profile["org_id"]),
                     "company_name": profile["company_name"],
+                    "enabled_features": json.loads(profile["enabled_features"]) if isinstance(profile["enabled_features"], str) else profile["enabled_features"],
                     "first_name": profile["first_name"],
                     "last_name": profile["last_name"],
                     "email": profile["email"],

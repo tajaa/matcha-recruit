@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
-import type { User, CurrentUserResponse, LoginRequest, BusinessRegister, CandidateRegister, UserRole } from '../types';
+import type { User, CurrentUserResponse, LoginRequest, BusinessRegister, CandidateRegister, UserRole, EnabledFeatures } from '../types';
 import { auth, getAccessToken, clearTokens } from '../api/client';
 
 interface AuthContextType {
@@ -8,6 +8,7 @@ interface AuthContextType {
   betaFeatures: Record<string, boolean>;
   interviewPrepTokens: number;
   allowedInterviewRoles: string[];
+  companyFeatures: EnabledFeatures;
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (data: LoginRequest) => Promise<User>;
@@ -16,6 +17,7 @@ interface AuthContextType {
   registerCandidate: (data: CandidateRegister) => Promise<void>;
   hasRole: (...roles: UserRole[]) => boolean;
   hasBetaFeature: (feature: string) => boolean;
+  hasFeature: (feature: string) => boolean;
   refreshUser: () => Promise<void>;
 }
 
@@ -27,8 +29,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [betaFeatures, setBetaFeatures] = useState<Record<string, boolean>>({});
   const [interviewPrepTokens, setInterviewPrepTokens] = useState(0);
   const [allowedInterviewRoles, setAllowedInterviewRoles] = useState<string[]>([]);
+  const [companyFeatures, setCompanyFeatures] = useState<EnabledFeatures>({});
   const [isLoading, setIsLoading] = useState(true);
   const loadingRef = useRef(false);
+
+  const extractCompanyFeatures = (profileData: any): EnabledFeatures => {
+    if (profileData?.enabled_features) {
+      return profileData.enabled_features;
+    }
+    return {};
+  };
 
   const loadUser = useCallback(async () => {
     const token = getAccessToken();
@@ -55,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setBetaFeatures(data.user.beta_features || {});
       setInterviewPrepTokens(data.user.interview_prep_tokens || 0);
       setAllowedInterviewRoles(data.user.allowed_interview_roles || []);
+      setCompanyFeatures(extractCompanyFeatures(data.profile));
     } catch (err) {
       // Only clear tokens and user for auth errors (401), not server errors
       const isAuthError = err instanceof Error &&
@@ -66,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setBetaFeatures({});
         setInterviewPrepTokens(0);
         setAllowedInterviewRoles([]);
+        setCompanyFeatures({});
       } else {
         // For non-auth errors (500s, network issues), log but don't clear user
         console.warn('Failed to load user profile:', err);
@@ -112,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setBetaFeatures(profileData.user.beta_features || {});
       setInterviewPrepTokens(profileData.user.interview_prep_tokens || 0);
       setAllowedInterviewRoles(profileData.user.allowed_interview_roles || []);
+      setCompanyFeatures(extractCompanyFeatures(profileData.profile));
     } catch (err) {
       // Profile load failed, but login succeeded - keep the basic user info
       console.warn('Failed to load full profile after login:', err);
@@ -124,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await auth.logout();
     setUser(null);
     setProfile(null);
+    setCompanyFeatures({});
   };
 
   const registerBusiness = async (data: BusinessRegister) => {
@@ -157,6 +171,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return betaFeatures[feature] === true;
   };
 
+  const hasFeature = (feature: string) => {
+    // Admin always sees everything
+    if (user?.role === 'admin') return true;
+    return companyFeatures[feature] === true;
+  };
+
   const refreshUser = useCallback(async () => {
     await loadUser();
   }, [loadUser]);
@@ -169,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         betaFeatures,
         interviewPrepTokens,
         allowedInterviewRoles,
+        companyFeatures,
         isLoading,
         isAuthenticated: !!user,
         login,
@@ -177,6 +198,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         registerCandidate,
         hasRole,
         hasBetaFeature,
+        hasFeature,
         refreshUser,
       }}
     >

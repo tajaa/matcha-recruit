@@ -11,6 +11,8 @@ interface NavItem {
   roles: UserRole[];
   icon: React.ReactNode;
   betaFeature?: string;
+  feature?: string;
+  anyFeature?: string[];
   helpText?: string;
 }
 
@@ -40,6 +42,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/offer-letters',
         label: 'Offer Letters',
         roles: ['admin', 'client'],
+        feature: 'offer_letters',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -50,6 +53,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/policies',
         label: 'Policies',
         roles: ['admin', 'client'],
+        feature: 'policies',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -60,6 +64,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/compliance',
         label: 'Compliance',
         roles: ['admin', 'client'],
+        feature: 'compliance',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
@@ -70,6 +75,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/employees',
         label: 'Employees',
         roles: ['admin', 'client'],
+        feature: 'employees',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -126,6 +132,7 @@ const navSections: NavSection[] = [
         path: '/app/xp/dashboard',
         label: 'XP Dashboard',
         roles: ['admin', 'client'],
+        anyFeature: ['vibe_checks', 'enps', 'performance_reviews'],
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -136,6 +143,7 @@ const navSections: NavSection[] = [
         path: '/app/xp/vibe-checks',
         label: 'Vibe Checks',
         roles: ['admin', 'client'],
+        feature: 'vibe_checks',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -146,6 +154,7 @@ const navSections: NavSection[] = [
         path: '/app/xp/enps',
         label: 'eNPS Surveys',
         roles: ['admin', 'client'],
+        feature: 'enps',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
@@ -156,6 +165,7 @@ const navSections: NavSection[] = [
         path: '/app/xp/reviews',
         label: 'Performance Reviews',
         roles: ['admin', 'client'],
+        feature: 'performance_reviews',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -172,6 +182,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/er-copilot',
         label: 'ER Copilot',
         roles: ['admin', 'client'],
+        feature: 'er_copilot',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
@@ -182,6 +193,7 @@ const navSections: NavSection[] = [
         path: '/app/ir',
         label: 'Incidents',
         roles: ['admin', 'client'],
+        feature: 'incidents',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -220,9 +232,21 @@ const navSections: NavSection[] = [
         ),
       },
       {
+        path: '/app/admin/company-features',
+        label: 'Company Features',
+        roles: ['admin'],
+        helpText: 'Toggle features on/off per company.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+        ),
+      },
+      {
         path: '/app/matcha/pto',
         label: 'Time Off',
         roles: ['admin', 'client'],
+        feature: 'time_off',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -286,6 +310,7 @@ const navSections: NavSection[] = [
         path: '/app/portal/pto',
         label: 'Time Off',
         roles: ['employee'],
+        feature: 'time_off',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -296,6 +321,7 @@ const navSections: NavSection[] = [
         path: '/app/portal/policies',
         label: 'Policies',
         roles: ['employee'],
+        feature: 'policies',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -316,6 +342,7 @@ const navSections: NavSection[] = [
         path: '/app/portal/vibe-check',
         label: 'Vibe Check',
         roles: ['employee'],
+        feature: 'vibe_checks',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -326,6 +353,7 @@ const navSections: NavSection[] = [
         path: '/app/portal/enps',
         label: 'Surveys',
         roles: ['employee'],
+        feature: 'enps',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
@@ -336,6 +364,7 @@ const navSections: NavSection[] = [
         path: '/app/portal/reviews',
         label: 'My Reviews',
         roles: ['employee'],
+        feature: 'performance_reviews',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -602,7 +631,7 @@ const settingsItem: NavItem = {
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, profile, logout, hasRole, hasBetaFeature } = useAuth();
+  const { user, profile, logout, hasRole, hasBetaFeature, hasFeature } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Check if client user's company is pending or rejected
@@ -626,15 +655,21 @@ export function Layout() {
     }
   }
 
-  // Check if user can see a nav item (role-based or beta feature access)
+  // Check if user can see a nav item (role-based, beta feature, or company feature access)
   const canSeeItem = (item: NavItem) => {
-    // If user has the required role, they can see it
-    if (hasRole(...item.roles)) return true;
-    // If item has a beta feature requirement and user is a candidate with that feature
-    if (item.betaFeature && user?.role === 'candidate' && hasBetaFeature(item.betaFeature)) {
-      return true;
+    // Check role access first
+    if (!hasRole(...item.roles)) {
+      // Allow candidates with beta features to see specific items
+      if (item.betaFeature && user?.role === 'candidate' && hasBetaFeature(item.betaFeature)) {
+        return true;
+      }
+      return false;
     }
-    return false;
+    // Check company feature flag (admin bypassed inside hasFeature)
+    if (item.feature && !hasFeature(item.feature)) return false;
+    // Check if any of multiple features is enabled (e.g. XP Dashboard)
+    if (item.anyFeature && !item.anyFeature.some(f => hasFeature(f))) return false;
+    return true;
   };
 
   // Filter nav items based on user role or beta access

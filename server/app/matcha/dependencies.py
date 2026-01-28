@@ -135,6 +135,78 @@ async def require_interview_prep_access(
     )
 
 
+def require_feature(feature_name: str):
+    """Factory that returns a dependency checking if a company feature is enabled.
+
+    Also verifies the company is approved (pending/rejected companies are blocked).
+    Admin users bypass all checks.
+    """
+    async def checker(current_user=Depends(get_current_user)):
+        # Admin bypasses all feature checks
+        if current_user.role == "admin":
+            return current_user
+
+        async with get_connection() as conn:
+            company_row = None
+
+            if current_user.role == "client":
+                company_row = await conn.fetchrow(
+                    """
+                    SELECT comp.id, comp.status, comp.rejection_reason,
+                           COALESCE(comp.enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features
+                    FROM clients c
+                    JOIN companies comp ON c.company_id = comp.id
+                    WHERE c.user_id = $1
+                    """,
+                    current_user.id
+                )
+            elif current_user.role == "employee":
+                company_row = await conn.fetchrow(
+                    """
+                    SELECT comp.id, comp.status, comp.rejection_reason,
+                           COALESCE(comp.enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features
+                    FROM employees e
+                    JOIN companies comp ON e.org_id = comp.id
+                    WHERE e.user_id = $1
+                    """,
+                    current_user.id
+                )
+
+            if not company_row:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="No company associated with this account"
+                )
+
+            # Check company approval status
+            company_status = company_row["status"] or "approved"
+            if company_status == "pending":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your business registration is pending approval."
+                )
+            if company_status == "rejected":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your business registration was not approved."
+                )
+
+            features = company_row["enabled_features"]
+            if isinstance(features, str):
+                import json
+                features = json.loads(features)
+            features = features or {}
+
+            if not features.get(feature_name, False):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"The '{feature_name}' feature is not enabled for your company"
+                )
+
+        return current_user
+    return checker
+
+
 async def verify_manager_access(
     current_user,
     target_employee_id: UUID
