@@ -74,10 +74,10 @@ export function Landing() {
               </span>
             </div>
             <Link
-              to="/register"
+              to="/login"
               className="px-6 py-2 border border-white/20 text-xs font-mono uppercase tracking-widest hover:bg-white hover:text-black transition-colors"
             >
-              Initialize
+              Login
             </Link>
           </div>
         </div>

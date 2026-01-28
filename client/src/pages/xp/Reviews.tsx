@@ -200,11 +200,11 @@ export default function PerformanceReviews() {
       name: template.name,
       description: template.description || '',
       categories: template.categories.map(cat => ({
-        id: cat.id,
+        id: cat.id as ReturnType<typeof crypto.randomUUID>,
         name: cat.name,
         weight: cat.weight,
         criteria: cat.criteria.map(crit => ({
-          id: crit.id,
+          id: crit.id as ReturnType<typeof crypto.randomUUID>,
           name: crit.name,
           description: crit.description,
         })),
