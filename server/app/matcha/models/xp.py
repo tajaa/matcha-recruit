@@ -79,6 +79,7 @@ class VibeCheckResponse(BaseModel):
     id: UUID
     org_id: UUID
     employee_id: Optional[UUID]
+    employee_name: Optional[str] = None
     mood_rating: int
     comment: Optional[str]
     custom_responses: Optional[dict[str, Any]]

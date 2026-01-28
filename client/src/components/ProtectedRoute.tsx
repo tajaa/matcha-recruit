@@ -24,6 +24,10 @@ export function ProtectedRoute({ children, roles }: ProtectedRouteProps) {
   }
 
   if (roles && user && !roles.includes(user.role)) {
+    // Redirect employees to their portal instead of unauthorized
+    if (user.role === 'employee') {
+      return <Navigate to="/app/portal" replace />;
+    }
     return <Navigate to="/unauthorized" replace />;
   }
 

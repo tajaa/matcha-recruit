@@ -933,9 +933,7 @@ async def submit_vibe_check(
                 print(f"[VibeCheck] Sentiment analysis failed: {e}")
                 # Continue without sentiment analysis
 
-        # Store response (employee_id NULL if anonymous)
-        employee_id = None if config["is_anonymous"] else employee["id"]
-
+        # Always store employee_id for tracking (anonymity is enforced at display layer)
         result = await conn.fetchrow(
             """
             INSERT INTO vibe_check_responses
@@ -944,7 +942,7 @@ async def submit_vibe_check(
             RETURNING *
             """,
             employee["org_id"],
-            employee_id,
+            employee["id"],
             submission.mood_rating,
             submission.comment,
             json.dumps(submission.custom_responses or {}),
