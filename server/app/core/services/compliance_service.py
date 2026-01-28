@@ -1,5 +1,6 @@
 from typing import Optional, List
 from uuid import UUID
+from datetime import date
 
 from ..models.compliance import (
     BusinessLocation,
@@ -11,6 +12,16 @@ from ..models.compliance import (
     AlertResponse,
     ComplianceSummary,
 )
+
+
+def parse_date(date_str: Optional[str]) -> Optional[date]:
+    """Parse ISO date string to Python date object."""
+    if not date_str:
+        return None
+    try:
+        return date.fromisoformat(date_str)
+    except (ValueError, AttributeError):
+        return None
 
 
 async def create_location(company_id: UUID, data: LocationCreate) -> BusinessLocation:
@@ -104,28 +115,28 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                     await conn.execute(
                         """
                         UPDATE compliance_requirements
-                        SET current_value = $1, numeric_value = $2, previous_value = $3, 
-                            last_changed_at = NOW(), description = $4, source_url = $5, 
+                        SET current_value = $1, numeric_value = $2, previous_value = $3,
+                            last_changed_at = NOW(), description = $4, source_url = $5,
                             effective_date = $6, updated_at = NOW()
                         WHERE id = $7
                         """,
                         req['current_value'], req.get('numeric_value'), existing['current_value'],
-                        req['description'], req.get('source_url'), 
-                        req.get('effective_date'), existing['id']
+                        req['description'], req.get('source_url'),
+                        parse_date(req.get('effective_date')), existing['id']
                     )
             else:
                 # Insert new requirement
                 req_id = await conn.fetchval(
                     """
                     INSERT INTO compliance_requirements
-                    (location_id, category, jurisdiction_level, jurisdiction_name, title, description, 
+                    (location_id, category, jurisdiction_level, jurisdiction_name, title, description,
                      current_value, numeric_value, source_url, source_name, effective_date)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                     RETURNING id
                     """,
                     location_id, req['category'], req['jurisdiction_level'], req['jurisdiction_name'],
                     req['title'], req['description'], req['current_value'], req.get('numeric_value'),
-                    req.get('source_url'), req.get('source_name'), req.get('effective_date')
+                    req.get('source_url'), req.get('source_name'), parse_date(req.get('effective_date'))
                 )
                 
                 # Create alert for new requirement
