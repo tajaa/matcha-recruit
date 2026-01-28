@@ -32,6 +32,7 @@ export default function PerformanceReviews() {
 
   const [showCreateCycleModal, setShowCreateCycleModal] = useState(false);
   const [showCreateTemplateModal, setShowCreateTemplateModal] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Create cycle form state
@@ -151,32 +152,84 @@ export default function PerformanceReviews() {
     try {
       setCreatingTemplate(true);
       setError(null);
-      await reviewsApi.createTemplate({
-        ...newTemplate,
-        is_active: true,
-      });
-      setShowCreateTemplateModal(false);
-      setNewTemplate({
-        name: '',
-        description: '',
-        categories: [
-          {
-            id: crypto.randomUUID(),
-            name: 'Job Performance',
-            weight: 40,
-            criteria: [
-              { id: crypto.randomUUID(), name: 'Quality of Work', description: 'Accuracy, thoroughness, and reliability of work output' },
-              { id: crypto.randomUUID(), name: 'Productivity', description: 'Volume of work completed and efficiency' },
-            ],
-          },
-        ],
-      });
+
+      if (editingTemplateId) {
+        await reviewsApi.updateTemplate(editingTemplateId, {
+          ...newTemplate,
+          is_active: true,
+        });
+      } else {
+        await reviewsApi.createTemplate({
+          ...newTemplate,
+          is_active: true,
+        });
+      }
+
+      closeTemplateModal();
       refetchTemplates();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create template');
+      setError(err instanceof Error ? err.message : editingTemplateId ? 'Failed to update template' : 'Failed to create template');
     } finally {
       setCreatingTemplate(false);
     }
+  };
+
+  const closeTemplateModal = () => {
+    setShowCreateTemplateModal(false);
+    setEditingTemplateId(null);
+    setNewTemplate({
+      name: '',
+      description: '',
+      categories: [
+        {
+          id: crypto.randomUUID(),
+          name: 'Job Performance',
+          weight: 40,
+          criteria: [
+            { id: crypto.randomUUID(), name: 'Quality of Work', description: 'Accuracy, thoroughness, and reliability of work output' },
+            { id: crypto.randomUUID(), name: 'Productivity', description: 'Volume of work completed and efficiency' },
+          ],
+        },
+      ],
+    });
+  };
+
+  const handleEditTemplate = (template: typeof templates[0]) => {
+    setEditingTemplateId(template.id);
+    setNewTemplate({
+      name: template.name,
+      description: template.description || '',
+      categories: template.categories.map(cat => ({
+        id: cat.id,
+        name: cat.name,
+        weight: cat.weight,
+        criteria: cat.criteria.map(crit => ({
+          id: crit.id,
+          name: crit.name,
+          description: crit.description,
+        })),
+      })),
+    });
+    setShowCreateTemplateModal(true);
+  };
+
+  const handleDuplicateTemplate = (template: typeof templates[0]) => {
+    setEditingTemplateId(null);
+    setNewTemplate({
+      name: `${template.name} (Copy)`,
+      description: template.description || '',
+      categories: template.categories.map(cat => ({
+        id: crypto.randomUUID(),
+        name: cat.name,
+        weight: cat.weight,
+        criteria: cat.criteria.map(crit => ({
+          id: crypto.randomUUID(),
+          name: crit.name,
+          description: crit.description,
+        })),
+      })),
+    });
+    setShowCreateTemplateModal(true);
   };
 
   const handleUpdateCycleStatus = async (cycleId: string, status: ReviewCycle['status']) => {
@@ -636,10 +689,16 @@ export default function PerformanceReviews() {
                     </div>
                   </div>
                   <div className="mt-4 pt-4 border-t border-white/10 flex items-center gap-3">
-                    <button className="text-xs text-zinc-400 uppercase tracking-wider hover:text-zinc-300 transition-colors">
+                    <button
+                      onClick={() => handleEditTemplate(template)}
+                      className="text-xs text-zinc-400 uppercase tracking-wider hover:text-zinc-300 transition-colors"
+                    >
                       Edit
                     </button>
-                    <button className="text-xs text-zinc-400 uppercase tracking-wider hover:text-zinc-300 transition-colors">
+                    <button
+                      onClick={() => handleDuplicateTemplate(template)}
+                      className="text-xs text-zinc-400 uppercase tracking-wider hover:text-zinc-300 transition-colors"
+                    >
                       Duplicate
                     </button>
                   </div>
@@ -758,9 +817,11 @@ export default function PerformanceReviews() {
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-zinc-900 border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-zinc-900">
-              <h2 className="text-sm font-bold text-white uppercase tracking-[0.2em]">Create Review Template</h2>
+              <h2 className="text-sm font-bold text-white uppercase tracking-[0.2em]">
+                {editingTemplateId ? 'Edit Review Template' : 'Create Review Template'}
+              </h2>
               <button
-                onClick={() => setShowCreateTemplateModal(false)}
+                onClick={closeTemplateModal}
                 className="p-2 hover:bg-white/5 rounded transition-colors"
               >
                 <X className="w-4 h-4 text-zinc-400" />
@@ -894,7 +955,7 @@ export default function PerformanceReviews() {
               <div className="flex items-center gap-3 pt-4 border-t border-white/10">
                 <button
                   type="button"
-                  onClick={() => setShowCreateTemplateModal(false)}
+                  onClick={closeTemplateModal}
                   className="flex-1 border border-white/10 text-white py-2 px-4 text-sm font-medium uppercase tracking-wider hover:bg-white/5 transition-colors"
                 >
                   Cancel
@@ -904,7 +965,7 @@ export default function PerformanceReviews() {
                   disabled={creatingTemplate}
                   className="flex-1 bg-white text-black py-2 px-4 text-sm font-medium uppercase tracking-wider hover:bg-zinc-200 transition-colors disabled:opacity-50"
                 >
-                  {creatingTemplate ? 'Creating...' : 'Create Template'}
+                  {creatingTemplate ? (editingTemplateId ? 'Saving...' : 'Creating...') : (editingTemplateId ? 'Save Template' : 'Create Template')}
                 </button>
               </div>
             </form>
