@@ -1,8 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Smile, Send, Clock, MessageCircle } from 'lucide-react';
+import { Smile, Send, Clock, MessageCircle, CalendarClock } from 'lucide-react';
 import { vibeChecksApi } from '../../api/xp';
 import { MoodRatingInput } from '../../components/xp/MoodRatingInput';
 import type { VibeCheckResponse } from '../../types/xp';
+
+interface VibeCheckStatus {
+  enabled: boolean;
+  can_submit: boolean;
+  already_submitted?: boolean;
+  next_available?: string;
+  message: string;
+}
 
 export default function PortalVibeCheck() {
   const [moodRating, setMoodRating] = useState(0);
@@ -10,12 +18,27 @@ export default function PortalVibeCheck() {
   const [submitting, setSubmitting] = useState(false);
   const [history, setHistory] = useState<VibeCheckResponse[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [status, setStatus] = useState<VibeCheckStatus | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
+    fetchStatus();
     fetchHistory();
   }, []);
+
+  const fetchStatus = async () => {
+    try {
+      setLoadingStatus(true);
+      const data = await vibeChecksApi.getStatus();
+      setStatus(data);
+    } catch (err) {
+      console.error('Failed to fetch status:', err);
+    } finally {
+      setLoadingStatus(false);
+    }
+  };
 
   const fetchHistory = async () => {
     try {
@@ -50,6 +73,7 @@ export default function PortalVibeCheck() {
       setSuccess(true);
       setMoodRating(0);
       setComment('');
+      fetchStatus();
       fetchHistory();
 
       setTimeout(() => setSuccess(false), 3000);
@@ -109,56 +133,90 @@ export default function PortalVibeCheck() {
 
         {/* Submission Form */}
         <div className="bg-zinc-900/30 border border-white/10 p-8">
-          <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em] mb-6">
-            How are you feeling today?
-          </h2>
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500 mb-4 block">
-                Select your mood
-              </label>
-              <MoodRatingInput
-                value={moodRating}
-                onChange={setMoodRating}
-                disabled={submitting}
-              />
+          {loadingStatus ? (
+            <div className="text-center py-8">
+              <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">
+                Loading...
+              </div>
             </div>
-
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 block">
-                Add a comment (optional)
-              </label>
-              <textarea
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                disabled={submitting}
-                placeholder="Share what's on your mind..."
-                rows={4}
-                className="w-full bg-zinc-900 border border-white/10 text-white px-4 py-3 text-sm rounded focus:border-white/30 focus:outline-none resize-none disabled:opacity-50"
-              />
-              <p className="text-xs text-zinc-500 mt-2">
-                Your comment helps us understand context and improve our workplace.
+          ) : status && !status.can_submit ? (
+            <div className="text-center py-8">
+              <CalendarClock className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
+              <h2 className="text-sm font-bold text-white uppercase tracking-[0.2em] mb-2">
+                Already Submitted This Week
+              </h2>
+              <p className="text-sm text-zinc-400 mb-4">
+                Thanks for your feedback! You've already submitted your vibe check for this week.
               </p>
-            </div>
-
-            <button
-              type="submit"
-              disabled={submitting || moodRating === 0}
-              className="w-full bg-white text-black py-3 px-6 text-sm font-medium uppercase tracking-wider hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {submitting ? (
-                <>
-                  <span className="animate-pulse">Submitting...</span>
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4" />
-                  Submit Feedback
-                </>
+              {status.next_available && (
+                <p className="text-xs text-zinc-500">
+                  Next submission opens:{' '}
+                  <span className="text-emerald-400 font-mono">
+                    {new Date(status.next_available).toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </p>
               )}
-            </button>
-          </form>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em] mb-6">
+                How are you feeling today?
+              </h2>
+
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-zinc-500 mb-4 block">
+                    Select your mood
+                  </label>
+                  <MoodRatingInput
+                    value={moodRating}
+                    onChange={setMoodRating}
+                    disabled={submitting}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 block">
+                    Add a comment (optional)
+                  </label>
+                  <textarea
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    disabled={submitting}
+                    placeholder="Share what's on your mind..."
+                    rows={4}
+                    className="w-full bg-zinc-900 border border-white/10 text-white px-4 py-3 text-sm rounded focus:border-white/30 focus:outline-none resize-none disabled:opacity-50"
+                  />
+                  <p className="text-xs text-zinc-500 mt-2">
+                    Your comment helps us understand context and improve our workplace.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={submitting || moodRating === 0}
+                  className="w-full bg-white text-black py-3 px-6 text-sm font-medium uppercase tracking-wider hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {submitting ? (
+                    <>
+                      <span className="animate-pulse">Submitting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      Submit Feedback
+                    </>
+                  )}
+                </button>
+              </form>
+            </>
+          )}
         </div>
 
         {/* History */}

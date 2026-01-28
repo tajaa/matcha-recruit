@@ -71,6 +71,16 @@ export const vibeChecksApi = {
     const response = await fetchWithAuth(`${API_BASE}/v1/portal/vibe-checks/history`);
     return response.responses || [];
   },
+
+  getStatus: async (): Promise<{
+    enabled: boolean;
+    can_submit: boolean;
+    already_submitted?: boolean;
+    next_available?: string;
+    message: string;
+  }> => {
+    return fetchWithAuth(`${API_BASE}/v1/portal/vibe-checks/status`);
+  },
 };
 
 // eNPS API

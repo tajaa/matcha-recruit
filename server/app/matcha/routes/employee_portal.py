@@ -8,7 +8,7 @@ Provides API endpoints for employees to:
 - Search company policies
 - Update personal information
 """
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -819,6 +819,71 @@ async def complete_onboarding_task(
 # ================================
 
 
+def get_current_week_start() -> datetime:
+    """Get the start of the current vibe check week (Monday 7 AM)."""
+    now = datetime.now()
+    # Calculate days since Monday (Monday = 0)
+    days_since_monday = now.weekday()
+    # Get this Monday at 7 AM
+    monday_7am = now.replace(hour=7, minute=0, second=0, microsecond=0) - timedelta(days=days_since_monday)
+    # If we're before Monday 7 AM, use last week's Monday
+    if now < monday_7am:
+        monday_7am -= timedelta(days=7)
+    return monday_7am
+
+
+def get_next_week_start() -> datetime:
+    """Get the start of the next vibe check week (next Monday 7 AM)."""
+    return get_current_week_start() + timedelta(days=7)
+
+
+@router.get("/vibe-checks/status")
+async def get_vibe_check_status(
+    employee: dict = Depends(require_employee_record)
+):
+    """Check if employee can submit a vibe check this week."""
+    async with get_connection() as conn:
+        # Check if vibe checks are enabled
+        config = await conn.fetchrow(
+            "SELECT * FROM vibe_check_configs WHERE org_id = $1 AND enabled = true",
+            employee["org_id"]
+        )
+
+        if not config:
+            return {
+                "enabled": False,
+                "can_submit": False,
+                "message": "Vibe checks are not enabled for your organization"
+            }
+
+        # Check if already submitted this week
+        week_start = get_current_week_start()
+        existing = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM vibe_check_responses
+            WHERE employee_id = $1 AND created_at >= $2
+            """,
+            employee["id"], week_start
+        )
+
+        if existing > 0:
+            next_week = get_next_week_start()
+            return {
+                "enabled": True,
+                "can_submit": False,
+                "already_submitted": True,
+                "next_available": next_week.isoformat(),
+                "message": f"You've already submitted this week. Next submission opens Monday at 7 AM."
+            }
+
+        return {
+            "enabled": True,
+            "can_submit": True,
+            "week_start": week_start.isoformat(),
+            "message": "Ready to submit your vibe check"
+        }
+
+
 @router.post("/vibe-checks", response_model=VibeCheckResponse)
 async def submit_vibe_check(
     submission: VibeCheckSubmit,
@@ -839,6 +904,22 @@ async def submit_vibe_check(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Vibe checks are not enabled for your organization"
+            )
+
+        # Check if already submitted this week
+        week_start = get_current_week_start()
+        existing = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM vibe_check_responses
+            WHERE employee_id = $1 AND created_at >= $2
+            """,
+            employee["id"], week_start
+        )
+
+        if existing > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You've already submitted a vibe check this week. Next submission opens Monday at 7 AM."
             )
 
         # Real-time sentiment analysis (if comment provided)
