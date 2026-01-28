@@ -56,7 +56,13 @@ class VibeCheckConfigResponse(VibeCheckConfigBase):
         if v is None:
             return []
         if isinstance(v, str):
-            return json.loads(v)
+            v = json.loads(v)
+        # Convert string items to dict format for backwards compatibility
+        if isinstance(v, list):
+            return [
+                item if isinstance(item, dict) else {"text": item}
+                for item in v
+            ]
         return v
 
     class Config:
