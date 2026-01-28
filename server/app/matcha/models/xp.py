@@ -6,8 +6,9 @@ Models for Vibe Checks, eNPS Surveys, and Performance Reviews.
 from datetime import datetime, date
 from typing import Optional, Literal, Any
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from decimal import Decimal
+import json
 
 
 # ================================
@@ -49,6 +50,15 @@ class VibeCheckConfigResponse(VibeCheckConfigBase):
     created_at: datetime
     updated_at: datetime
 
+    @field_validator('questions', mode='before')
+    @classmethod
+    def parse_questions(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
     class Config:
         from_attributes = True
 
@@ -68,6 +78,15 @@ class VibeCheckResponse(BaseModel):
     custom_responses: Optional[dict[str, Any]]
     sentiment_analysis: Optional[dict[str, Any]]
     created_at: datetime
+
+    @field_validator('custom_responses', 'sentiment_analysis', mode='before')
+    @classmethod
+    def parse_json_fields(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
     class Config:
         from_attributes = True
@@ -145,6 +164,15 @@ class ENPSResponseRecord(BaseModel):
     sentiment_analysis: Optional[dict[str, Any]]
     created_at: datetime
 
+    @field_validator('sentiment_analysis', mode='before')
+    @classmethod
+    def parse_sentiment(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
     class Config:
         from_attributes = True
 
@@ -188,6 +216,15 @@ class ReviewTemplateResponse(ReviewTemplateBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    @field_validator('categories', mode='before')
+    @classmethod
+    def parse_categories(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
     class Config:
         from_attributes = True
@@ -267,6 +304,15 @@ class PerformanceReviewResponse(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime]
 
+    @field_validator('self_ratings', 'manager_ratings', 'ai_analysis', mode='before')
+    @classmethod
+    def parse_json_fields(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
     class Config:
         from_attributes = True
 
@@ -280,6 +326,15 @@ class PerformanceReviewDetail(PerformanceReviewResponse):
     manager_last_name: str
     manager_email: str
     template_categories: Optional[list[dict[str, Any]]]
+
+    @field_validator('template_categories', mode='before')
+    @classmethod
+    def parse_categories(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
 
 class PerformanceReviewListResponse(BaseModel):
