@@ -56,17 +56,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setInterviewPrepTokens(data.user.interview_prep_tokens || 0);
       setAllowedInterviewRoles(data.user.allowed_interview_roles || []);
     } catch (err) {
-      // Only clear tokens for auth errors (401), not network errors
+      // Only clear tokens and user for auth errors (401), not server errors
       const isAuthError = err instanceof Error &&
         (err.message.includes('401') || err.message.includes('Unauthorized') || err.message.includes('expired'));
       if (isAuthError) {
         clearTokens();
+        setUser(null);
+        setProfile(null);
+        setBetaFeatures({});
+        setInterviewPrepTokens(0);
+        setAllowedInterviewRoles([]);
+      } else {
+        // For non-auth errors (500s, network issues), log but don't clear user
+        console.warn('Failed to load user profile:', err);
       }
-      setUser(null);
-      setProfile(null);
-      setBetaFeatures({});
-      setInterviewPrepTokens(0);
-      setAllowedInterviewRoles([]);
     } finally {
       setIsLoading(false);
       loadingRef.current = false;
