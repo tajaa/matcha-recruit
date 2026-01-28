@@ -286,16 +286,22 @@ async def get_vibe_responses(
         employee_filter = ""
         params = [org_id, limit, offset]
         if employee_id:
-            employee_filter = "AND employee_id = $4"
+            employee_filter = "AND v.employee_id = $4"
             params.append(employee_id)
 
-        # Get responses
+        # Get responses with employee names
         rows = await conn.fetch(
             f"""
-            SELECT * FROM vibe_check_responses
-            WHERE org_id = $1
+            SELECT v.*,
+                   CASE
+                       WHEN e.id IS NOT NULL THEN e.first_name || ' ' || e.last_name
+                       ELSE NULL
+                   END as employee_name
+            FROM vibe_check_responses v
+            LEFT JOIN employees e ON v.employee_id = e.id
+            WHERE v.org_id = $1
             {employee_filter}
-            ORDER BY created_at DESC
+            ORDER BY v.created_at DESC
             LIMIT $2 OFFSET $3
             """,
             *params,
@@ -317,9 +323,9 @@ async def get_vibe_responses(
             *count_params,
         )
 
-        return VibeCheckListResponse(
-            responses=[VibeCheckResponse(**dict(r)) for r in rows], total=total
-        )
+        responses = [VibeCheckResponse(**dict(r)) for r in rows]
+
+        return VibeCheckListResponse(responses=responses, total=total)
 
 
 # ================================
@@ -531,28 +537,34 @@ async def update_enps_survey(
 
     # Send email notifications AFTER releasing the DB connection
     if activation_data:
+        print(f"[eNPS] Survey {survey_id} activated - preparing to send emails to {len(activation_data['employees'])} employees")
         email_service = get_email_service()
         settings = get_settings()
         portal_url = f"{settings.app_base_url}/app/portal/enps"
 
-        sent_count = 0
-        for emp in activation_data["employees"]:
-            employee_name = f"{emp['first_name']} {emp['last_name']}".strip() or "Team Member"
-            try:
-                success = await email_service.send_enps_survey_email(
-                    to_email=emp["email"],
-                    to_name=employee_name,
-                    company_name=activation_data["company_name"],
-                    survey_title=activation_data["survey_title"],
-                    survey_description=activation_data["survey_description"],
-                    portal_url=portal_url,
-                )
-                if success:
-                    sent_count += 1
-            except Exception as e:
-                print(f"[eNPS] Failed to send email to {emp['email']}: {e}")
+        if not email_service.is_configured():
+            print(f"[eNPS] Warning: Email service not configured - skipping email notifications")
+        else:
+            sent_count = 0
+            for emp in activation_data["employees"]:
+                employee_name = f"{emp['first_name']} {emp['last_name']}".strip() or "Team Member"
+                try:
+                    success = await email_service.send_enps_survey_email(
+                        to_email=emp["email"],
+                        to_name=employee_name,
+                        company_name=activation_data["company_name"],
+                        survey_title=activation_data["survey_title"],
+                        survey_description=activation_data["survey_description"],
+                        portal_url=portal_url,
+                    )
+                    if success:
+                        sent_count += 1
+                    else:
+                        print(f"[eNPS] Email to {emp['email']} returned false (may be unconfigured)")
+                except Exception as e:
+                    print(f"[eNPS] Failed to send email to {emp['email']}: {e}")
 
-        print(f"[eNPS] Survey {survey_id} activated - sent {sent_count}/{len(activation_data['employees'])} notification emails")
+            print(f"[eNPS] Survey {survey_id} - sent {sent_count}/{len(activation_data['employees'])} notification emails")
 
     return response
 

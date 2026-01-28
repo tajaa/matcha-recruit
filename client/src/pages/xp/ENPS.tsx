@@ -37,6 +37,7 @@ export default function ENPS() {
     custom_question: '',
   });
   const [creating, setCreating] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
   // Auto-select first active survey
   useEffect(() => {
@@ -100,15 +101,20 @@ export default function ENPS() {
   };
 
   const handleUpdateStatus = async (surveyId: string, status: ENPSSurvey['status']) => {
+    if (updatingStatus) return; // Prevent double-clicks
     try {
       setError(null);
+      setUpdatingStatus(surveyId);
       await enpsApi.updateSurvey(surveyId, { status });
-      refetch();
+      await refetch();
       if (selectedSurvey?.id === surveyId) {
         setSelectedSurvey({ ...selectedSurvey, status });
       }
     } catch (err) {
+      console.error('[eNPS] Status update failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to update survey');
+    } finally {
+      setUpdatingStatus(null);
     }
   };
 
@@ -209,9 +215,10 @@ export default function ENPS() {
                 </button>
                 <button
                   onClick={() => handleUpdateStatus(survey.id, 'closed')}
-                  className="text-xs text-zinc-400 uppercase tracking-wider hover:text-zinc-300 transition-colors"
+                  disabled={!!updatingStatus}
+                  className="text-xs text-zinc-400 uppercase tracking-wider hover:text-zinc-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Close Survey
+                  {updatingStatus === survey.id ? 'Closing...' : 'Close Survey'}
                 </button>
               </div>
             </div>
@@ -348,9 +355,10 @@ export default function ENPS() {
                   <div className="flex items-center gap-3 mt-3">
                     <button
                       onClick={() => handleUpdateStatus(survey.id, 'active')}
-                      className="text-xs text-emerald-400 uppercase tracking-wider hover:text-emerald-300 transition-colors"
+                      disabled={!!updatingStatus}
+                      className="text-xs text-emerald-400 uppercase tracking-wider hover:text-emerald-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Activate
+                      {updatingStatus === survey.id ? 'Activating...' : 'Activate'}
                     </button>
                     <button
                       onClick={() => setSelectedSurvey(survey)}
