@@ -501,9 +501,9 @@ async def update_enps_survey(
         if is_activating:
             org_id = current_survey["org_id"]
 
-            # Get organization name
+            # Get company name
             org = await conn.fetchrow(
-                "SELECT name FROM organizations WHERE id = $1", org_id
+                "SELECT name FROM companies WHERE id = $1", org_id
             )
             company_name = org["name"] if org else "Your Company"
 

@@ -870,7 +870,7 @@ async def submit_vibe_check(
             json.dumps(sentiment_result) if sentiment_result else None
         )
 
-        return VibeCheckResponse(**result)
+        return VibeCheckResponse(**dict(result))
 
 
 @router.get("/vibe-checks/history", response_model=VibeCheckListResponse)
