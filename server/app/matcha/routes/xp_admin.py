@@ -510,11 +510,11 @@ async def update_enps_survey(
             # Get all active employees with email
             employees = await conn.fetch(
                 """
-                SELECT e.id, e.first_name, e.last_name, e.work_email
+                SELECT e.id, e.first_name, e.last_name, e.email
                 FROM employees e
                 WHERE e.org_id = $1
                 AND e.status = 'active'
-                AND e.work_email IS NOT NULL
+                AND e.email IS NOT NULL
                 """,
                 org_id,
             )
@@ -540,7 +540,7 @@ async def update_enps_survey(
             employee_name = f"{emp['first_name']} {emp['last_name']}".strip() or "Team Member"
             try:
                 success = await email_service.send_enps_survey_email(
-                    to_email=emp["work_email"],
+                    to_email=emp["email"],
                     to_name=employee_name,
                     company_name=activation_data["company_name"],
                     survey_title=activation_data["survey_title"],
@@ -550,7 +550,7 @@ async def update_enps_survey(
                 if success:
                     sent_count += 1
             except Exception as e:
-                print(f"[eNPS] Failed to send email to {emp['work_email']}: {e}")
+                print(f"[eNPS] Failed to send email to {emp['email']}: {e}")
 
         print(f"[eNPS] Survey {survey_id} activated - sent {sent_count}/{len(activation_data['employees'])} notification emails")
 
