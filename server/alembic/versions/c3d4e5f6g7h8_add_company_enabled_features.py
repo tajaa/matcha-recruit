@@ -46,7 +46,7 @@ def upgrade() -> None:
         sa.text(
             "UPDATE companies SET enabled_features = :features "
             "WHERE status = 'approved' OR status IS NULL"
-        ).bindparams(features=json.dumps(ALL_FEATURES))
+        ).bindparams(sa.bindparam("features", value=ALL_FEATURES, type_=JSONB))
     )
 
 
