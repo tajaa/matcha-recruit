@@ -196,7 +196,7 @@ export function Compliance() {
     };
 
     const selectedLocation = locations?.find(l => l.id === selectedLocationId);
-    const locationAlerts = alerts?.filter(a => a.location_id === selectedLocationId) || [];
+    const locationAlerts = alerts?.filter(a => a.location_id === selectedLocationId && a.status !== 'dismissed') || [];
     const unreadAlertsCount = locationAlerts.filter(a => a.status === 'unread').length;
 
     return (

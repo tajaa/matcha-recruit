@@ -77,7 +77,7 @@ def _base_title(title, jurisdiction_name):
     return title
 
 
-def _normalize_value_text(value):
+def _normalize_value_text(value, category: Optional[str] = None):
     """Normalise current_value text to reduce formatting noise.
 
     Collapses "per hour" / "/ hour" → "/hr" etc. so that rephrasing
@@ -89,23 +89,30 @@ def _normalize_value_text(value):
     s = s.replace("‑", "-").replace("–", "-").replace("—", "-")
     s = re.sub(r"[$,]", "", s)
     s = re.sub(r"\s+", " ", s)
+    cat_key = _normalize_category(category)
+    is_pay_frequency = cat_key == "pay_frequency"
 
-    # Canonicalize common wording variations (esp. pay frequency).
-    phrase_map = [
-        (r"\bevery\s+2\s+weeks\b", "biweekly"),
-        (r"\bevery\s+two\s+weeks\b", "biweekly"),
-        (r"\bevery\s+other\s+week\b", "biweekly"),
-        (r"\bbi[-\s]?weekly\b", "biweekly"),
-        (r"\btwice\s+a\s+month\b", "semimonthly"),
-        (r"\bsemi[-\s]?monthly\b", "semimonthly"),
-        (r"\bevery\s+week\b", "weekly"),
-        (r"\bevery\s+month\b", "monthly"),
-        (r"\bevery\s+year\b", "yearly"),
-        (r"\bannually\b", "yearly"),
-        (r"\bevery\s+day\b", "daily"),
-    ]
-    for pattern, repl in phrase_map:
-        s = re.sub(pattern, repl, s)
+    if is_pay_frequency:
+        s = re.sub(r"\bor\s+at\s+least\b", "or", s)
+        s = re.sub(r"\bat\s+least\s+\b", "", s)
+        # Canonicalize common wording variations (pay frequency).
+        phrase_map = [
+            (r"\bevery\s+2\s+weeks\b", "biweekly"),
+            (r"\bevery\s+two\s+weeks\b", "biweekly"),
+            (r"\bevery\s+other\s+week\b", "biweekly"),
+            (r"\bbi[-\s]?weekly\b", "biweekly"),
+            (r"\bat\s+least\s+twice\s+(?:a|per)\s+month\b", "semimonthly"),
+            (r"\bat\s+least\s+2\s+times?\s+(?:a|per)\s+month\b", "semimonthly"),
+            (r"\btwice\s+(?:a|per)\s+month\b", "semimonthly"),
+            (r"\bsemi[-\s]?monthly\b", "semimonthly"),
+            (r"\bevery\s+week\b", "weekly"),
+            (r"\bevery\s+month\b", "monthly"),
+            (r"\bevery\s+year\b", "yearly"),
+            (r"\bannually\b", "yearly"),
+            (r"\bevery\s+day\b", "daily"),
+        ]
+        for pattern, repl in phrase_map:
+            s = re.sub(pattern, repl, s)
 
     unit_map = [
         (r"\bper\s+hour\b", "/hr"),
@@ -124,6 +131,20 @@ def _normalize_value_text(value):
         s = re.sub(pattern, repl, s)
 
     s = re.sub(r"\s*/\s*", "/", s)
+    s = re.sub(r"/hour\b", "/hr", s)
+    s = re.sub(r"/week\b", "/wk", s)
+    s = re.sub(r"/month\b", "/mo", s)
+    s = re.sub(r"/year\b", "/yr", s)
+    s = re.sub(r"/annum\b", "/yr", s)
+    if cat_key == "minimum_wage":
+        if re.fullmatch(r"\d+(?:\.\d+)?", s):
+            s = f"{s}/hr"
+    if is_pay_frequency:
+        s = re.sub(
+            r"\b(semimonthly|biweekly|weekly|monthly|yearly|daily)\b(?:\s+or\s+\1\b)+",
+            r"\1",
+            s,
+        )
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
@@ -242,13 +263,15 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                     new_num = req.get('numeric_value')
                     if existing_num is not None and new_num is not None:
                         num_changed = float(existing_num) != float(new_num)
-                        content_changed = (_normalize_value_text(existing['current_value'])
-                                           != _normalize_value_text(req['current_value']))
+                        category = req.get('category')
+                        content_changed = (_normalize_value_text(existing['current_value'], category)
+                                           != _normalize_value_text(req['current_value'], category))
                         material_change = num_changed or content_changed
                     else:
                         # No numeric values — use normalized text comparison
-                        material_change = (_normalize_value_text(existing['current_value'])
-                                           != _normalize_value_text(req['current_value']))
+                        category = req.get('category')
+                        material_change = (_normalize_value_text(existing['current_value'], category)
+                                           != _normalize_value_text(req['current_value'], category))
 
                     if material_change:
                         await conn.execute(
