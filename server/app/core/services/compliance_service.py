@@ -27,18 +27,54 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
 JURISDICTION_PRIORITY = {'city': 1, 'county': 2, 'state': 3, 'federal': 4}
 
 
-def _filter_by_jurisdiction_priority(requirements):
-    """For each (category, title), keep only the most specific jurisdiction level.
+def _base_title(title, jurisdiction_name):
+    """Strip jurisdiction-name prefix from a title for grouping.
 
-    This ensures that a city-level "Minimum Wage" supersedes a state-level
-    "Minimum Wage", but a state-level "Overtime Pay" in the same category is
-    preserved because no more-specific entry exists for that title.
+    "California Minimum Wage" with jurisdiction_name "California"
+    → "Minimum Wage", so it matches "West Hollywood Minimum Wage".
+    """
+    if jurisdiction_name and title.lower().startswith(jurisdiction_name.lower()):
+        stripped = title[len(jurisdiction_name):].lstrip(' -:')
+        if stripped:
+            return stripped
+    return title
+
+
+def _normalize_value_text(value):
+    """Normalise current_value text to reduce formatting noise.
+
+    Collapses "per hour" / "/ hour" → "/hr" etc. so that rephrasing
+    by Gemini doesn't look like a material change.
+    """
+    if not value:
+        return ""
+    s = value.lower().strip()
+    s = ' '.join(s.split())
+    for long, short in (('per hour', '/hr'), ('/ hour', '/hr'), ('/hour', '/hr'),
+                        ('per year', '/yr'), ('/ year', '/yr'), ('/year', '/yr'),
+                        ('per month', '/mo'), ('/ month', '/mo'), ('/month', '/mo')):
+        s = s.replace(long, short)
+    return s
+
+
+def _filter_by_jurisdiction_priority(requirements):
+    """For each distinct requirement within a category, keep only the most
+    specific jurisdiction level.
+
+    Titles are compared after stripping jurisdiction-name prefixes so that
+    e.g. "California Minimum Wage" (state) and "West Hollywood Minimum Wage"
+    (city) are recognised as the same rule, while genuinely different
+    requirements (e.g. separate meal / rest break entries) within one category
+    are preserved.
     """
     by_key = {}
     for req in requirements:
         cat = req['category'] if isinstance(req, dict) else req.category
         title = req['title'] if isinstance(req, dict) else req.title
-        by_key.setdefault((cat, title), []).append(req)
+        jname = (req['jurisdiction_name'] if isinstance(req, dict)
+                 else getattr(req, 'jurisdiction_name', None))
+        base = _base_title(title, jname)
+        by_key.setdefault((cat, base), []).append(req)
 
     filtered = []
     for reqs in by_key.values():
@@ -127,22 +163,32 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
             )
 
             if existing:
-                # Update if value changed
-                if existing['current_value'] != req['current_value']:
-                    # Create alert
-                    await conn.execute(
-                        """
-                        INSERT INTO compliance_alerts 
-                        (location_id, company_id, requirement_id, title, message, severity, status, category, action_required)
-                        VALUES ($1, $2, $3, $4, $5, $6, 'unread', $7, 'Review new requirement')
-                        """,
-                        location_id, company_id, existing['id'],
-                        f"Compliance Change: {req['title']}",
-                        f"Value changed from {existing['current_value']} to {req['current_value']}",
-                        "warning", req['category']
-                    )
+                text_changed = existing['current_value'] != req['current_value']
+                if text_changed:
+                    existing_num = existing['numeric_value']
+                    new_num = req.get('numeric_value')
+                    if existing_num is not None and new_num is not None:
+                        num_changed = float(existing_num) != float(new_num)
+                        content_changed = (_normalize_value_text(existing['current_value'])
+                                           != _normalize_value_text(req['current_value']))
+                        material_change = num_changed or content_changed
+                    else:
+                        material_change = True
 
-                    # Update requirement
+                    if material_change:
+                        await conn.execute(
+                            """
+                            INSERT INTO compliance_alerts
+                            (location_id, company_id, requirement_id, title, message, severity, status, category, action_required)
+                            VALUES ($1, $2, $3, $4, $5, $6, 'unread', $7, 'Review new requirement')
+                            """,
+                            location_id, company_id, existing['id'],
+                            f"Compliance Change: {req['title']}",
+                            f"Value changed from {existing['current_value']} to {req['current_value']}",
+                            "warning", req['category']
+                        )
+
+                    # Always update the requirement row so stored text stays fresh
                     await conn.execute(
                         """
                         UPDATE compliance_requirements
@@ -197,7 +243,7 @@ async def get_location_counts(location_id: UUID) -> dict:
     from ...database import get_connection
     async with get_connection() as conn:
         rows = await conn.fetch(
-            "SELECT category, jurisdiction_level, title FROM compliance_requirements WHERE location_id = $1",
+            "SELECT category, jurisdiction_level, title, jurisdiction_name FROM compliance_requirements WHERE location_id = $1",
             location_id,
         )
         filtered = _filter_by_jurisdiction_priority([dict(r) for r in rows])
