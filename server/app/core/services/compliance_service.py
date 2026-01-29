@@ -32,11 +32,20 @@ def _base_title(title, jurisdiction_name):
 
     "California Minimum Wage" with jurisdiction_name "California"
     → "Minimum Wage", so it matches "West Hollywood Minimum Wage".
+    Also handles "City of …" / "County of …" prefixes that Gemini
+    may prepend to the jurisdiction name in the title.
     """
-    if jurisdiction_name and title.lower().startswith(jurisdiction_name.lower()):
-        stripped = title[len(jurisdiction_name):].lstrip(' -:')
-        if stripped:
-            return stripped
+    if not jurisdiction_name:
+        return title
+    t_lower = title.lower()
+    jn_lower = jurisdiction_name.lower()
+    # Try direct match first, then with "city of" / "county of" prefix
+    for prefix in ('', 'city of ', 'county of '):
+        candidate = prefix + jn_lower
+        if t_lower.startswith(candidate):
+            stripped = title[len(candidate):].lstrip(' -:')
+            if stripped:
+                return stripped
     return title
 
 
@@ -173,7 +182,9 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                                            != _normalize_value_text(req['current_value']))
                         material_change = num_changed or content_changed
                     else:
-                        material_change = True
+                        # No numeric values — use normalized text comparison
+                        material_change = (_normalize_value_text(existing['current_value'])
+                                           != _normalize_value_text(req['current_value']))
 
                     if material_change:
                         await conn.execute(
