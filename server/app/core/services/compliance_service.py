@@ -77,78 +77,6 @@ def _base_title(title, jurisdiction_name):
     return title
 
 
-def _normalize_value_text(value, category: Optional[str] = None):
-    """Normalise current_value text to reduce formatting noise.
-
-    Collapses "per hour" / "/ hour" → "/hr" etc. so that rephrasing
-    by Gemini doesn't look like a material change.
-    """
-    if not value:
-        return ""
-    s = value.lower().strip()
-    s = s.replace("‑", "-").replace("–", "-").replace("—", "-")
-    s = re.sub(r"[$,]", "", s)
-    s = re.sub(r"\s+", " ", s)
-    cat_key = _normalize_category(category)
-    is_pay_frequency = cat_key == "pay_frequency"
-
-    if is_pay_frequency:
-        s = re.sub(r"\bor\s+at\s+least\b", "or", s)
-        s = re.sub(r"\bat\s+least\s+\b", "", s)
-        # Canonicalize common wording variations (pay frequency).
-        phrase_map = [
-            (r"\bevery\s+2\s+weeks\b", "biweekly"),
-            (r"\bevery\s+two\s+weeks\b", "biweekly"),
-            (r"\bevery\s+other\s+week\b", "biweekly"),
-            (r"\bbi[-\s]?weekly\b", "biweekly"),
-            (r"\bat\s+least\s+twice\s+(?:a|per)\s+month\b", "semimonthly"),
-            (r"\bat\s+least\s+2\s+times?\s+(?:a|per)\s+month\b", "semimonthly"),
-            (r"\btwice\s+(?:a|per)\s+month\b", "semimonthly"),
-            (r"\bsemi[-\s]?monthly\b", "semimonthly"),
-            (r"\bevery\s+week\b", "weekly"),
-            (r"\bevery\s+month\b", "monthly"),
-            (r"\bevery\s+year\b", "yearly"),
-            (r"\bannually\b", "yearly"),
-            (r"\bevery\s+day\b", "daily"),
-        ]
-        for pattern, repl in phrase_map:
-            s = re.sub(pattern, repl, s)
-
-    unit_map = [
-        (r"\bper\s+hour\b", "/hr"),
-        (r"\bper\s+hr\b", "/hr"),
-        (r"\bper\s+week\b", "/wk"),
-        (r"\bper\s+month\b", "/mo"),
-        (r"\bper\s+year\b", "/yr"),
-        (r"\bper\s+annum\b", "/yr"),
-        (r"\bhourly\b", "/hr"),
-        (r"\bweekly\b", "/wk"),
-        (r"\bmonthly\b", "/mo"),
-        (r"\byearly\b", "/yr"),
-        (r"\bdaily\b", "/day"),
-    ]
-    for pattern, repl in unit_map:
-        s = re.sub(pattern, repl, s)
-
-    s = re.sub(r"\s*/\s*", "/", s)
-    s = re.sub(r"/hour\b", "/hr", s)
-    s = re.sub(r"/week\b", "/wk", s)
-    s = re.sub(r"/month\b", "/mo", s)
-    s = re.sub(r"/year\b", "/yr", s)
-    s = re.sub(r"/annum\b", "/yr", s)
-    if cat_key == "minimum_wage":
-        if re.fullmatch(r"\d+(?:\.\d+)?", s):
-            s = f"{s}/hr"
-    if is_pay_frequency:
-        s = re.sub(
-            r"\b(semimonthly|biweekly|weekly|monthly|yearly|daily)\b(?:\s+or\s+\1\b)+",
-            r"\1",
-            s,
-        )
-    s = re.sub(r"\s+", " ", s)
-    return s.strip()
-
-
 def _filter_by_jurisdiction_priority(requirements):
     """For each distinct requirement within a category, keep only the most
     specific jurisdiction level.
@@ -250,28 +178,18 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
             # Check if requirement exists
             existing = await conn.fetchrow(
                 """
-                SELECT * FROM compliance_requirements 
-                WHERE location_id = $1 AND category = $2 AND jurisdiction_level = $3 AND title = $4
+                SELECT * FROM compliance_requirements
+                WHERE location_id = $1 AND category = $2 AND jurisdiction_level = $3
                 """,
-                location_id, req['category'], req['jurisdiction_level'], req['title']
+                location_id, req['category'], req['jurisdiction_level']
             )
 
             if existing:
                 text_changed = existing['current_value'] != req['current_value']
                 if text_changed:
-                    existing_num = existing['numeric_value']
-                    new_num = req.get('numeric_value')
-                    if existing_num is not None and new_num is not None:
-                        num_changed = float(existing_num) != float(new_num)
-                        category = req.get('category')
-                        content_changed = (_normalize_value_text(existing['current_value'], category)
-                                           != _normalize_value_text(req['current_value'], category))
-                        material_change = num_changed or content_changed
-                    else:
-                        # No numeric values — use normalized text comparison
-                        category = req.get('category')
-                        material_change = (_normalize_value_text(existing['current_value'], category)
-                                           != _normalize_value_text(req['current_value'], category))
+                    material_change = await service.is_material_change(
+                        req['category'], existing['current_value'], req['current_value']
+                    )
 
                     if material_change:
                         await conn.execute(
@@ -286,19 +204,19 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                             "warning", req['category']
                         )
 
-                    # Always update the requirement row so stored text stays fresh
-                    await conn.execute(
-                        """
-                        UPDATE compliance_requirements
-                        SET current_value = $1, numeric_value = $2, previous_value = $3,
-                            last_changed_at = NOW(), description = $4, source_url = $5,
-                            effective_date = $6, updated_at = NOW()
-                        WHERE id = $7
-                        """,
-                        req['current_value'], req.get('numeric_value'), existing['current_value'],
-                        req['description'], req.get('source_url'),
-                        parse_date(req.get('effective_date')), existing['id']
-                    )
+                # Always update the requirement row so stored text stays fresh
+                await conn.execute(
+                    """
+                    UPDATE compliance_requirements
+                    SET title = $1, current_value = $2, numeric_value = $3, previous_value = $4,
+                        last_changed_at = NOW(), description = $5, source_url = $6,
+                        effective_date = $7, updated_at = NOW()
+                    WHERE id = $8
+                    """,
+                    req['title'], req['current_value'], req.get('numeric_value'), existing['current_value'],
+                    req['description'], req.get('source_url'),
+                    parse_date(req.get('effective_date')), existing['id']
+                )
             else:
                 # Insert new requirement
                 req_id = await conn.fetchval(

@@ -36,6 +36,28 @@ class GeminiComplianceService:
                 self._client = genai.Client(api_key=self.settings.gemini_api_key)
         return self._client
 
+    async def is_material_change(self, category: str, old_value: str, new_value: str) -> bool:
+        """Ask Gemini whether two compliance values represent a material change."""
+        prompt = f"""Compare these two compliance requirement values for the category "{category}".
+
+Old: {old_value}
+New: {new_value}
+
+Are these materially different, or just different wording for the same requirement?
+Respond with ONLY "yes" if materially different, "no" if same meaning."""
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.settings.analysis_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.0),
+            )
+            return response.text.strip().lower().startswith("yes")
+        except Exception as e:
+            print(f"[Gemini Compliance] Error checking material change: {e}")
+            # Fall back to assuming it's a material change so we don't silently drop real changes
+            return True
+
     async def research_location_compliance(
         self,
         city: str,
