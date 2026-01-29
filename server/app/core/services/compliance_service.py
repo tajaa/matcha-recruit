@@ -1,6 +1,7 @@
 from typing import Optional, List
 from uuid import UUID
 from datetime import date
+import re
 
 from ..models.compliance import (
     BusinessLocation,
@@ -27,6 +28,27 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
 JURISDICTION_PRIORITY = {'city': 1, 'county': 2, 'state': 3, 'federal': 4}
 
 
+def _normalize_jurisdiction_name(name: Optional[str]) -> str:
+    if not name:
+        return ""
+    s = " ".join(name.lower().strip().split())
+    for prefix in ("city of ", "county of "):
+        if s.startswith(prefix):
+            s = s[len(prefix):].strip()
+    for suffix in (" city", " county"):
+        if s.endswith(suffix):
+            s = s[:-len(suffix)].strip()
+    return s
+
+
+def _normalize_category(category: Optional[str]) -> Optional[str]:
+    if not category:
+        return category
+    s = category.strip().lower()
+    s = re.sub(r"[\s\-]+", "_", s)
+    return s
+
+
 def _base_title(title, jurisdiction_name):
     """Strip jurisdiction-name prefix from a title for grouping.
 
@@ -38,12 +60,18 @@ def _base_title(title, jurisdiction_name):
     if not jurisdiction_name:
         return title
     t_lower = title.lower()
-    jn_lower = jurisdiction_name.lower()
-    # Try direct match first, then with "city of" / "county of" prefix
-    for prefix in ('', 'city of ', 'county of '):
-        candidate = prefix + jn_lower
-        if t_lower.startswith(candidate):
-            stripped = title[len(candidate):].lstrip(' -:')
+    jn_norm = _normalize_jurisdiction_name(jurisdiction_name)
+    if not jn_norm:
+        return title
+
+    # Match optional "city/county of" prefix and optional "city/county" suffix.
+    jn_parts = [re.escape(p) for p in jn_norm.split()]
+    if jn_parts:
+        jn_pattern = r"\s+".join(jn_parts)
+        pattern = rf"^(?:city|county)\s+of\s+{jn_pattern}\b|^{jn_pattern}\s+(?:city|county)\b|^{jn_pattern}\b"
+        match = re.match(pattern, t_lower)
+        if match:
+            stripped = title[match.end():].lstrip(" -:,")
             if stripped:
                 return stripped
     return title
@@ -58,12 +86,46 @@ def _normalize_value_text(value):
     if not value:
         return ""
     s = value.lower().strip()
-    s = ' '.join(s.split())
-    for long, short in (('per hour', '/hr'), ('/ hour', '/hr'), ('/hour', '/hr'),
-                        ('per year', '/yr'), ('/ year', '/yr'), ('/year', '/yr'),
-                        ('per month', '/mo'), ('/ month', '/mo'), ('/month', '/mo')):
-        s = s.replace(long, short)
-    return s
+    s = s.replace("‑", "-").replace("–", "-").replace("—", "-")
+    s = re.sub(r"[$,]", "", s)
+    s = re.sub(r"\s+", " ", s)
+
+    # Canonicalize common wording variations (esp. pay frequency).
+    phrase_map = [
+        (r"\bevery\s+2\s+weeks\b", "biweekly"),
+        (r"\bevery\s+two\s+weeks\b", "biweekly"),
+        (r"\bevery\s+other\s+week\b", "biweekly"),
+        (r"\bbi[-\s]?weekly\b", "biweekly"),
+        (r"\btwice\s+a\s+month\b", "semimonthly"),
+        (r"\bsemi[-\s]?monthly\b", "semimonthly"),
+        (r"\bevery\s+week\b", "weekly"),
+        (r"\bevery\s+month\b", "monthly"),
+        (r"\bevery\s+year\b", "yearly"),
+        (r"\bannually\b", "yearly"),
+        (r"\bevery\s+day\b", "daily"),
+    ]
+    for pattern, repl in phrase_map:
+        s = re.sub(pattern, repl, s)
+
+    unit_map = [
+        (r"\bper\s+hour\b", "/hr"),
+        (r"\bper\s+hr\b", "/hr"),
+        (r"\bper\s+week\b", "/wk"),
+        (r"\bper\s+month\b", "/mo"),
+        (r"\bper\s+year\b", "/yr"),
+        (r"\bper\s+annum\b", "/yr"),
+        (r"\bhourly\b", "/hr"),
+        (r"\bweekly\b", "/wk"),
+        (r"\bmonthly\b", "/mo"),
+        (r"\byearly\b", "/yr"),
+        (r"\bdaily\b", "/day"),
+    ]
+    for pattern, repl in unit_map:
+        s = re.sub(pattern, repl, s)
+
+    s = re.sub(r"\s*/\s*", "/", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
 
 
 def _filter_by_jurisdiction_priority(requirements):
@@ -83,7 +145,9 @@ def _filter_by_jurisdiction_priority(requirements):
         jname = (req['jurisdiction_name'] if isinstance(req, dict)
                  else getattr(req, 'jurisdiction_name', None))
         base = _base_title(title, jname)
-        by_key.setdefault((cat, base), []).append(req)
+        base_key = re.sub(r"\s+", " ", (base or "").strip().lower())
+        cat_key = _normalize_category(cat)
+        by_key.setdefault((cat_key, base_key), []).append(req)
 
     filtered = []
     for reqs in by_key.values():
