@@ -16,6 +16,7 @@ export function PolicyForm() {
   const [status, setStatus] = useState<PolicyStatus>('draft');
   const [loading, setLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (isEditing) {
@@ -41,7 +42,13 @@ export function PolicyForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     if (!title.trim()) return;
+
+    if (!isEditing && !content.trim() && !file) {
+      setError('Please provide either text content or upload a document.');
+      return;
+    }
 
     try {
       setLoading(true);
@@ -143,22 +150,23 @@ export function PolicyForm() {
           {/* Content */}
           <div className="space-y-4 pt-4">
             <div className="flex items-center justify-between border-b border-white/20 pb-2">
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Content</label>
+              <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">
+                Content {file && <span className="text-zinc-600 font-normal">(Optional when document is attached)</span>}
+              </label>
               <span className="text-[9px] text-zinc-400 font-mono italic">Plain text or basic formatting</span>
             </div>
             <textarea
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => { setContent(e.target.value); setError(''); }}
               className="w-full px-4 py-4 bg-zinc-900 border border-white/20 rounded-sm text-white text-sm font-serif leading-relaxed min-h-[400px] focus:outline-none focus:border-white/40 transition-all resize-none placeholder-zinc-500"
               placeholder="Start drafting policy content here..."
-              required
             />
           </div>
 
           {/* File Upload */}
           <div className="space-y-4 pt-4">
             <label className="block text-[10px] uppercase tracking-wider text-zinc-500 font-bold border-b border-white/20 pb-2">
-              Reference Document (Optional)
+              Upload Document
             </label>
             <div className="flex items-center gap-6 p-6 border-2 border-dashed border-white/10 rounded-lg bg-white/5 hover:bg-white/10 transition-colors group">
               <div className="w-12 h-12 rounded-full bg-zinc-900 border border-white/20 flex items-center justify-center text-zinc-400 group-hover:text-white transition-colors">
@@ -169,7 +177,7 @@ export function PolicyForm() {
                   <span className="text-sm font-medium text-white hover:underline">Click to upload policy PDF</span>
                   <input
                     type="file"
-                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    onChange={(e) => { setFile(e.target.files?.[0] || null); setError(''); }}
                     accept=".pdf,.doc,.docx,.txt"
                     className="hidden"
                   />
@@ -216,6 +224,11 @@ export function PolicyForm() {
         </div>
 
         {/* Footer Actions */}
+        {error && (
+          <div className="text-red-400 text-xs font-medium px-4 py-3 border border-red-500/30 bg-red-500/10 rounded-sm">
+            {error}
+          </div>
+        )}
         <div className="flex justify-end gap-4 pt-10 border-t border-white/10">
           <button
             type="button"

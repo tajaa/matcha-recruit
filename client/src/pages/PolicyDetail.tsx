@@ -246,23 +246,44 @@ export function PolicyDetail() {
               <div className="border-b border-zinc-200 pb-2">
                 <h2 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Policy Document</h2>
               </div>
-              <a
-                href={policy.file_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-4 p-6 bg-zinc-50 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-100 transition-colors group"
-              >
-                <div className="w-12 h-12 bg-white border border-zinc-200 flex items-center justify-center">
-                  <FileText size={24} className="text-zinc-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-zinc-900 group-hover:text-zinc-700">View Policy Document</div>
-                  <div className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">
-                    {policy.file_url.split('/').pop()}
+              {policy.file_url.toLowerCase().endsWith('.pdf') ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-end">
+                    <a
+                      href={policy.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-900 uppercase tracking-wider transition-colors"
+                    >
+                      Open in new tab <ExternalLink size={10} />
+                    </a>
                   </div>
+                  <iframe
+                    src={policy.file_url}
+                    className="w-full border border-zinc-200 rounded-sm"
+                    style={{ height: '600px' }}
+                    title="Policy Document"
+                  />
                 </div>
-                <ExternalLink size={16} className="text-zinc-400 group-hover:text-zinc-600" />
-              </a>
+              ) : (
+                <a
+                  href={policy.file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-4 p-6 bg-zinc-50 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-100 transition-colors group"
+                >
+                  <div className="w-12 h-12 bg-white border border-zinc-200 flex items-center justify-center">
+                    <FileText size={24} className="text-zinc-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-zinc-900 group-hover:text-zinc-700">View Policy Document</div>
+                    <div className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">
+                      {policy.file_url.split('/').pop()}
+                    </div>
+                  </div>
+                  <ExternalLink size={16} className="text-zinc-400 group-hover:text-zinc-600" />
+                </a>
+              )}
             </div>
           )}
 

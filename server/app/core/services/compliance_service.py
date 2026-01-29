@@ -24,6 +24,37 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
         return None
 
 
+JURISDICTION_PRIORITY = {'city': 1, 'county': 2, 'state': 3, 'federal': 4}
+
+
+def _filter_by_jurisdiction_priority(requirements):
+    """For each (category, title), keep only the most specific jurisdiction level.
+
+    This ensures that a city-level "Minimum Wage" supersedes a state-level
+    "Minimum Wage", but a state-level "Overtime Pay" in the same category is
+    preserved because no more-specific entry exists for that title.
+    """
+    by_key = {}
+    for req in requirements:
+        cat = req['category'] if isinstance(req, dict) else req.category
+        title = req['title'] if isinstance(req, dict) else req.title
+        by_key.setdefault((cat, title), []).append(req)
+
+    filtered = []
+    for reqs in by_key.values():
+        best = min(
+            JURISDICTION_PRIORITY.get(
+                r['jurisdiction_level'] if isinstance(r, dict) else r.jurisdiction_level, 99
+            )
+            for r in reqs
+        )
+        for r in reqs:
+            level = r['jurisdiction_level'] if isinstance(r, dict) else r.jurisdiction_level
+            if JURISDICTION_PRIORITY.get(level, 99) == best:
+                filtered.append(r)
+    return filtered
+
+
 async def create_location(company_id: UUID, data: LocationCreate) -> BusinessLocation:
     from ...database import get_connection
     async with get_connection() as conn:
@@ -165,16 +196,17 @@ async def get_location_counts(location_id: UUID) -> dict:
     """Get requirements count and unread alerts count for a location."""
     from ...database import get_connection
     async with get_connection() as conn:
-        requirements_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM compliance_requirements WHERE location_id = $1",
+        rows = await conn.fetch(
+            "SELECT category, jurisdiction_level, title FROM compliance_requirements WHERE location_id = $1",
             location_id,
         )
+        filtered = _filter_by_jurisdiction_priority([dict(r) for r in rows])
         unread_alerts_count = await conn.fetchval(
             "SELECT COUNT(*) FROM compliance_alerts WHERE location_id = $1 AND status = 'unread'",
             location_id,
         )
         return {
-            "requirements_count": requirements_count or 0,
+            "requirements_count": len(filtered),
             "unread_alerts_count": unread_alerts_count or 0,
         }
 
@@ -281,6 +313,8 @@ async def get_location_requirements(location_id: UUID, company_id: UUID, categor
         query += " ORDER BY r.category, r.jurisdiction_level"
 
         rows = await conn.fetch(query, *params)
+        row_dicts = [dict(row) for row in rows]
+        filtered = _filter_by_jurisdiction_priority(row_dicts)
         return [
             RequirementResponse(
                 id=str(row["id"]),
@@ -297,7 +331,7 @@ async def get_location_requirements(location_id: UUID, company_id: UUID, categor
                 previous_value=row["previous_value"],
                 last_changed_at=row["last_changed_at"].isoformat() if row["last_changed_at"] else None,
             )
-            for row in rows
+            for row in filtered
         ]
 
 
@@ -378,9 +412,10 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
                 "SELECT * FROM compliance_requirements WHERE location_id = $1",
                 loc["id"],
             )
-            total_requirements += len(reqs)
+            filtered_reqs = _filter_by_jurisdiction_priority([dict(r) for r in reqs])
+            total_requirements += len(filtered_reqs)
 
-            for req in reqs:
+            for req in filtered_reqs:
                 if req["last_changed_at"]:
                     recent_changes.append({
                         "location": loc["name"] or f"{loc['city']}, {loc['state']}",
