@@ -46,6 +46,7 @@ const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
 const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 const BlogCommentsAdmin = lazy(() => import('./pages/BlogCommentsAdmin'));
 const TestBot = lazy(() => import('./pages/TestBot').then(m => ({ default: m.TestBot })));
+const AdminOverview = lazy(() => import('./pages/admin/AdminOverview'));
 const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
 const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
 
@@ -344,6 +345,14 @@ function App() {
               />
 
               {/* Admin Routes */}
+              <Route
+                path="admin/overview"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <AdminOverview />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="admin/blog"
                 element={

@@ -14,6 +14,61 @@ from ..services.email import get_email_service
 
 router = APIRouter()
 
+
+@router.get("/overview", dependencies=[Depends(require_admin)])
+async def admin_overview():
+    """Get platform overview with company and employee stats."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                comp.id,
+                comp.name,
+                comp.industry,
+                comp.size,
+                comp.status,
+                comp.created_at,
+                comp.approved_at,
+                COUNT(e.id) AS total_employees,
+                COUNT(CASE WHEN e.user_id IS NOT NULL AND e.termination_date IS NULL THEN 1 END) AS active_employees,
+                COUNT(CASE WHEN e.termination_date IS NOT NULL THEN 1 END) AS terminated_employees,
+                COUNT(CASE WHEN e.id IS NOT NULL AND e.user_id IS NULL AND e.termination_date IS NULL THEN 1 END) AS pending_employees
+            FROM companies comp
+            LEFT JOIN employees e ON e.org_id = comp.id
+            WHERE comp.owner_id IS NOT NULL
+            GROUP BY comp.id
+            ORDER BY comp.created_at DESC
+            """
+        )
+
+        companies = [
+            {
+                "id": str(row["id"]),
+                "name": row["name"],
+                "industry": row["industry"],
+                "size": row["size"],
+                "status": row["status"] or "approved",
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "approved_at": row["approved_at"].isoformat() if row["approved_at"] else None,
+                "total_employees": row["total_employees"],
+                "active_employees": row["active_employees"],
+                "terminated_employees": row["terminated_employees"],
+                "pending_employees": row["pending_employees"],
+            }
+            for row in rows
+        ]
+
+        totals = {
+            "total_companies": len(companies),
+            "total_employees": sum(c["total_employees"] for c in companies),
+            "active_employees": sum(c["active_employees"] for c in companies),
+            "pending_employees": sum(c["pending_employees"] for c in companies),
+            "terminated_employees": sum(c["terminated_employees"] for c in companies),
+        }
+
+        return {"companies": companies, "totals": totals}
+
+
 # Known feature keys that can be toggled
 KNOWN_FEATURES = {
     "offer_letters", "policies", "compliance", "employees",

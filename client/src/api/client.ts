@@ -1454,6 +1454,39 @@ export const adminCompanyFeatures = {
     }),
 };
 
+// Admin Overview
+export interface AdminOverviewCompany {
+  id: string;
+  name: string;
+  industry: string | null;
+  size: string | null;
+  status: string;
+  created_at: string | null;
+  approved_at: string | null;
+  total_employees: number;
+  active_employees: number;
+  terminated_employees: number;
+  pending_employees: number;
+}
+
+export interface AdminOverviewTotals {
+  total_companies: number;
+  total_employees: number;
+  active_employees: number;
+  pending_employees: number;
+  terminated_employees: number;
+}
+
+export interface AdminOverviewResponse {
+  companies: AdminOverviewCompany[];
+  totals: AdminOverviewTotals;
+}
+
+export const adminOverview = {
+  get: (): Promise<AdminOverviewResponse> =>
+    request<AdminOverviewResponse>('/admin/overview'),
+};
+
 // Blog API
 export const blogs = {
   list: (options?: { status?: BlogStatus; tag?: string; page?: number; limit?: number }) => {
