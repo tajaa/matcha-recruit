@@ -41,6 +41,7 @@ class ERCaseResponse(BaseModel):
     title: str
     description: Optional[str] = None
     status: ERCaseStatus
+    company_id: Optional[UUID] = None
     created_by: Optional[UUID] = None
     assigned_to: Optional[UUID] = None
     document_count: int = 0

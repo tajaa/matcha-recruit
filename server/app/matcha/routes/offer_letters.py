@@ -5,10 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, File, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from ...database import get_connection
 from ..models.offer_letter import OfferLetter, OfferLetterCreate, OfferLetterUpdate
+from ..dependencies import require_admin_or_client, get_client_company_id
+from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
 
 logger = logging.getLogger(__name__)
@@ -17,26 +18,55 @@ router = APIRouter()
 
 
 @router.get("", response_model=List[OfferLetter])
-async def list_offer_letters():
-    """List all offer letters."""
+async def list_offer_letters(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List offer letters scoped to the user's company."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
+    is_admin = current_user.role == "admin"
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT * FROM offer_letters
-            ORDER BY created_at DESC
-            """
-        )
+        if is_admin:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM offer_letters
+                WHERE (company_id = $1 OR company_id IS NULL)
+                ORDER BY created_at DESC
+                """,
+                company_id,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM offer_letters
+                WHERE company_id = $1
+                ORDER BY created_at DESC
+                """,
+                company_id,
+            )
         return [OfferLetter(**dict(row)) for row in rows]
 
 
 @router.post("", response_model=OfferLetter)
-async def create_offer_letter(offer: OfferLetterCreate):
+async def create_offer_letter(
+    offer: OfferLetterCreate,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Create a new offer letter draft."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
     async with get_connection() as conn:
+        # Look up company name from companies table (authoritative source)
+        company_name = await conn.fetchval(
+            "SELECT name FROM companies WHERE id = $1", company_id
+        )
         row = await conn.fetchrow(
             """
             INSERT INTO offer_letters (
-                candidate_name, position_title, company_name, salary, bonus,
+                candidate_name, position_title, company_name, company_id,
+                salary, bonus,
                 stock_options, start_date, employment_type, location, benefits,
                 manager_name, manager_title, expiration_date,
                 benefits_medical, benefits_medical_coverage, benefits_medical_waiting_days,
@@ -46,14 +76,15 @@ async def create_offer_letter(offer: OfferLetterCreate):
                 contingency_background_check, contingency_credit_check, contingency_drug_screening,
                 company_logo_url
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
-                    $26, $27, $28, $29)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+                    $27, $28, $29, $30)
             RETURNING *
             """,
             offer.candidate_name,
             offer.position_title,
-            offer.company_name,
+            company_name,
+            company_id,
             offer.salary,
             offer.bonus,
             offer.stock_options,
@@ -85,32 +116,64 @@ async def create_offer_letter(offer: OfferLetterCreate):
 
 
 @router.get("/{offer_id}", response_model=OfferLetter)
-async def get_offer_letter(offer_id: UUID):
+async def get_offer_letter(
+    offer_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Get details of a specific offer letter."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Offer letter not found")
+    is_admin = current_user.role == "admin"
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM offer_letters WHERE id = $1",
-            offer_id
-        )
+        if is_admin:
+            row = await conn.fetchrow(
+                "SELECT * FROM offer_letters WHERE id = $1 AND (company_id = $2 OR company_id IS NULL)",
+                offer_id,
+                company_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                "SELECT * FROM offer_letters WHERE id = $1 AND company_id = $2",
+                offer_id,
+                company_id,
+            )
         if not row:
             raise HTTPException(status_code=404, detail="Offer letter not found")
         return OfferLetter(**dict(row))
 
 
 @router.patch("/{offer_id}", response_model=OfferLetter)
-async def update_offer_letter(offer_id: UUID, update: OfferLetterUpdate):
+async def update_offer_letter(
+    offer_id: UUID,
+    update: OfferLetterUpdate,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Update an offer letter."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Offer letter not found")
+    is_admin = current_user.role == "admin"
+    company_filter = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+
     async with get_connection() as conn:
-        # Check if exists
-        exists = await conn.fetchval("SELECT 1 FROM offer_letters WHERE id = $1", offer_id)
+        # Check if exists and belongs to company
+        exists = await conn.fetchval(
+            f"SELECT 1 FROM offer_letters WHERE id = $1 AND {company_filter}",
+            offer_id,
+            company_id,
+        )
         if not exists:
             raise HTTPException(status_code=404, detail="Offer letter not found")
 
         # Build query dynamically
         update_data = update.dict(exclude_unset=True)
         if not update_data:
-            # Nothing to update, return current state
-            row = await conn.fetchrow("SELECT * FROM offer_letters WHERE id = $1", offer_id)
+            row = await conn.fetchrow(
+                f"SELECT * FROM offer_letters WHERE id = $1 AND {company_filter}",
+                offer_id,
+                company_id,
+            )
             return OfferLetter(**dict(row))
 
         set_clauses = []
@@ -120,15 +183,17 @@ async def update_offer_letter(offer_id: UUID, update: OfferLetterUpdate):
             set_clauses.append(f"{key} = ${idx}")
             values.append(value)
             idx += 1
-        
+
         values.append(offer_id)
+        values.append(company_id)
+        where_filter = f"(company_id = ${idx + 1} OR company_id IS NULL)" if is_admin else f"company_id = ${idx + 1}"
         query = f"""
             UPDATE offer_letters
             SET {', '.join(set_clauses)}, updated_at = NOW()
-            WHERE id = ${idx}
+            WHERE id = ${idx} AND {where_filter}
             RETURNING *
         """
-        
+
         row = await conn.fetchrow(query, *values)
         return OfferLetter(**dict(row))
 
@@ -444,13 +509,28 @@ def _generate_offer_letter_html(offer: dict) -> str:
 
 
 @router.get("/{offer_id}/pdf")
-async def download_offer_letter_pdf(offer_id: UUID):
+async def download_offer_letter_pdf(
+    offer_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Generate and download offer letter as PDF."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Offer letter not found")
+    is_admin = current_user.role == "admin"
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM offer_letters WHERE id = $1",
-            offer_id
-        )
+        if is_admin:
+            row = await conn.fetchrow(
+                "SELECT * FROM offer_letters WHERE id = $1 AND (company_id = $2 OR company_id IS NULL)",
+                offer_id,
+                company_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                "SELECT * FROM offer_letters WHERE id = $1 AND company_id = $2",
+                offer_id,
+                company_id,
+            )
         if not row:
             raise HTTPException(status_code=404, detail="Offer letter not found")
 
@@ -487,15 +567,30 @@ async def download_offer_letter_pdf(offer_id: UUID):
 
 
 @router.post("/{offer_id}/logo")
-async def upload_offer_logo(offer_id: UUID, file: UploadFile = File(...)):
+async def upload_offer_logo(
+    offer_id: UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Upload a company logo for an offer letter."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Offer letter not found")
+
     # Validate file type
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image files are supported")
 
+    is_admin = current_user.role == "admin"
+    company_filter = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+
     async with get_connection() as conn:
-        # Check if offer exists
-        exists = await conn.fetchval("SELECT 1 FROM offer_letters WHERE id = $1", offer_id)
+        # Check if offer exists and belongs to company
+        exists = await conn.fetchval(
+            f"SELECT 1 FROM offer_letters WHERE id = $1 AND {company_filter}",
+            offer_id,
+            company_id,
+        )
         if not exists:
             raise HTTPException(status_code=404, detail="Offer letter not found")
 
@@ -514,10 +609,12 @@ async def upload_offer_logo(offer_id: UUID, file: UploadFile = File(...)):
             raise HTTPException(status_code=500, detail=f"Failed to upload logo: {str(e)}")
 
         # Update offer letter with logo URL
+        logo_filter = "(company_id = $3 OR company_id IS NULL)" if is_admin else "company_id = $3"
         await conn.execute(
-            "UPDATE offer_letters SET company_logo_url = $1, updated_at = NOW() WHERE id = $2",
+            f"UPDATE offer_letters SET company_logo_url = $1, updated_at = NOW() WHERE id = $2 AND {logo_filter}",
             url,
-            offer_id
+            offer_id,
+            company_id,
         )
 
         return {"url": url}

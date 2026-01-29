@@ -40,24 +40,43 @@ class PolicyService:
             return await PolicyService.get_policy_by_id(policy_id)
 
     @staticmethod
-    async def get_policy_by_id(policy_id: str) -> Optional[PolicyResponse]:
+    async def get_policy_by_id(policy_id: str, company_id: Optional[str] = None) -> Optional[PolicyResponse]:
         async with get_connection() as conn:
-            row = await conn.fetchrow(
-                """
-                    SELECT
-                        p.*,
-                        c.name as company_name,
-                        COUNT(ps.id) as signature_count,
-                        COUNT(CASE WHEN ps.status = 'signed' THEN 1 END) as signed_count,
-                        COUNT(CASE WHEN ps.status = 'pending' THEN 1 END) as pending_signatures
-                    FROM policies p
-                    LEFT JOIN companies c ON p.company_id = c.id
-                    LEFT JOIN policy_signatures ps ON p.id = ps.policy_id
-                    WHERE p.id = $1
-                    GROUP BY p.id, c.name
-                """,
-                policy_id,
-            )
+            if company_id:
+                row = await conn.fetchrow(
+                    """
+                        SELECT
+                            p.*,
+                            c.name as company_name,
+                            COUNT(ps.id) as signature_count,
+                            COUNT(CASE WHEN ps.status = 'signed' THEN 1 END) as signed_count,
+                            COUNT(CASE WHEN ps.status = 'pending' THEN 1 END) as pending_signatures
+                        FROM policies p
+                        LEFT JOIN companies c ON p.company_id = c.id
+                        LEFT JOIN policy_signatures ps ON p.id = ps.policy_id
+                        WHERE p.id = $1 AND p.company_id = $2
+                        GROUP BY p.id, c.name
+                    """,
+                    policy_id,
+                    company_id,
+                )
+            else:
+                row = await conn.fetchrow(
+                    """
+                        SELECT
+                            p.*,
+                            c.name as company_name,
+                            COUNT(ps.id) as signature_count,
+                            COUNT(CASE WHEN ps.status = 'signed' THEN 1 END) as signed_count,
+                            COUNT(CASE WHEN ps.status = 'pending' THEN 1 END) as pending_signatures
+                        FROM policies p
+                        LEFT JOIN companies c ON p.company_id = c.id
+                        LEFT JOIN policy_signatures ps ON p.id = ps.policy_id
+                        WHERE p.id = $1
+                        GROUP BY p.id, c.name
+                    """,
+                    policy_id,
+                )
             if not row:
                 return None
             return PolicyResponse(**dict(row))
@@ -89,7 +108,7 @@ class PolicyService:
             return [PolicyResponse(**dict(row)) for row in rows]
 
     @staticmethod
-    async def update_policy(policy_id: str, data: PolicyUpdate) -> Optional[PolicyResponse]:
+    async def update_policy(policy_id: str, data: PolicyUpdate, company_id: Optional[str] = None) -> Optional[PolicyResponse]:
         async with get_connection() as conn:
             updates = []
             params = []
@@ -126,22 +145,36 @@ class PolicyService:
                 param_idx += 1
 
             if not updates:
-                return await PolicyService.get_policy_by_id(policy_id)
+                return await PolicyService.get_policy_by_id(policy_id, company_id)
 
             updates.append("updated_at = NOW()")
-            query = f"UPDATE policies SET {', '.join(updates)} WHERE id = $1 RETURNING id"
+            where = "WHERE id = $1"
+            if company_id:
+                where += f" AND company_id = ${param_idx}"
+                params.append(company_id)
+                param_idx += 1
+            query = f"UPDATE policies SET {', '.join(updates)} {where} RETURNING id"
             params.insert(0, policy_id)
 
-            await conn.execute(query, *params)
-            return await PolicyService.get_policy_by_id(policy_id)
+            result = await conn.fetchval(query, *params)
+            if result is None:
+                return None
+            return await PolicyService.get_policy_by_id(policy_id, company_id)
 
     @staticmethod
-    async def delete_policy(policy_id: str) -> bool:
+    async def delete_policy(policy_id: str, company_id: Optional[str] = None) -> bool:
         async with get_connection() as conn:
-            result = await conn.execute(
-                "DELETE FROM policies WHERE id = $1",
-                policy_id,
-            )
+            if company_id:
+                result = await conn.execute(
+                    "DELETE FROM policies WHERE id = $1 AND company_id = $2",
+                    policy_id,
+                    company_id,
+                )
+            else:
+                result = await conn.execute(
+                    "DELETE FROM policies WHERE id = $1",
+                    policy_id,
+                )
             return result == "DELETE 1"
 
     @staticmethod

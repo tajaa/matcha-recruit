@@ -19,8 +19,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 
 from ...database import get_connection
-from ...core.dependencies import require_admin
-from ..dependencies import require_admin_or_client
+from ..dependencies import require_admin_or_client, get_client_company_id
+from ...core.models.auth import CurrentUser
 from ...config import get_settings
 from ...core.services.storage import get_storage
 from ..models.er_case import (
@@ -85,6 +85,25 @@ async def log_audit(
     )
 
 
+async def _verify_case_company(conn, case_id: UUID, company_id: UUID, is_admin: bool = False):
+    """Verify a case exists and belongs to the company. Raises 404 if not.
+    Admins can also access legacy rows with NULL company_id."""
+    if is_admin:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM er_cases WHERE id = $1 AND (company_id = $2 OR company_id IS NULL)",
+            case_id,
+            company_id,
+        )
+    else:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM er_cases WHERE id = $1 AND company_id = $2",
+            case_id,
+            company_id,
+        )
+    if not exists:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+
 # ===========================================
 # Cases CRUD
 # ===========================================
@@ -93,22 +112,27 @@ async def log_audit(
 async def create_case(
     case: ERCaseCreate,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new ER investigation case."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+
     case_number = generate_case_number()
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO er_cases (case_number, title, description, created_by)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, case_number, title, description, status, created_by, assigned_to, created_at, updated_at, closed_at
+            INSERT INTO er_cases (case_number, title, description, created_by, company_id)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, case_number, title, description, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at
             """,
             case_number,
             case.title,
             case.description,
             str(current_user.id),
+            company_id,
         )
 
         # Log audit
@@ -129,6 +153,7 @@ async def create_case(
             title=row["title"],
             description=row["description"],
             status=row["status"],
+            company_id=row["company_id"],
             created_by=row["created_by"],
             assigned_to=row["assigned_to"],
             document_count=0,
@@ -141,22 +166,29 @@ async def create_case(
 @router.get("", response_model=ERCaseListResponse)
 async def list_cases(
     status: Optional[str] = None,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """List all ER cases with optional status filter."""
+    """List ER cases scoped to the user's company."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return ERCaseListResponse(cases=[], total=0)
+
+    is_admin = current_user.role == "admin"
     async with get_connection() as conn:
-        base_query = """
+        company_filter = "(c.company_id = $1 OR c.company_id IS NULL)" if is_admin else "c.company_id = $1"
+        base_query = f"""
             SELECT c.*, COUNT(d.id) as document_count
             FROM er_cases c
             LEFT JOIN er_case_documents d ON c.id = d.case_id
+            WHERE {company_filter}
         """
 
         if status:
-            query = base_query + " WHERE c.status = $1 GROUP BY c.id ORDER BY c.updated_at DESC"
-            rows = await conn.fetch(query, status)
+            query = base_query + " AND c.status = $2 GROUP BY c.id ORDER BY c.updated_at DESC"
+            rows = await conn.fetch(query, company_id, status)
         else:
             query = base_query + " GROUP BY c.id ORDER BY c.updated_at DESC"
-            rows = await conn.fetch(query)
+            rows = await conn.fetch(query, company_id)
 
         cases = [
             ERCaseResponse(
@@ -165,6 +197,7 @@ async def list_cases(
                 title=row["title"],
                 description=row["description"],
                 status=row["status"],
+                company_id=row["company_id"],
                 created_by=row["created_by"],
                 assigned_to=row["assigned_to"],
                 document_count=row["document_count"],
@@ -181,19 +214,26 @@ async def list_cases(
 @router.get("/{case_id}", response_model=ERCaseResponse)
 async def get_case(
     case_id: UUID,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get a case by ID."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    is_admin = current_user.role == "admin"
     async with get_connection() as conn:
+        company_filter = "(c.company_id = $2 OR c.company_id IS NULL)" if is_admin else "c.company_id = $2"
         row = await conn.fetchrow(
-            """
+            f"""
             SELECT c.*, COUNT(d.id) as document_count
             FROM er_cases c
             LEFT JOIN er_case_documents d ON c.id = d.case_id
-            WHERE c.id = $1
+            WHERE c.id = $1 AND {company_filter}
             GROUP BY c.id
             """,
             case_id,
+            company_id,
         )
 
         if not row:
@@ -205,6 +245,7 @@ async def get_case(
             title=row["title"],
             description=row["description"],
             status=row["status"],
+            company_id=row["company_id"],
             created_by=row["created_by"],
             assigned_to=row["assigned_to"],
             document_count=row["document_count"],
@@ -219,10 +260,17 @@ async def update_case(
     case_id: UUID,
     case: ERCaseUpdate,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update a case."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    is_admin = current_user.role == "admin"
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, is_admin)
+
         # Build dynamic update
         updates = []
         params = []
@@ -256,12 +304,15 @@ async def update_case(
 
         updates.append("updated_at = NOW()")
         params.append(case_id)
+        param_count += 1
+        params.append(company_id)
 
+        company_filter = f"(company_id = ${param_count} OR company_id IS NULL)" if is_admin else f"company_id = ${param_count}"
         query = f"""
             UPDATE er_cases
             SET {', '.join(updates)}
-            WHERE id = ${param_count}
-            RETURNING id, case_number, title, description, status, created_by, assigned_to, created_at, updated_at, closed_at
+            WHERE id = ${param_count - 1} AND {company_filter}
+            RETURNING id, case_number, title, description, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at
         """
 
         row = await conn.fetchrow(query, *params)
@@ -293,6 +344,7 @@ async def update_case(
             title=row["title"],
             description=row["description"],
             status=row["status"],
+            company_id=row["company_id"],
             created_by=row["created_by"],
             assigned_to=row["assigned_to"],
             document_count=doc_count or 0,
@@ -306,21 +358,33 @@ async def update_case(
 async def delete_case(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a case and all associated data."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    is_admin = current_user.role == "admin"
+    company_filter = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+
     async with get_connection() as conn:
         # Get case info for audit log before deletion
         case = await conn.fetchrow(
-            "SELECT case_number, title FROM er_cases WHERE id = $1",
+            f"SELECT case_number, title FROM er_cases WHERE id = $1 AND {company_filter}",
             case_id,
+            company_id,
         )
 
         if not case:
             raise HTTPException(status_code=404, detail="Case not found")
 
         # Delete case (cascades to documents, chunks, analysis)
-        await conn.execute("DELETE FROM er_cases WHERE id = $1", case_id)
+        await conn.execute(
+            f"DELETE FROM er_cases WHERE id = $1 AND {company_filter}",
+            case_id,
+            company_id,
+        )
 
         # Log audit (case_id is null since case is deleted)
         await log_audit(
@@ -347,12 +411,28 @@ async def upload_document(
     request: Request,
     file: UploadFile = File(...),
     document_type: str = Form("transcript"),
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Upload a document to a case. Triggers async processing."""
-    # Validate case exists
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    # Validate case exists and belongs to company
+    is_admin = current_user.role == "admin"
     async with get_connection() as conn:
-        case = await conn.fetchval("SELECT id FROM er_cases WHERE id = $1", case_id)
+        if is_admin:
+            case = await conn.fetchval(
+                "SELECT id FROM er_cases WHERE id = $1 AND (company_id = $2 OR company_id IS NULL)",
+                case_id,
+                company_id,
+            )
+        else:
+            case = await conn.fetchval(
+                "SELECT id FROM er_cases WHERE id = $1 AND company_id = $2",
+                case_id,
+                company_id,
+            )
         if not case:
             raise HTTPException(status_code=404, detail="Case not found")
 
@@ -493,10 +573,15 @@ async def upload_document(
 @router.get("/{case_id}/documents", response_model=list[ERDocumentResponse])
 async def list_documents(
     case_id: UUID,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List all documents in a case."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         rows = await conn.fetch(
             """
             SELECT id, case_id, document_type, filename, mime_type, file_size,
@@ -531,10 +616,15 @@ async def list_documents(
 async def get_document(
     case_id: UUID,
     doc_id: UUID,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get document details."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         row = await conn.fetchrow(
             """
             SELECT id, case_id, document_type, filename, mime_type, file_size,
@@ -570,10 +660,15 @@ async def reprocess_document(
     case_id: UUID,
     doc_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Manually reprocess a document that is stuck or failed."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         doc = await conn.fetchrow(
             "SELECT id, processing_status FROM er_case_documents WHERE id = $1 AND case_id = $2",
             doc_id,
@@ -654,10 +749,15 @@ async def reprocess_document(
 async def reprocess_all_documents(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Reprocess all pending or failed documents in a case."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         # Find all documents that need processing
         docs = await conn.fetch(
             """
@@ -726,10 +826,15 @@ async def delete_document(
     case_id: UUID,
     doc_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a document and its chunks."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         doc = await conn.fetchrow(
             "SELECT filename FROM er_case_documents WHERE id = $1 AND case_id = $2",
             doc_id,
@@ -763,10 +868,15 @@ async def delete_document(
 async def generate_timeline(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Generate timeline analysis. Queues async task or runs synchronously."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         # Verify case exists and has documents
         doc_count = await conn.fetchval(
             "SELECT COUNT(*) FROM er_case_documents WHERE case_id = $1 AND processing_status = 'completed'",
@@ -829,10 +939,15 @@ async def generate_timeline(
 @router.get("/{case_id}/analysis/timeline")
 async def get_timeline(
     case_id: UUID,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get cached timeline analysis."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         row = await conn.fetchrow(
             """
             SELECT analysis_data, source_documents, generated_at
@@ -865,10 +980,15 @@ async def get_timeline(
 async def generate_discrepancies(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Generate discrepancy analysis. Queues async task or runs synchronously."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         doc_count = await conn.fetchval(
             "SELECT COUNT(*) FROM er_case_documents WHERE case_id = $1 AND processing_status = 'completed'",
             case_id,
@@ -930,10 +1050,15 @@ async def generate_discrepancies(
 @router.get("/{case_id}/analysis/discrepancies")
 async def get_discrepancies(
     case_id: UUID,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get cached discrepancy analysis."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         row = await conn.fetchrow(
             """
             SELECT analysis_data, source_documents, generated_at
@@ -965,10 +1090,15 @@ async def get_discrepancies(
 async def run_policy_check(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Run policy violation check against all company policies. Queues async task or runs synchronously."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         # Verify we have evidence documents
         evidence_count = await conn.fetchval(
             """
@@ -1034,10 +1164,15 @@ async def run_policy_check(
 @router.get("/{case_id}/analysis/policy-check")
 async def get_policy_check(
     case_id: UUID,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get cached policy check analysis."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         row = await conn.fetchrow(
             """
             SELECT analysis_data, source_documents, generated_at
@@ -1073,9 +1208,17 @@ async def get_policy_check(
 async def search_evidence(
     case_id: UUID,
     search: EvidenceSearchRequest,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Search case evidence using semantic similarity."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    # Verify case belongs to company before searching
+    async with get_connection() as verify_conn:
+        await _verify_case_company(verify_conn, case_id, company_id, current_user.role == "admin")
+
     settings = get_settings()
 
     from ..services.embedding_service import EmbeddingService
@@ -1126,10 +1269,15 @@ async def search_evidence(
 async def generate_summary_report(
     case_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Generate investigation summary report. Queues async task or runs synchronously."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         await log_audit(
             conn,
             str(case_id),
@@ -1182,7 +1330,7 @@ async def generate_determination_letter(
     case_id: UUID,
     report_request: ReportGenerateRequest,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Generate determination letter. Queues async task or runs synchronously."""
     if not report_request.determination:
@@ -1198,7 +1346,13 @@ async def generate_determination_letter(
             detail=f"Invalid determination. Must be one of: {valid_determinations}",
         )
 
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+
         await log_audit(
             conn,
             str(case_id),
@@ -1258,7 +1412,7 @@ async def generate_determination_letter(
 async def get_report(
     case_id: UUID,
     report_type: str,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get generated report."""
     valid_types = ["summary", "determination"]
@@ -1268,7 +1422,12 @@ async def get_report(
             detail=f"Invalid report type. Must be one of: {valid_types}",
         )
 
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         row = await conn.fetchrow(
             """
             SELECT analysis_data, source_documents, generated_at
@@ -1299,10 +1458,15 @@ async def get_audit_log(
     case_id: UUID,
     limit: int = 100,
     offset: int = 0,
-    current_user=Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get audit log for a case."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
     async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         rows = await conn.fetch(
             """
             SELECT id, case_id, user_id, action, entity_type, entity_id, details, ip_address, created_at

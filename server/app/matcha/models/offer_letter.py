@@ -9,6 +9,7 @@ class OfferLetterBase(BaseModel):
     candidate_name: str
     position_title: str
     company_name: str
+    company_id: Optional[UUID] = None
     salary: Optional[str] = None
     bonus: Optional[str] = None
     stock_options: Optional[str] = None

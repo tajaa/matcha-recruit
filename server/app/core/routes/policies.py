@@ -98,13 +98,9 @@ async def get_policy(
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    policy = await PolicyService.get_policy_by_id(policy_id)
+    policy = await PolicyService.get_policy_by_id(policy_id, str(company_id))
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
-
-    can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
-    if not can_access:
-        raise HTTPException(status_code=403, detail="Access denied")
 
     return policy
 
@@ -115,11 +111,11 @@ async def update_policy(
     data: PolicyUpdate,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
-    if not can_access:
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    policy = await PolicyService.update_policy(policy_id, data)
+    policy = await PolicyService.update_policy(policy_id, data, str(company_id))
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
 
@@ -131,11 +127,11 @@ async def delete_policy(
     policy_id: str,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
-    if not can_access:
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    success = await PolicyService.delete_policy(policy_id)
+    success = await PolicyService.delete_policy(policy_id, str(company_id))
     if not success:
         raise HTTPException(status_code=404, detail="Policy not found")
 
@@ -153,11 +149,7 @@ async def send_signature_requests(
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
-    if not can_access:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    policy = await PolicyService.get_policy_by_id(policy_id)
+    policy = await PolicyService.get_policy_by_id(policy_id, str(company_id))
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
 
@@ -181,9 +173,9 @@ async def list_policy_signatures(
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    can_access = await PolicyService.can_user_access_policy(str(current_user.id), policy_id)
-    if not can_access:
-        raise HTTPException(status_code=403, detail="Access denied")
+    policy = await PolicyService.get_policy_by_id(policy_id, str(company_id))
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
 
     signatures = await SignatureService.get_policy_signatures(policy_id)
     return signatures
@@ -202,9 +194,10 @@ async def cancel_signature_request(
     if not signature:
         raise HTTPException(status_code=404, detail="Signature request not found")
 
-    can_access = await PolicyService.can_user_access_policy(str(current_user.id), signature.policy_id)
-    if not can_access:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Verify the policy belongs to this company
+    policy = await PolicyService.get_policy_by_id(signature.policy_id, str(company_id))
+    if not policy:
+        raise HTTPException(status_code=404, detail="Signature request not found")
 
     success = await SignatureService.delete_signature(signature_id)
     if not success:
@@ -240,9 +233,10 @@ async def resend_signature_request(
     if not signature:
         raise HTTPException(status_code=404, detail="Signature request not found")
 
-    can_access = await PolicyService.can_user_access_policy(str(current_user.id), signature.policy_id)
-    if not can_access:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Verify the policy belongs to this company
+    policy = await PolicyService.get_policy_by_id(signature.policy_id, str(company_id))
+    if not policy:
+        raise HTTPException(status_code=404, detail="Signature request not found")
 
     signature = await SignatureService.resend_signature(signature_id)
     if not signature:
