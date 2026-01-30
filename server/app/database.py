@@ -1970,6 +1970,36 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_creator_valuations_creator_id ON creator_valuations(creator_id)
         """)
 
+        # AI Chat tables
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_conversations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id),
+                user_id UUID NOT NULL REFERENCES users(id),
+                title TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ai_conversations_company_user
+            ON ai_conversations(company_id, user_id)
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_messages (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                conversation_id UUID NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation
+            ON ai_messages(conversation_id, created_at)
+        """)
+
         # Add Stripe columns to creators table
         await conn.execute("""
             DO $$

@@ -59,6 +59,10 @@ class Settings:
     apollo_api_key: Optional[str] = None      # Apollo.io - contact database
     clearbit_api_key: Optional[str] = None    # Clearbit - company enrichment
 
+    # AI Chat (local Qwen via llama.cpp / MLX)
+    ai_chat_base_url: str = "http://localhost:8080"
+    ai_chat_model: str = "Qwen2-VL-2B-Instruct"
+
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: Optional[str] = None  # Falls back to redis_url
@@ -138,6 +142,8 @@ def load_settings() -> Settings:
         hunter_api_key=os.getenv("HUNTER_API_KEY"),
         apollo_api_key=os.getenv("APOLLO_API_KEY"),
         clearbit_api_key=os.getenv("CLEARBIT_API_KEY"),
+        ai_chat_base_url=os.getenv("AI_CHAT_BASE_URL", "http://localhost:8080"),
+        ai_chat_model=os.getenv("AI_CHAT_MODEL", "Qwen2-VL-2B-Instruct"),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         celery_broker_url=os.getenv("CELERY_BROKER_URL"),
         celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),

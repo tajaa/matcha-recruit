@@ -13,9 +13,13 @@ REMOTE_PORT="5432"
 DEFAULT_LOCAL_PORT="5432"
 DEFAULT_REDIS_PORT="6380"
 DEFAULT_FRONTEND_PORT="5174"
+DEFAULT_CHAT_PORT="8080"
+CHAT_MODEL_DIR="$HOME/Documents/github/models"
+CHAT_MODEL_PATH="$CHAT_MODEL_DIR/Qwen3VL-8B-Instruct-Q8_0.gguf"
+CHAT_MMPROJ_PATH="$CHAT_MODEL_DIR/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf"
 #
 # Optional overrides: LOCAL_PORT/LOCAL_DB_PORT, REDIS_PORT, FRONTEND_PORT,
-# DATABASE_URL, REDIS_URL
+# DATABASE_URL, REDIS_URL, CHAT_PORT
 
 # Colors
 GREEN='\033[0;32m'
@@ -68,12 +72,20 @@ if [ ! -f "$KEY_FILE" ]; then
     exit 1
 fi
 
-# Handle stop command
-if [ "$1" = "stop" ]; then
-    echo "Stopping Matcha remote dev environment..."
-    tmux kill-session -t "$SESSION_NAME" 2>/dev/null && echo "Stopped!" || echo "Not running."
-    exit 0
-fi
+# Parse arguments
+ENABLE_CHAT=false
+for arg in "$@"; do
+    case "$arg" in
+        stop)
+            echo "Stopping Matcha remote dev environment..."
+            tmux kill-session -t "$SESSION_NAME" 2>/dev/null && echo "Stopped!" || echo "Not running."
+            exit 0
+            ;;
+        --chat)
+            ENABLE_CHAT=true
+            ;;
+    esac
+done
 
 echo -e "${GREEN}Starting Matcha Recruit Remote Dev environment...${NC}"
 
@@ -99,6 +111,13 @@ if [ -n "${FRONTEND_PORT:-}" ]; then
     FRONTEND_PORT_SOURCE="env"
 else
     FRONTEND_PORT="$DEFAULT_FRONTEND_PORT"
+fi
+
+CHAT_PORT_SOURCE="default"
+if [ -n "${CHAT_PORT:-}" ]; then
+    CHAT_PORT_SOURCE="env"
+else
+    CHAT_PORT="$DEFAULT_CHAT_PORT"
 fi
 
 DATABASE_URL_SOURCE="default"
@@ -195,6 +214,24 @@ if [ "$REDIS_URL_SOURCE" = "default" ]; then
     REDIS_URL="redis://localhost:${REDIS_PORT}/0"
 fi
 
+if [ "$ENABLE_CHAT" = true ]; then
+    if is_port_in_use "$CHAT_PORT"; then
+        if [ "$CHAT_PORT_SOURCE" = "env" ]; then
+            echo -e "${RED}Error: CHAT_PORT $CHAT_PORT is already in use. Set CHAT_PORT to a free port.${NC}"
+            exit 1
+        fi
+
+        ALT_CHAT_PORT="$(pick_available_port 8081 8090)"
+        if [ -z "$ALT_CHAT_PORT" ]; then
+            echo -e "${RED}Error: No free chat ports found in 8081-8090.${NC}"
+            exit 1
+        fi
+
+        echo -e "${YELLOW}Port $CHAT_PORT is in use; using $ALT_CHAT_PORT for the chat model instead.${NC}"
+        CHAT_PORT="$ALT_CHAT_PORT"
+    fi
+fi
+
 export DATABASE_URL
 export REDIS_URL
 
@@ -204,9 +241,14 @@ tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 # Create new tmux session
 echo -e "${YELLOW}Creating tmux session...${NC}"
 
+CHAT_ENV=""
+if [ "$ENABLE_CHAT" = true ]; then
+    CHAT_ENV="export AI_CHAT_BASE_URL='http://localhost:${CHAT_PORT}' && "
+fi
+
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
+    "export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && ${CHAT_ENV}source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
 # Enable mouse mode for clicking panes and scrolling
@@ -227,6 +269,12 @@ tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
     "npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
 
+# Pane 4 (optional): AI Chat Model Server
+if [ "$ENABLE_CHAT" = true ]; then
+    tmux split-window -t "$SESSION_NAME:dev.3" -v -c "$PROJECT_ROOT" \
+        "echo 'Starting Qwen chat model on port $CHAT_PORT...'; llama-server -m $CHAT_MODEL_PATH --mmproj $CHAT_MMPROJ_PATH -ngl 99 --ctx-size 4096 --port $CHAT_PORT; echo -e '\n${RED}Chat model exited.${NC}'; read"
+fi
+
 # Select the server pane as active
 tmux select-pane -t "$SESSION_NAME:dev.0"
 
@@ -235,5 +283,8 @@ echo -e "  - Database: Tunnel to $REMOTE_HOST:$REMOTE_PORT (mapped to localhost:
 echo -e "  - Redis:    Local ($REDIS_PORT)"
 echo -e "  - Backend:  http://localhost:8001"
 echo -e "  - Frontend: http://localhost:$FRONTEND_PORT"
+if [ "$ENABLE_CHAT" = true ]; then
+    echo -e "  - AI Chat:  http://localhost:$CHAT_PORT (Qwen2-VL-2B)"
+fi
 
 tmux attach-session -t "$SESSION_NAME"
