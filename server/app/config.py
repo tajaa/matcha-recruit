@@ -62,6 +62,8 @@ class Settings:
     # AI Chat (local Qwen via llama.cpp / MLX)
     ai_chat_base_url: str = "http://localhost:8080"
     ai_chat_model: str = "Qwen2-VL-2B-Instruct"
+    ai_chat_max_tokens: int = 2048
+    ai_chat_temperature: float = 0.7
 
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
@@ -144,6 +146,8 @@ def load_settings() -> Settings:
         clearbit_api_key=os.getenv("CLEARBIT_API_KEY"),
         ai_chat_base_url=os.getenv("AI_CHAT_BASE_URL", "http://localhost:8080"),
         ai_chat_model=os.getenv("AI_CHAT_MODEL", "Qwen2-VL-2B-Instruct"),
+        ai_chat_max_tokens=int(os.getenv("AI_CHAT_MAX_TOKENS", "2048")),
+        ai_chat_temperature=float(os.getenv("AI_CHAT_TEMPERATURE", "0.7")),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         celery_broker_url=os.getenv("CELERY_BROKER_URL"),
         celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),

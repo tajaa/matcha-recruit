@@ -11,9 +11,11 @@ _service = None
 
 
 class AIChatService:
-    def __init__(self, base_url: str, model: str):
+    def __init__(self, base_url: str, model: str, max_tokens: int = 2048, temperature: float = 0.7):
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.max_tokens = max_tokens
+        self.temperature = temperature
 
     async def build_company_context(self, company_id: UUID) -> str:
         async with get_connection() as conn:
@@ -93,6 +95,8 @@ class AIChatService:
             "model": self.model,
             "messages": full_messages,
             "stream": True,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
         }
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
@@ -127,5 +131,7 @@ def get_ai_chat_service() -> AIChatService:
     _service = AIChatService(
         base_url=settings.ai_chat_base_url,
         model=settings.ai_chat_model,
+        max_tokens=settings.ai_chat_max_tokens,
+        temperature=settings.ai_chat_temperature,
     )
     return _service
