@@ -342,6 +342,11 @@ export function Compliance() {
                                         </h2>
                                         <p className="text-xs text-zinc-500 font-mono mt-0.5">
                                             {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zipcode}
+                                            {selectedLocation.last_compliance_check && (
+                                                <span className="ml-3 text-zinc-600">
+                                                    Updated {new Date(selectedLocation.last_compliance_check).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                </span>
+                                            )}
                                         </p>
                                     </div>
                                 </div>
