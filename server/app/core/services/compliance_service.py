@@ -476,8 +476,7 @@ async def run_compliance_check_stream(
             new_requirement_keys.add(requirement_key)
             existing = existing_by_key.get(requirement_key)
 
-            cat_label = req.get("category", "")
-            yield {"type": "processing", "message": f"Processing {cat_label}: {req.get('title', '')}"}
+            req_title = req.get("title", "")
 
             if existing:
                 old_value = existing.get("current_value")
@@ -546,6 +545,10 @@ async def run_compliance_check_stream(
                             "warning", req.get('category'),
                             req.get("source_url"), req.get("source_name")
                         )
+                    change_detail = f" ({old_value} → {new_value})" if material_change else ""
+                    yield {"type": "result", "status": "updated", "message": req_title + change_detail}
+                else:
+                    yield {"type": "result", "status": "unchanged", "message": req_title}
 
                 previous_value = existing.get("previous_value")
                 last_changed_at = existing.get("last_changed_at")
@@ -627,6 +630,7 @@ async def run_compliance_check_stream(
                     "info", req.get("category"),
                     req.get("source_url"), req.get("source_name")
                 )
+                yield {"type": "result", "status": "new", "message": req_title}
                 existing_by_key[requirement_key] = {
                     "id": req_id,
                     "requirement_key": requirement_key,

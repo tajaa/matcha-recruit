@@ -69,7 +69,7 @@ export function Compliance() {
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
     const [activeTab, setActiveTab] = useState<'requirements' | 'alerts'>('requirements');
     const [checkInProgress, setCheckInProgress] = useState(false);
-    const [checkMessages, setCheckMessages] = useState<{ type: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
+    const [checkMessages, setCheckMessages] = useState<{ type: string; status?: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
 
     const { data: locations, isLoading: loadingLocations } = useQuery({
         queryKey: ['compliance-locations'],
@@ -385,21 +385,38 @@ export function Compliance() {
                             </div>
 
                             {checkMessages.length > 0 && (
-                                <div className="border-b border-white/10 px-6 py-3 bg-zinc-900/30 space-y-1 max-h-40 overflow-y-auto">
+                                <div className="border-b border-white/10 px-6 py-3 bg-zinc-900/30 space-y-1.5 max-h-48 overflow-y-auto">
                                     {checkMessages.map((msg, i) => (
                                         <div key={i} className="flex items-center gap-2 text-xs font-mono">
                                             {msg.type === 'error' ? (
                                                 <X size={12} className="text-red-400 flex-shrink-0" />
                                             ) : msg.type === 'completed' ? (
                                                 <CheckCircle size={12} className="text-emerald-400 flex-shrink-0" />
+                                            ) : msg.type === 'result' ? (
+                                                <CheckCircle size={12} className={
+                                                    msg.status === 'new' ? 'text-emerald-400 flex-shrink-0' :
+                                                    msg.status === 'updated' ? 'text-amber-400 flex-shrink-0' :
+                                                    'text-zinc-600 flex-shrink-0'
+                                                } />
                                             ) : checkInProgress && i === checkMessages.length - 1 ? (
                                                 <Loader2 size={12} className="text-blue-400 animate-spin flex-shrink-0" />
                                             ) : (
                                                 <CheckCircle size={12} className="text-zinc-600 flex-shrink-0" />
                                             )}
+                                            {msg.type === 'result' && msg.status && (
+                                                <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded ${
+                                                    msg.status === 'new' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                                                    msg.status === 'updated' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                                                    'bg-zinc-800 text-zinc-500 border border-zinc-700'
+                                                }`}>
+                                                    {msg.status}
+                                                </span>
+                                            )}
                                             <span className={
                                                 msg.type === 'error' ? 'text-red-400' :
                                                 msg.type === 'completed' ? 'text-emerald-400' :
+                                                msg.type === 'result' && msg.status === 'new' ? 'text-emerald-300' :
+                                                msg.type === 'result' && msg.status === 'updated' ? 'text-amber-300' :
                                                 i === checkMessages.length - 1 && checkInProgress ? 'text-zinc-300' :
                                                 'text-zinc-600'
                                             }>
