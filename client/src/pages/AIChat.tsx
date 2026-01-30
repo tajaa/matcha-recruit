@@ -4,6 +4,13 @@ import { aiChat } from '../api/client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
+interface Attachment {
+  url: string;
+  filename: string;
+  content_type: string;
+  size: number;
+}
+
 interface Conversation {
   id: string;
   title: string | null;
@@ -16,6 +23,7 @@ interface Message {
   role: string;
   content: string;
   created_at: string;
+  attachments?: Attachment[];
 }
 
 export default function AIChat() {
@@ -26,9 +34,11 @@ export default function AIChat() {
   const [streaming, setStreaming] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -37,6 +47,13 @@ export default function AIChat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  // Abort any in-flight stream on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   // Load conversations on mount
   useEffect(() => {
@@ -55,7 +72,7 @@ export default function AIChat() {
   }
 
   async function selectConversation(id: string) {
-    if (id === activeId) return;
+    if (id === activeId || streaming) return;
     setActiveId(id);
     setMessages([]);
     setLoadingMessages(true);
@@ -94,10 +111,36 @@ export default function AIChat() {
     }
   }
 
+  function handleFilePick() {
+    fileInputRef.current?.click();
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = e.target.files;
+    if (!selected) return;
+    setPendingFiles((prev) => [...prev, ...Array.from(selected)]);
+    // Reset input so the same file can be picked again
+    e.target.value = '';
+  }
+
+  function removePendingFile(index: number) {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function sendMessage() {
-    if (!input.trim() || !activeId || streaming) return;
+    if ((!input.trim() && pendingFiles.length === 0) || !activeId || streaming) return;
     const content = input.trim();
     setInput('');
+    const filesToSend = [...pendingFiles];
+    setPendingFiles([]);
+
+    // Build optimistic attachments for the user message preview
+    const optimisticAttachments: Attachment[] = filesToSend.map((f) => ({
+      url: URL.createObjectURL(f),
+      filename: f.name,
+      content_type: f.type || 'application/octet-stream',
+      size: f.size,
+    }));
 
     // Optimistic user message
     const userMsg: Message = {
@@ -105,17 +148,20 @@ export default function AIChat() {
       role: 'user',
       content,
       created_at: new Date().toISOString(),
+      attachments: optimisticAttachments,
     };
     setMessages((prev) => [...prev, userMsg]);
 
     // Update conversation title optimistically if it was untitled
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === activeId && !c.title
-          ? { ...c, title: content.slice(0, 60) + (content.length > 60 ? '...' : ''), updated_at: new Date().toISOString() }
-          : c
-      )
-    );
+    if (content) {
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeId && !c.title
+            ? { ...c, title: content.slice(0, 60) + (content.length > 60 ? '...' : ''), updated_at: new Date().toISOString() }
+            : c
+        )
+      );
+    }
 
     // Start streaming
     setStreaming(true);
@@ -130,15 +176,22 @@ export default function AIChat() {
 
     try {
       const token = getAccessToken();
+
+      // Build FormData
+      const formData = new FormData();
+      formData.append('content', content || ' ');
+      for (const file of filesToSend) {
+        formData.append('files', file);
+      }
+
       const response = await fetch(
         `${API_BASE}/chat/ai/conversations/${activeId}/messages`,
         {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-          body: JSON.stringify({ content }),
+          body: formData,
           signal: abort.signal,
         }
       );
@@ -164,15 +217,31 @@ export default function AIChat() {
           if (!trimmed.startsWith('data: ')) continue;
           const payload = trimmed.slice(6);
           if (payload === '[DONE]') continue;
-          if (payload.startsWith('[ERROR]')) {
-            console.error('Stream error:', payload);
-            continue;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.error) {
+              console.error('Stream error:', parsed.error);
+              continue;
+            }
+            if (parsed.t != null) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: m.content + parsed.t } : m
+                )
+              );
+            }
+          } catch {
+            // Non-JSON payload (legacy fallback)
+            if (payload.startsWith('[ERROR]')) {
+              console.error('Stream error:', payload);
+              continue;
+            }
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: m.content + payload } : m
+              )
+            );
           }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + payload } : m
-            )
-          );
         }
       }
     } catch (err: unknown) {
@@ -198,6 +267,49 @@ export default function AIChat() {
       e.preventDefault();
       sendMessage();
     }
+  }
+
+  function isImageType(ct: string) {
+    return ct.startsWith('image/');
+  }
+
+  function formatFileSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function renderAttachments(attachments: Attachment[]) {
+    if (!attachments || attachments.length === 0) return null;
+    return (
+      <div className="mt-2 flex flex-wrap gap-2">
+        {attachments.map((att, i) =>
+          isImageType(att.content_type) ? (
+            <a key={i} href={att.url} target="_blank" rel="noopener noreferrer">
+              <img
+                src={att.url}
+                alt={att.filename}
+                className="max-w-[200px] max-h-[150px] object-cover border border-white/10"
+              />
+            </a>
+          ) : (
+            <a
+              key={i}
+              href={att.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3 py-2 bg-black/20 border border-white/10 text-xs text-zinc-400 hover:text-white transition-colors"
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              <span className="truncate max-w-[150px]">{att.filename}</span>
+              <span className="text-zinc-600">{formatFileSize(att.size)}</span>
+            </a>
+          )
+        )}
+      </div>
+    );
   }
 
   function formatContent(text: string) {
@@ -347,6 +459,7 @@ export default function AIChat() {
                         {msg.role === 'assistant' && streaming && msg.content === '' && (
                           <span className="inline-block w-2 h-4 bg-zinc-500 animate-pulse" />
                         )}
+                        {msg.attachments && msg.attachments.length > 0 && renderAttachments(msg.attachments)}
                       </div>
                     </div>
                   ))}
@@ -357,28 +470,85 @@ export default function AIChat() {
 
             {/* Input */}
             <div className="border-t border-white/10 p-4">
-              <div className="max-w-3xl mx-auto flex gap-3">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Type a message..."
-                  rows={1}
-                  className="flex-1 bg-zinc-900 border border-white/10 px-4 py-3 text-sm text-white placeholder-zinc-600 resize-none focus:outline-none focus:border-white/20 transition-colors"
-                  disabled={streaming}
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={!input.trim() || streaming}
-                  className="px-5 py-3 bg-white text-black text-[10px] tracking-[0.15em] uppercase font-bold hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                >
-                  {streaming ? (
-                    <div className="w-4 h-4 border-2 border-black/30 border-t-black animate-spin" />
-                  ) : (
-                    'Send'
-                  )}
-                </button>
+              <div className="max-w-3xl mx-auto">
+                {/* Pending files preview */}
+                {pendingFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {pendingFiles.map((file, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 border border-white/10 text-xs text-zinc-300"
+                      >
+                        {file.type.startsWith('image/') ? (
+                          <img
+                            src={URL.createObjectURL(file)}
+                            alt={file.name}
+                            className="w-6 h-6 object-cover"
+                          />
+                        ) : (
+                          <svg className="w-3.5 h-3.5 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                        )}
+                        <span className="truncate max-w-[120px]">{file.name}</span>
+                        <button
+                          onClick={() => removePendingFile(i)}
+                          className="text-zinc-600 hover:text-red-400 transition-colors"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,.pdf,.txt,.csv"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+
+                  {/* Attach button */}
+                  <button
+                    onClick={handleFilePick}
+                    disabled={streaming}
+                    className="px-3 py-3 border border-white/10 text-zinc-500 hover:text-white hover:border-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                    title="Attach file"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                  </button>
+
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Type a message..."
+                    rows={1}
+                    className="flex-1 bg-zinc-900 border border-white/10 px-4 py-3 text-sm text-white placeholder-zinc-600 resize-none focus:outline-none focus:border-white/20 transition-colors"
+                    disabled={streaming}
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={(!input.trim() && pendingFiles.length === 0) || streaming}
+                    className="px-5 py-3 bg-white text-black text-[10px] tracking-[0.15em] uppercase font-bold hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                  >
+                    {streaming ? (
+                      <div className="w-4 h-4 border-2 border-black/30 border-t-black animate-spin" />
+                    ) : (
+                      'Send'
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </>

@@ -2000,6 +2000,12 @@ async def init_db():
             ON ai_messages(conversation_id, created_at)
         """)
 
+        # Add attachments column to ai_messages
+        await conn.execute("""
+            ALTER TABLE ai_messages
+            ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'
+        """)
+
         # Add Stripe columns to creators table
         await conn.execute("""
             DO $$

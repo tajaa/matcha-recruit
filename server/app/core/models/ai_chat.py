@@ -20,11 +20,19 @@ class MessageCreate(BaseModel):
     content: str
 
 
+class AttachmentResponse(BaseModel):
+    url: str
+    filename: str
+    content_type: str
+    size: int
+
+
 class MessageResponse(BaseModel):
     id: UUID
     role: str
     content: str
     created_at: datetime
+    attachments: List[AttachmentResponse] = []
 
 
 class ConversationDetail(BaseModel):

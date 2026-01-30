@@ -6,8 +6,12 @@ import httpx
 
 from ...config import get_settings
 from ...database import get_connection
+from .compliance_service import _filter_by_jurisdiction_priority
 
 _service = None
+
+MAX_HISTORY_MESSAGES = 50
+MAX_POLICIES = 20
 
 
 class AIChatService:
@@ -45,10 +49,12 @@ class AIChatService:
                 for loc in locations:
                     parts.append(f"- {loc['name']}: {loc['city']}, {loc['state']}")
 
-            # Compliance requirements grouped by location
+            # Compliance requirements — filtered by jurisdiction priority so
+            # superseded entries (e.g. state rule overridden by city) are excluded.
             reqs = await conn.fetch(
-                """SELECT cr.category, cr.current_value, cr.jurisdiction_level,
-                          cr.jurisdiction_name, bl.name as location_name
+                """SELECT cr.category, cr.title, cr.current_value,
+                          cr.jurisdiction_level, cr.jurisdiction_name,
+                          bl.name as location_name
                    FROM compliance_requirements cr
                    JOIN business_locations bl ON cr.location_id = bl.id
                    WHERE bl.company_id = $1
@@ -56,22 +62,30 @@ class AIChatService:
                 company_id,
             )
             if reqs:
-                parts.append("\n## Compliance Requirements")
-                current_loc = None
-                for req in reqs:
-                    if req["location_name"] != current_loc:
-                        current_loc = req["location_name"]
-                        parts.append(f"### {current_loc}")
-                    parts.append(
-                        f"- {req['category']}: {req['current_value']} "
-                        f"({req['jurisdiction_level']}: {req['jurisdiction_name']})"
-                    )
+                reqs_dicts = [dict(r) for r in reqs]
+                # Group by location and filter each location independently
+                by_location: dict[str, list[dict]] = {}
+                for r in reqs_dicts:
+                    by_location.setdefault(r["location_name"], []).append(r)
 
-            # Policies
+                parts.append("\n## Compliance Requirements")
+                for loc_name, loc_reqs in by_location.items():
+                    filtered = _filter_by_jurisdiction_priority(loc_reqs)
+                    if filtered:
+                        parts.append(f"### {loc_name}")
+                        for req in filtered:
+                            parts.append(
+                                f"- {req['category']}: {req['current_value']} "
+                                f"({req['jurisdiction_level']}: {req['jurisdiction_name']})"
+                            )
+
+            # Policies — capped to avoid blowing context window
             policies = await conn.fetch(
                 """SELECT title, description FROM policies
-                   WHERE company_id = $1 ORDER BY title""",
+                   WHERE company_id = $1 ORDER BY title
+                   LIMIT $2""",
                 company_id,
+                MAX_POLICIES,
             )
             if policies:
                 parts.append("\n## Company Policies")
