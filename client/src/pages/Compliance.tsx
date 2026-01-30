@@ -13,6 +13,17 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
+function linkifyText(text: string) {
+    const splitRegex = /(https?:\/\/[^\s,)]+)/g;
+    const parts = text.split(splitRegex);
+    if (parts.length === 1) return text;
+    return parts.map((part, i) =>
+        /^https?:\/\//.test(part) ? (
+            <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-emerald-300 hover:text-emerald-200 underline break-all">{part}</a>
+        ) : part
+    );
+}
+
 const US_STATES = [
     { value: 'AL', label: 'Alabama' }, { value: 'AK', label: 'Alaska' },
     { value: 'AZ', label: 'Arizona' }, { value: 'AR', label: 'Arkansas' },
@@ -386,6 +397,13 @@ export function Compliance() {
 
                             {checkMessages.length > 0 && (
                                 <div className="border-b border-white/10 px-6 py-3 bg-zinc-900/30 space-y-1.5 max-h-48 overflow-y-auto">
+                                    {checkMessages.some(m => m.type === 'result') && (
+                                        <div className="flex items-center gap-3 pb-1.5 mb-1.5 border-b border-white/5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
+                                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> New</span>
+                                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Updated</span>
+                                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-600 inline-block" /> Unchanged</span>
+                                        </div>
+                                    )}
                                     {checkMessages.map((msg, i) => (
                                         <div key={i} className="flex items-center gap-2 text-xs font-mono">
                                             {msg.type === 'error' ? (
@@ -586,7 +604,7 @@ export function Compliance() {
                                                             <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
                                                             <div>
                                                                 <h4 className="text-sm font-bold uppercase tracking-wide">{alert.title}</h4>
-                                                                <p className="text-xs mt-1 opacity-90 leading-relaxed">{alert.message}</p>
+                                                                <p className="text-xs mt-1 opacity-90 leading-relaxed">{linkifyText(alert.message)}</p>
                                                                 {(alert.source_url || alert.source_name) && (
                                                                     <p className="text-[10px] mt-2 text-zinc-400">
                                                                         <span className="uppercase tracking-wider">Source:</span>{' '}
