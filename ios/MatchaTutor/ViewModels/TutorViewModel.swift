@@ -75,6 +75,7 @@ final class TutorViewModel: ObservableObject {
         webSocketManager.delegate = self
         audioRecorder.delegate = self
         audioPlayer.delegate = self
+        audioRecorder.setSharedEngine(audioPlayer.sharedEngine)
         audioRecorder.setupInterruptionHandling()
     }
 

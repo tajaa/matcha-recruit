@@ -27,7 +27,10 @@ enum AudioPlayerError: Error, LocalizedError {
 final class AudioPlayer {
     weak var delegate: AudioPlayerDelegate?
 
-    private let audioEngine = AVAudioEngine()
+    // Shared engine — AudioRecorder installs its input tap on this same engine
+    // to avoid the simulator's "reconfig pending" I/O crash from dual engines.
+    let sharedEngine = AVAudioEngine()
+
     private let playerNode = AVAudioPlayerNode()
     private var isPlaying = false
 
@@ -47,8 +50,8 @@ final class AudioPlayer {
         do {
             try configureAudioSession()
             setupAudioEngine()
-            audioEngine.prepare()
-            try audioEngine.start()
+            sharedEngine.prepare()
+            try sharedEngine.start()
             playerNode.play()
             isPlaying = true
             delegate?.audioPlayerDidStartPlaying(self)
@@ -62,7 +65,7 @@ final class AudioPlayer {
         guard isPlaying else { return }
 
         playerNode.stop()
-        audioEngine.stop()
+        sharedEngine.stop()
         isPlaying = false
         delegate?.audioPlayerDidStopPlaying(self)
     }
@@ -91,7 +94,7 @@ final class AudioPlayer {
 
     private func setupAudioEngine() {
         // Attach player node to engine
-        audioEngine.attach(playerNode)
+        sharedEngine.attach(playerNode)
 
         // Create audio format for 24kHz mono PCM
         guard let format = AVAudioFormat(
@@ -104,7 +107,11 @@ final class AudioPlayer {
         }
 
         // Connect player to main mixer
-        audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: format)
+        sharedEngine.connect(playerNode, to: sharedEngine.mainMixerNode, format: format)
+
+        // Access inputNode now to force full-duplex graph setup.
+        // This prevents an I/O reconfiguration when the recorder installs its tap later.
+        _ = sharedEngine.inputNode
     }
 
     private func createPCMBuffer(from data: Data) -> AVAudioPCMBuffer? {

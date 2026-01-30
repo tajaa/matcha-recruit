@@ -28,13 +28,18 @@ enum AudioRecorderError: Error, LocalizedError {
 final class AudioRecorder {
     weak var delegate: AudioRecorderDelegate?
 
-    private let audioEngine = AVAudioEngine()
+    // Shared engine from AudioPlayer — avoids dual-engine I/O conflicts
+    private var sharedEngine: AVAudioEngine?
     private var isRecording = false
 
     private let targetSampleRate: Double = AudioProtocol.inputSampleRate
     private let bufferSize: AVAudioFrameCount = AVAudioFrameCount(AudioProtocol.audioChunkSize)
 
     // MARK: - Public Methods
+
+    func setSharedEngine(_ engine: AVAudioEngine) {
+        self.sharedEngine = engine
+    }
 
     func requestPermission() async -> Bool {
         return await withCheckedContinuation { continuation in
@@ -46,11 +51,16 @@ final class AudioRecorder {
 
     func startRecording() throws {
         guard !isRecording else { return }
+        guard let engine = sharedEngine else {
+            throw AudioRecorderError.engineSetupFailed
+        }
 
         do {
-            try configureAudioSession()
-            try setupAudioEngine()
-            try audioEngine.start()
+            // Restart the shared engine if it was stopped (e.g. after an interruption)
+            if !engine.isRunning {
+                try engine.start()
+            }
+            try installInputTap(on: engine)
             isRecording = true
             delegate?.audioRecorderDidStart(self)
         } catch {
@@ -62,23 +72,15 @@ final class AudioRecorder {
     func stopRecording() {
         guard isRecording else { return }
 
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        sharedEngine?.inputNode.removeTap(onBus: 0)
         isRecording = false
         delegate?.audioRecorderDidStop(self)
     }
 
     // MARK: - Private Methods
 
-    private func configureAudioSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
-        try session.setPreferredSampleRate(targetSampleRate)
-        try session.setActive(true)
-    }
-
-    private func setupAudioEngine() throws {
-        let inputNode = audioEngine.inputNode
+    private func installInputTap(on engine: AVAudioEngine) throws {
+        let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
 
         // Create target format: 16kHz, mono, 16-bit PCM
@@ -100,7 +102,7 @@ final class AudioRecorder {
             converter = audioConverter
         }
 
-        // Install tap on input
+        // Install tap on input — engine is already running (managed by AudioPlayer)
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
             self.processAudioBuffer(buffer, converter: converter, targetFormat: targetFormat)
