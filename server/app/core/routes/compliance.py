@@ -1,4 +1,7 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from uuid import UUID
 
@@ -23,6 +26,7 @@ from ..services.compliance_service import (
     dismiss_alert,
     get_compliance_summary,
     run_compliance_check,
+    run_compliance_check_stream,
 )
 
 router = APIRouter()
@@ -57,10 +61,9 @@ async def create_location_endpoint(
     }
 
 
-@router.post("/locations/{location_id}/check", response_model=dict)
+@router.post("/locations/{location_id}/check")
 async def check_location_compliance_endpoint(
     location_id: str,
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
@@ -71,14 +74,20 @@ async def check_location_compliance_endpoint(
         loc_uuid = UUID(location_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid location ID")
-        
+
     location = await get_location(loc_uuid, company_id)
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
 
-    background_tasks.add_task(run_compliance_check, loc_uuid, company_id)
-    
-    return {"message": "Compliance check started"}
+    async def event_stream():
+        try:
+            async for event in run_compliance_check_stream(loc_uuid, company_id):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/locations", response_model=List[dict])

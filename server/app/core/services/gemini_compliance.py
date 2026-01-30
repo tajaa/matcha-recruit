@@ -36,28 +36,6 @@ class GeminiComplianceService:
                 self._client = genai.Client(api_key=self.settings.gemini_api_key)
         return self._client
 
-    async def is_material_change(self, category: str, old_value: str, new_value: str) -> bool:
-        """Ask Gemini whether two compliance values represent a material change."""
-        prompt = f"""Compare these two compliance requirement values for the category "{category}".
-
-Old: {old_value}
-New: {new_value}
-
-Are these materially different, or just different wording for the same requirement?
-Respond with ONLY "yes" if materially different, "no" if same meaning."""
-
-        try:
-            response = await self.client.aio.models.generate_content(
-                model=self.settings.analysis_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.0),
-            )
-            return response.text.strip().lower().startswith("yes")
-        except Exception as e:
-            print(f"[Gemini Compliance] Error checking material change: {e}")
-            # Conservative default to avoid noisy/incorrect alerts
-            return False
-
     async def research_location_compliance(
         self,
         city: str,
@@ -76,29 +54,34 @@ Respond with ONLY "yes" if materially different, "no" if same meaning."""
         prompt = f"""You are a compliance research expert. Research current labor laws and compliance requirements for a business operating in {location_str}.
 
 Focus on these specific categories:
-1. Minimum Wage (State and Local if applicable)
-2. Paid Time Off / Sick Leave
-3. Meal and Rest Break Requirements
-4. Child Labor Laws (Minor Laws)
+1. Minimum Wage — general/default rate ONLY (not industry-specific, tipped, fast-food, healthcare, hotel, etc.)
+2. Overtime rules
+3. Paid Sick Leave
+4. Meal and Rest Break Requirements
 5. Pay Frequency Requirements
 
-For EACH category, I need you to find:
+IMPORTANT RULES:
+- For each category, return ONLY the single most local jurisdiction that applies (city > county > state). Do NOT include overlapping jurisdictions for the same category. For example, if {location_str} has a city minimum wage, return ONLY the city rate, not the state rate.
+- For minimum wage, return ONLY the general/default rate. Do NOT include industry-specific rates (fast food, healthcare, hotel, tipped, etc.).
+- Accuracy is critical. Double-check numeric values against official government sources.
+
+For EACH requirement, provide:
 - The specific requirement/rule
 - The current value (e.g., "$16.00/hr")
 - The effective date of this rule
-- The source of this information (government website URL preferred)
-- The jurisdiction level (State, County, or City)
+- The source URL (official government website preferred)
+- The jurisdiction level (state, county, or city)
 
 Use Google Search to find the most up-to-date information for 2025/2026.
 
 Respond with a JSON object containing a list of requirements under the key "requirements".
 Each requirement object should have:
-- "category": One of ["minimum_wage", "sick_leave", "meal_breaks", "child_labor", "pay_frequency"]
+- "category": One of ["minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency"]
 - "jurisdiction_level": One of ["state", "county", "city"]
 - "jurisdiction_name": Name of the jurisdiction (e.g., "California" or "San Francisco")
 - "title": Short title (e.g., "California Minimum Wage")
 - "description": Detailed explanation of the rule
-- "current_value": The specific value (e.g., "$16.00")
+- "current_value": The specific value (e.g., "$16.00/hr")
 - "numeric_value": Float value if applicable (e.g., 16.00), else null
 - "effective_date": "YYYY-MM-DD" if known, else null
 - "source_url": URL to the official source
@@ -109,20 +92,20 @@ Example JSON structure:
   "requirements": [
     {{
       "category": "minimum_wage",
-      "jurisdiction_level": "state",
-      "jurisdiction_name": "California",
-      "title": "California Minimum Wage",
-      "description": "The minimum wage for all employers in California is $16.00 per hour.",
-      "current_value": "$16.00",
-      "numeric_value": 16.00,
-      "effective_date": "2024-01-01",
-      "source_url": "https://www.dir.ca.gov/dlse/faq_minimumwage.htm",
-      "source_name": "CA DIR"
+      "jurisdiction_level": "city",
+      "jurisdiction_name": "San Francisco",
+      "title": "San Francisco Minimum Wage",
+      "description": "The minimum wage in San Francisco is $18.67 per hour.",
+      "current_value": "$18.67/hr",
+      "numeric_value": 18.67,
+      "effective_date": "2024-07-01",
+      "source_url": "https://sfgov.org/olse/minimum-wage-ordinance",
+      "source_name": "SF OLSE"
     }}
   ]
 }}
 
-Ensure all data is accurate and recent. If a local (city/county) law overrides a state law (e.g., higher minimum wage), include BOTH.
+Return at most one requirement per category. Ensure all data is accurate and sourced.
 """
 
         try:

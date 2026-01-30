@@ -197,7 +197,7 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async checkCompliance(locationId: string): Promise<void> {
+    async checkCompliance(locationId: string): Promise<Response> {
         const response = await fetch(`/api/compliance/locations/${locationId}/check`, {
             method: 'POST',
             headers: {
@@ -205,6 +205,7 @@ export const complianceAPI = {
             },
         });
         if (!response.ok) throw new Error('Failed to start compliance check');
+        return response;
     }
 };
 
@@ -212,6 +213,8 @@ export const COMPLIANCE_CATEGORY_LABELS: Record<string, string> = {
     minimum_wage: 'Minimum Wage',
     overtime: 'Overtime',
     sick_leave: 'Sick Leave',
+    meal_breaks: 'Meal & Rest Breaks',
+    pay_frequency: 'Pay Frequency',
     workers_comp: "Workers' Comp",
     business_license: 'Business License',
     tax_rate: 'Tax Rate',

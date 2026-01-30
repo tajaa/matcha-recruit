@@ -1,6 +1,7 @@
-from typing import Optional, List
+from typing import Optional, List, AsyncGenerator, Dict, Any
 from uuid import UUID
 from datetime import date, datetime
+import json
 import re
 
 from ..models.compliance import (
@@ -24,6 +25,12 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
     except (ValueError, AttributeError):
         return None
 
+
+# Threshold for numeric material changes (e.g. $0.25 for wages)
+MATERIAL_CHANGE_THRESHOLDS = {
+    'minimum_wage': 0.25,
+    'default': 0.10,
+}
 
 JURISDICTION_PRIORITY = {'city': 1, 'county': 2, 'state': 3, 'federal': 4}
 MIN_WAGE_GENERAL_KEYS = {"minimum wage", "minimum wage rate", "general minimum wage"}
@@ -209,6 +216,21 @@ def _is_special_min_wage(base_key: str, title: Optional[str], description: Optio
     return any(keyword in text for keyword in MIN_WAGE_SPECIAL_KEYWORDS)
 
 
+def _is_material_numeric_change(old_num: Optional[float], new_num: Optional[float], category: Optional[str]) -> bool:
+    """Deterministic check: is the numeric difference above our threshold?"""
+    if old_num is None or new_num is None:
+        return False
+    threshold = MATERIAL_CHANGE_THRESHOLDS.get(
+        _normalize_category(category) or '', MATERIAL_CHANGE_THRESHOLDS['default']
+    )
+    return abs(float(old_num) - float(new_num)) >= threshold
+
+
+def _is_material_text_change(old_text: Optional[str], new_text: Optional[str], category: Optional[str] = None) -> bool:
+    """Deterministic check: do the normalized text values differ?"""
+    return _normalize_value_text(old_text, category) != _normalize_value_text(new_text, category)
+
+
 def _get_numeric_from_req(req) -> Optional[float]:
     val = req.get("numeric_value") if isinstance(req, dict) else getattr(req, "numeric_value", None)
     if val is not None:
@@ -337,23 +359,27 @@ async def create_location(company_id: UUID, data: LocationCreate) -> BusinessLoc
         # To avoid blocking response, we might need BackgroundTasks passed from route
         return location
 
-async def run_compliance_check(location_id: UUID, company_id: UUID):
+async def run_compliance_check_stream(
+    location_id: UUID, company_id: UUID
+) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Runs a compliance check for a specific location using Gemini.
-    Updates requirements and creates alerts for changes.
+    Yields progress dicts as SSE-friendly events.
     """
     from ...database import get_connection
     from .gemini_compliance import get_gemini_compliance_service
 
     location = await get_location(location_id, company_id)
     if not location:
-        print(f"[Compliance Check] Location {location_id} not found")
+        yield {"type": "error", "message": "Location not found"}
         return
 
     location_name = location.name or f"{location.city}, {location.state}"
-    print(f"[Compliance Check] Starting check for {location_name}...")
+    yield {"type": "started", "location": location_name}
 
     service = get_gemini_compliance_service()
+    yield {"type": "researching", "message": f"Researching requirements for {location_name}..."}
+
     requirements = await service.research_location_compliance(
         city=location.city,
         state=location.state,
@@ -361,16 +387,24 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
     )
 
     if not requirements:
-        print(f"[Compliance Check] No requirements found for {location_name}")
-        # Still update the last check timestamp
         async with get_connection() as conn:
             await conn.execute(
                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
                 location_id
             )
+        yield {"type": "completed", "location": location_name, "new": 0, "updated": 0, "alerts": 0}
         return
 
-    print(f"[Compliance Check] Processing {len(requirements)} requirements for {location_name}")
+    # Filter by jurisdiction priority BEFORE saving to DB
+    for req in requirements:
+        req["category"] = _normalize_category(req.get("category")) or req.get("category")
+    requirements = _filter_by_jurisdiction_priority(requirements)
+
+    yield {"type": "processing", "message": f"Processing {len(requirements)} requirements..."}
+
+    new_count = 0
+    updated_count = 0
+    alert_count = 0
 
     async with get_connection() as conn:
         existing_rows = await conn.fetch(
@@ -434,11 +468,16 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                     dup["id"],
                 )
 
+        # Track which keys are in the new result set
+        new_requirement_keys = set()
+
         for req in requirements:
-            # Normalize category + build requirement key
-            req["category"] = _normalize_category(req.get("category")) or req.get("category")
             requirement_key = _compute_requirement_key(req)
+            new_requirement_keys.add(requirement_key)
             existing = existing_by_key.get(requirement_key)
+
+            cat_label = req.get("category", "")
+            yield {"type": "processing", "message": f"Processing {cat_label}: {req.get('title', '')}"}
 
             if existing:
                 old_value = existing.get("current_value")
@@ -450,26 +489,20 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                 if new_num is None:
                     new_num = _extract_numeric_value(new_value)
 
-                normalized_same = _normalize_value_text(old_value, req.get("category")) == _normalize_value_text(
-                    new_value, req.get("category")
-                )
+                # Deterministic material change detection
+                material_change = False
+                if _is_material_numeric_change(old_num, new_num, req.get("category")):
+                    material_change = True
+                elif _is_material_text_change(old_value, new_value, req.get("category")):
+                    material_change = True
+
                 numeric_changed = (
                     old_num is not None
                     and new_num is not None
-                    and float(old_num) != float(new_num)
+                    and abs(float(old_num) - float(new_num)) > 0.001
                 )
                 text_changed = (old_value != new_value)
 
-                material_change = False
-                if numeric_changed:
-                    material_change = True
-                elif text_changed and not normalized_same:
-                    # Ask Gemini only when local normalization can't confirm equivalence
-                    material_change = await service.is_material_change(
-                        req.get("category"), old_value, new_value
-                    )
-
-                # Record history if anything about the requirement changed
                 metadata_changed = any(
                     [
                         existing.get("title") != req.get("title"),
@@ -482,6 +515,7 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                     ]
                 )
                 if metadata_changed:
+                    updated_count += 1
                     await conn.execute(
                         """
                         INSERT INTO compliance_requirement_history
@@ -498,6 +532,7 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                     )
 
                     if material_change:
+                        alert_count += 1
                         source_hint = req.get("source_url") or req.get("source_name") or "N/A"
                         await conn.execute(
                             """
@@ -512,7 +547,6 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                             req.get("source_url"), req.get("source_name")
                         )
 
-                # Update the requirement row
                 previous_value = existing.get("previous_value")
                 last_changed_at = existing.get("last_changed_at")
                 if material_change:
@@ -565,7 +599,7 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                     "effective_date": parse_date(req.get("effective_date")),
                 }
             else:
-                # Insert new requirement
+                new_count += 1
                 req_id = await conn.fetchval(
                     """
                     INSERT INTO compliance_requirements
@@ -579,11 +613,11 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                     req.get("source_url"), req.get("source_name"), parse_date(req.get("effective_date"))
                 )
 
-                # Create alert for new requirement
+                alert_count += 1
                 source_hint = req.get("source_url") or req.get("source_name") or "N/A"
                 await conn.execute(
                     """
-                    INSERT INTO compliance_alerts 
+                    INSERT INTO compliance_alerts
                     (location_id, company_id, requirement_id, title, message, severity, status, category, action_required, source_url, source_name)
                     VALUES ($1, $2, $3, $4, $5, $6, 'unread', $7, 'Review new requirement', $8, $9)
                     """,
@@ -608,13 +642,49 @@ async def run_compliance_check(location_id: UUID, company_id: UUID):
                     "effective_date": parse_date(req.get("effective_date")),
                 }
 
-        # Update last check timestamp
+        # Delete stale requirements not in the new result set
+        stale_keys = set(existing_by_key.keys()) - new_requirement_keys
+        for stale_key in stale_keys:
+            stale = existing_by_key[stale_key]
+            stale_id = stale.get("id")
+            if stale_id:
+                await conn.execute(
+                    """
+                    INSERT INTO compliance_requirement_history
+                    (requirement_id, location_id, category, jurisdiction_level, jurisdiction_name,
+                     title, description, current_value, numeric_value, source_url, source_name, effective_date)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    """,
+                    stale_id, location_id, stale.get("category"),
+                    stale.get("jurisdiction_level"), stale.get("jurisdiction_name"),
+                    stale.get("title"), stale.get("description"),
+                    stale.get("current_value"), stale.get("numeric_value"),
+                    stale.get("source_url"), stale.get("source_name"),
+                    stale.get("effective_date"),
+                )
+                await conn.execute(
+                    "DELETE FROM compliance_requirements WHERE id = $1",
+                    stale_id,
+                )
+
         await conn.execute(
             "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
             location_id
         )
 
-    print(f"[Compliance Check] Completed check for {location_name}")
+    yield {
+        "type": "completed",
+        "location": location_name,
+        "new": new_count,
+        "updated": updated_count,
+        "alerts": alert_count,
+    }
+
+
+async def run_compliance_check(location_id: UUID, company_id: UUID):
+    """Non-streaming wrapper for backward compatibility (e.g. background tasks on location create)."""
+    async for _ in run_compliance_check_stream(location_id, company_id):
+        pass
 
 
 async def get_location_counts(location_id: UUID) -> dict:

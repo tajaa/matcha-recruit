@@ -9,7 +9,7 @@ import {
 import {
     MapPin, Plus, Trash2, Edit2, X,
     ChevronDown, ChevronRight, AlertTriangle, Bell, CheckCircle,
-    ExternalLink, Building2
+    ExternalLink, Building2, Loader2
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -68,6 +68,8 @@ export function Compliance() {
     const [formData, setFormData] = useState<LocationFormData>(emptyFormData);
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
     const [activeTab, setActiveTab] = useState<'requirements' | 'alerts'>('requirements');
+    const [checkInProgress, setCheckInProgress] = useState(false);
+    const [checkMessages, setCheckMessages] = useState<{ type: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
 
     const { data: locations, isLoading: loadingLocations } = useQuery({
         queryKey: ['compliance-locations'],
@@ -333,22 +335,82 @@ export function Compliance() {
                                     </div>
                                 </div>
                                 <button
+                                    disabled={checkInProgress}
                                     onClick={async () => {
-                                        if (!selectedLocationId) return;
+                                        if (!selectedLocationId || checkInProgress) return;
+                                        setCheckInProgress(true);
+                                        setCheckMessages([]);
                                         try {
-                                            await complianceAPI.checkCompliance(selectedLocationId);
-                                            alert('Compliance check started. Check back in a few moments.');
+                                            const response = await complianceAPI.checkCompliance(selectedLocationId);
+                                            const reader = response.body?.getReader();
+                                            if (!reader) throw new Error('No response body');
+                                            const decoder = new TextDecoder();
+                                            let buffer = '';
+                                            while (true) {
+                                                const { done, value } = await reader.read();
+                                                if (done) break;
+                                                buffer += decoder.decode(value, { stream: true });
+                                                const lines = buffer.split('\n');
+                                                buffer = lines.pop() || '';
+                                                for (const line of lines) {
+                                                    const trimmed = line.trim();
+                                                    if (!trimmed.startsWith('data: ')) continue;
+                                                    const payload = trimmed.slice(6);
+                                                    if (payload === '[DONE]') continue;
+                                                    try {
+                                                        const event = JSON.parse(payload);
+                                                        setCheckMessages(prev => [...prev, event]);
+                                                    } catch { /* skip malformed */ }
+                                                }
+                                            }
                                             queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId] });
+                                            queryClient.invalidateQueries({ queryKey: ['compliance-alerts'] });
+                                            queryClient.invalidateQueries({ queryKey: ['compliance-locations'] });
+                                            queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
                                         } catch (error) {
-                                            console.error('Failed to check compliance:', error);
-                                            alert('Failed to start compliance check');
+                                            console.error('Compliance check failed:', error);
+                                            setCheckMessages(prev => [...prev, { type: 'error', message: 'Failed to run compliance check' }]);
+                                        } finally {
+                                            setCheckInProgress(false);
                                         }
                                     }}
-                                    className="text-[10px] uppercase tracking-wider font-bold text-zinc-500 hover:text-white transition-colors flex items-center gap-1.5 border border-zinc-800 px-3 py-1.5 bg-zinc-900 hover:border-zinc-600"
+                                    className="text-[10px] uppercase tracking-wider font-bold text-zinc-500 hover:text-white transition-colors flex items-center gap-1.5 border border-zinc-800 px-3 py-1.5 bg-zinc-900 hover:border-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    <Bell size={12} /> Check for Updates
+                                    {checkInProgress ? (
+                                        <><Loader2 size={12} className="animate-spin" /> Checking...</>
+                                    ) : (
+                                        <><Bell size={12} /> Check for Updates</>
+                                    )}
                                 </button>
                             </div>
+
+                            {checkMessages.length > 0 && (
+                                <div className="border-b border-white/10 px-6 py-3 bg-zinc-900/30 space-y-1 max-h-40 overflow-y-auto">
+                                    {checkMessages.map((msg, i) => (
+                                        <div key={i} className="flex items-center gap-2 text-xs font-mono">
+                                            {msg.type === 'error' ? (
+                                                <X size={12} className="text-red-400 flex-shrink-0" />
+                                            ) : msg.type === 'completed' ? (
+                                                <CheckCircle size={12} className="text-emerald-400 flex-shrink-0" />
+                                            ) : checkInProgress && i === checkMessages.length - 1 ? (
+                                                <Loader2 size={12} className="text-blue-400 animate-spin flex-shrink-0" />
+                                            ) : (
+                                                <CheckCircle size={12} className="text-zinc-600 flex-shrink-0" />
+                                            )}
+                                            <span className={
+                                                msg.type === 'error' ? 'text-red-400' :
+                                                msg.type === 'completed' ? 'text-emerald-400' :
+                                                i === checkMessages.length - 1 && checkInProgress ? 'text-zinc-300' :
+                                                'text-zinc-600'
+                                            }>
+                                                {msg.type === 'completed'
+                                                    ? `Done — ${msg.new} new, ${msg.updated} updated, ${msg.alerts} alerts`
+                                                    : msg.message || msg.location || msg.type}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
 
                             <div className="flex border-b border-white/10">
                                 <button
