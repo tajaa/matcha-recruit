@@ -59,6 +59,8 @@ export interface ComplianceAlert {
     status: 'unread' | 'read' | 'dismissed' | 'actioned';
     category: string | null;
     action_required: string | null;
+    source_url: string | null;
+    source_name: string | null;
     deadline: string | null;
     created_at: string;
     read_at: string | null;

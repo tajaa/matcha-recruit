@@ -1231,6 +1231,14 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_compliance_requirements_category ON compliance_requirements(category)
         """)
+        await conn.execute("""
+            ALTER TABLE compliance_requirements
+            ADD COLUMN IF NOT EXISTS requirement_key TEXT
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_requirements_location_key
+            ON compliance_requirements(location_id, requirement_key)
+        """)
 
         # Compliance alerts table
         await conn.execute("""
@@ -1245,6 +1253,8 @@ async def init_db():
                 status VARCHAR(20) NOT NULL DEFAULT 'unread' CHECK (status IN ('unread', 'read', 'dismissed', 'actioned')),
                 category VARCHAR(50),
                 action_required TEXT,
+                source_url VARCHAR(500),
+                source_name VARCHAR(100),
                 deadline DATE,
                 created_at TIMESTAMP DEFAULT NOW(),
                 read_at TIMESTAMP,
@@ -1259,6 +1269,42 @@ async def init_db():
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_compliance_alerts_status ON compliance_alerts(status)
+        """)
+        await conn.execute("""
+            ALTER TABLE compliance_alerts
+            ADD COLUMN IF NOT EXISTS source_url VARCHAR(500)
+        """)
+        await conn.execute("""
+            ALTER TABLE compliance_alerts
+            ADD COLUMN IF NOT EXISTS source_name VARCHAR(100)
+        """)
+
+        # Compliance requirement history (stateful updates)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS compliance_requirement_history (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                requirement_id UUID NOT NULL REFERENCES compliance_requirements(id) ON DELETE CASCADE,
+                location_id UUID NOT NULL REFERENCES business_locations(id) ON DELETE CASCADE,
+                category VARCHAR(50),
+                jurisdiction_level VARCHAR(20),
+                jurisdiction_name VARCHAR(200),
+                title VARCHAR(500),
+                description TEXT,
+                current_value TEXT,
+                numeric_value NUMERIC,
+                source_url TEXT,
+                source_name TEXT,
+                effective_date DATE,
+                captured_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_requirement_history_requirement
+            ON compliance_requirement_history(requirement_id, captured_at)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_requirement_history_location
+            ON compliance_requirement_history(location_id, captured_at)
         """)
 
         # ===========================================

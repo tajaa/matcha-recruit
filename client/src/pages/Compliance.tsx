@@ -508,6 +508,23 @@ export function Compliance() {
                                                             <div>
                                                                 <h4 className="text-sm font-bold uppercase tracking-wide">{alert.title}</h4>
                                                                 <p className="text-xs mt-1 opacity-90 leading-relaxed">{alert.message}</p>
+                                                                {(alert.source_url || alert.source_name) && (
+                                                                    <p className="text-[10px] mt-2 text-zinc-400">
+                                                                        <span className="uppercase tracking-wider">Source:</span>{' '}
+                                                                        {alert.source_url ? (
+                                                                            <a
+                                                                                href={alert.source_url}
+                                                                                target="_blank"
+                                                                                rel="noopener noreferrer"
+                                                                                className="text-emerald-300 hover:text-emerald-200 underline"
+                                                                            >
+                                                                                {alert.source_name || 'View source'}
+                                                                            </a>
+                                                                        ) : (
+                                                                            <span>{alert.source_name}</span>
+                                                                        )}
+                                                                    </p>
+                                                                )}
                                                                 {alert.action_required && (
                                                                     <p className="text-xs mt-2 font-bold uppercase tracking-wider bg-black/20 inline-block px-2 py-1 rounded">
                                                                         Action: {alert.action_required}

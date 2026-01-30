@@ -55,8 +55,8 @@ Respond with ONLY "yes" if materially different, "no" if same meaning."""
             return response.text.strip().lower().startswith("yes")
         except Exception as e:
             print(f"[Gemini Compliance] Error checking material change: {e}")
-            # Fall back to assuming it's a material change so we don't silently drop real changes
-            return True
+            # Conservative default to avoid noisy/incorrect alerts
+            return False
 
     async def research_location_compliance(
         self,

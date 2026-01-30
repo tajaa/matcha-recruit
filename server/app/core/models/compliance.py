@@ -81,6 +81,8 @@ class ComplianceAlert(BaseModel):
     status: str
     category: Optional[str] = None
     action_required: Optional[str] = None
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
     deadline: Optional[date] = None
     created_at: datetime
     read_at: Optional[datetime] = None
@@ -132,6 +134,8 @@ class AlertResponse(BaseModel):
     status: str
     category: Optional[str] = None
     action_required: Optional[str] = None
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
     deadline: Optional[str] = None
     created_at: str
     read_at: Optional[str] = None
