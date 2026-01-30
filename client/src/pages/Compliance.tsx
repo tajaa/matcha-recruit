@@ -610,7 +610,14 @@ export function Compliance() {
                                                         <div className="flex items-start gap-3">
                                                             <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
                                                             <div>
-                                                                <h4 className="text-sm font-bold uppercase tracking-wide">{alert.title}</h4>
+                                                                <div className="flex items-center gap-2">
+                                                                    <h4 className="text-sm font-bold uppercase tracking-wide">{alert.title}</h4>
+                                                                    {alert.created_at && (
+                                                                        <span className="text-[10px] text-zinc-400 font-mono whitespace-nowrap">
+                                                                            {new Date(alert.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
                                                                 <p className="text-xs mt-1 opacity-90 leading-relaxed">{linkifyText(alert.message)}</p>
                                                                 {(alert.source_url || alert.source_name) && (
                                                                     <p className="text-[10px] mt-2 text-zinc-400">

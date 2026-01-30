@@ -532,7 +532,10 @@ async def run_compliance_check_stream(
 
                     if material_change:
                         alert_count += 1
-                        source_hint = req.get("source_url") or req.get("source_name") or "N/A"
+                        change_msg = f"Value changed from {old_value} to {new_value}."
+                        description = req.get("description")
+                        if description:
+                            change_msg += f" {description}"
                         await conn.execute(
                             """
                             INSERT INTO compliance_alerts
@@ -541,7 +544,7 @@ async def run_compliance_check_stream(
                             """,
                             location_id, company_id, existing['id'],
                             f"Compliance Change: {req.get('title')}",
-                            f"Value changed from {old_value} to {new_value}. Source: {source_hint}",
+                            change_msg,
                             "warning", req.get('category'),
                             req.get("source_url"), req.get("source_name")
                         )
@@ -617,7 +620,6 @@ async def run_compliance_check_stream(
                 )
 
                 alert_count += 1
-                source_hint = req.get("source_url") or req.get("source_name") or "N/A"
                 await conn.execute(
                     """
                     INSERT INTO compliance_alerts
@@ -626,7 +628,7 @@ async def run_compliance_check_stream(
                     """,
                     location_id, company_id, req_id,
                     f"New Requirement: {req.get('title')}",
-                    f"New compliance requirement identified. Source: {source_hint}",
+                    req.get("description") or "New compliance requirement identified.",
                     "info", req.get("category"),
                     req.get("source_url"), req.get("source_name")
                 )
