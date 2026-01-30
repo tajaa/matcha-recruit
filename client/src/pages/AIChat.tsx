@@ -39,6 +39,7 @@ export default function AIChat() {
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlsRef = useRef<Map<File, string>>(new Map());
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -48,12 +49,27 @@ export default function AIChat() {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  // Abort any in-flight stream on unmount
+  // Abort any in-flight stream on unmount and revoke preview URLs
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      for (const url of previewUrlsRef.current.values()) {
+        URL.revokeObjectURL(url);
+      }
+      previewUrlsRef.current.clear();
     };
   }, []);
+
+  // Revoke preview URLs when files are removed
+  useEffect(() => {
+    const currentFiles = new Set(pendingFiles);
+    for (const [file, url] of previewUrlsRef.current) {
+      if (!currentFiles.has(file)) {
+        URL.revokeObjectURL(url);
+        previewUrlsRef.current.delete(file);
+      }
+    }
+  }, [pendingFiles]);
 
   // Load conversations on mount
   useEffect(() => {
@@ -127,6 +143,15 @@ export default function AIChat() {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function getPreviewUrl(file: File): string {
+    let url = previewUrlsRef.current.get(file);
+    if (!url) {
+      url = URL.createObjectURL(file);
+      previewUrlsRef.current.set(file, url);
+    }
+    return url;
+  }
+
   async function sendMessage() {
     if ((!input.trim() && pendingFiles.length === 0) || !activeId || streaming) return;
     const content = input.trim();
@@ -179,7 +204,7 @@ export default function AIChat() {
 
       // Build FormData
       const formData = new FormData();
-      formData.append('content', content || ' ');
+      formData.append('content', content);
       for (const file of filesToSend) {
         formData.append('files', file);
       }
@@ -257,6 +282,12 @@ export default function AIChat() {
     } finally {
       setStreaming(false);
       abortRef.current = null;
+      // Revoke optimistic blob URLs
+      for (const att of optimisticAttachments) {
+        if (att.url.startsWith('blob:')) {
+          URL.revokeObjectURL(att.url);
+        }
+      }
       // Refresh conversation list to get server-side title updates
       loadConversations();
     }
@@ -279,15 +310,22 @@ export default function AIChat() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
+  function getAttachmentUrl(url: string): string {
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) {
+      return url;
+    }
+    return `${API_BASE}${url}`;
+  }
+
   function renderAttachments(attachments: Attachment[]) {
     if (!attachments || attachments.length === 0) return null;
     return (
       <div className="mt-2 flex flex-wrap gap-2">
         {attachments.map((att, i) =>
           isImageType(att.content_type) ? (
-            <a key={i} href={att.url} target="_blank" rel="noopener noreferrer">
+            <a key={i} href={getAttachmentUrl(att.url)} target="_blank" rel="noopener noreferrer">
               <img
-                src={att.url}
+                src={getAttachmentUrl(att.url)}
                 alt={att.filename}
                 className="max-w-[200px] max-h-[150px] object-cover border border-white/10"
               />
@@ -295,7 +333,7 @@ export default function AIChat() {
           ) : (
             <a
               key={i}
-              href={att.url}
+              href={getAttachmentUrl(att.url)}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-3 py-2 bg-black/20 border border-white/10 text-xs text-zinc-400 hover:text-white transition-colors"
@@ -481,7 +519,7 @@ export default function AIChat() {
                       >
                         {file.type.startsWith('image/') ? (
                           <img
-                            src={URL.createObjectURL(file)}
+                            src={getPreviewUrl(file)}
                             alt={file.name}
                             className="w-6 h-6 object-cover"
                           />

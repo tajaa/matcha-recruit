@@ -201,3 +201,97 @@ class TestContextCaps:
         source = inspect.getsource(AIChatService.build_company_context)
         # The method must call the filter function
         assert "_filter_by_jurisdiction_priority" in source
+
+
+# ---------------------------------------------------------------------------
+# Upload limits & validation
+# ---------------------------------------------------------------------------
+
+class TestUploadLimits:
+    """send_message must enforce file count, size, and type limits."""
+
+    def test_max_file_count_constant(self):
+        src = _read_route_source()
+        assert "MAX_FILE_COUNT" in src
+
+    def test_max_file_size_constant(self):
+        src = _read_route_source()
+        assert "MAX_FILE_SIZE" in src
+
+    def test_file_count_validation(self):
+        src = _read_route_source()
+        assert "len(files) > MAX_FILE_COUNT" in src
+
+    def test_file_size_validation(self):
+        src = _read_route_source()
+        assert "size > MAX_FILE_SIZE" in src
+
+    def test_allowed_content_types_defined(self):
+        src = _read_route_source()
+        assert "ALLOWED_CONTENT_TYPES" in src
+
+    def test_file_type_validation(self):
+        src = _read_route_source()
+        assert "ct not in ALLOWED_CONTENT_TYPES" in src
+
+    def test_image_size_gate_for_vision(self):
+        """Oversized images should skip base64 inlining."""
+        src = _read_route_source()
+        assert "MAX_IMAGE_SIZE_FOR_VISION" in src
+        assert "size <= MAX_IMAGE_SIZE_FOR_VISION" in src
+
+
+class TestPdfExtraction:
+    """PDF extraction must be safe and bounded."""
+
+    def test_max_pdf_pages_constant(self):
+        src = _read_route_source()
+        assert "MAX_PDF_PAGES" in src
+
+    def test_max_pdf_chars_constant(self):
+        src = _read_route_source()
+        assert "MAX_PDF_CHARS" in src
+
+    def test_extract_wrapped_in_try_except(self):
+        src = _read_route_source()
+        # The _extract_pdf_text function should handle errors
+        import re
+        fn_match = re.search(
+            r"def _extract_pdf_text.*?(?=\ndef |\nclass |\n@router|\Z)",
+            src, re.DOTALL,
+        )
+        assert fn_match
+        fn_body = fn_match.group()
+        assert "try:" in fn_body
+        assert "except" in fn_body
+
+
+class TestAutoTitle:
+    """Auto-title must not produce blank titles from empty content."""
+
+    def test_nullif_in_title_update(self):
+        src = _read_route_source()
+        assert "NULLIF" in src
+        assert "BTRIM" in src
+
+    def test_content_is_optional(self):
+        """Content field should accept empty strings for attachment-only messages."""
+        src = _read_route_source()
+        assert 'Form(default="")' in src
+
+
+class TestAttachmentDownloadProxy:
+    """Non-HTTP attachment URLs must be served via a download proxy."""
+
+    def test_download_route_exists(self):
+        src = _read_route_source()
+        assert "download_attachment" in src
+
+    def test_resolve_attachment_url_helper(self):
+        src = _read_route_source()
+        assert "_resolve_attachment_url" in src
+
+    def test_get_conversation_resolves_urls(self):
+        """get_conversation must transform attachment URLs for the client."""
+        src = _read_route_source()
+        assert "_resolve_attachment_url(a, m" in src

@@ -1,11 +1,12 @@
 import base64
 import json
+import os
 from typing import List
 from uuid import UUID
 
 import fitz  # pymupdf
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from ....database import get_connection
 from ....matcha.dependencies import get_client_company_id
@@ -24,15 +25,39 @@ router = APIRouter()
 
 IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 TEXT_EXTENSIONS = {".txt", ".csv"}
+ALLOWED_CONTENT_TYPES = IMAGE_CONTENT_TYPES | {"application/pdf", "text/plain", "text/csv"}
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf", ".txt", ".csv"}
+MAX_FILE_COUNT = 5
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_IMAGE_SIZE_FOR_VISION = 5 * 1024 * 1024  # 5 MB
+MAX_PDF_PAGES = 50
+MAX_PDF_CHARS = 50_000
 
 
 def _extract_pdf_text(data: bytes) -> str:
-    doc = fitz.open(stream=data, filetype="pdf")
-    pages = []
-    for page in doc:
-        pages.append(page.get_text())
-    doc.close()
-    return "\n".join(pages)
+    try:
+        doc = fitz.open(stream=data, filetype="pdf")
+        pages = []
+        for i, page in enumerate(doc):
+            if i >= MAX_PDF_PAGES:
+                pages.append(f"[... truncated at {MAX_PDF_PAGES} pages]")
+                break
+            pages.append(page.get_text())
+        doc.close()
+        text = "\n".join(pages)
+        if len(text) > MAX_PDF_CHARS:
+            text = text[:MAX_PDF_CHARS] + f"\n[... truncated at {MAX_PDF_CHARS:,} characters]"
+        return text
+    except Exception:
+        return ""
+
+
+def _resolve_attachment_url(att: dict, message_id, index: int) -> dict:
+    """Convert non-HTTP storage paths to proxy download URLs."""
+    url = att.get("url", "")
+    if url.startswith("http://") or url.startswith("https://"):
+        return att
+    return {**att, "url": f"/chat/ai/messages/{message_id}/attachments/{index}"}
 
 
 @router.post("/conversations", response_model=ConversationResponse)
@@ -113,7 +138,12 @@ async def get_conversation(
                 role=m["role"],
                 content=m["content"],
                 created_at=m["created_at"],
-                attachments=json.loads(m["attachments"]) if m["attachments"] else [],
+                attachments=[
+                    _resolve_attachment_url(a, m["id"], i)
+                    for i, a in enumerate(
+                        json.loads(m["attachments"]) if m["attachments"] else []
+                    )
+                ],
             )
             for m in msgs
         ],
@@ -142,10 +172,50 @@ async def delete_conversation(
             raise HTTPException(status_code=404, detail="Conversation not found")
 
 
+@router.get("/messages/{message_id}/attachments/{index}")
+async def download_attachment(
+    message_id: UUID,
+    index: int,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+
+    storage = get_storage()
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT m.attachments
+               FROM ai_messages m
+               JOIN ai_conversations c ON c.id = m.conversation_id
+               WHERE m.id = $1 AND c.company_id = $2 AND c.user_id = $3""",
+            message_id,
+            company_id,
+            current_user.id,
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    atts = json.loads(row["attachments"]) if row["attachments"] else []
+    if index < 0 or index >= len(atts):
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    att = atts[index]
+    file_bytes = await storage.download_file(att["url"])
+
+    return Response(
+        content=file_bytes,
+        media_type=att.get("content_type", "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="{att["filename"]}"'},
+    )
+
+
 @router.post("/conversations/{conversation_id}/messages")
 async def send_message(
     conversation_id: UUID,
-    content: str = Form(...),
+    content: str = Form(default=""),
     files: List[UploadFile] = File(default=[]),
     current_user: CurrentUser = Depends(require_admin),
 ):
@@ -168,6 +238,13 @@ async def send_message(
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
+        # Validate file count
+        if len(files) > MAX_FILE_COUNT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many files. Maximum is {MAX_FILE_COUNT}.",
+            )
+
         # Process uploaded files
         attachments: list[dict] = []
         image_parts: list[dict] = []
@@ -177,7 +254,22 @@ async def send_message(
             file_bytes = await file.read()
             filename = file.filename or "upload"
             ct = file.content_type or "application/octet-stream"
+            ext = os.path.splitext(filename)[1].lower()
             size = len(file_bytes)
+
+            # Validate file type
+            if ct not in ALLOWED_CONTENT_TYPES and ext not in ALLOWED_EXTENSIONS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File type not allowed: {filename}",
+                )
+
+            # Validate file size
+            if size > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File too large: {filename} ({size // (1024*1024)}MB). Maximum is {MAX_FILE_SIZE // (1024*1024)}MB.",
+                )
 
             # Upload to S3
             url = await storage.upload_file(
@@ -192,11 +284,12 @@ async def send_message(
 
             # Build multimodal content for the model
             if ct in IMAGE_CONTENT_TYPES:
-                b64 = base64.b64encode(file_bytes).decode()
-                image_parts.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{ct};base64,{b64}"},
-                })
+                if size <= MAX_IMAGE_SIZE_FOR_VISION:
+                    b64 = base64.b64encode(file_bytes).decode()
+                    image_parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{ct};base64,{b64}"},
+                    })
             elif ct == "application/pdf":
                 extracted = _extract_pdf_text(file_bytes)
                 if extracted.strip():
@@ -227,7 +320,7 @@ async def send_message(
         await conn.execute(
             """UPDATE ai_conversations
                SET updated_at = NOW(),
-                   title = COALESCE(title, LEFT($2, 100))
+                   title = COALESCE(title, NULLIF(LEFT(BTRIM($2), 100), ''))
                WHERE id = $1""",
             conversation_id,
             content,
