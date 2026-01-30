@@ -214,21 +214,20 @@ if [ "$REDIS_URL_SOURCE" = "default" ]; then
     REDIS_URL="redis://localhost:${REDIS_PORT}/0"
 fi
 
+CHAT_REUSE_EXISTING=false
 if [ "$ENABLE_CHAT" = true ]; then
     if is_port_in_use "$CHAT_PORT"; then
-        if [ "$CHAT_PORT_SOURCE" = "env" ]; then
-            echo -e "${RED}Error: CHAT_PORT $CHAT_PORT is already in use. Set CHAT_PORT to a free port.${NC}"
+        # Check if an existing llama-server is already on this port — reuse it
+        if lsof -n -P -iTCP:"$CHAT_PORT" -sTCP:LISTEN 2>/dev/null | grep -q llama; then
+            echo -e "${GREEN}Reusing existing llama-server on port $CHAT_PORT (avoids GPU memory conflict)${NC}"
+            CHAT_REUSE_EXISTING=true
+        elif [ "$CHAT_PORT_SOURCE" = "env" ]; then
+            echo -e "${RED}Error: CHAT_PORT $CHAT_PORT is already in use by a non-llama process. Set CHAT_PORT to a free port.${NC}"
+            exit 1
+        else
+            echo -e "${RED}Error: Port $CHAT_PORT is in use by a non-llama process. Free it or set CHAT_PORT.${NC}"
             exit 1
         fi
-
-        ALT_CHAT_PORT="$(pick_available_port 8081 8090)"
-        if [ -z "$ALT_CHAT_PORT" ]; then
-            echo -e "${RED}Error: No free chat ports found in 8081-8090.${NC}"
-            exit 1
-        fi
-
-        echo -e "${YELLOW}Port $CHAT_PORT is in use; using $ALT_CHAT_PORT for the chat model instead.${NC}"
-        CHAT_PORT="$ALT_CHAT_PORT"
     fi
 fi
 
@@ -270,7 +269,7 @@ tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
     "npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
 
 # Pane 4 (optional): AI Chat Model Server
-if [ "$ENABLE_CHAT" = true ]; then
+if [ "$ENABLE_CHAT" = true ] && [ "$CHAT_REUSE_EXISTING" = false ]; then
     tmux split-window -t "$SESSION_NAME:dev.3" -v -c "$PROJECT_ROOT" \
         "echo 'Starting Qwen chat model on port $CHAT_PORT...'; llama-server -m $CHAT_MODEL_PATH --mmproj $CHAT_MMPROJ_PATH -ngl 99 --ctx-size 4096 --port $CHAT_PORT; echo -e '\n${RED}Chat model exited.${NC}'; read"
 fi
