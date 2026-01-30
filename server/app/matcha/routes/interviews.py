@@ -894,6 +894,7 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
     await websocket.accept()
 
     settings = get_settings()
+    cancelled = False
     gemini_session: Optional[GeminiLiveSession] = None
     analyzer = CultureAnalyzer(
         api_key=settings.gemini_api_key,
@@ -1013,7 +1014,10 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
 
             if "text" in message:
                 cmd = parse_text_message(message["text"])
-                if cmd and cmd.command == "stop_session":
+                if cmd and cmd.command == "cancel_session":
+                    cancelled = True
+                    break
+                elif cmd and cmd.command == "stop_session":
                     break
                 elif cmd and cmd.command == "send_text":
                     # Allow sending text messages (for testing)
@@ -1043,42 +1047,55 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
         except Exception:
             pass
     finally:
-        # Save transcript immediately and queue analysis for background processing
         if gemini_session:
             transcript_text = gemini_session.get_transcript_text()
 
-            # Save transcript with 'analyzing' status - analysis will run in background worker
-            async with get_connection() as conn:
-                await conn.execute(
-                    """
-                    UPDATE interviews
-                    SET transcript = $1, status = 'analyzing', completed_at = NOW()
-                    WHERE id = $2
-                    """,
-                    transcript_text,
-                    interview_id,
-                )
-
-            # Queue analysis task for Celery worker
-            if transcript_text:
-                from app.workers.tasks.interview_analysis import analyze_interview_async
-
-                analyze_interview_async.delay(
-                    interview_id=str(interview_id),
-                    interview_type=interview_type,
-                    transcript=transcript_text,
-                    company_id=str(row["company_id"]) if row["company_id"] else None,
-                    culture_profile=culture_profile,
-                    language=tutor_language,  # Pass language for tutor_language sessions
-                )
-                print(f"[Interview {interview_id}] Queued analysis task for background processing")
-            else:
-                # No transcript, mark as completed without analysis
+            if cancelled:
+                # User cancelled — save transcript but skip analysis
                 async with get_connection() as conn:
                     await conn.execute(
-                        "UPDATE interviews SET status = 'completed' WHERE id = $1",
+                        """
+                        UPDATE interviews
+                        SET transcript = $1, status = 'cancelled', completed_at = NOW()
+                        WHERE id = $2
+                        """,
+                        transcript_text,
                         interview_id,
                     )
+                print(f"[Interview {interview_id}] Session cancelled by user, skipping analysis")
+            else:
+                # Save transcript with 'analyzing' status - analysis will run in background worker
+                async with get_connection() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE interviews
+                        SET transcript = $1, status = 'analyzing', completed_at = NOW()
+                        WHERE id = $2
+                        """,
+                        transcript_text,
+                        interview_id,
+                    )
+
+                # Queue analysis task for Celery worker
+                if transcript_text:
+                    from app.workers.tasks.interview_analysis import analyze_interview_async
+
+                    analyze_interview_async.delay(
+                        interview_id=str(interview_id),
+                        interview_type=interview_type,
+                        transcript=transcript_text,
+                        company_id=str(row["company_id"]) if row["company_id"] else None,
+                        culture_profile=culture_profile,
+                        language=tutor_language,  # Pass language for tutor_language sessions
+                    )
+                    print(f"[Interview {interview_id}] Queued analysis task for background processing")
+                else:
+                    # No transcript, mark as completed without analysis
+                    async with get_connection() as conn:
+                        await conn.execute(
+                            "UPDATE interviews SET status = 'completed' WHERE id = $1",
+                            interview_id,
+                        )
 
             await gemini_session.close()
 

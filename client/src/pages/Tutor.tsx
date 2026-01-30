@@ -57,7 +57,7 @@ export function Tutor() {
     messages,
     sessionTimeRemaining,
     connect,
-    disconnect,
+    cancelSession,
     startRecording,
     stopRecording,
   } = useAudioInterview(interviewId || '', { maxSessionDurationMs });
@@ -95,10 +95,10 @@ export function Tutor() {
     }
   };
 
-  // End the session
+  // End the session (cancel — skip analysis, return to mode selection)
   const handleEnd = () => {
-    disconnect();
-    setCompleted(true);
+    cancelSession();
+    handleReset();
   };
 
   // Reset to mode selection

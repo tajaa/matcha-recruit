@@ -32,16 +32,11 @@ final class AudioPlayer {
     private var isPlaying = false
 
     private let sampleRate: Double = AudioProtocol.outputSampleRate
-    private let playaheadSeconds: TimeInterval = 0.25
-    private let turnStartDelaySeconds: TimeInterval = 0.5
-
-    private var nextScheduleTime: AVAudioTime?
-    private var lastScheduleHostTime: UInt64 = 0
 
     // MARK: - Initialization
 
     init() {
-        setupAudioEngine()
+        // Engine setup deferred to start() — must happen after audio session is configured
     }
 
     // MARK: - Public Methods
@@ -51,6 +46,8 @@ final class AudioPlayer {
 
         do {
             try configureAudioSession()
+            setupAudioEngine()
+            audioEngine.prepare()
             try audioEngine.start()
             playerNode.play()
             isPlaying = true
@@ -67,8 +64,6 @@ final class AudioPlayer {
         playerNode.stop()
         audioEngine.stop()
         isPlaying = false
-        nextScheduleTime = nil
-        lastScheduleHostTime = 0
         delegate?.audioPlayerDidStopPlaying(self)
     }
 
@@ -86,7 +81,10 @@ final class AudioPlayer {
 
     private func configureAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+        // Use .default mode — .voiceChat enables heavy voice processing (AEC/AGC/NS)
+        // that overloads the simulator's proxy audio I/O loop.
+        // The recorder will switch to .voiceChat when recording starts.
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
         try session.setPreferredSampleRate(sampleRate)
         try session.setActive(true)
     }
@@ -141,35 +139,10 @@ final class AudioPlayer {
     }
 
     private func scheduleBuffer(_ buffer: AVAudioPCMBuffer) {
-        let now = mach_absolute_time()
-        var timeInfo = mach_timebase_info_data_t()
-        mach_timebase_info(&timeInfo)
-
-        let nanosPerTick = Double(timeInfo.numer) / Double(timeInfo.denom)
-
-        // Calculate schedule time
-        let playaheadNanos = UInt64(playaheadSeconds * 1_000_000_000)
-        let turnDelayNanos = UInt64(turnStartDelaySeconds * 1_000_000_000)
-
-        let graceNanos = UInt64(0.05 * 1_000_000_000)
-        let isNewTurn = lastScheduleHostTime == 0 || (now > lastScheduleHostTime + graceNanos)
-
-        var scheduleHostTime: UInt64
-        if isNewTurn {
-            scheduleHostTime = now + playaheadNanos + turnDelayNanos
-        } else {
-            scheduleHostTime = max(lastScheduleHostTime, now + playaheadNanos)
-        }
-
-        // Convert to ticks
-        let scheduleTicks = UInt64(Double(scheduleHostTime) / nanosPerTick)
-
-        let scheduleTime = AVAudioTime(hostTime: scheduleTicks)
-        playerNode.scheduleBuffer(buffer, at: scheduleTime, options: [], completionHandler: nil)
-
-        // Update for next buffer
-        let bufferDurationNanos = UInt64(Double(buffer.frameLength) / sampleRate * 1_000_000_000)
-        lastScheduleHostTime = scheduleHostTime + bufferDurationNanos
+        // Sequential scheduling — each buffer plays after the previous one finishes.
+        // Simpler and more reliable than host-time scheduling, which can fail
+        // silently when the Core Audio I/O loop is under pressure.
+        playerNode.scheduleBuffer(buffer, completionHandler: nil)
     }
 }
 

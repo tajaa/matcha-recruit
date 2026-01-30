@@ -29,6 +29,7 @@ interface UseAudioInterviewReturn {
   idleWarning: boolean;
   connect: () => void;
   disconnect: () => void;
+  cancelSession: () => void;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
   resetIdleTimer: () => void;
@@ -300,6 +301,14 @@ export function useAudioInterview(
     setIsConnected(false);
   }, [clearAllTimers]);
 
+  // Cancel session (tells backend to skip analysis, then disconnects)
+  const cancelSession = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ command: 'cancel_session' }));
+    }
+    disconnect();
+  }, [disconnect]);
+
   // Start recording
   const startRecording = useCallback(async () => {
     if (!wsRef.current || isRecording) return;
@@ -400,6 +409,7 @@ export function useAudioInterview(
     idleWarning,
     connect,
     disconnect,
+    cancelSession,
     startRecording,
     stopRecording,
     resetIdleTimer,
