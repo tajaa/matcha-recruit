@@ -406,7 +406,7 @@ export function Compliance() {
                                         <div className="flex items-center gap-3 px-6 pt-3 pb-2 border-b border-white/5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
                                             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> New</span>
                                             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Updated</span>
-                                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-600 inline-block" /> Unchanged</span>
+                                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-600 inline-block" /> Same</span>
                                         </div>
                                     )}
                                     <div className="px-6 py-3 space-y-1.5 max-h-40 overflow-y-auto">
@@ -433,7 +433,7 @@ export function Compliance() {
                                                     msg.status === 'updated' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
                                                     'bg-zinc-800 text-zinc-500 border border-zinc-700'
                                                 }`}>
-                                                    {msg.status}
+                                                    {msg.status === 'unchanged' ? 'same' : msg.status}
                                                 </span>
                                             )}
                                             <span className={
