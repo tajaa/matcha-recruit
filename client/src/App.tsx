@@ -105,6 +105,9 @@ const GumFitUsers = lazy(() => import('./pages/gumfit/GumFitUsers'));
 const GumFitInvites = lazy(() => import('./pages/gumfit/GumFitInvites'));
 const GumFitAssets = lazy(() => import('./pages/gumfit/GumFitAssets'));
 
+// AI Chat
+const AIChat = lazy(() => import('./pages/AIChat'));
+
 // Employee Experience (XP) Pages
 const XPDashboard = lazy(() => import('./pages/xp/Dashboard'));
 const VibeChecks = lazy(() => import('./pages/xp/VibeChecks'));
@@ -289,6 +292,16 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="time_off">
                     <PTOManagement />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* AI Chat */}
+              <Route
+                path="ai-chat"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <AIChat />
                   </ProtectedRoute>
                 }
               />

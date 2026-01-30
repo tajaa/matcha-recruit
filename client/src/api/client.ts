@@ -2664,6 +2664,32 @@ export const gumfit = {
     request<{ categories: GumFitAssetCategory[] }>('/gumfit/assets/categories/list'),
 };
 
+// AI Chat API
+export const aiChat = {
+  createConversation: (title?: string) =>
+    request<{ id: string; title: string | null; created_at: string; updated_at: string }>(
+      '/chat/ai/conversations',
+      { method: 'POST', body: JSON.stringify({ title }) }
+    ),
+
+  listConversations: () =>
+    request<{ id: string; title: string | null; created_at: string; updated_at: string }[]>(
+      '/chat/ai/conversations'
+    ),
+
+  getConversation: (id: string) =>
+    request<{
+      id: string;
+      title: string | null;
+      created_at: string;
+      updated_at: string;
+      messages: { id: string; role: string; content: string; created_at: string }[];
+    }>(`/chat/ai/conversations/${id}`),
+
+  deleteConversation: (id: string) =>
+    request<void>(`/chat/ai/conversations/${id}`, { method: 'DELETE' }),
+};
+
 // Combined API object for convenient imports
 export const api = {
   auth,
@@ -2695,4 +2721,5 @@ export const api = {
   deals,
   campaigns,
   gumfit,
+  aiChat,
 };
