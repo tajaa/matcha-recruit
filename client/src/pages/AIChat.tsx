@@ -40,6 +40,7 @@ export default function AIChat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewUrlsRef = useRef<Map<File, string>>(new Map());
+  const optimisticBlobUrlsRef = useRef<Set<string>>(new Set());
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -57,6 +58,10 @@ export default function AIChat() {
         URL.revokeObjectURL(url);
       }
       previewUrlsRef.current.clear();
+      for (const url of optimisticBlobUrlsRef.current.values()) {
+        URL.revokeObjectURL(url);
+      }
+      optimisticBlobUrlsRef.current.clear();
     };
   }, []);
 
@@ -95,6 +100,7 @@ export default function AIChat() {
     try {
       const detail = await aiChat.getConversation(id);
       setMessages(detail.messages);
+      cleanupOptimisticBlobUrls(detail.messages);
     } catch (err) {
       console.error('Failed to load conversation:', err);
     } finally {
@@ -152,6 +158,24 @@ export default function AIChat() {
     return url;
   }
 
+  function cleanupOptimisticBlobUrls(nextMessages: Message[]) {
+    const active = new Set<string>();
+    for (const msg of nextMessages) {
+      if (!msg.attachments) continue;
+      for (const att of msg.attachments) {
+        if (att.url.startsWith('blob:')) {
+          active.add(att.url);
+        }
+      }
+    }
+    for (const url of optimisticBlobUrlsRef.current) {
+      if (!active.has(url)) {
+        URL.revokeObjectURL(url);
+        optimisticBlobUrlsRef.current.delete(url);
+      }
+    }
+  }
+
   async function sendMessage() {
     if ((!input.trim() && pendingFiles.length === 0) || !activeId || streaming) return;
     const content = input.trim();
@@ -160,12 +184,16 @@ export default function AIChat() {
     setPendingFiles([]);
 
     // Build optimistic attachments for the user message preview
-    const optimisticAttachments: Attachment[] = filesToSend.map((f) => ({
-      url: URL.createObjectURL(f),
-      filename: f.name,
-      content_type: f.type || 'application/octet-stream',
-      size: f.size,
-    }));
+    const optimisticAttachments: Attachment[] = filesToSend.map((f) => {
+      const url = URL.createObjectURL(f);
+      optimisticBlobUrlsRef.current.add(url);
+      return {
+        url,
+        filename: f.name,
+        content_type: f.type || 'application/octet-stream',
+        size: f.size,
+      };
+    });
 
     // Optimistic user message
     const userMsg: Message = {
@@ -282,12 +310,6 @@ export default function AIChat() {
     } finally {
       setStreaming(false);
       abortRef.current = null;
-      // Revoke optimistic blob URLs
-      for (const att of optimisticAttachments) {
-        if (att.url.startsWith('blob:')) {
-          URL.revokeObjectURL(att.url);
-        }
-      }
       // Refresh conversation list to get server-side title updates
       loadConversations();
     }

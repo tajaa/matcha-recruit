@@ -60,6 +60,25 @@ def _resolve_attachment_url(att: dict, message_id, index: int) -> dict:
     return {**att, "url": f"/chat/ai/messages/{message_id}/attachments/{index}"}
 
 
+def _parse_attachments(value) -> list:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return parsed
+            if isinstance(parsed, dict):
+                return [parsed]
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
 @router.post("/conversations", response_model=ConversationResponse)
 async def create_conversation(
     data: ConversationCreate,
@@ -141,7 +160,7 @@ async def get_conversation(
                 attachments=[
                     _resolve_attachment_url(a, m["id"], i)
                     for i, a in enumerate(
-                        json.loads(m["attachments"]) if m["attachments"] else []
+                        _parse_attachments(m["attachments"])
                     )
                 ],
             )
@@ -198,7 +217,7 @@ async def download_attachment(
     if not row:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    atts = json.loads(row["attachments"]) if row["attachments"] else []
+    atts = _parse_attachments(row["attachments"])
     if index < 0 or index >= len(atts):
         raise HTTPException(status_code=404, detail="Attachment not found")
 
