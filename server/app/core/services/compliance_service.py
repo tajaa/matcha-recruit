@@ -468,6 +468,17 @@ async def run_compliance_check_stream(
                     dup["id"],
                 )
 
+        # Dismiss orphaned alerts (NULL requirement_id) left by old key-mismatch bug
+        await conn.execute(
+            """
+            UPDATE compliance_alerts
+            SET status = 'dismissed', dismissed_at = NOW()
+            WHERE location_id = $1 AND requirement_id IS NULL
+              AND status IN ('unread', 'read')
+            """,
+            location_id,
+        )
+
         # Track which keys are in the new result set
         new_requirement_keys = set()
 
@@ -479,13 +490,12 @@ async def run_compliance_check_stream(
             req_title = req.get("title", "")
 
             if existing:
-                # Auto-dismiss stale "New Requirement" alerts for this existing requirement
+                # Auto-dismiss stale alerts for this requirement before re-check creates fresh ones
                 await conn.execute(
                     """
                     UPDATE compliance_alerts
                     SET status = 'dismissed', dismissed_at = NOW()
                     WHERE requirement_id = $1 AND status IN ('unread', 'read')
-                      AND title LIKE 'New Requirement:%'
                     """,
                     existing["id"],
                 )
