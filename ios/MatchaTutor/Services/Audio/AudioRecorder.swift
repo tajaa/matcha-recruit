@@ -31,6 +31,8 @@ final class AudioRecorder {
     // Shared engine from AudioPlayer — avoids dual-engine I/O conflicts
     private var sharedEngine: AVAudioEngine?
     private var isRecording = false
+    private var isTapInstalled = false
+    private var debugBufferCount = 0
 
     private let targetSampleRate: Double = AudioProtocol.inputSampleRate
     private let bufferSize: AVAudioFrameCount = AVAudioFrameCount(AudioProtocol.audioChunkSize)
@@ -49,6 +51,16 @@ final class AudioRecorder {
         }
     }
 
+    func prepareTap() throws {
+        guard let engine = sharedEngine else {
+            throw AudioRecorderError.engineSetupFailed
+        }
+        guard !isTapInstalled else { return }
+
+        try installInputTap(on: engine)
+        isTapInstalled = true
+    }
+
     func startRecording() throws {
         guard !isRecording else { return }
         guard let engine = sharedEngine else {
@@ -56,11 +68,12 @@ final class AudioRecorder {
         }
 
         do {
-            // Restart the shared engine if it was stopped (e.g. after an interruption)
+            try prepareTap()
+
+            // Start the shared engine after the tap is installed.
             if !engine.isRunning {
                 try engine.start()
             }
-            try installInputTap(on: engine)
             isRecording = true
             delegate?.audioRecorderDidStart(self)
         } catch {
@@ -72,9 +85,14 @@ final class AudioRecorder {
     func stopRecording() {
         guard isRecording else { return }
 
-        sharedEngine?.inputNode.removeTap(onBus: 0)
         isRecording = false
         delegate?.audioRecorderDidStop(self)
+    }
+
+    func removeTap() {
+        guard isTapInstalled, let engine = sharedEngine else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        isTapInstalled = false
     }
 
     // MARK: - Private Methods
@@ -82,6 +100,11 @@ final class AudioRecorder {
     private func installInputTap(on engine: AVAudioEngine) throws {
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            print("[AudioRecorder] Invalid input format: \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount)ch")
+            throw AudioRecorderError.engineSetupFailed
+        }
 
         // Create target format: 16kHz, mono, 16-bit PCM
         guard let targetFormat = AVAudioFormat(
@@ -93,16 +116,16 @@ final class AudioRecorder {
             throw AudioRecorderError.formatConversionFailed
         }
 
-        // Create format converter if needed
-        var converter: AVAudioConverter?
-        if inputFormat.sampleRate != targetSampleRate || inputFormat.channelCount != 1 {
-            guard let audioConverter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-                throw AudioRecorderError.formatConversionFailed
-            }
-            converter = audioConverter
-        }
+        print("[AudioRecorder] Input format: \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount)ch, \(inputFormat)")
 
-        // Install tap on input — engine is already running (managed by AudioPlayer)
+        // Always create converter to normalize format for the backend.
+        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+            print("[AudioRecorder] Failed to create converter from \(inputFormat) to \(targetFormat)")
+            throw AudioRecorderError.formatConversionFailed
+        }
+        print("[AudioRecorder] Converter created: \(inputFormat.sampleRate)Hz → \(targetFormat.sampleRate)Hz")
+
+        // Install tap on input — engine will be started after the graph is complete.
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
             self.processAudioBuffer(buffer, converter: converter, targetFormat: targetFormat)
@@ -110,21 +133,36 @@ final class AudioRecorder {
     }
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter?, targetFormat: AVAudioFormat) {
+        guard isRecording else { return }
+
         let pcmData: Data
 
-        if let converter = converter {
-            // Need to convert sample rate and/or channels
-            guard let convertedBuffer = convertBuffer(buffer, using: converter, to: targetFormat) else {
-                return
+        guard let converter = converter else { return }
+        guard let convertedBuffer = convertBuffer(buffer, using: converter, to: targetFormat) else {
+            return
+        }
+        pcmData = bufferToPCMData(convertedBuffer)
+
+        debugBufferCount += 1
+        if debugBufferCount % 50 == 0 {
+            // Calculate RMS of raw input to verify mic captures real audio
+            var rmsDB: Float = -999
+            if let floatData = buffer.floatChannelData {
+                let frames = Int(buffer.frameLength)
+                var sum: Float = 0
+                for i in 0..<frames {
+                    let s = floatData[0][i]
+                    sum += s * s
+                }
+                let rms = sqrtf(sum / Float(max(frames, 1)))
+                rmsDB = 20 * log10f(max(rms, 1e-10))
             }
-            pcmData = bufferToPCMData(convertedBuffer)
-        } else {
-            // Already in correct format
-            pcmData = bufferToPCMData(buffer)
+            print("[AudioRecorder] buf#\(debugBufferCount) | RMS: \(String(format: "%.1f", rmsDB)) dBFS | \(pcmData.count) bytes (\(convertedBuffer.frameLength) frames)")
         }
 
         delegate?.audioRecorder(self, didCapturePCMData: pcmData)
     }
+
 
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, using converter: AVAudioConverter, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
         let ratio = format.sampleRate / buffer.format.sampleRate
@@ -135,7 +173,13 @@ final class AudioRecorder {
         }
 
         var error: NSError?
+        var hasProvidedData = false
         let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+            if hasProvidedData {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            hasProvidedData = true
             outStatus.pointee = .haveData
             return buffer
         }

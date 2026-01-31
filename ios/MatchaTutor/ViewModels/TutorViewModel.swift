@@ -117,6 +117,7 @@ final class TutorViewModel: ObservableObject {
         stopRecording()
         stopAllTimers()
         webSocketManager.disconnect()
+        audioRecorder.removeTap()
         try? audioPlayer.stop()
         sessionState = .idle
     }
@@ -272,7 +273,9 @@ extension TutorViewModel: WebSocketManagerDelegate {
             addSystemMessage("Connected to interview")
             startSessionTimer()
             do {
-                try audioPlayer.start()
+                try audioPlayer.configureGraph()
+                try audioRecorder.prepareTap()
+                try audioPlayer.startEngine()
             } catch {
                 print("Failed to start audio player: \(error)")
             }

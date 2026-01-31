@@ -21,6 +21,7 @@ final class WebSocketManager: NSObject {
     private(set) var state: WebSocketState = .disconnected
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession!
+    private var debugAudioSendCount = 0
 
     #if DEBUG
     private let baseWSURL = "ws://localhost:8001/api/ws/interview"
@@ -65,6 +66,11 @@ final class WebSocketManager: NSObject {
         // Prepend the client audio prefix byte
         var framedData = Data([AudioProtocol.clientAudioPrefix])
         framedData.append(pcmData)
+
+        debugAudioSendCount += 1
+        if debugAudioSendCount % 50 == 0 {
+            print("[WebSocket] Sending audio frame: \(framedData.count) bytes")
+        }
 
         let message = URLSessionWebSocketTask.Message.data(framedData)
         webSocketTask?.send(message) { error in
@@ -160,6 +166,7 @@ final class WebSocketManager: NSObject {
 
 extension WebSocketManager: URLSessionWebSocketDelegate {
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        print("[WebSocket] Connected to \(webSocketTask.originalRequest?.url?.absoluteString ?? "unknown")")
         state = .connected
         delegate?.webSocketDidConnect()
     }

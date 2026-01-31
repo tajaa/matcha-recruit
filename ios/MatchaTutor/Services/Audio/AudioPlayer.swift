@@ -33,6 +33,7 @@ final class AudioPlayer {
 
     private let playerNode = AVAudioPlayerNode()
     private var isPlaying = false
+    private var isPrepared = false
 
     private let sampleRate: Double = AudioProtocol.outputSampleRate
 
@@ -44,12 +45,28 @@ final class AudioPlayer {
 
     // MARK: - Public Methods
 
-    func start() throws {
+    /// Configure audio session and engine graph without preparing or starting playback.
+    /// Call this before installing input taps, then call `startEngine()`.
+    func configureGraph() throws {
         guard !isPlaying else { return }
 
         do {
             try configureAudioSession()
-            setupAudioEngine()
+            if !isPrepared {
+                setupAudioEngine()
+                isPrepared = true
+            }
+        } catch {
+            delegate?.audioPlayer(self, didFailWithError: error)
+            throw error
+        }
+    }
+
+    /// Start the engine and player node. Call after `configureGraph()` and any tap setup.
+    func startEngine() throws {
+        guard !isPlaying else { return }
+
+        do {
             sharedEngine.prepare()
             try sharedEngine.start()
             playerNode.play()
@@ -59,6 +76,12 @@ final class AudioPlayer {
             delegate?.audioPlayer(self, didFailWithError: error)
             throw error
         }
+    }
+
+    /// Convenience: prepare + start in one call (when no tap coordination is needed).
+    func start() throws {
+        try configureGraph()
+        try startEngine()
     }
 
     func stop() {
@@ -84,10 +107,14 @@ final class AudioPlayer {
 
     private func configureAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        // Use .default mode — .voiceChat enables heavy voice processing (AEC/AGC/NS)
-        // that overloads the simulator's proxy audio I/O loop.
-        // The recorder will switch to .voiceChat when recording starts.
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+        // Use .voiceChat on device for AEC/AGC/NS; use .default on simulator to
+        // avoid overloading its proxy audio I/O loop.
+#if targetEnvironment(simulator)
+        let mode: AVAudioSession.Mode = .default
+#else
+        let mode: AVAudioSession.Mode = .voiceChat
+#endif
+        try session.setCategory(.playAndRecord, mode: mode, options: [.defaultToSpeaker, .allowBluetooth])
         try session.setPreferredSampleRate(sampleRate)
         try session.setActive(true)
     }
