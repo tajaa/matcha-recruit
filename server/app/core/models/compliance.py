@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Optional, List, Any
 from pydantic import BaseModel
 from uuid import UUID
 from datetime import datetime, date
@@ -35,6 +35,22 @@ class AlertStatus(str, Enum):
     actioned = "actioned"
 
 
+class AlertType(str, Enum):
+    change = "change"
+    new_requirement = "new_requirement"
+    upcoming_legislation = "upcoming_legislation"
+    deadline_approaching = "deadline_approaching"
+
+
+class LegislationStatus(str, Enum):
+    proposed = "proposed"
+    passed = "passed"
+    signed = "signed"
+    effective_soon = "effective_soon"
+    effective = "effective"
+    dismissed = "dismissed"
+
+
 class BusinessLocation(BaseModel):
     id: UUID
     company_id: UUID
@@ -45,6 +61,9 @@ class BusinessLocation(BaseModel):
     county: Optional[str] = None
     zipcode: str
     is_active: bool = True
+    auto_check_enabled: bool = True
+    auto_check_interval_days: int = 7
+    next_auto_check: Optional[datetime] = None
     last_compliance_check: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -84,6 +103,11 @@ class ComplianceAlert(BaseModel):
     source_url: Optional[str] = None
     source_name: Optional[str] = None
     deadline: Optional[date] = None
+    confidence_score: Optional[float] = None
+    verification_sources: Optional[list] = None
+    alert_type: Optional[str] = "change"
+    effective_date: Optional[date] = None
+    metadata: Optional[dict] = None
     created_at: datetime
     read_at: Optional[datetime] = None
     dismissed_at: Optional[datetime] = None
@@ -106,6 +130,11 @@ class LocationUpdate(BaseModel):
     county: Optional[str] = None
     zipcode: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class AutoCheckSettings(BaseModel):
+    auto_check_enabled: Optional[bool] = None
+    auto_check_interval_days: Optional[int] = None
 
 
 class RequirementResponse(BaseModel):
@@ -137,8 +166,50 @@ class AlertResponse(BaseModel):
     source_url: Optional[str] = None
     source_name: Optional[str] = None
     deadline: Optional[str] = None
+    confidence_score: Optional[float] = None
+    verification_sources: Optional[list] = None
+    alert_type: Optional[str] = None
+    effective_date: Optional[str] = None
+    metadata: Optional[dict] = None
     created_at: str
     read_at: Optional[str] = None
+
+
+class CheckLogEntry(BaseModel):
+    id: str
+    location_id: str
+    company_id: str
+    check_type: str
+    status: str
+    started_at: str
+    completed_at: Optional[str] = None
+    new_count: int = 0
+    updated_count: int = 0
+    alert_count: int = 0
+    error_message: Optional[str] = None
+
+
+class UpcomingLegislationResponse(BaseModel):
+    id: str
+    location_id: str
+    category: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    current_status: str
+    expected_effective_date: Optional[str] = None
+    impact_summary: Optional[str] = None
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    confidence: Optional[float] = None
+    days_until_effective: Optional[int] = None
+    created_at: str
+
+
+class VerificationResult(BaseModel):
+    confirmed: bool
+    confidence: float
+    sources: List[dict] = []
+    explanation: str = ""
 
 
 class ComplianceSummary(BaseModel):
@@ -147,3 +218,5 @@ class ComplianceSummary(BaseModel):
     unread_alerts: int
     critical_alerts: int
     recent_changes: list
+    auto_check_locations: int = 0
+    upcoming_deadlines: list = []

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { BusinessLocation, ComplianceRequirement, LocationCreate } from '../api/compliance';
+import type { BusinessLocation, ComplianceRequirement, ComplianceAlert, LocationCreate, UpcomingLegislation } from '../api/compliance';
 import {
     complianceAPI,
     COMPLIANCE_CATEGORY_LABELS,
@@ -9,7 +9,8 @@ import {
 import {
     MapPin, Plus, Trash2, Edit2, X,
     ChevronDown, ChevronRight, AlertTriangle, Bell, CheckCircle,
-    ExternalLink, Building2, Loader2
+    ExternalLink, Building2, Loader2, Clock, Calendar, Shield,
+    History, Eye, Zap
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -78,9 +79,10 @@ export function Compliance() {
     const [editingLocation, setEditingLocation] = useState<BusinessLocation | null>(null);
     const [formData, setFormData] = useState<LocationFormData>(emptyFormData);
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-    const [activeTab, setActiveTab] = useState<'requirements' | 'alerts'>('requirements');
+    const [activeTab, setActiveTab] = useState<'requirements' | 'alerts' | 'upcoming' | 'history'>('requirements');
     const [checkInProgress, setCheckInProgress] = useState(false);
     const [checkMessages, setCheckMessages] = useState<{ type: string; status?: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
+    const [expandedAlertSources, setExpandedAlertSources] = useState<Set<string>>(new Set());
 
     const { data: locations, isLoading: loadingLocations } = useQuery({
         queryKey: ['compliance-locations'],
@@ -96,6 +98,18 @@ export function Compliance() {
     const { data: alerts, isLoading: loadingAlerts } = useQuery({
         queryKey: ['compliance-alerts'],
         queryFn: () => complianceAPI.getAlerts()
+    });
+
+    const { data: upcomingLegislation } = useQuery({
+        queryKey: ['compliance-upcoming', selectedLocationId],
+        queryFn: () => selectedLocationId ? complianceAPI.getUpcomingLegislation(selectedLocationId) : Promise.resolve([]),
+        enabled: !!selectedLocationId
+    });
+
+    const { data: checkLog } = useQuery({
+        queryKey: ['compliance-check-log', selectedLocationId],
+        queryFn: () => selectedLocationId ? complianceAPI.getCheckLog(selectedLocationId, 10) : Promise.resolve([]),
+        enabled: !!selectedLocationId
     });
 
     const createLocationMutation = useMutation({
@@ -142,6 +156,14 @@ export function Compliance() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['compliance-alerts'] });
             queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
+        }
+    });
+
+    const updateAutoCheckMutation = useMutation({
+        mutationFn: ({ id, settings }: { id: string; settings: { auto_check_enabled?: boolean; auto_check_interval_days?: number } }) =>
+            complianceAPI.updateAutoCheck(id, settings),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['compliance-locations'] });
         }
     });
 
@@ -205,6 +227,32 @@ export function Compliance() {
                 return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
             default:
                 return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+        }
+    };
+
+    const toggleAlertSources = (alertId: string) => {
+        setExpandedAlertSources(prev => {
+            const next = new Set(prev);
+            if (next.has(alertId)) next.delete(alertId);
+            else next.add(alertId);
+            return next;
+        });
+    };
+
+    const getConfidenceBadge = (score: number | null) => {
+        if (score === null || score === undefined) return null;
+        const pct = Math.round(score * 100);
+        if (score >= 0.6) return { label: `${pct}%`, color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', tag: 'Verified' };
+        if (score >= 0.3) return { label: `${pct}%`, color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', tag: 'Unverified' };
+        return { label: `${pct}%`, color: 'bg-red-500/20 text-red-400 border-red-500/30', tag: 'Low Confidence' };
+    };
+
+    const getAlertTypeIcon = (alertType: string | null) => {
+        switch (alertType) {
+            case 'upcoming_legislation': return <Calendar size={14} className="text-purple-400" />;
+            case 'deadline_approaching': return <Clock size={14} className="text-red-400" />;
+            case 'new_requirement': return <Zap size={14} className="text-blue-400" />;
+            default: return <AlertTriangle size={14} />;
         }
     };
 
@@ -331,7 +379,8 @@ export function Compliance() {
                 <div className="lg:col-span-2">
                     {selectedLocationId && selectedLocation ? (
                         <div className="bg-zinc-950 border border-white/10 rounded overflow-hidden min-h-[600px] flex flex-col">
-                            <div className="p-6 border-b border-white/10 bg-zinc-900/50 flex items-center justify-between">
+                            <div className="p-6 border-b border-white/10 bg-zinc-900/50">
+                                <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-4">
                                     <div className="w-10 h-10 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center">
                                         <Building2 size={20} className="text-white" />
@@ -398,6 +447,52 @@ export function Compliance() {
                                         <><Bell size={12} /> Check for Updates</>
                                     )}
                                 </button>
+                                </div>
+
+                                {/* Auto-check controls */}
+                                <div className="flex items-center gap-4 mt-3 pt-3 border-t border-white/5">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <button
+                                            onClick={() => updateAutoCheckMutation.mutate({
+                                                id: selectedLocation.id,
+                                                settings: { auto_check_enabled: !selectedLocation.auto_check_enabled }
+                                            })}
+                                            className={`w-8 h-4 rounded-full transition-colors relative ${
+                                                selectedLocation.auto_check_enabled ? 'bg-emerald-500' : 'bg-zinc-700'
+                                            }`}
+                                        >
+                                            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
+                                                selectedLocation.auto_check_enabled ? 'translate-x-4' : 'translate-x-0.5'
+                                            }`} />
+                                        </button>
+                                        <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-500">Auto-check</span>
+                                    </label>
+
+                                    {selectedLocation.auto_check_enabled && (
+                                        <>
+                                            <select
+                                                value={selectedLocation.auto_check_interval_days}
+                                                onChange={e => updateAutoCheckMutation.mutate({
+                                                    id: selectedLocation.id,
+                                                    settings: { auto_check_interval_days: parseInt(e.target.value) }
+                                                })}
+                                                className="text-[10px] bg-zinc-900 border border-zinc-800 text-zinc-400 px-2 py-1 uppercase tracking-wider"
+                                            >
+                                                <option value={1}>Daily</option>
+                                                <option value={3}>Every 3 days</option>
+                                                <option value={7}>Weekly</option>
+                                                <option value={14}>Biweekly</option>
+                                                <option value={30}>Monthly</option>
+                                            </select>
+                                            {selectedLocation.next_auto_check && (
+                                                <span className="text-[10px] text-zinc-600 font-mono flex items-center gap-1">
+                                                    <Clock size={10} />
+                                                    Next: {new Date(selectedLocation.next_auto_check).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                </span>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
                             </div>
 
                             {checkMessages.length > 0 && (
@@ -480,10 +575,171 @@ export function Compliance() {
                                         </span>
                                     )}
                                 </button>
+                                <button
+                                    onClick={() => setActiveTab('upcoming')}
+                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
+                                        activeTab === 'upcoming'
+                                            ? 'text-white border-b-2 border-white bg-zinc-900'
+                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
+                                    }`}
+                                >
+                                    <Calendar size={12} />
+                                    Upcoming ({upcomingLegislation?.length || 0})
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('history')}
+                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
+                                        activeTab === 'history'
+                                            ? 'text-white border-b-2 border-white bg-zinc-900'
+                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
+                                    }`}
+                                >
+                                    <History size={12} />
+                                    Log
+                                </button>
                             </div>
 
                             <div className="p-6 flex-1 bg-zinc-950 overflow-y-auto">
-                                {activeTab === 'requirements' ? (
+                                {activeTab === 'upcoming' ? (
+                                    !upcomingLegislation || upcomingLegislation.length === 0 ? (
+                                        <div className="text-center py-12">
+                                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                                                <Calendar size={20} className="text-zinc-500" />
+                                            </div>
+                                            <p className="text-zinc-500 text-sm font-mono uppercase tracking-wider">No upcoming legislation detected.</p>
+                                            <p className="text-zinc-600 text-xs mt-2">Run a compliance check to scan for upcoming changes.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {upcomingLegislation.map(leg => {
+                                                const statusColors: Record<string, string> = {
+                                                    proposed: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                                                    passed: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+                                                    signed: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+                                                    effective_soon: 'bg-red-500/20 text-red-400 border-red-500/30',
+                                                };
+                                                return (
+                                                    <div key={leg.id} className="border border-white/10 rounded-lg p-4 bg-zinc-900/50">
+                                                        <div className="flex items-start justify-between">
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-2 flex-wrap mb-1">
+                                                                    <h4 className="text-sm font-bold text-white uppercase tracking-wide">{leg.title}</h4>
+                                                                    <span className={`text-[10px] px-1.5 py-0.5 border rounded font-bold uppercase tracking-wider ${statusColors[leg.current_status] || 'bg-zinc-700 text-zinc-400 border-zinc-600'}`}>
+                                                                        {leg.current_status.replace('_', ' ')}
+                                                                    </span>
+                                                                    {leg.category && (
+                                                                        <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 rounded">
+                                                                            {COMPLIANCE_CATEGORY_LABELS[leg.category] || leg.category}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                {leg.description && (
+                                                                    <p className="text-xs text-zinc-400 leading-relaxed mb-2">{leg.description}</p>
+                                                                )}
+                                                                {leg.impact_summary && (
+                                                                    <p className="text-xs text-amber-300/80 leading-relaxed mb-2">
+                                                                        <span className="font-bold uppercase tracking-wider text-[10px]">Impact:</span> {leg.impact_summary}
+                                                                    </p>
+                                                                )}
+                                                                <div className="flex items-center gap-4 text-[10px] text-zinc-500">
+                                                                    {leg.expected_effective_date && (
+                                                                        <span className="flex items-center gap-1 font-mono">
+                                                                            <Calendar size={10} />
+                                                                            {new Date(leg.expected_effective_date).toLocaleDateString()}
+                                                                            {leg.days_until_effective !== null && (
+                                                                                <span className={`ml-1 font-bold ${
+                                                                                    leg.days_until_effective <= 30 ? 'text-red-400' :
+                                                                                    leg.days_until_effective <= 90 ? 'text-amber-400' :
+                                                                                    'text-zinc-400'
+                                                                                }`}>
+                                                                                    ({leg.days_until_effective <= 0 ? 'NOW' : `${leg.days_until_effective}d`})
+                                                                                </span>
+                                                                            )}
+                                                                        </span>
+                                                                    )}
+                                                                    {leg.confidence !== null && (
+                                                                        <span>Confidence: {Math.round(leg.confidence * 100)}%</span>
+                                                                    )}
+                                                                    {leg.source_url && (
+                                                                        <a href={leg.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 flex items-center gap-1">
+                                                                            Source <ExternalLink size={10} />
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            {leg.days_until_effective !== null && leg.days_until_effective <= 90 && (
+                                                                <div className={`text-right ml-4 ${
+                                                                    leg.days_until_effective <= 0 ? 'text-red-400' :
+                                                                    leg.days_until_effective <= 30 ? 'text-red-400' :
+                                                                    'text-amber-400'
+                                                                }`}>
+                                                                    <div className="text-2xl font-bold font-mono">
+                                                                        {leg.days_until_effective <= 0 ? 'NOW' : leg.days_until_effective}
+                                                                    </div>
+                                                                    {leg.days_until_effective > 0 && (
+                                                                        <div className="text-[10px] uppercase tracking-wider">days</div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )
+                                ) : activeTab === 'history' ? (
+                                    !checkLog || checkLog.length === 0 ? (
+                                        <div className="text-center py-12">
+                                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                                                <History size={20} className="text-zinc-500" />
+                                            </div>
+                                            <p className="text-zinc-500 text-sm font-mono uppercase tracking-wider">No check history yet.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {checkLog.map(entry => (
+                                                <div key={entry.id} className="flex items-center gap-4 p-3 border border-white/5 rounded bg-zinc-900/30">
+                                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                                        entry.status === 'completed' ? 'bg-emerald-400' :
+                                                        entry.status === 'failed' ? 'bg-red-400' :
+                                                        'bg-amber-400 animate-pulse'
+                                                    }`} />
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold uppercase tracking-wider ${
+                                                                entry.check_type === 'scheduled' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                                                                entry.check_type === 'proactive' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' :
+                                                                'bg-zinc-800 text-zinc-400 border-zinc-700'
+                                                            }`}>
+                                                                {entry.check_type}
+                                                            </span>
+                                                            <span className="text-xs text-zinc-400 font-mono">
+                                                                {new Date(entry.started_at).toLocaleString(undefined, {
+                                                                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                                                                })}
+                                                            </span>
+                                                        </div>
+                                                        {entry.status === 'completed' && (
+                                                            <p className="text-[10px] text-zinc-500 mt-1 font-mono">
+                                                                {entry.new_count} new, {entry.updated_count} updated, {entry.alert_count} alerts
+                                                            </p>
+                                                        )}
+                                                        {entry.error_message && (
+                                                            <p className="text-[10px] text-red-400 mt-1 truncate">{entry.error_message}</p>
+                                                        )}
+                                                    </div>
+                                                    <span className={`text-[10px] uppercase tracking-wider font-bold ${
+                                                        entry.status === 'completed' ? 'text-emerald-400' :
+                                                        entry.status === 'failed' ? 'text-red-400' :
+                                                        'text-amber-400'
+                                                    }`}>
+                                                        {entry.status}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )
+                                ) : activeTab === 'requirements' ? (
                                     loadingRequirements ? (
                                         <div className="space-y-4">
                                             {[1, 2, 3].map(i => (
@@ -599,7 +855,9 @@ export function Compliance() {
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
-                                            {locationAlerts.map(alert => (
+                                            {locationAlerts.map(alert => {
+                                                const confidence = getConfidenceBadge(alert.confidence_score);
+                                                return (
                                                 <div
                                                     key={alert.id}
                                                     className={`border rounded-lg p-4 ${getSeverityStyles(alert.severity)} ${
@@ -608,10 +866,23 @@ export function Compliance() {
                                                 >
                                                     <div className="flex items-start justify-between">
                                                         <div className="flex items-start gap-3">
-                                                            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+                                                            <span className="mt-0.5 flex-shrink-0">
+                                                                {getAlertTypeIcon(alert.alert_type)}
+                                                            </span>
                                                             <div>
-                                                                <div className="flex items-center gap-2">
+                                                                <div className="flex items-center gap-2 flex-wrap">
                                                                     <h4 className="text-sm font-bold uppercase tracking-wide">{alert.title}</h4>
+                                                                    {alert.alert_type && alert.alert_type !== 'change' && (
+                                                                        <span className="text-[10px] px-1.5 py-0.5 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded uppercase tracking-wider font-bold">
+                                                                            {alert.alert_type.replace('_', ' ')}
+                                                                        </span>
+                                                                    )}
+                                                                    {confidence && (
+                                                                        <span className={`text-[10px] px-1.5 py-0.5 border rounded font-bold uppercase tracking-wider ${confidence.color}`}>
+                                                                            <Shield size={8} className="inline mr-0.5" />
+                                                                            {confidence.tag} {confidence.label}
+                                                                        </span>
+                                                                    )}
                                                                     {alert.created_at && (
                                                                         <span className="text-[10px] text-zinc-400 font-mono whitespace-nowrap">
                                                                             {new Date(alert.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -619,6 +890,11 @@ export function Compliance() {
                                                                     )}
                                                                 </div>
                                                                 <p className="text-xs mt-1 opacity-90 leading-relaxed">{linkifyText(alert.message)}</p>
+                                                                {alert.effective_date && (
+                                                                    <p className="text-[10px] mt-1.5 font-mono text-purple-300 flex items-center gap-1">
+                                                                        <Calendar size={10} /> Effective: {new Date(alert.effective_date).toLocaleDateString()}
+                                                                    </p>
+                                                                )}
                                                                 {(alert.source_url || alert.source_name) && (
                                                                     <p className="text-[10px] mt-2 text-zinc-400">
                                                                         <span className="uppercase tracking-wider">Source:</span>{' '}
@@ -635,6 +911,42 @@ export function Compliance() {
                                                                             <span>{alert.source_name}</span>
                                                                         )}
                                                                     </p>
+                                                                )}
+                                                                {alert.verification_sources && alert.verification_sources.length > 0 && (
+                                                                    <div className="mt-2">
+                                                                        <button
+                                                                            onClick={() => toggleAlertSources(alert.id)}
+                                                                            className="text-[10px] uppercase tracking-wider text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition-colors"
+                                                                        >
+                                                                            <Eye size={10} />
+                                                                            {expandedAlertSources.has(alert.id) ? 'Hide' : 'Show'} {alert.verification_sources.length} verification source(s)
+                                                                        </button>
+                                                                        {expandedAlertSources.has(alert.id) && (
+                                                                            <div className="mt-1.5 space-y-1 pl-3 border-l border-white/10">
+                                                                                {alert.verification_sources.map((src, idx) => (
+                                                                                    <div key={idx} className="text-[10px]">
+                                                                                        <span className={`px-1 py-0.5 rounded mr-1.5 uppercase tracking-wider font-bold ${
+                                                                                            src.type === 'official' ? 'bg-emerald-500/20 text-emerald-400' :
+                                                                                            src.type === 'news' ? 'bg-blue-500/20 text-blue-400' :
+                                                                                            'bg-zinc-700 text-zinc-400'
+                                                                                        }`}>
+                                                                                            {src.type}
+                                                                                        </span>
+                                                                                        {src.url ? (
+                                                                                            <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-emerald-300 hover:text-emerald-200 underline">
+                                                                                                {src.name || src.url}
+                                                                                            </a>
+                                                                                        ) : (
+                                                                                            <span className="text-zinc-400">{src.name}</span>
+                                                                                        )}
+                                                                                        {src.snippet && (
+                                                                                            <p className="text-zinc-500 mt-0.5 italic">{src.snippet}</p>
+                                                                                        )}
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
                                                                 )}
                                                                 {alert.action_required && (
                                                                     <p className="text-xs mt-2 font-bold uppercase tracking-wider bg-black/20 inline-block px-2 py-1 rounded">
@@ -670,7 +982,8 @@ export function Compliance() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     )
                                 )}

@@ -8,6 +8,9 @@ export interface BusinessLocation {
     county: string | null;
     zipcode: string;
     is_active: boolean;
+    auto_check_enabled: boolean;
+    auto_check_interval_days: number;
+    next_auto_check: string | null;
     last_compliance_check: string | null;
     created_at: string;
     requirements_count: number;
@@ -49,6 +52,13 @@ export interface ComplianceRequirement {
     last_changed_at: string | null;
 }
 
+export interface VerificationSource {
+    url: string;
+    name: string;
+    type: 'official' | 'news' | 'blog' | 'other';
+    snippet?: string;
+}
+
 export interface ComplianceAlert {
     id: string;
     location_id: string;
@@ -62,8 +72,43 @@ export interface ComplianceAlert {
     source_url: string | null;
     source_name: string | null;
     deadline: string | null;
+    confidence_score: number | null;
+    verification_sources: VerificationSource[] | null;
+    alert_type: 'change' | 'new_requirement' | 'upcoming_legislation' | 'deadline_approaching' | null;
+    effective_date: string | null;
+    metadata: Record<string, unknown> | null;
     created_at: string;
     read_at: string | null;
+}
+
+export interface CheckLogEntry {
+    id: string;
+    location_id: string;
+    company_id: string;
+    check_type: 'manual' | 'scheduled' | 'proactive';
+    status: 'running' | 'completed' | 'failed';
+    started_at: string;
+    completed_at: string | null;
+    new_count: number;
+    updated_count: number;
+    alert_count: number;
+    error_message: string | null;
+}
+
+export interface UpcomingLegislation {
+    id: string;
+    location_id: string;
+    category: string | null;
+    title: string;
+    description: string | null;
+    current_status: 'proposed' | 'passed' | 'signed' | 'effective_soon' | 'effective' | 'dismissed';
+    expected_effective_date: string | null;
+    impact_summary: string | null;
+    source_url: string | null;
+    source_name: string | null;
+    confidence: number | null;
+    days_until_effective: number | null;
+    created_at: string;
 }
 
 export interface ComplianceSummary {
@@ -78,6 +123,15 @@ export interface ComplianceSummary {
         old_value: string | null;
         new_value: string;
         changed_at: string;
+    }[];
+    auto_check_locations: number;
+    upcoming_deadlines: {
+        title: string;
+        effective_date: string;
+        days_until: number;
+        status: string;
+        category: string | null;
+        location: string;
     }[];
 }
 
@@ -206,7 +260,41 @@ export const complianceAPI = {
         });
         if (!response.ok) throw new Error('Failed to start compliance check');
         return response;
-    }
+    },
+
+    async updateAutoCheck(locationId: string, settings: { auto_check_enabled?: boolean; auto_check_interval_days?: number }): Promise<{ id: string; auto_check_enabled: boolean; auto_check_interval_days: number; next_auto_check: string | null }> {
+        const response = await fetch(`/api/compliance/locations/${locationId}/auto-check`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(settings),
+        });
+        if (!response.ok) throw new Error('Failed to update auto-check settings');
+        return response.json();
+    },
+
+    async getCheckLog(locationId: string, limit?: number): Promise<CheckLogEntry[]> {
+        const params = limit ? `?limit=${limit}` : '';
+        const response = await fetch(`/api/compliance/locations/${locationId}/check-log${params}`, {
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+            },
+        });
+        if (!response.ok) throw new Error('Failed to fetch check log');
+        return response.json();
+    },
+
+    async getUpcomingLegislation(locationId: string): Promise<UpcomingLegislation[]> {
+        const response = await fetch(`/api/compliance/locations/${locationId}/upcoming-legislation`, {
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+            },
+        });
+        if (!response.ok) throw new Error('Failed to fetch upcoming legislation');
+        return response.json();
+    },
 };
 
 export const COMPLIANCE_CATEGORY_LABELS: Record<string, string> = {

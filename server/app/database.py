@@ -1203,6 +1203,45 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_business_locations_company_id ON business_locations(company_id)
         """)
 
+        # Auto-check scheduling columns
+        await conn.execute("""
+            ALTER TABLE business_locations
+            ADD COLUMN IF NOT EXISTS auto_check_enabled BOOLEAN DEFAULT true
+        """)
+        await conn.execute("""
+            ALTER TABLE business_locations
+            ADD COLUMN IF NOT EXISTS auto_check_interval_days INTEGER DEFAULT 7
+        """)
+        await conn.execute("""
+            ALTER TABLE business_locations
+            ADD COLUMN IF NOT EXISTS next_auto_check TIMESTAMP
+        """)
+
+        # Compliance check log table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS compliance_check_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                location_id UUID NOT NULL REFERENCES business_locations(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                check_type VARCHAR(30) NOT NULL DEFAULT 'manual' CHECK (check_type IN ('manual', 'scheduled', 'proactive')),
+                status VARCHAR(20) NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed')),
+                started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMP,
+                new_count INTEGER DEFAULT 0,
+                updated_count INTEGER DEFAULT 0,
+                alert_count INTEGER DEFAULT 0,
+                error_message TEXT
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_check_log_location
+            ON compliance_check_log(location_id, started_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_check_log_company
+            ON compliance_check_log(company_id, started_at DESC)
+        """)
+
         # Compliance requirements table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS compliance_requirements (
@@ -1279,6 +1318,28 @@ async def init_db():
             ADD COLUMN IF NOT EXISTS source_name VARCHAR(100)
         """)
 
+        # Agentic compliance columns on alerts
+        await conn.execute("""
+            ALTER TABLE compliance_alerts
+            ADD COLUMN IF NOT EXISTS confidence_score DECIMAL(3,2)
+        """)
+        await conn.execute("""
+            ALTER TABLE compliance_alerts
+            ADD COLUMN IF NOT EXISTS verification_sources JSONB
+        """)
+        await conn.execute("""
+            ALTER TABLE compliance_alerts
+            ADD COLUMN IF NOT EXISTS alert_type VARCHAR(30) DEFAULT 'change'
+        """)
+        await conn.execute("""
+            ALTER TABLE compliance_alerts
+            ADD COLUMN IF NOT EXISTS effective_date DATE
+        """)
+        await conn.execute("""
+            ALTER TABLE compliance_alerts
+            ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'
+        """)
+
         # Compliance requirement history (stateful updates)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS compliance_requirement_history (
@@ -1305,6 +1366,42 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_compliance_requirement_history_location
             ON compliance_requirement_history(location_id, captured_at)
+        """)
+
+        # Upcoming legislation tracking table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS upcoming_legislation (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                location_id UUID NOT NULL REFERENCES business_locations(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                category VARCHAR(50),
+                title VARCHAR(500) NOT NULL,
+                description TEXT,
+                current_status VARCHAR(30) NOT NULL DEFAULT 'proposed'
+                    CHECK (current_status IN ('proposed', 'passed', 'signed', 'effective_soon', 'effective', 'dismissed')),
+                expected_effective_date DATE,
+                impact_summary TEXT,
+                source_url TEXT,
+                source_name VARCHAR(200),
+                confidence DECIMAL(3,2),
+                legislation_key TEXT,
+                alert_id UUID REFERENCES compliance_alerts(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_upcoming_legislation_location
+            ON upcoming_legislation(location_id, current_status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_upcoming_legislation_company
+            ON upcoming_legislation(company_id, expected_effective_date)
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_upcoming_legislation_key
+            ON upcoming_legislation(location_id, legislation_key)
+            WHERE legislation_key IS NOT NULL
         """)
 
         # ===========================================

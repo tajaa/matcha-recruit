@@ -2,6 +2,7 @@
 
 import os
 from celery import Celery
+from celery.signals import worker_ready
 from dotenv import load_dotenv
 
 # Load environment variables for worker process
@@ -22,6 +23,7 @@ celery_app = Celery(
         "app.workers.tasks.culture_aggregation",
         "app.workers.tasks.er_document_processing",
         "app.workers.tasks.er_analysis",
+        "app.workers.tasks.compliance_checks",
     ],
 )
 
@@ -51,3 +53,19 @@ celery_app.conf.update(
     task_default_retry_delay=60,  # 1 minute between retries
     task_max_retries=3,
 )
+
+
+@worker_ready.connect
+def on_worker_ready(**kwargs):
+    """Auto-dispatch scheduled compliance checks on every worker startup.
+
+    The systemd timer restarts the worker every 15 minutes, so this
+    effectively runs the dispatcher on a 15-minute schedule without
+    needing celery-beat infrastructure.
+    """
+    from app.workers.tasks.compliance_checks import (
+        enqueue_scheduled_compliance_checks,
+        run_deadline_escalation,
+    )
+    enqueue_scheduled_compliance_checks.delay()
+    run_deadline_escalation.delay()

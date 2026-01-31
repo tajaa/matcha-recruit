@@ -1,6 +1,6 @@
 from typing import Optional, List, AsyncGenerator, Dict, Any
 from uuid import UUID
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import json
 import re
 
@@ -10,8 +10,12 @@ from ..models.compliance import (
     ComplianceAlert,
     LocationCreate,
     LocationUpdate,
+    AutoCheckSettings,
     RequirementResponse,
     AlertResponse,
+    CheckLogEntry,
+    UpcomingLegislationResponse,
+    VerificationResult,
     ComplianceSummary,
 )
 
@@ -277,6 +281,9 @@ def _pick_most_restrictive_wage(reqs):
     return _pick_best_by_priority(reqs)
 
 
+MAX_VERIFICATIONS_PER_CHECK = 3
+
+
 def _compute_requirement_key(req) -> str:
     cat = req.get("category") if isinstance(req, dict) else req.category
     title = req.get("title") if isinstance(req, dict) else req.title
@@ -286,6 +293,270 @@ def _compute_requirement_key(req) -> str:
     base_title = _base_title(title or "", jname)
     base_key = _normalize_title_key(base_title)
     return f"{cat_key}:{base_key}"
+
+
+def score_verification_confidence(sources: List[dict]) -> float:
+    """Score confidence based on source quality. Pure function."""
+    if not sources:
+        return 0.0
+    score = 0.0
+    weights = {"official": 0.5, "news": 0.25, "blog": 0.05, "other": 0.05}
+    for source in sources:
+        source_type = source.get("type", "other")
+        score += weights.get(source_type, 0.05)
+    return min(score, 1.0)
+
+
+async def _create_check_log(conn, location_id: UUID, company_id: UUID, check_type: str = "manual") -> UUID:
+    """Create a check log entry and return its ID."""
+    return await conn.fetchval(
+        """
+        INSERT INTO compliance_check_log (location_id, company_id, check_type, status, started_at)
+        VALUES ($1, $2, $3, 'running', NOW())
+        RETURNING id
+        """,
+        location_id, company_id, check_type,
+    )
+
+
+async def _complete_check_log(conn, log_id: UUID, new_count: int, updated_count: int, alert_count: int, error: Optional[str] = None):
+    """Mark a check log entry as completed or failed."""
+    status = "failed" if error else "completed"
+    await conn.execute(
+        """
+        UPDATE compliance_check_log
+        SET status = $1, completed_at = NOW(), new_count = $2, updated_count = $3, alert_count = $4, error_message = $5
+        WHERE id = $6
+        """,
+        status, new_count, updated_count, alert_count, error, log_id,
+    )
+
+
+async def _create_alert(
+    conn,
+    location_id: UUID,
+    company_id: UUID,
+    requirement_id: Optional[UUID],
+    title: str,
+    message: str,
+    severity: str,
+    category: Optional[str],
+    source_url: Optional[str] = None,
+    source_name: Optional[str] = None,
+    alert_type: str = "change",
+    confidence_score: Optional[float] = None,
+    verification_sources: Optional[list] = None,
+    effective_date: Optional[date] = None,
+    metadata: Optional[dict] = None,
+) -> UUID:
+    """Create a compliance alert with extended fields. Returns alert ID."""
+    return await conn.fetchval(
+        """
+        INSERT INTO compliance_alerts
+        (location_id, company_id, requirement_id, title, message, severity, status,
+         category, action_required, source_url, source_name,
+         alert_type, confidence_score, verification_sources, effective_date, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, 'unread', $7, 'Review new requirement', $8, $9,
+                $10, $11, $12::jsonb, $13, $14::jsonb)
+        RETURNING id
+        """,
+        location_id, company_id, requirement_id, title, message, severity,
+        category, source_url, source_name,
+        alert_type, confidence_score,
+        json.dumps(verification_sources) if verification_sources else None,
+        effective_date,
+        json.dumps(metadata) if metadata else None,
+    )
+
+
+async def _upsert_requirement(
+    conn, location_id: UUID, requirement_key: str, req: dict
+) -> UUID:
+    """Insert a new compliance requirement. Returns the new ID."""
+    return await conn.fetchval(
+        """
+        INSERT INTO compliance_requirements
+        (location_id, requirement_key, category, jurisdiction_level, jurisdiction_name, title, description,
+         current_value, numeric_value, source_url, source_name, effective_date)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING id
+        """,
+        location_id, requirement_key, req.get("category"), req.get("jurisdiction_level"),
+        req.get("jurisdiction_name"), req.get("title"), req.get("description"),
+        req.get("current_value"), req.get("numeric_value"),
+        req.get("source_url"), req.get("source_name"), parse_date(req.get("effective_date")),
+    )
+
+
+async def _update_requirement(
+    conn, existing_id: UUID, requirement_key: str, req: dict,
+    previous_value: Optional[str], last_changed_at: Optional[datetime]
+):
+    """Update an existing compliance requirement."""
+    await conn.execute(
+        """
+        UPDATE compliance_requirements
+        SET requirement_key = $1, category = $2, jurisdiction_name = $3, title = $4,
+            current_value = $5, numeric_value = $6, previous_value = $7, last_changed_at = $8,
+            description = $9, source_url = $10, source_name = $11, effective_date = $12,
+            updated_at = NOW()
+        WHERE id = $13
+        """,
+        requirement_key, req.get("category"), req.get("jurisdiction_name"), req.get("title"),
+        req.get("current_value"), req.get("numeric_value"), previous_value, last_changed_at,
+        req.get("description"), req.get("source_url"), req.get("source_name"),
+        parse_date(req.get("effective_date")), existing_id,
+    )
+
+
+async def _snapshot_to_history(conn, row_dict: dict, location_id: UUID):
+    """Insert a snapshot of a requirement into the history table."""
+    await conn.execute(
+        """
+        INSERT INTO compliance_requirement_history
+        (requirement_id, location_id, category, jurisdiction_level, jurisdiction_name,
+         title, description, current_value, numeric_value, source_url, source_name, effective_date)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        """,
+        row_dict["id"], location_id, row_dict.get("category"),
+        row_dict.get("jurisdiction_level"), row_dict.get("jurisdiction_name"),
+        row_dict.get("title"), row_dict.get("description"),
+        row_dict.get("current_value"), row_dict.get("numeric_value"),
+        row_dict.get("source_url"), row_dict.get("source_name"),
+        row_dict.get("effective_date"),
+    )
+
+
+async def process_upcoming_legislation(
+    conn, location_id: UUID, company_id: UUID, legislation_items: List[Dict]
+) -> int:
+    """Process upcoming legislation results from Gemini. Returns count of new/updated items."""
+    count = 0
+    for item in legislation_items:
+        leg_key = item.get("legislation_key")
+        if not leg_key:
+            leg_key = _normalize_title_key(item.get("title", ""))
+        if not leg_key:
+            continue
+
+        existing = await conn.fetchrow(
+            "SELECT * FROM upcoming_legislation WHERE location_id = $1 AND legislation_key = $2",
+            location_id, leg_key,
+        )
+
+        eff_date = parse_date(item.get("expected_effective_date"))
+        confidence = item.get("confidence")
+        if confidence is not None:
+            confidence = float(confidence)
+
+        if existing:
+            new_status = item.get("current_status", existing["current_status"])
+            await conn.execute(
+                """
+                UPDATE upcoming_legislation
+                SET current_status = $1, expected_effective_date = $2, impact_summary = $3,
+                    source_url = $4, source_name = $5, confidence = $6, description = $7,
+                    updated_at = NOW()
+                WHERE id = $8
+                """,
+                new_status, eff_date, item.get("impact_summary"),
+                item.get("source_url"), item.get("source_name"),
+                confidence, item.get("description"),
+                existing["id"],
+            )
+        else:
+            alert_id = await _create_alert(
+                conn, location_id, company_id, None,
+                f"Upcoming: {item.get('title', 'Unknown')}",
+                item.get("impact_summary") or item.get("description") or "New legislation detected.",
+                "info",
+                item.get("category"),
+                source_url=item.get("source_url"),
+                source_name=item.get("source_name"),
+                alert_type="upcoming_legislation",
+                confidence_score=confidence,
+                effective_date=eff_date,
+            )
+            await conn.execute(
+                """
+                INSERT INTO upcoming_legislation
+                (location_id, company_id, category, title, description, current_status,
+                 expected_effective_date, impact_summary, source_url, source_name,
+                 confidence, legislation_key, alert_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                """,
+                location_id, company_id, item.get("category"),
+                item.get("title"), item.get("description"),
+                item.get("current_status", "proposed"),
+                eff_date, item.get("impact_summary"),
+                item.get("source_url"), item.get("source_name"),
+                confidence, leg_key, alert_id,
+            )
+            count += 1
+
+    return count
+
+
+async def escalate_upcoming_deadlines(conn, company_id: UUID) -> int:
+    """Re-evaluate deadline severity for upcoming legislation. No Gemini calls."""
+    rows = await conn.fetch(
+        """
+        SELECT ul.*, ca.id as alert_id, ca.severity as alert_severity, ca.status as alert_status
+        FROM upcoming_legislation ul
+        LEFT JOIN compliance_alerts ca ON ul.alert_id = ca.id
+        WHERE ul.company_id = $1
+          AND ul.current_status NOT IN ('effective', 'dismissed')
+          AND ul.expected_effective_date IS NOT NULL
+        """,
+        company_id,
+    )
+
+    escalated = 0
+    now = datetime.utcnow().date()
+    for row in rows:
+        eff_date = row["expected_effective_date"]
+        days_remaining = (eff_date - now).days
+
+        if days_remaining <= 0:
+            new_severity = "critical"
+            new_status = "effective_soon"
+        elif days_remaining <= 30:
+            new_severity = "critical"
+            new_status = row["current_status"]
+        elif days_remaining <= 90:
+            new_severity = "warning"
+            new_status = row["current_status"]
+        else:
+            new_severity = "info"
+            new_status = row["current_status"]
+
+        # Update legislation status if nearing effective date
+        if new_status != row["current_status"]:
+            await conn.execute(
+                "UPDATE upcoming_legislation SET current_status = $1, updated_at = NOW() WHERE id = $2",
+                new_status, row["id"],
+            )
+
+        # Escalate alert severity if needed
+        alert_id = row["alert_id"]
+        if alert_id and row["alert_severity"] != new_severity:
+            old_severity_rank = {"info": 0, "warning": 1, "critical": 2}.get(row["alert_severity"], 0)
+            new_severity_rank = {"info": 0, "warning": 1, "critical": 2}.get(new_severity, 0)
+
+            if new_severity_rank > old_severity_rank:
+                await conn.execute(
+                    "UPDATE compliance_alerts SET severity = $1 WHERE id = $2",
+                    new_severity, alert_id,
+                )
+                # Re-open dismissed alerts if severity escalates
+                if row["alert_status"] == "dismissed":
+                    await conn.execute(
+                        "UPDATE compliance_alerts SET status = 'unread', dismissed_at = NULL WHERE id = $1",
+                        alert_id,
+                    )
+                escalated += 1
+
+    return escalated
 
 def _filter_by_jurisdiction_priority(requirements):
     """For each distinct requirement within a category, keep only the most
@@ -388,10 +659,12 @@ async def run_compliance_check_stream(
 
     if not requirements:
         async with get_connection() as conn:
+            log_id = await _create_check_log(conn, location_id, company_id, "manual")
             await conn.execute(
                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
                 location_id
             )
+            await _complete_check_log(conn, log_id, 0, 0, 0)
         yield {"type": "completed", "location": location_name, "new": 0, "updated": 0, "alerts": 0}
         return
 
@@ -407,6 +680,8 @@ async def run_compliance_check_stream(
     alert_count = 0
 
     async with get_connection() as conn:
+        log_id = await _create_check_log(conn, location_id, company_id, "manual")
+
         existing_rows = await conn.fetch(
             "SELECT * FROM compliance_requirements WHERE location_id = $1",
             location_id,
@@ -449,20 +724,7 @@ async def run_compliance_check_stream(
 
         if duplicates:
             for dup in duplicates:
-                await conn.execute(
-                    """
-                    INSERT INTO compliance_requirement_history
-                    (requirement_id, location_id, category, jurisdiction_level, jurisdiction_name,
-                     title, description, current_value, numeric_value, source_url, source_name, effective_date)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                    """,
-                    dup["id"], location_id, dup.get("category"),
-                    dup.get("jurisdiction_level"), dup.get("jurisdiction_name"),
-                    dup.get("title"), dup.get("description"),
-                    dup.get("current_value"), dup.get("numeric_value"),
-                    dup.get("source_url"), dup.get("source_name"),
-                    dup.get("effective_date"),
-                )
+                await _snapshot_to_history(conn, dup, location_id)
                 await conn.execute(
                     "DELETE FROM compliance_requirements WHERE id = $1",
                     dup["id"],
@@ -481,6 +743,9 @@ async def run_compliance_check_stream(
 
         # Track which keys are in the new result set
         new_requirement_keys = set()
+
+        # Track material changes for verification
+        changes_to_verify = []
 
         for req in requirements:
             requirement_key = _compute_requirement_key(req)
@@ -536,39 +801,17 @@ async def run_compliance_check_stream(
                 )
                 if metadata_changed:
                     updated_count += 1
-                    await conn.execute(
-                        """
-                        INSERT INTO compliance_requirement_history
-                        (requirement_id, location_id, category, jurisdiction_level, jurisdiction_name,
-                         title, description, current_value, numeric_value, source_url, source_name, effective_date)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                        """,
-                        existing["id"], location_id, existing.get("category"),
-                        existing.get("jurisdiction_level"), existing.get("jurisdiction_name"),
-                        existing.get("title"), existing.get("description"),
-                        existing.get("current_value"), existing.get("numeric_value"),
-                        existing.get("source_url"), existing.get("source_name"),
-                        existing.get("effective_date"),
-                    )
+                    await _snapshot_to_history(conn, existing, location_id)
 
                     if material_change:
-                        alert_count += 1
-                        change_msg = f"Value changed from {old_value} to {new_value}."
-                        description = req.get("description")
-                        if description:
-                            change_msg += f" {description}"
-                        await conn.execute(
-                            """
-                            INSERT INTO compliance_alerts
-                            (location_id, company_id, requirement_id, title, message, severity, status, category, action_required, source_url, source_name)
-                            VALUES ($1, $2, $3, $4, $5, $6, 'unread', $7, 'Review new requirement', $8, $9)
-                            """,
-                            location_id, company_id, existing['id'],
-                            f"Compliance Change: {req.get('title')}",
-                            change_msg,
-                            "warning", req.get('category'),
-                            req.get("source_url"), req.get("source_name")
-                        )
+                        # Queue for verification instead of creating alert immediately
+                        changes_to_verify.append({
+                            "req": req,
+                            "existing": existing,
+                            "old_value": old_value,
+                            "new_value": new_value,
+                            "requirement_key": requirement_key,
+                        })
                     change_detail = f" ({old_value} → {new_value})" if material_change else ""
                     yield {"type": "result", "status": "updated", "message": req_title + change_detail}
                 else:
@@ -580,37 +823,9 @@ async def run_compliance_check_stream(
                     previous_value = old_value
                     last_changed_at = datetime.utcnow()
 
-                await conn.execute(
-                    """
-                    UPDATE compliance_requirements
-                    SET requirement_key = $1,
-                        category = $2,
-                        jurisdiction_name = $3,
-                        title = $4,
-                        current_value = $5,
-                        numeric_value = $6,
-                        previous_value = $7,
-                        last_changed_at = $8,
-                        description = $9,
-                        source_url = $10,
-                        source_name = $11,
-                        effective_date = $12,
-                        updated_at = NOW()
-                    WHERE id = $13
-                    """,
-                    requirement_key,
-                    req.get("category"),
-                    req.get("jurisdiction_name"),
-                    req.get("title"),
-                    req.get("current_value"),
-                    req.get("numeric_value"),
-                    previous_value,
-                    last_changed_at,
-                    req.get("description"),
-                    req.get("source_url"),
-                    req.get("source_name"),
-                    parse_date(req.get("effective_date")),
-                    existing["id"],
+                await _update_requirement(
+                    conn, existing["id"], requirement_key, req,
+                    previous_value, last_changed_at,
                 )
                 existing_by_key[requirement_key] = {
                     **existing,
@@ -627,31 +842,17 @@ async def run_compliance_check_stream(
                 }
             else:
                 new_count += 1
-                req_id = await conn.fetchval(
-                    """
-                    INSERT INTO compliance_requirements
-                    (location_id, requirement_key, category, jurisdiction_level, jurisdiction_name, title, description,
-                     current_value, numeric_value, source_url, source_name, effective_date)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                    RETURNING id
-                    """,
-                    location_id, requirement_key, req.get("category"), req.get("jurisdiction_level"), req.get("jurisdiction_name"),
-                    req.get("title"), req.get("description"), req.get("current_value"), req.get("numeric_value"),
-                    req.get("source_url"), req.get("source_name"), parse_date(req.get("effective_date"))
-                )
+                req_id = await _upsert_requirement(conn, location_id, requirement_key, req)
 
                 alert_count += 1
-                await conn.execute(
-                    """
-                    INSERT INTO compliance_alerts
-                    (location_id, company_id, requirement_id, title, message, severity, status, category, action_required, source_url, source_name)
-                    VALUES ($1, $2, $3, $4, $5, $6, 'unread', $7, 'Review new requirement', $8, $9)
-                    """,
-                    location_id, company_id, req_id,
+                await _create_alert(
+                    conn, location_id, company_id, req_id,
                     f"New Requirement: {req.get('title')}",
                     req.get("description") or "New compliance requirement identified.",
                     "info", req.get("category"),
-                    req.get("source_url"), req.get("source_name")
+                    source_url=req.get("source_url"),
+                    source_name=req.get("source_name"),
+                    alert_type="new_requirement",
                 )
                 yield {"type": "result", "status": "new", "message": req_title}
                 existing_by_key[requirement_key] = {
@@ -669,35 +870,133 @@ async def run_compliance_check_stream(
                     "effective_date": parse_date(req.get("effective_date")),
                 }
 
+        # Verify material changes with Gemini (Sprint 2)
+        if changes_to_verify:
+            yield {"type": "verifying", "message": f"Verifying {min(len(changes_to_verify), MAX_VERIFICATIONS_PER_CHECK)} change(s)..."}
+            verification_count = 0
+            for change_info in changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK]:
+                req = change_info["req"]
+                existing = change_info["existing"]
+
+                try:
+                    verification = await service.verify_compliance_change(
+                        category=req.get("category", ""),
+                        title=req.get("title", ""),
+                        jurisdiction_name=req.get("jurisdiction_name", ""),
+                        old_value=change_info["old_value"],
+                        new_value=change_info["new_value"],
+                    )
+                    confidence = score_verification_confidence(verification.sources)
+                    confidence = max(confidence, verification.confidence)
+                except Exception as e:
+                    print(f"[Compliance] Verification failed: {e}")
+                    verification = VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Verification unavailable")
+                    confidence = 0.5  # Treat as unverified
+
+                change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
+                description = req.get("description")
+                if description:
+                    change_msg += f" {description}"
+
+                # Gate alert creation by confidence
+                if confidence >= 0.6:
+                    alert_count += 1
+                    await _create_alert(
+                        conn, location_id, company_id, existing["id"],
+                        f"Compliance Change: {req.get('title')}",
+                        change_msg,
+                        "warning", req.get("category"),
+                        source_url=req.get("source_url"),
+                        source_name=req.get("source_name"),
+                        alert_type="change",
+                        confidence_score=round(confidence, 2),
+                        verification_sources=verification.sources,
+                        metadata={"verification_explanation": verification.explanation},
+                    )
+                    verification_count += 1
+                elif confidence >= 0.3:
+                    alert_count += 1
+                    await _create_alert(
+                        conn, location_id, company_id, existing["id"],
+                        f"Unverified: {req.get('title')}",
+                        change_msg,
+                        "info", req.get("category"),
+                        source_url=req.get("source_url"),
+                        source_name=req.get("source_name"),
+                        alert_type="change",
+                        confidence_score=round(confidence, 2),
+                        verification_sources=verification.sources,
+                        metadata={"verification_explanation": verification.explanation, "unverified": True},
+                    )
+                    verification_count += 1
+                else:
+                    # Low confidence: log only, no alert
+                    print(f"[Compliance] Low confidence ({confidence:.2f}) for change: {req.get('title')}, skipping alert")
+
+            # Create alerts for unverified changes (beyond MAX_VERIFICATIONS_PER_CHECK)
+            for change_info in changes_to_verify[MAX_VERIFICATIONS_PER_CHECK:]:
+                req = change_info["req"]
+                existing = change_info["existing"]
+                change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
+                description = req.get("description")
+                if description:
+                    change_msg += f" {description}"
+                alert_count += 1
+                await _create_alert(
+                    conn, location_id, company_id, existing["id"],
+                    f"Compliance Change: {req.get('title')}",
+                    change_msg,
+                    "warning", req.get("category"),
+                    source_url=req.get("source_url"),
+                    source_name=req.get("source_name"),
+                    alert_type="change",
+                )
+
+            if verification_count > 0:
+                yield {"type": "verified", "message": f"Verified {verification_count} change(s)"}
+
         # Delete stale requirements not in the new result set
         stale_keys = set(existing_by_key.keys()) - new_requirement_keys
         for stale_key in stale_keys:
             stale = existing_by_key[stale_key]
             stale_id = stale.get("id")
             if stale_id:
-                await conn.execute(
-                    """
-                    INSERT INTO compliance_requirement_history
-                    (requirement_id, location_id, category, jurisdiction_level, jurisdiction_name,
-                     title, description, current_value, numeric_value, source_url, source_name, effective_date)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                    """,
-                    stale_id, location_id, stale.get("category"),
-                    stale.get("jurisdiction_level"), stale.get("jurisdiction_name"),
-                    stale.get("title"), stale.get("description"),
-                    stale.get("current_value"), stale.get("numeric_value"),
-                    stale.get("source_url"), stale.get("source_name"),
-                    stale.get("effective_date"),
-                )
+                await _snapshot_to_history(conn, stale, location_id)
                 await conn.execute(
                     "DELETE FROM compliance_requirements WHERE id = $1",
                     stale_id,
                 )
 
+        # Scan for upcoming legislation (Sprint 3)
+        yield {"type": "scanning", "message": "Scanning for upcoming legislation..."}
+        try:
+            current_reqs = [dict(r) for r in existing_by_key.values() if r.get("id")]
+            legislation_items = await service.scan_upcoming_legislation(
+                city=location.city,
+                state=location.state,
+                county=location.county,
+                current_requirements=current_reqs,
+            )
+            leg_count = await process_upcoming_legislation(conn, location_id, company_id, legislation_items)
+            if leg_count > 0:
+                alert_count += leg_count
+                yield {"type": "legislation", "message": f"Found {leg_count} upcoming legislative change(s)"}
+        except Exception as e:
+            print(f"[Compliance] Legislation scan error: {e}")
+
+        # Run deadline escalation
+        try:
+            escalated = await escalate_upcoming_deadlines(conn, company_id)
+            if escalated > 0:
+                yield {"type": "escalation", "message": f"Escalated {escalated} deadline(s)"}
+        except Exception as e:
+            print(f"[Compliance] Deadline escalation error: {e}")
+
         await conn.execute(
             "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
             location_id
         )
+        await _complete_check_log(conn, log_id, new_count, updated_count, alert_count)
 
     yield {
         "type": "completed",
@@ -862,8 +1161,8 @@ async def get_company_alerts(company_id: UUID, status: Optional[str] = None, sev
     async with get_connection() as conn:
         query = """
             SELECT a.*,
-                   COALESCE(a.source_url, r.source_url) AS source_url,
-                   COALESCE(a.source_name, r.source_name) AS source_name
+                   COALESCE(a.source_url, r.source_url) AS resolved_source_url,
+                   COALESCE(a.source_name, r.source_name) AS resolved_source_name
             FROM compliance_alerts a
             LEFT JOIN compliance_requirements r ON a.requirement_id = r.id
             WHERE a.company_id = $1
@@ -871,15 +1170,26 @@ async def get_company_alerts(company_id: UUID, status: Optional[str] = None, sev
         params = [company_id]
 
         if status:
-            query += f" AND status = ${len(params) + 1}"
+            query += f" AND a.status = ${len(params) + 1}"
             params.append(status)
         if severity:
-            query += f" AND severity = ${len(params) + 1}"
+            query += f" AND a.severity = ${len(params) + 1}"
             params.append(severity)
 
-        query += f" ORDER BY created_at DESC LIMIT {limit}"
+        query += f" ORDER BY a.created_at DESC LIMIT {limit}"
 
         rows = await conn.fetch(query, *params)
+
+        def _parse_jsonb(val):
+            if val is None:
+                return None
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    return None
+            return val
+
         return [
             AlertResponse(
                 id=str(row["id"]),
@@ -891,9 +1201,14 @@ async def get_company_alerts(company_id: UUID, status: Optional[str] = None, sev
                 status=row["status"],
                 category=row["category"],
                 action_required=row["action_required"],
-                source_url=row["source_url"],
-                source_name=row["source_name"],
+                source_url=row["resolved_source_url"],
+                source_name=row["resolved_source_name"],
                 deadline=row["deadline"].isoformat() if row["deadline"] else None,
+                confidence_score=float(row["confidence_score"]) if row.get("confidence_score") is not None else None,
+                verification_sources=_parse_jsonb(row.get("verification_sources")),
+                alert_type=row.get("alert_type"),
+                effective_date=row["effective_date"].isoformat() if row.get("effective_date") else None,
+                metadata=_parse_jsonb(row.get("metadata")),
                 created_at=row["created_at"].isoformat(),
                 read_at=row["read_at"].isoformat() if row["read_at"] else None,
             )
@@ -937,8 +1252,12 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
         unread_alerts = 0
         critical_alerts = 0
         recent_changes = []
+        auto_check_count = 0
 
         for loc in locations:
+            if loc.get("auto_check_enabled", True):
+                auto_check_count += 1
+
             reqs = await conn.fetch(
                 "SELECT * FROM compliance_requirements WHERE location_id = $1",
                 loc["id"],
@@ -970,10 +1289,400 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
         recent_changes.sort(key=lambda x: x["changed_at"], reverse=True)
         recent_changes = recent_changes[:10]
 
+        # Get nearest upcoming deadlines
+        upcoming_rows = await conn.fetch(
+            """
+            SELECT ul.title, ul.expected_effective_date, ul.current_status, ul.category,
+                   bl.name AS location_name, bl.city, bl.state
+            FROM upcoming_legislation ul
+            JOIN business_locations bl ON ul.location_id = bl.id
+            WHERE ul.company_id = $1
+              AND ul.current_status NOT IN ('effective', 'dismissed')
+              AND ul.expected_effective_date IS NOT NULL
+            ORDER BY ul.expected_effective_date ASC
+            LIMIT 3
+            """,
+            company_id,
+        )
+        upcoming_deadlines = []
+        now = datetime.utcnow().date()
+        for row in upcoming_rows:
+            days = (row["expected_effective_date"] - now).days
+            upcoming_deadlines.append({
+                "title": row["title"],
+                "effective_date": row["expected_effective_date"].isoformat(),
+                "days_until": days,
+                "status": row["current_status"],
+                "category": row["category"],
+                "location": row["location_name"] or f"{row['city']}, {row['state']}",
+            })
+
         return ComplianceSummary(
             total_locations=len(locations),
             total_requirements=total_requirements,
             unread_alerts=unread_alerts,
             critical_alerts=critical_alerts,
             recent_changes=recent_changes,
+            auto_check_locations=auto_check_count,
+            upcoming_deadlines=upcoming_deadlines,
         )
+
+
+async def update_auto_check_settings(
+    location_id: UUID, company_id: UUID, settings: AutoCheckSettings
+) -> Optional[BusinessLocation]:
+    """Update auto-check settings for a location."""
+    from ...database import get_connection
+    async with get_connection() as conn:
+        updates = []
+        params = []
+        param_idx = 3
+
+        if settings.auto_check_enabled is not None:
+            updates.append(f"auto_check_enabled = ${param_idx}")
+            params.append(settings.auto_check_enabled)
+            param_idx += 1
+        if settings.auto_check_interval_days is not None:
+            updates.append(f"auto_check_interval_days = ${param_idx}")
+            params.append(settings.auto_check_interval_days)
+            param_idx += 1
+
+        if not updates:
+            return await get_location(location_id, company_id)
+
+        # Recompute next_auto_check
+        if settings.auto_check_enabled is not None and not settings.auto_check_enabled:
+            updates.append("next_auto_check = NULL")
+        else:
+            interval = settings.auto_check_interval_days or 7
+            updates.append(f"next_auto_check = NOW() + INTERVAL '1 day' * ${param_idx}")
+            params.append(interval)
+            param_idx += 1
+
+        updates.append("updated_at = NOW()")
+        params.insert(0, location_id)
+        params.insert(1, company_id)
+
+        await conn.execute(
+            f"UPDATE business_locations SET {', '.join(updates)} WHERE id = $1 AND company_id = $2",
+            *params,
+        )
+        return await get_location(location_id, company_id)
+
+
+async def get_check_log(location_id: UUID, company_id: UUID, limit: int = 20) -> List[CheckLogEntry]:
+    """Get compliance check history for a location."""
+    from ...database import get_connection
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM compliance_check_log
+            WHERE location_id = $1 AND company_id = $2
+            ORDER BY started_at DESC
+            LIMIT $3
+            """,
+            location_id, company_id, limit,
+        )
+        return [
+            CheckLogEntry(
+                id=str(row["id"]),
+                location_id=str(row["location_id"]),
+                company_id=str(row["company_id"]),
+                check_type=row["check_type"],
+                status=row["status"],
+                started_at=row["started_at"].isoformat(),
+                completed_at=row["completed_at"].isoformat() if row["completed_at"] else None,
+                new_count=row["new_count"] or 0,
+                updated_count=row["updated_count"] or 0,
+                alert_count=row["alert_count"] or 0,
+                error_message=row["error_message"],
+            )
+            for row in rows
+        ]
+
+
+async def get_upcoming_legislation(
+    location_id: UUID, company_id: UUID
+) -> List[UpcomingLegislationResponse]:
+    """Get upcoming legislation for a location."""
+    from ...database import get_connection
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM upcoming_legislation
+            WHERE location_id = $1 AND company_id = $2
+              AND current_status NOT IN ('effective', 'dismissed')
+            ORDER BY expected_effective_date ASC NULLS LAST
+            """,
+            location_id, company_id,
+        )
+        now = datetime.utcnow().date()
+        return [
+            UpcomingLegislationResponse(
+                id=str(row["id"]),
+                location_id=str(row["location_id"]),
+                category=row["category"],
+                title=row["title"],
+                description=row["description"],
+                current_status=row["current_status"],
+                expected_effective_date=row["expected_effective_date"].isoformat() if row["expected_effective_date"] else None,
+                impact_summary=row["impact_summary"],
+                source_url=row["source_url"],
+                source_name=row["source_name"],
+                confidence=float(row["confidence"]) if row["confidence"] is not None else None,
+                days_until_effective=(row["expected_effective_date"] - now).days if row["expected_effective_date"] else None,
+                created_at=row["created_at"].isoformat(),
+            )
+            for row in rows
+        ]
+
+
+async def run_compliance_check_background(
+    location_id: UUID, company_id: UUID, check_type: str = "scheduled"
+) -> Dict[str, Any]:
+    """Non-streaming compliance check for Celery tasks. Returns summary dict."""
+    from ...database import get_connection
+    from .gemini_compliance import get_gemini_compliance_service
+
+    location = await get_location(location_id, company_id)
+    if not location:
+        return {"error": "Location not found", "new": 0, "updated": 0, "alerts": 0}
+
+    service = get_gemini_compliance_service()
+    requirements = await service.research_location_compliance(
+        city=location.city, state=location.state, county=location.county
+    )
+
+    if not requirements:
+        async with get_connection() as conn:
+            log_id = await _create_check_log(conn, location_id, company_id, check_type)
+            await conn.execute(
+                "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+                location_id,
+            )
+            await _complete_check_log(conn, log_id, 0, 0, 0)
+        return {"new": 0, "updated": 0, "alerts": 0}
+
+    for req in requirements:
+        req["category"] = _normalize_category(req.get("category")) or req.get("category")
+    requirements = _filter_by_jurisdiction_priority(requirements)
+
+    new_count = 0
+    updated_count = 0
+    alert_count = 0
+
+    async with get_connection() as conn:
+        log_id = await _create_check_log(conn, location_id, company_id, check_type)
+
+        try:
+            existing_rows = await conn.fetch(
+                "SELECT * FROM compliance_requirements WHERE location_id = $1",
+                location_id,
+            )
+            existing_by_key = {}
+            duplicates = []
+            for row in existing_rows:
+                row_dict = dict(row)
+                key = _compute_requirement_key(row_dict)
+                normalized_category = _normalize_category(row_dict.get("category")) or row_dict.get("category")
+
+                if key and (row_dict.get("requirement_key") != key or row_dict.get("category") != normalized_category):
+                    await conn.execute(
+                        "UPDATE compliance_requirements SET requirement_key = $1, category = $2, updated_at = NOW() WHERE id = $3",
+                        key, normalized_category, row_dict["id"],
+                    )
+                    row_dict["requirement_key"] = key
+                    row_dict["category"] = normalized_category
+
+                if not key:
+                    continue
+                current = existing_by_key.get(key)
+                if not current:
+                    existing_by_key[key] = row_dict
+                else:
+                    current_updated = current.get("updated_at")
+                    row_updated = row_dict.get("updated_at")
+                    if current_updated and row_updated and row_updated > current_updated:
+                        duplicates.append(current)
+                        existing_by_key[key] = row_dict
+                    else:
+                        duplicates.append(row_dict)
+
+            for dup in duplicates:
+                await _snapshot_to_history(conn, dup, location_id)
+                await conn.execute("DELETE FROM compliance_requirements WHERE id = $1", dup["id"])
+
+            await conn.execute(
+                """
+                UPDATE compliance_alerts SET status = 'dismissed', dismissed_at = NOW()
+                WHERE location_id = $1 AND requirement_id IS NULL AND status IN ('unread', 'read')
+                """,
+                location_id,
+            )
+
+            new_requirement_keys = set()
+            changes_to_verify = []
+
+            for req in requirements:
+                requirement_key = _compute_requirement_key(req)
+                new_requirement_keys.add(requirement_key)
+                existing = existing_by_key.get(requirement_key)
+
+                if existing:
+                    await conn.execute(
+                        "UPDATE compliance_alerts SET status = 'dismissed', dismissed_at = NOW() WHERE requirement_id = $1 AND status IN ('unread', 'read')",
+                        existing["id"],
+                    )
+
+                    old_value = existing.get("current_value")
+                    new_value = req.get("current_value")
+                    old_num = existing.get("numeric_value")
+                    new_num = req.get("numeric_value")
+                    if old_num is None:
+                        old_num = _extract_numeric_value(old_value)
+                    if new_num is None:
+                        new_num = _extract_numeric_value(new_value)
+
+                    material_change = False
+                    if _is_material_numeric_change(old_num, new_num, req.get("category")):
+                        material_change = True
+                    elif _is_material_text_change(old_value, new_value, req.get("category")):
+                        material_change = True
+
+                    numeric_changed = old_num is not None and new_num is not None and abs(float(old_num) - float(new_num)) > 0.001
+                    text_changed = old_value != new_value
+                    metadata_changed = any([
+                        existing.get("title") != req.get("title"),
+                        existing.get("description") != req.get("description"),
+                        existing.get("source_url") != req.get("source_url"),
+                        existing.get("source_name") != req.get("source_name"),
+                        existing.get("effective_date") != parse_date(req.get("effective_date")),
+                        text_changed, numeric_changed,
+                    ])
+
+                    if metadata_changed:
+                        updated_count += 1
+                        await _snapshot_to_history(conn, existing, location_id)
+                        if material_change:
+                            changes_to_verify.append({
+                                "req": req, "existing": existing,
+                                "old_value": old_value, "new_value": new_value,
+                            })
+
+                    previous_value = existing.get("previous_value")
+                    last_changed_at = existing.get("last_changed_at")
+                    if material_change:
+                        previous_value = old_value
+                        last_changed_at = datetime.utcnow()
+
+                    await _update_requirement(conn, existing["id"], requirement_key, req, previous_value, last_changed_at)
+                    existing_by_key[requirement_key] = {**existing, "id": existing["id"]}
+                else:
+                    new_count += 1
+                    req_id = await _upsert_requirement(conn, location_id, requirement_key, req)
+                    alert_count += 1
+                    await _create_alert(
+                        conn, location_id, company_id, req_id,
+                        f"New Requirement: {req.get('title')}",
+                        req.get("description") or "New compliance requirement identified.",
+                        "info", req.get("category"),
+                        source_url=req.get("source_url"), source_name=req.get("source_name"),
+                        alert_type="new_requirement",
+                    )
+                    existing_by_key[requirement_key] = {"id": req_id}
+
+            # Verify changes
+            for change_info in changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK]:
+                req = change_info["req"]
+                existing = change_info["existing"]
+                try:
+                    verification = await service.verify_compliance_change(
+                        category=req.get("category", ""), title=req.get("title", ""),
+                        jurisdiction_name=req.get("jurisdiction_name", ""),
+                        old_value=change_info["old_value"], new_value=change_info["new_value"],
+                    )
+                    confidence = max(score_verification_confidence(verification.sources), verification.confidence)
+                except Exception:
+                    confidence = 0.5
+                    verification = VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Verification unavailable")
+
+                change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
+                if req.get("description"):
+                    change_msg += f" {req['description']}"
+
+                if confidence >= 0.6:
+                    alert_count += 1
+                    await _create_alert(
+                        conn, location_id, company_id, existing["id"],
+                        f"Compliance Change: {req.get('title')}", change_msg,
+                        "warning", req.get("category"),
+                        source_url=req.get("source_url"), source_name=req.get("source_name"),
+                        alert_type="change", confidence_score=round(confidence, 2),
+                        verification_sources=verification.sources,
+                        metadata={"verification_explanation": verification.explanation},
+                    )
+                elif confidence >= 0.3:
+                    alert_count += 1
+                    await _create_alert(
+                        conn, location_id, company_id, existing["id"],
+                        f"Unverified: {req.get('title')}", change_msg,
+                        "info", req.get("category"),
+                        source_url=req.get("source_url"), source_name=req.get("source_name"),
+                        alert_type="change", confidence_score=round(confidence, 2),
+                        verification_sources=verification.sources,
+                        metadata={"verification_explanation": verification.explanation, "unverified": True},
+                    )
+
+            for change_info in changes_to_verify[MAX_VERIFICATIONS_PER_CHECK:]:
+                req = change_info["req"]
+                existing = change_info["existing"]
+                change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
+                if req.get("description"):
+                    change_msg += f" {req['description']}"
+                alert_count += 1
+                await _create_alert(
+                    conn, location_id, company_id, existing["id"],
+                    f"Compliance Change: {req.get('title')}", change_msg,
+                    "warning", req.get("category"),
+                    source_url=req.get("source_url"), source_name=req.get("source_name"),
+                    alert_type="change",
+                )
+
+            # Stale requirements cleanup
+            stale_keys = set(existing_by_key.keys()) - new_requirement_keys
+            for stale_key in stale_keys:
+                stale = existing_by_key[stale_key]
+                stale_id = stale.get("id")
+                if stale_id:
+                    await _snapshot_to_history(conn, stale, location_id)
+                    await conn.execute("DELETE FROM compliance_requirements WHERE id = $1", stale_id)
+
+            # Legislation scan
+            try:
+                current_reqs = [dict(r) for r in existing_by_key.values() if r.get("id")]
+                legislation_items = await service.scan_upcoming_legislation(
+                    city=location.city, state=location.state, county=location.county,
+                    current_requirements=current_reqs,
+                )
+                leg_count = await process_upcoming_legislation(conn, location_id, company_id, legislation_items)
+                alert_count += leg_count
+            except Exception as e:
+                print(f"[Compliance] Background legislation scan error: {e}")
+
+            # Deadline escalation
+            try:
+                await escalate_upcoming_deadlines(conn, company_id)
+            except Exception as e:
+                print(f"[Compliance] Background escalation error: {e}")
+
+            await conn.execute(
+                "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+                location_id,
+            )
+            await _complete_check_log(conn, log_id, new_count, updated_count, alert_count)
+
+        except Exception as e:
+            await _complete_check_log(conn, log_id, new_count, updated_count, alert_count, error=str(e))
+            raise
+
+    return {"new": new_count, "updated": updated_count, "alerts": alert_count}

@@ -1,13 +1,13 @@
 import json
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime, date
 
 from google import genai
 from google.genai import types
 
 from ...config import get_settings
-from ..models.compliance import ComplianceCategory, JurisdictionLevel
+from ..models.compliance import ComplianceCategory, JurisdictionLevel, VerificationResult
 
 class GeminiComplianceService:
     """
@@ -156,6 +156,181 @@ Return at most one requirement per category. Ensure all data is accurate and sou
                 print(f"[Gemini Compliance] Rate limit/quota error: {e}")
             else:
                 print(f"[Gemini Compliance] Error researching requirements: {e}")
+            return []
+
+    async def verify_compliance_change(
+        self,
+        category: str,
+        title: str,
+        jurisdiction_name: str,
+        old_value: Optional[str],
+        new_value: Optional[str],
+    ) -> VerificationResult:
+        """
+        Verify a detected compliance change against authoritative sources.
+        Returns confirmation, confidence score, and source citations.
+        """
+        prompt = f"""You are a compliance verification expert. A compliance monitoring system detected the following change:
+
+Category: {category}
+Rule: {title}
+Jurisdiction: {jurisdiction_name}
+Previous value: {old_value or 'N/A'}
+New value: {new_value or 'N/A'}
+
+Your task:
+1. Use Google Search to verify whether this change is accurate
+2. Check official government sources (.gov domains preferred)
+3. Confirm or deny the change with supporting evidence
+
+Respond with a JSON object:
+{{
+  "confirmed": true/false,
+  "confidence": 0.0 to 1.0,
+  "sources": [
+    {{
+      "url": "https://...",
+      "name": "Source Name",
+      "type": "official" | "news" | "blog" | "other",
+      "snippet": "Brief relevant excerpt"
+    }}
+  ],
+  "explanation": "Brief explanation of your findings"
+}}
+
+Be conservative with confidence scores:
+- 0.9+ only if confirmed by official .gov source
+- 0.6-0.9 if confirmed by reputable news sources
+- 0.3-0.6 if only found in blogs or unverified sources
+- Below 0.3 if you cannot find confirmation
+"""
+        try:
+            api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
+            if not api_key and not self.settings.use_vertex:
+                return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="No API key configured")
+
+            tools = [types.Tool(google_search=types.GoogleSearch())]
+            response = await self.client.aio.models.generate_content(
+                model=self.settings.analysis_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    tools=tools,
+                    response_modalities=["TEXT"],
+                ),
+            )
+
+            text = response.text
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+
+            data = json.loads(text.strip())
+            return VerificationResult(
+                confirmed=data.get("confirmed", False),
+                confidence=float(data.get("confidence", 0.0)),
+                sources=data.get("sources", []),
+                explanation=data.get("explanation", ""),
+            )
+        except Exception as e:
+            print(f"[Gemini Compliance] Verification error: {e}")
+            return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Verification failed: {e}")
+
+    async def scan_upcoming_legislation(
+        self,
+        city: str,
+        state: str,
+        county: Optional[str] = None,
+        current_requirements: Optional[List[Dict]] = None,
+    ) -> List[Dict]:
+        """
+        Scan for upcoming or pending legislation that may affect compliance.
+        Returns a list of upcoming legislative changes.
+        """
+        location_str = f"{city}, {state}"
+        if county:
+            location_str += f" ({county})"
+
+        context_lines = ""
+        if current_requirements:
+            context_lines = "\n".join(
+                f"- {r.get('category', 'unknown')}: {r.get('title', 'N/A')} = {r.get('current_value', 'N/A')}"
+                for r in current_requirements[:10]
+            )
+
+        prompt = f"""You are a legislative monitoring expert. Search for upcoming, pending, or recently passed legislation that could affect labor law compliance for businesses in {location_str}.
+
+{"Current requirements for context:" + chr(10) + context_lines if context_lines else ""}
+
+Focus on:
+1. Minimum wage increases (scheduled or proposed)
+2. New or expanded sick leave requirements
+3. Changes to overtime rules
+4. New meal/rest break requirements
+5. Pay transparency or frequency changes
+
+For each upcoming change, search for:
+- Bills in the current legislative session
+- Ballot measures
+- Regulatory changes
+- Scheduled effective dates of already-passed laws
+
+Respond with a JSON object:
+{{
+  "upcoming": [
+    {{
+      "category": "minimum_wage" | "overtime" | "sick_leave" | "meal_breaks" | "pay_frequency" | "other",
+      "title": "Short descriptive title",
+      "description": "Detailed description of the change",
+      "current_status": "proposed" | "passed" | "signed" | "effective_soon" | "effective",
+      "expected_effective_date": "YYYY-MM-DD" or null,
+      "impact_summary": "How this affects businesses",
+      "source_url": "URL to source",
+      "source_name": "Source name",
+      "confidence": 0.0 to 1.0,
+      "legislation_key": "unique_identifier_for_this_bill"
+    }}
+  ]
+}}
+
+Only include items you can verify through search. Be conservative with confidence scores.
+Return an empty array if no upcoming legislation is found.
+"""
+        try:
+            api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
+            if not api_key and not self.settings.use_vertex:
+                return []
+
+            print(f"[Gemini Compliance] Scanning upcoming legislation for {location_str}...")
+
+            tools = [types.Tool(google_search=types.GoogleSearch())]
+            response = await self.client.aio.models.generate_content(
+                model=self.settings.analysis_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    tools=tools,
+                    response_modalities=["TEXT"],
+                ),
+            )
+
+            text = response.text
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+
+            data = json.loads(text.strip())
+            upcoming = data.get("upcoming", [])
+            print(f"[Gemini Compliance] Found {len(upcoming)} upcoming legislative items for {location_str}")
+            return upcoming
+
+        except json.JSONDecodeError as e:
+            print(f"[Gemini Compliance] Error parsing legislation JSON: {e}")
+            return []
+        except Exception as e:
+            print(f"[Gemini Compliance] Error scanning legislation: {e}")
             return []
 
 # Singleton instance

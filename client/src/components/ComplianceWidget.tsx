@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { complianceAPI, COMPLIANCE_CATEGORY_LABELS } from '../api/compliance';
-import { Shield, MapPin, AlertTriangle, ChevronRight, Plus, RefreshCw } from 'lucide-react';
+import { Shield, MapPin, AlertTriangle, ChevronRight, Plus, RefreshCw, Calendar, Zap } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export function ComplianceWidget() {
@@ -148,12 +148,55 @@ export function ComplianceWidget() {
                 </div>
             )}
 
+            {(summary.upcoming_deadlines?.length ?? 0) > 0 && (
+                <div className="mt-4">
+                    <h3 className="text-sm font-medium text-zinc-500 mb-3 flex items-center gap-2">
+                        <Calendar size={14} />
+                        Upcoming Deadlines
+                    </h3>
+                    <div className="space-y-2">
+                        {(summary.upcoming_deadlines ?? []).map((deadline, idx) => (
+                            <div
+                                key={idx}
+                                className={`flex items-center justify-between p-3 border ${
+                                    deadline.days_until <= 30 ? 'bg-red-50 border-red-200' :
+                                    deadline.days_until <= 90 ? 'bg-amber-50 border-amber-200' :
+                                    'bg-zinc-50 border-zinc-100'
+                                }`}
+                            >
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-sm font-medium text-zinc-900 truncate">{deadline.title}</div>
+                                    <div className="text-xs text-zinc-500 mt-0.5">
+                                        {deadline.location} &middot; {new Date(deadline.effective_date).toLocaleDateString()}
+                                    </div>
+                                </div>
+                                <div className={`text-right ml-3 font-mono ${
+                                    deadline.days_until <= 30 ? 'text-red-600' :
+                                    deadline.days_until <= 90 ? 'text-amber-600' :
+                                    'text-zinc-500'
+                                }`}>
+                                    <div className="text-lg font-semibold">{deadline.days_until <= 0 ? 'NOW' : deadline.days_until}</div>
+                                    {deadline.days_until > 0 && <div className="text-[10px]">days</div>}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {summary.critical_alerts > 0 && (
                 <div className="mt-4 p-3 bg-zinc-100 border border-zinc-200 flex items-center gap-3">
                     <AlertTriangle size={18} className="text-zinc-700 flex-shrink-0" />
                     <p className="text-sm text-zinc-700">
                         You have {summary.critical_alerts} critical compliance alert{summary.critical_alerts > 1 ? 's' : ''} requiring attention
                     </p>
+                </div>
+            )}
+
+            {summary.auto_check_locations > 0 && (
+                <div className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
+                    <Zap size={12} className="text-emerald-500" />
+                    Auto-monitoring active for {summary.auto_check_locations} location{summary.auto_check_locations > 1 ? 's' : ''}
                 </div>
             )}
         </div>
