@@ -1009,6 +1009,7 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
         forward_task = asyncio.create_task(forward_responses())
 
         # Handle incoming messages
+        audio_frame_count = 0
         while True:
             message = await websocket.receive()
 
@@ -1027,6 +1028,9 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
             elif "bytes" in message:
                 audio_data = parse_audio_from_client(message["bytes"])
                 if audio_data:
+                    audio_frame_count += 1
+                    if audio_frame_count % 50 == 0:
+                        print(f"[Interview {interview_id}] Audio frame #{audio_frame_count}: {len(audio_data)} bytes")
                     await gemini_session.send_audio(audio_data)
 
     except WebSocketDisconnect:

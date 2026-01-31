@@ -643,18 +643,25 @@ class GeminiLiveSession:
             if not self._closed:
                 print(f"[Gemini] Receive error: {e}")
 
+    _audio_send_count = 0
+
     async def send_audio(self, pcm_data: bytes) -> None:
         """Send audio data to Gemini."""
-        if self.session and not self._closed:
-            try:
-                await self.session.send_realtime_input(
-                    media=types.Blob(
-                        data=pcm_data,
-                        mime_type="audio/pcm;rate=16000",
-                    )
+        if not self.session or self._closed:
+            print(f"[Gemini] Audio dropped: session={'exists' if self.session else 'None'}, closed={self._closed}")
+            return
+        try:
+            await self.session.send_realtime_input(
+                media=types.Blob(
+                    data=pcm_data,
+                    mime_type="audio/pcm;rate=16000",
                 )
-            except Exception as e:
-                print(f"[Gemini] Failed to send audio: {e}")
+            )
+            self._audio_send_count += 1
+            if self._audio_send_count % 50 == 0:
+                print(f"[Gemini] Sent audio #{self._audio_send_count}: {len(pcm_data)} bytes")
+        except Exception as e:
+            print(f"[Gemini] Failed to send audio: {e}")
 
     async def send_text(self, text: str) -> None:
         """Send a text message to trigger model response."""
