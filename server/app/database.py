@@ -1405,6 +1405,124 @@ async def init_db():
         """)
 
         # ===========================================
+        # Jurisdiction Compliance Repository Tables
+        # ===========================================
+
+        # Jurisdictions table — first-class entity for a city+state
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS jurisdictions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                city VARCHAR(100) NOT NULL,
+                state VARCHAR(2) NOT NULL,
+                county VARCHAR(100),
+                last_verified_at TIMESTAMP,
+                requirement_count INTEGER DEFAULT 0,
+                legislation_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(city, state)
+            )
+        """)
+
+        # Jurisdiction requirements — growing repository of employment requirements per jurisdiction
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS jurisdiction_requirements (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                jurisdiction_id UUID NOT NULL REFERENCES jurisdictions(id) ON DELETE CASCADE,
+                requirement_key TEXT NOT NULL,
+                category VARCHAR(50) NOT NULL,
+                jurisdiction_level VARCHAR(20) NOT NULL,
+                jurisdiction_name VARCHAR(100) NOT NULL,
+                title VARCHAR(500) NOT NULL,
+                description TEXT,
+                current_value VARCHAR(100),
+                numeric_value DECIMAL(10, 4),
+                source_url VARCHAR(500),
+                source_name VARCHAR(100),
+                effective_date DATE,
+                expiration_date DATE,
+                previous_value VARCHAR(100),
+                last_changed_at TIMESTAMP,
+                last_verified_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(jurisdiction_id, requirement_key)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jurisdiction_requirements_jurisdiction
+            ON jurisdiction_requirements(jurisdiction_id)
+        """)
+
+        # Jurisdiction legislation — upcoming/pending legislation per jurisdiction
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS jurisdiction_legislation (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                jurisdiction_id UUID NOT NULL REFERENCES jurisdictions(id) ON DELETE CASCADE,
+                legislation_key TEXT NOT NULL,
+                category VARCHAR(50),
+                title VARCHAR(500) NOT NULL,
+                description TEXT,
+                current_status VARCHAR(30) NOT NULL DEFAULT 'proposed',
+                expected_effective_date DATE,
+                impact_summary TEXT,
+                source_url TEXT,
+                source_name VARCHAR(200),
+                confidence DECIMAL(3,2),
+                last_verified_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(jurisdiction_id, legislation_key)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jurisdiction_legislation_jurisdiction
+            ON jurisdiction_legislation(jurisdiction_id)
+        """)
+
+        # Add jurisdiction_id FK on business_locations
+        await conn.execute("""
+            ALTER TABLE business_locations
+            ADD COLUMN IF NOT EXISTS jurisdiction_id UUID REFERENCES jurisdictions(id)
+        """)
+
+        # Backfill: create jurisdictions from existing locations
+        await conn.execute("""
+            INSERT INTO jurisdictions (city, state, county)
+            SELECT DISTINCT LOWER(city), UPPER(state), county
+            FROM business_locations WHERE is_active = true
+            ON CONFLICT (city, state) DO NOTHING
+        """)
+
+        # Backfill: link existing locations to jurisdictions
+        await conn.execute("""
+            UPDATE business_locations bl
+            SET jurisdiction_id = j.id
+            FROM jurisdictions j
+            WHERE LOWER(bl.city) = j.city AND UPPER(bl.state) = j.state
+              AND bl.jurisdiction_id IS NULL
+        """)
+
+        # Backfill: seed jurisdiction_requirements from existing per-location data
+        await conn.execute("""
+            INSERT INTO jurisdiction_requirements
+                (jurisdiction_id, requirement_key, category, jurisdiction_level, jurisdiction_name,
+                 title, description, current_value, numeric_value, source_url, source_name,
+                 effective_date, expiration_date, previous_value, last_changed_at, last_verified_at)
+            SELECT DISTINCT ON (j.id, cr.requirement_key)
+                j.id, cr.requirement_key, cr.category, cr.jurisdiction_level, cr.jurisdiction_name,
+                cr.title, cr.description, cr.current_value, cr.numeric_value,
+                cr.source_url, cr.source_name, cr.effective_date, cr.expiration_date,
+                cr.previous_value, cr.last_changed_at, cr.updated_at
+            FROM compliance_requirements cr
+            JOIN business_locations bl ON cr.location_id = bl.id
+            JOIN jurisdictions j ON LOWER(bl.city) = j.city AND UPPER(bl.state) = j.state
+            WHERE cr.requirement_key IS NOT NULL
+            ORDER BY j.id, cr.requirement_key, cr.updated_at DESC
+            ON CONFLICT (jurisdiction_id, requirement_key) DO NOTHING
+        """)
+
+        # ===========================================
         # Employee Self-Service Portal Tables
         # ===========================================
         # NOTE: Employee portal tables are now managed via Alembic migrations

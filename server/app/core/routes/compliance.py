@@ -46,11 +46,12 @@ async def create_location_endpoint(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
 
-    location = await create_location(company_id, data)
-    
-    # Trigger compliance check in background
-    background_tasks.add_task(run_compliance_check, location.id, company_id)
-    
+    location, has_repository_data = await create_location(company_id, data)
+
+    # Only trigger background Gemini check if no repository data was found
+    if not has_repository_data:
+        background_tasks.add_task(run_compliance_check, location.id, company_id)
+
     return {
         "id": str(location.id),
         "company_id": str(location.company_id),

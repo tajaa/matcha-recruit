@@ -54,6 +54,7 @@ class LegislationStatus(str, Enum):
 class BusinessLocation(BaseModel):
     id: UUID
     company_id: UUID
+    jurisdiction_id: Optional[UUID] = None
     name: Optional[str] = None
     address: Optional[str] = None
     city: str
