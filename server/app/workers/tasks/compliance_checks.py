@@ -49,7 +49,13 @@ async def _enqueue_due_checks() -> dict:
             comp_id = str(row["company_id"])
             interval = row["auto_check_interval_days"] or 7
 
-            # Update next_auto_check immediately to prevent re-enqueue
+            # Enqueue the individual check task, then advance next_auto_check
+            try:
+                run_compliance_check_task.delay(loc_id, comp_id, "scheduled")
+            except Exception as e:
+                print(f"[Compliance Scheduler] Failed to enqueue check for location {loc_id}: {e}")
+                continue
+
             await conn.execute(
                 """
                 UPDATE business_locations
@@ -58,9 +64,6 @@ async def _enqueue_due_checks() -> dict:
                 """,
                 interval, row["location_id"],
             )
-
-            # Enqueue the individual check task
-            run_compliance_check_task.delay(loc_id, comp_id, "scheduled")
             enqueued += 1
             print(f"[Compliance Scheduler] Enqueued check for location {loc_id}")
 

@@ -682,224 +682,266 @@ async def run_compliance_check_stream(
     async with get_connection() as conn:
         log_id = await _create_check_log(conn, location_id, company_id, "manual")
 
-        existing_rows = await conn.fetch(
-            "SELECT * FROM compliance_requirements WHERE location_id = $1",
-            location_id,
-        )
-        existing_by_key = {}
-        duplicates = []
-        for row in existing_rows:
-            row_dict = dict(row)
-            key = _compute_requirement_key(row_dict)
-            normalized_category = _normalize_category(row_dict.get("category")) or row_dict.get("category")
+        try:
+            existing_rows = await conn.fetch(
+                "SELECT * FROM compliance_requirements WHERE location_id = $1",
+                location_id,
+            )
+            existing_by_key = {}
+            duplicates = []
+            for row in existing_rows:
+                row_dict = dict(row)
+                key = _compute_requirement_key(row_dict)
+                normalized_category = _normalize_category(row_dict.get("category")) or row_dict.get("category")
 
-            if key and (row_dict.get("requirement_key") != key or row_dict.get("category") != normalized_category):
-                await conn.execute(
-                    """
-                    UPDATE compliance_requirements
-                    SET requirement_key = $1, category = $2, updated_at = NOW()
-                    WHERE id = $3
-                    """,
-                    key,
-                    normalized_category,
-                    row_dict["id"],
-                )
-                row_dict["requirement_key"] = key
-                row_dict["category"] = normalized_category
+                if key and (row_dict.get("requirement_key") != key or row_dict.get("category") != normalized_category):
+                    await conn.execute(
+                        """
+                        UPDATE compliance_requirements
+                        SET requirement_key = $1, category = $2, updated_at = NOW()
+                        WHERE id = $3
+                        """,
+                        key,
+                        normalized_category,
+                        row_dict["id"],
+                    )
+                    row_dict["requirement_key"] = key
+                    row_dict["category"] = normalized_category
 
-            if not key:
-                continue
+                if not key:
+                    continue
 
-            current = existing_by_key.get(key)
-            if not current:
-                existing_by_key[key] = row_dict
-            else:
-                current_updated = current.get("updated_at")
-                row_updated = row_dict.get("updated_at")
-                if current_updated and row_updated and row_updated > current_updated:
-                    duplicates.append(current)
+                current = existing_by_key.get(key)
+                if not current:
                     existing_by_key[key] = row_dict
                 else:
-                    duplicates.append(row_dict)
+                    current_updated = current.get("updated_at")
+                    row_updated = row_dict.get("updated_at")
+                    if current_updated and row_updated and row_updated > current_updated:
+                        duplicates.append(current)
+                        existing_by_key[key] = row_dict
+                    else:
+                        duplicates.append(row_dict)
 
-        if duplicates:
-            for dup in duplicates:
-                await _snapshot_to_history(conn, dup, location_id)
-                await conn.execute(
-                    "DELETE FROM compliance_requirements WHERE id = $1",
-                    dup["id"],
-                )
-
-        # Dismiss orphaned alerts (NULL requirement_id) left by old key-mismatch bug
-        await conn.execute(
-            """
-            UPDATE compliance_alerts
-            SET status = 'dismissed', dismissed_at = NOW()
-            WHERE location_id = $1 AND requirement_id IS NULL
-              AND status IN ('unread', 'read')
-            """,
-            location_id,
-        )
-
-        # Track which keys are in the new result set
-        new_requirement_keys = set()
-
-        # Track material changes for verification
-        changes_to_verify = []
-
-        for req in requirements:
-            requirement_key = _compute_requirement_key(req)
-            new_requirement_keys.add(requirement_key)
-            existing = existing_by_key.get(requirement_key)
-
-            req_title = req.get("title", "")
-
-            if existing:
-                # Auto-dismiss stale alerts for this requirement before re-check creates fresh ones
-                await conn.execute(
-                    """
-                    UPDATE compliance_alerts
-                    SET status = 'dismissed', dismissed_at = NOW()
-                    WHERE requirement_id = $1 AND status IN ('unread', 'read')
-                    """,
-                    existing["id"],
-                )
-
-                old_value = existing.get("current_value")
-                new_value = req.get("current_value")
-                old_num = existing.get("numeric_value")
-                new_num = req.get("numeric_value")
-                if old_num is None:
-                    old_num = _extract_numeric_value(old_value)
-                if new_num is None:
-                    new_num = _extract_numeric_value(new_value)
-
-                # Deterministic material change detection
-                material_change = False
-                if _is_material_numeric_change(old_num, new_num, req.get("category")):
-                    material_change = True
-                elif _is_material_text_change(old_value, new_value, req.get("category")):
-                    material_change = True
-
-                numeric_changed = (
-                    old_num is not None
-                    and new_num is not None
-                    and abs(float(old_num) - float(new_num)) > 0.001
-                )
-                text_changed = (old_value != new_value)
-
-                metadata_changed = any(
-                    [
-                        existing.get("title") != req.get("title"),
-                        existing.get("description") != req.get("description"),
-                        existing.get("source_url") != req.get("source_url"),
-                        existing.get("source_name") != req.get("source_name"),
-                        existing.get("effective_date") != parse_date(req.get("effective_date")),
-                        text_changed,
-                        numeric_changed,
-                    ]
-                )
-                if metadata_changed:
-                    updated_count += 1
-                    await _snapshot_to_history(conn, existing, location_id)
-
-                    if material_change:
-                        # Queue for verification instead of creating alert immediately
-                        changes_to_verify.append({
-                            "req": req,
-                            "existing": existing,
-                            "old_value": old_value,
-                            "new_value": new_value,
-                            "requirement_key": requirement_key,
-                        })
-                    change_detail = f" ({old_value} → {new_value})" if material_change else ""
-                    yield {"type": "result", "status": "updated", "message": req_title + change_detail}
-                else:
-                    yield {"type": "result", "status": "unchanged", "message": req_title}
-
-                previous_value = existing.get("previous_value")
-                last_changed_at = existing.get("last_changed_at")
-                if material_change:
-                    previous_value = old_value
-                    last_changed_at = datetime.utcnow()
-
-                await _update_requirement(
-                    conn, existing["id"], requirement_key, req,
-                    previous_value, last_changed_at,
-                )
-                existing_by_key[requirement_key] = {
-                    **existing,
-                    "requirement_key": requirement_key,
-                    "category": req.get("category"),
-                    "jurisdiction_name": req.get("jurisdiction_name"),
-                    "title": req.get("title"),
-                    "current_value": req.get("current_value"),
-                    "numeric_value": req.get("numeric_value"),
-                    "description": req.get("description"),
-                    "source_url": req.get("source_url"),
-                    "source_name": req.get("source_name"),
-                    "effective_date": parse_date(req.get("effective_date")),
-                }
-            else:
-                new_count += 1
-                req_id = await _upsert_requirement(conn, location_id, requirement_key, req)
-
-                alert_count += 1
-                await _create_alert(
-                    conn, location_id, company_id, req_id,
-                    f"New Requirement: {req.get('title')}",
-                    req.get("description") or "New compliance requirement identified.",
-                    "info", req.get("category"),
-                    source_url=req.get("source_url"),
-                    source_name=req.get("source_name"),
-                    alert_type="new_requirement",
-                )
-                yield {"type": "result", "status": "new", "message": req_title}
-                existing_by_key[requirement_key] = {
-                    "id": req_id,
-                    "requirement_key": requirement_key,
-                    "category": req.get("category"),
-                    "jurisdiction_level": req.get("jurisdiction_level"),
-                    "jurisdiction_name": req.get("jurisdiction_name"),
-                    "title": req.get("title"),
-                    "current_value": req.get("current_value"),
-                    "numeric_value": req.get("numeric_value"),
-                    "description": req.get("description"),
-                    "source_url": req.get("source_url"),
-                    "source_name": req.get("source_name"),
-                    "effective_date": parse_date(req.get("effective_date")),
-                }
-
-        # Verify material changes with Gemini (Sprint 2)
-        if changes_to_verify:
-            yield {"type": "verifying", "message": f"Verifying {min(len(changes_to_verify), MAX_VERIFICATIONS_PER_CHECK)} change(s)..."}
-            verification_count = 0
-            for change_info in changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK]:
-                req = change_info["req"]
-                existing = change_info["existing"]
-
-                try:
-                    verification = await service.verify_compliance_change(
-                        category=req.get("category", ""),
-                        title=req.get("title", ""),
-                        jurisdiction_name=req.get("jurisdiction_name", ""),
-                        old_value=change_info["old_value"],
-                        new_value=change_info["new_value"],
+            if duplicates:
+                for dup in duplicates:
+                    await _snapshot_to_history(conn, dup, location_id)
+                    await conn.execute(
+                        "DELETE FROM compliance_requirements WHERE id = $1",
+                        dup["id"],
                     )
-                    confidence = score_verification_confidence(verification.sources)
-                    confidence = max(confidence, verification.confidence)
-                except Exception as e:
-                    print(f"[Compliance] Verification failed: {e}")
-                    verification = VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Verification unavailable")
-                    confidence = 0.5  # Treat as unverified
 
-                change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
-                description = req.get("description")
-                if description:
-                    change_msg += f" {description}"
+            # Dismiss orphaned alerts (NULL requirement_id) left by old key-mismatch bug
+            await conn.execute(
+                """
+                UPDATE compliance_alerts
+                SET status = 'dismissed', dismissed_at = NOW()
+                WHERE location_id = $1 AND requirement_id IS NULL
+                  AND status IN ('unread', 'read')
+                """,
+                location_id,
+            )
 
-                # Gate alert creation by confidence
-                if confidence >= 0.6:
+            # Track which keys are in the new result set
+            new_requirement_keys = set()
+
+            # Track material changes for verification
+            changes_to_verify = []
+
+            for req in requirements:
+                requirement_key = _compute_requirement_key(req)
+                new_requirement_keys.add(requirement_key)
+                existing = existing_by_key.get(requirement_key)
+
+                req_title = req.get("title", "")
+
+                if existing:
+                    # Auto-dismiss stale alerts for this requirement before re-check creates fresh ones
+                    await conn.execute(
+                        """
+                        UPDATE compliance_alerts
+                        SET status = 'dismissed', dismissed_at = NOW()
+                        WHERE requirement_id = $1 AND status IN ('unread', 'read')
+                        """,
+                        existing["id"],
+                    )
+
+                    old_value = existing.get("current_value")
+                    new_value = req.get("current_value")
+                    old_num = existing.get("numeric_value")
+                    new_num = req.get("numeric_value")
+                    if old_num is None:
+                        old_num = _extract_numeric_value(old_value)
+                    if new_num is None:
+                        new_num = _extract_numeric_value(new_value)
+
+                    # Deterministic material change detection
+                    material_change = False
+                    if _is_material_numeric_change(old_num, new_num, req.get("category")):
+                        material_change = True
+                    elif _is_material_text_change(old_value, new_value, req.get("category")):
+                        material_change = True
+
+                    numeric_changed = (
+                        old_num is not None
+                        and new_num is not None
+                        and abs(float(old_num) - float(new_num)) > 0.001
+                    )
+                    text_changed = (old_value != new_value)
+
+                    metadata_changed = any(
+                        [
+                            existing.get("title") != req.get("title"),
+                            existing.get("description") != req.get("description"),
+                            existing.get("source_url") != req.get("source_url"),
+                            existing.get("source_name") != req.get("source_name"),
+                            existing.get("effective_date") != parse_date(req.get("effective_date")),
+                            text_changed,
+                            numeric_changed,
+                        ]
+                    )
+                    if metadata_changed:
+                        updated_count += 1
+                        await _snapshot_to_history(conn, existing, location_id)
+
+                        if material_change:
+                            # Queue for verification instead of creating alert immediately
+                            changes_to_verify.append({
+                                "req": req,
+                                "existing": existing,
+                                "old_value": old_value,
+                                "new_value": new_value,
+                                "requirement_key": requirement_key,
+                            })
+                        change_detail = f" ({old_value} → {new_value})" if material_change else ""
+                        yield {"type": "result", "status": "updated", "message": req_title + change_detail}
+                    else:
+                        yield {"type": "result", "status": "unchanged", "message": req_title}
+
+                    previous_value = existing.get("previous_value")
+                    last_changed_at = existing.get("last_changed_at")
+                    if material_change:
+                        previous_value = old_value
+                        last_changed_at = datetime.utcnow()
+
+                    await _update_requirement(
+                        conn, existing["id"], requirement_key, req,
+                        previous_value, last_changed_at,
+                    )
+                    existing_by_key[requirement_key] = {
+                        **existing,
+                        "requirement_key": requirement_key,
+                        "category": req.get("category"),
+                        "jurisdiction_name": req.get("jurisdiction_name"),
+                        "title": req.get("title"),
+                        "current_value": req.get("current_value"),
+                        "numeric_value": req.get("numeric_value"),
+                        "description": req.get("description"),
+                        "source_url": req.get("source_url"),
+                        "source_name": req.get("source_name"),
+                        "effective_date": parse_date(req.get("effective_date")),
+                    }
+                else:
+                    new_count += 1
+                    req_id = await _upsert_requirement(conn, location_id, requirement_key, req)
+
+                    alert_count += 1
+                    await _create_alert(
+                        conn, location_id, company_id, req_id,
+                        f"New Requirement: {req.get('title')}",
+                        req.get("description") or "New compliance requirement identified.",
+                        "info", req.get("category"),
+                        source_url=req.get("source_url"),
+                        source_name=req.get("source_name"),
+                        alert_type="new_requirement",
+                    )
+                    yield {"type": "result", "status": "new", "message": req_title}
+                    existing_by_key[requirement_key] = {
+                        "id": req_id,
+                        "requirement_key": requirement_key,
+                        "category": req.get("category"),
+                        "jurisdiction_level": req.get("jurisdiction_level"),
+                        "jurisdiction_name": req.get("jurisdiction_name"),
+                        "title": req.get("title"),
+                        "current_value": req.get("current_value"),
+                        "numeric_value": req.get("numeric_value"),
+                        "description": req.get("description"),
+                        "source_url": req.get("source_url"),
+                        "source_name": req.get("source_name"),
+                        "effective_date": parse_date(req.get("effective_date")),
+                    }
+
+            # Verify material changes with Gemini (Sprint 2)
+            if changes_to_verify:
+                yield {"type": "verifying", "message": f"Verifying {min(len(changes_to_verify), MAX_VERIFICATIONS_PER_CHECK)} change(s)..."}
+                verification_count = 0
+                for change_info in changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK]:
+                    req = change_info["req"]
+                    existing = change_info["existing"]
+
+                    try:
+                        verification = await service.verify_compliance_change(
+                            category=req.get("category", ""),
+                            title=req.get("title", ""),
+                            jurisdiction_name=req.get("jurisdiction_name", ""),
+                            old_value=change_info["old_value"],
+                            new_value=change_info["new_value"],
+                        )
+                        confidence = score_verification_confidence(verification.sources)
+                        confidence = max(confidence, verification.confidence)
+                    except Exception as e:
+                        print(f"[Compliance] Verification failed: {e}")
+                        verification = VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Verification unavailable")
+                        confidence = 0.5  # Treat as unverified
+
+                    change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
+                    description = req.get("description")
+                    if description:
+                        change_msg += f" {description}"
+
+                    # Gate alert creation by confidence
+                    if confidence >= 0.6:
+                        alert_count += 1
+                        await _create_alert(
+                            conn, location_id, company_id, existing["id"],
+                            f"Compliance Change: {req.get('title')}",
+                            change_msg,
+                            "warning", req.get("category"),
+                            source_url=req.get("source_url"),
+                            source_name=req.get("source_name"),
+                            alert_type="change",
+                            confidence_score=round(confidence, 2),
+                            verification_sources=verification.sources,
+                            metadata={"verification_explanation": verification.explanation},
+                        )
+                        verification_count += 1
+                    elif confidence >= 0.3:
+                        alert_count += 1
+                        await _create_alert(
+                            conn, location_id, company_id, existing["id"],
+                            f"Unverified: {req.get('title')}",
+                            change_msg,
+                            "info", req.get("category"),
+                            source_url=req.get("source_url"),
+                            source_name=req.get("source_name"),
+                            alert_type="change",
+                            confidence_score=round(confidence, 2),
+                            verification_sources=verification.sources,
+                            metadata={"verification_explanation": verification.explanation, "unverified": True},
+                        )
+                        verification_count += 1
+                    else:
+                        # Low confidence: log only, no alert
+                        print(f"[Compliance] Low confidence ({confidence:.2f}) for change: {req.get('title')}, skipping alert")
+
+                # Create alerts for unverified changes (beyond MAX_VERIFICATIONS_PER_CHECK)
+                for change_info in changes_to_verify[MAX_VERIFICATIONS_PER_CHECK:]:
+                    req = change_info["req"]
+                    existing = change_info["existing"]
+                    change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
+                    description = req.get("description")
+                    if description:
+                        change_msg += f" {description}"
                     alert_count += 1
                     await _create_alert(
                         conn, location_id, company_id, existing["id"],
@@ -909,94 +951,56 @@ async def run_compliance_check_stream(
                         source_url=req.get("source_url"),
                         source_name=req.get("source_name"),
                         alert_type="change",
-                        confidence_score=round(confidence, 2),
-                        verification_sources=verification.sources,
-                        metadata={"verification_explanation": verification.explanation},
                     )
-                    verification_count += 1
-                elif confidence >= 0.3:
-                    alert_count += 1
-                    await _create_alert(
-                        conn, location_id, company_id, existing["id"],
-                        f"Unverified: {req.get('title')}",
-                        change_msg,
-                        "info", req.get("category"),
-                        source_url=req.get("source_url"),
-                        source_name=req.get("source_name"),
-                        alert_type="change",
-                        confidence_score=round(confidence, 2),
-                        verification_sources=verification.sources,
-                        metadata={"verification_explanation": verification.explanation, "unverified": True},
+
+                if verification_count > 0:
+                    yield {"type": "verified", "message": f"Verified {verification_count} change(s)"}
+
+            # Delete stale requirements not in the new result set
+            stale_keys = set(existing_by_key.keys()) - new_requirement_keys
+            for stale_key in stale_keys:
+                stale = existing_by_key[stale_key]
+                stale_id = stale.get("id")
+                if stale_id:
+                    await _snapshot_to_history(conn, stale, location_id)
+                    await conn.execute(
+                        "DELETE FROM compliance_requirements WHERE id = $1",
+                        stale_id,
                     )
-                    verification_count += 1
-                else:
-                    # Low confidence: log only, no alert
-                    print(f"[Compliance] Low confidence ({confidence:.2f}) for change: {req.get('title')}, skipping alert")
 
-            # Create alerts for unverified changes (beyond MAX_VERIFICATIONS_PER_CHECK)
-            for change_info in changes_to_verify[MAX_VERIFICATIONS_PER_CHECK:]:
-                req = change_info["req"]
-                existing = change_info["existing"]
-                change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
-                description = req.get("description")
-                if description:
-                    change_msg += f" {description}"
-                alert_count += 1
-                await _create_alert(
-                    conn, location_id, company_id, existing["id"],
-                    f"Compliance Change: {req.get('title')}",
-                    change_msg,
-                    "warning", req.get("category"),
-                    source_url=req.get("source_url"),
-                    source_name=req.get("source_name"),
-                    alert_type="change",
+            # Scan for upcoming legislation (Sprint 3)
+            yield {"type": "scanning", "message": "Scanning for upcoming legislation..."}
+            try:
+                current_reqs = [dict(r) for r in existing_by_key.values() if r.get("id")]
+                legislation_items = await service.scan_upcoming_legislation(
+                    city=location.city,
+                    state=location.state,
+                    county=location.county,
+                    current_requirements=current_reqs,
                 )
+                leg_count = await process_upcoming_legislation(conn, location_id, company_id, legislation_items)
+                if leg_count > 0:
+                    alert_count += leg_count
+                    yield {"type": "legislation", "message": f"Found {leg_count} upcoming legislative change(s)"}
+            except Exception as e:
+                print(f"[Compliance] Legislation scan error: {e}")
 
-            if verification_count > 0:
-                yield {"type": "verified", "message": f"Verified {verification_count} change(s)"}
+            # Run deadline escalation
+            try:
+                escalated = await escalate_upcoming_deadlines(conn, company_id)
+                if escalated > 0:
+                    yield {"type": "escalation", "message": f"Escalated {escalated} deadline(s)"}
+            except Exception as e:
+                print(f"[Compliance] Deadline escalation error: {e}")
 
-        # Delete stale requirements not in the new result set
-        stale_keys = set(existing_by_key.keys()) - new_requirement_keys
-        for stale_key in stale_keys:
-            stale = existing_by_key[stale_key]
-            stale_id = stale.get("id")
-            if stale_id:
-                await _snapshot_to_history(conn, stale, location_id)
-                await conn.execute(
-                    "DELETE FROM compliance_requirements WHERE id = $1",
-                    stale_id,
-                )
-
-        # Scan for upcoming legislation (Sprint 3)
-        yield {"type": "scanning", "message": "Scanning for upcoming legislation..."}
-        try:
-            current_reqs = [dict(r) for r in existing_by_key.values() if r.get("id")]
-            legislation_items = await service.scan_upcoming_legislation(
-                city=location.city,
-                state=location.state,
-                county=location.county,
-                current_requirements=current_reqs,
+            await conn.execute(
+                "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+                location_id
             )
-            leg_count = await process_upcoming_legislation(conn, location_id, company_id, legislation_items)
-            if leg_count > 0:
-                alert_count += leg_count
-                yield {"type": "legislation", "message": f"Found {leg_count} upcoming legislative change(s)"}
+            await _complete_check_log(conn, log_id, new_count, updated_count, alert_count)
         except Exception as e:
-            print(f"[Compliance] Legislation scan error: {e}")
-
-        # Run deadline escalation
-        try:
-            escalated = await escalate_upcoming_deadlines(conn, company_id)
-            if escalated > 0:
-                yield {"type": "escalation", "message": f"Escalated {escalated} deadline(s)"}
-        except Exception as e:
-            print(f"[Compliance] Deadline escalation error: {e}")
-
-        await conn.execute(
-            "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
-            location_id
-        )
-        await _complete_check_log(conn, log_id, new_count, updated_count, alert_count)
+            await _complete_check_log(conn, log_id, new_count, updated_count, alert_count, error=str(e))
+            raise
 
     yield {
         "type": "completed",
@@ -1354,10 +1358,16 @@ async def update_auto_check_settings(
         if settings.auto_check_enabled is not None and not settings.auto_check_enabled:
             updates.append("next_auto_check = NULL")
         else:
-            interval = settings.auto_check_interval_days or 7
-            updates.append(f"next_auto_check = NOW() + INTERVAL '1 day' * ${param_idx}")
-            params.append(interval)
-            param_idx += 1
+            if settings.auto_check_interval_days is not None:
+                interval = settings.auto_check_interval_days
+            else:
+                # Use the persisted interval so re-enabling doesn't reset to 7
+                updates.append(f"next_auto_check = NOW() + INTERVAL '1 day' * auto_check_interval_days")
+                interval = None
+            if interval is not None:
+                updates.append(f"next_auto_check = NOW() + INTERVAL '1 day' * ${param_idx}")
+                params.append(interval)
+                param_idx += 1
 
         updates.append("updated_at = NOW()")
         params.insert(0, location_id)
