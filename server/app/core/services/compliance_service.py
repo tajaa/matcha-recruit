@@ -285,7 +285,7 @@ def _compute_requirement_key(req) -> str:
     cat_key = _normalize_category(cat) or ""
     base_title = _base_title(title or "", jname)
     base_key = _normalize_title_key(base_title)
-    return f"{cat_key}:{level}:{base_key}"
+    return f"{cat_key}:{base_key}"
 
 def _filter_by_jurisdiction_priority(requirements):
     """For each distinct requirement within a category, keep only the most
@@ -415,7 +415,7 @@ async def run_compliance_check_stream(
         duplicates = []
         for row in existing_rows:
             row_dict = dict(row)
-            key = row_dict.get("requirement_key") or _compute_requirement_key(row_dict)
+            key = _compute_requirement_key(row_dict)
             normalized_category = _normalize_category(row_dict.get("category")) or row_dict.get("category")
 
             if key and (row_dict.get("requirement_key") != key or row_dict.get("category") != normalized_category):
