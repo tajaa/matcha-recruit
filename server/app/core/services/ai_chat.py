@@ -54,7 +54,10 @@ class AIChatService:
             reqs = await conn.fetch(
                 """SELECT cr.category, cr.title, cr.current_value,
                           cr.jurisdiction_level, cr.jurisdiction_name,
-                          bl.name as location_name
+                          cr.location_id,
+                          bl.name as location_name,
+                          bl.city as location_city,
+                          bl.state as location_state
                    FROM compliance_requirements cr
                    JOIN business_locations bl ON cr.location_id = bl.id
                    WHERE bl.company_id = $1
@@ -63,16 +66,22 @@ class AIChatService:
             )
             if reqs:
                 reqs_dicts = [dict(r) for r in reqs]
-                # Group by location and filter each location independently
-                by_location: dict[str, list[dict]] = {}
+                # Group by location_id (not name) to keep locations distinct
+                by_location: dict[UUID, list[dict]] = {}
+                location_labels: dict[UUID, str] = {}
                 for r in reqs_dicts:
-                    by_location.setdefault(r["location_name"], []).append(r)
+                    loc_id = r["location_id"]
+                    by_location.setdefault(loc_id, []).append(r)
+                    if loc_id not in location_labels:
+                        name = r["location_name"]
+                        city_state = f"{r['location_city']}, {r['location_state']}"
+                        location_labels[loc_id] = f"{name} ({city_state})" if name else city_state
 
                 parts.append("\n## Compliance Requirements")
-                for loc_name, loc_reqs in by_location.items():
+                for loc_id, loc_reqs in by_location.items():
                     filtered = _filter_by_jurisdiction_priority(loc_reqs)
                     if filtered:
-                        parts.append(f"### {loc_name}")
+                        parts.append(f"### {location_labels[loc_id]}")
                         for req in filtered:
                             parts.append(
                                 f"- {req['category']}: {req['current_value']} "
