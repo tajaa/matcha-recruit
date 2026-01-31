@@ -159,13 +159,8 @@ export function Compliance() {
         }
     });
 
-    const updateAutoCheckMutation = useMutation({
-        mutationFn: ({ id, settings }: { id: string; settings: { auto_check_enabled?: boolean; auto_check_interval_days?: number } }) =>
-            complianceAPI.updateAutoCheck(id, settings),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-locations'] });
-        }
-    });
+
+
 
     const requirementsByCategory = requirements?.reduce((acc, req) => {
         if (!acc[req.category]) {
@@ -393,7 +388,7 @@ export function Compliance() {
                                             {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zipcode}
                                             {selectedLocation.last_compliance_check && (
                                                 <span className="ml-3 text-zinc-600">
-                                                    Updated {new Date(selectedLocation.last_compliance_check).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                    Updated {new Date(selectedLocation.last_compliance_check).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
                                                 </span>
                                             )}
                                         </p>
@@ -449,50 +444,8 @@ export function Compliance() {
                                 </button>
                                 </div>
 
-                                {/* Auto-check controls */}
-                                <div className="flex items-center gap-4 mt-3 pt-3 border-t border-white/5">
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <button
-                                            onClick={() => updateAutoCheckMutation.mutate({
-                                                id: selectedLocation.id,
-                                                settings: { auto_check_enabled: !selectedLocation.auto_check_enabled }
-                                            })}
-                                            className={`w-8 h-4 rounded-full transition-colors relative ${
-                                                selectedLocation.auto_check_enabled ? 'bg-emerald-500' : 'bg-zinc-700'
-                                            }`}
-                                        >
-                                            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
-                                                selectedLocation.auto_check_enabled ? 'translate-x-4' : 'translate-x-0.5'
-                                            }`} />
-                                        </button>
-                                        <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-500">Auto-check</span>
-                                    </label>
 
-                                    {selectedLocation.auto_check_enabled && (
-                                        <>
-                                            <select
-                                                value={selectedLocation.auto_check_interval_days}
-                                                onChange={e => updateAutoCheckMutation.mutate({
-                                                    id: selectedLocation.id,
-                                                    settings: { auto_check_interval_days: parseInt(e.target.value) }
-                                                })}
-                                                className="text-[10px] bg-zinc-900 border border-zinc-800 text-zinc-400 px-2 py-1 uppercase tracking-wider"
-                                            >
-                                                <option value={1}>Daily</option>
-                                                <option value={3}>Every 3 days</option>
-                                                <option value={7}>Weekly</option>
-                                                <option value={14}>Biweekly</option>
-                                                <option value={30}>Monthly</option>
-                                            </select>
-                                            {selectedLocation.next_auto_check && (
-                                                <span className="text-[10px] text-zinc-600 font-mono flex items-center gap-1">
-                                                    <Clock size={10} />
-                                                    Next: {new Date(selectedLocation.next_auto_check).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                                </span>
-                                            )}
-                                        </>
-                                    )}
-                                </div>
+
                             </div>
 
                             {checkMessages.length > 0 && (

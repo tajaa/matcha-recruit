@@ -31,6 +31,21 @@ async def _enqueue_due_checks() -> dict:
     """Find locations due for auto-check and enqueue individual tasks."""
     conn = await get_db_connection()
     try:
+        # Check if compliance_checks scheduler is enabled and get max_per_cycle
+        # Guard against scheduler_settings table not existing yet (deploy ordering)
+        try:
+            sched_row = await conn.fetchrow(
+                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'compliance_checks'"
+            )
+        except Exception:
+            sched_row = None
+
+        if sched_row and not sched_row["enabled"]:
+            print("[Compliance Scheduler] Scheduler disabled, skipping.")
+            return {"enqueued": 0}
+
+        limit = (sched_row["max_per_cycle"] if sched_row and sched_row["max_per_cycle"] and sched_row["max_per_cycle"] > 0 else 2)
+
         rows = await conn.fetch(
             """
             SELECT bl.id AS location_id, bl.company_id, bl.auto_check_interval_days
@@ -39,8 +54,9 @@ async def _enqueue_due_checks() -> dict:
               AND bl.is_active = true
               AND (bl.next_auto_check IS NULL OR bl.next_auto_check <= NOW())
             ORDER BY bl.last_compliance_check ASC NULLS FIRST
-            LIMIT 2
+            LIMIT $1
             """,
+            limit,
         )
 
         enqueued = 0

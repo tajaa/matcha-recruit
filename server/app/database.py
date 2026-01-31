@@ -2267,6 +2267,31 @@ Creator: ___________________ Date: ___________',
 
         print("[DB] Campaign platform tables initialized")
 
+        # ===========================================
+        # Scheduler Settings Table
+        # ===========================================
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS scheduler_settings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_key VARCHAR(100) UNIQUE NOT NULL,
+                display_name VARCHAR(255) NOT NULL,
+                description TEXT,
+                enabled BOOLEAN DEFAULT true,
+                max_per_cycle INTEGER DEFAULT 2,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        # Seed scheduler settings
+        await conn.execute("""
+            INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
+            VALUES
+                ('compliance_checks', 'Compliance Auto-Checks', 'Automated compliance checks for business locations on a recurring schedule.', true, 2),
+                ('deadline_escalation', 'Deadline Escalation', 'Re-evaluate deadline severities for upcoming legislation based on proximity to effective dates.', true, 0)
+            ON CONFLICT (task_key) DO NOTHING
+        """)
+
         # Create default chat rooms if none exist
         room_exists = await conn.fetchval("SELECT COUNT(*) FROM chat_rooms")
         if room_exists == 0:

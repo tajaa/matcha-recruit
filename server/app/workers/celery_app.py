@@ -55,6 +55,28 @@ celery_app.conf.update(
 )
 
 
+def _is_scheduler_enabled(task_key: str) -> bool:
+    """Check if a scheduler task is enabled in the database."""
+    import asyncio
+    from app.workers.utils import get_db_connection
+
+    async def _check():
+        conn = await get_db_connection()
+        try:
+            row = await conn.fetchrow(
+                "SELECT enabled FROM scheduler_settings WHERE task_key = $1",
+                task_key,
+            )
+            # Default to enabled if no row (table may not exist yet)
+            return row["enabled"] if row else True
+        except Exception:
+            return True
+        finally:
+            await conn.close()
+
+    return asyncio.run(_check())
+
+
 @worker_ready.connect
 def on_worker_ready(**kwargs):
     """Auto-dispatch scheduled compliance checks on every worker startup.
@@ -67,5 +89,13 @@ def on_worker_ready(**kwargs):
         enqueue_scheduled_compliance_checks,
         run_deadline_escalation,
     )
-    enqueue_scheduled_compliance_checks.delay()
-    run_deadline_escalation.delay()
+
+    if _is_scheduler_enabled("compliance_checks"):
+        enqueue_scheduled_compliance_checks.delay()
+    else:
+        print("[Worker] Compliance checks scheduler is disabled, skipping.")
+
+    if _is_scheduler_enabled("deadline_escalation"):
+        run_deadline_escalation.delay()
+    else:
+        print("[Worker] Deadline escalation scheduler is disabled, skipping.")

@@ -49,6 +49,7 @@ const TestBot = lazy(() => import('./pages/TestBot').then(m => ({ default: m.Tes
 const AdminOverview = lazy(() => import('./pages/admin/AdminOverview'));
 const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
 const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
+const Schedulers = lazy(() => import('./pages/admin/Schedulers'));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -427,6 +428,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <CompanyFeatures />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="admin/schedulers"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <Schedulers />
                   </ProtectedRoute>
                 }
               />

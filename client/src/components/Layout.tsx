@@ -264,6 +264,17 @@ const navSections: NavSection[] = [
         ),
       },
       {
+        path: '/app/admin/schedulers',
+        label: 'Schedulers',
+        roles: ['admin'],
+        helpText: 'View and control automated background jobs like compliance checks.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+      },
+      {
         path: '/app/matcha/pto',
         label: 'Time Off',
         roles: ['admin', 'client'],

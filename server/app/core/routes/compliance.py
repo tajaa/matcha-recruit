@@ -10,7 +10,6 @@ from ..models.auth import CurrentUser
 from ..models.compliance import (
     LocationCreate,
     LocationUpdate,
-    AutoCheckSettings,
     RequirementResponse,
     AlertResponse,
     CheckLogEntry,
@@ -30,7 +29,6 @@ from ..services.compliance_service import (
     get_compliance_summary,
     run_compliance_check,
     run_compliance_check_stream,
-    update_auto_check_settings,
     get_check_log,
     get_upcoming_legislation,
 )
@@ -245,31 +243,8 @@ async def get_location_requirements_endpoint(
     return await get_location_requirements(loc_uuid, company_id, category)
 
 
-@router.put("/locations/{location_id}/auto-check", response_model=dict)
-async def update_auto_check_endpoint(
-    location_id: str,
-    settings: AutoCheckSettings,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=403, detail="Access denied")
 
-    try:
-        loc_uuid = UUID(location_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid location ID")
 
-    location = await update_auto_check_settings(loc_uuid, company_id, settings)
-    if not location:
-        raise HTTPException(status_code=404, detail="Location not found")
-
-    return {
-        "id": str(location.id),
-        "auto_check_enabled": location.auto_check_enabled,
-        "auto_check_interval_days": location.auto_check_interval_days,
-        "next_auto_check": location.next_auto_check.isoformat() if location.next_auto_check else None,
-    }
 
 
 @router.get("/locations/{location_id}/check-log", response_model=List[CheckLogEntry])

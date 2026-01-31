@@ -262,19 +262,6 @@ export const complianceAPI = {
         return response;
     },
 
-    async updateAutoCheck(locationId: string, settings: { auto_check_enabled?: boolean; auto_check_interval_days?: number }): Promise<{ id: string; auto_check_enabled: boolean; auto_check_interval_days: number; next_auto_check: string | null }> {
-        const response = await fetch(`/api/compliance/locations/${locationId}/auto-check`, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${getAccessToken()}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(settings),
-        });
-        if (!response.ok) throw new Error('Failed to update auto-check settings');
-        return response.json();
-    },
-
     async getCheckLog(locationId: string, limit?: number): Promise<CheckLogEntry[]> {
         const params = limit ? `?limit=${limit}` : '';
         const response = await fetch(`/api/compliance/locations/${locationId}/check-log${params}`, {

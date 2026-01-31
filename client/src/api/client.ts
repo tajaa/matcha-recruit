@@ -1487,6 +1487,92 @@ export const adminOverview = {
     request<AdminOverviewResponse>('/admin/overview'),
 };
 
+// Scheduler Admin API
+export interface SchedulerSetting {
+  id: string;
+  task_key: string;
+  display_name: string;
+  description: string | null;
+  enabled: boolean;
+  max_per_cycle: number;
+  created_at: string | null;
+  updated_at: string | null;
+  stats: Record<string, unknown>;
+}
+
+export interface SchedulerStatsOverview {
+  total_locations: number;
+  auto_check_enabled: number;
+  checks_24h: number;
+  failed_24h: number;
+}
+
+export interface SchedulerLogEntry {
+  id: string;
+  location_id: string;
+  company_id: string;
+  location_name: string | null;
+  check_type: string;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  new_count: number;
+  updated_count: number;
+  alert_count: number;
+  error_message: string | null;
+}
+
+export interface SchedulerStatsResponse {
+  overview: SchedulerStatsOverview;
+  recent_logs: SchedulerLogEntry[];
+}
+
+export interface SchedulerLocation {
+  id: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  auto_check_enabled: boolean;
+  auto_check_interval_days: number;
+  next_auto_check: string | null;
+  last_compliance_check: string | null;
+}
+
+export interface SchedulerCompanyLocations {
+  company_id: string;
+  company_name: string;
+  locations: SchedulerLocation[];
+}
+
+export const adminSchedulers = {
+  list: (): Promise<SchedulerSetting[]> =>
+    request<SchedulerSetting[]>('/admin/schedulers'),
+
+  update: (taskKey: string, data: { enabled?: boolean; max_per_cycle?: number }): Promise<SchedulerSetting> =>
+    request<SchedulerSetting>(`/admin/schedulers/${taskKey}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  trigger: (taskKey: string): Promise<{ status: string; task_key: string; message: string }> =>
+    request<{ status: string; task_key: string; message: string }>(`/admin/schedulers/${taskKey}/trigger`, {
+      method: 'POST',
+    }),
+
+  stats: (): Promise<SchedulerStatsResponse> =>
+    request<SchedulerStatsResponse>('/admin/schedulers/stats'),
+
+  listLocations: (): Promise<SchedulerCompanyLocations[]> =>
+    request<SchedulerCompanyLocations[]>('/admin/schedulers/locations'),
+
+  updateLocation: (locationId: string, data: { auto_check_enabled?: boolean; auto_check_interval_days?: number; next_auto_check_minutes?: number }): Promise<SchedulerLocation> =>
+    request<SchedulerLocation>(`/admin/schedulers/locations/${locationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+};
+
 // Blog API
 export const blogs = {
   list: (options?: { status?: BlogStatus; tag?: string; page?: number; limit?: number }) => {
@@ -2712,6 +2798,7 @@ export const api = {
   erCopilot,
   irIncidents,
   adminBeta,
+  adminSchedulers,
   blogs,
   policies,
   offerLetters,
