@@ -1487,6 +1487,102 @@ export const adminOverview = {
     request<AdminOverviewResponse>('/admin/overview'),
 };
 
+// Jurisdiction Admin API
+export interface JurisdictionLocation {
+  id: string;
+  name: string | null;
+  city: string;
+  state: string;
+  company_name: string;
+  auto_check_enabled: boolean;
+  auto_check_interval_days: number;
+  next_auto_check: string | null;
+  last_compliance_check: string | null;
+}
+
+export interface Jurisdiction {
+  id: string;
+  city: string;
+  state: string;
+  county: string | null;
+  requirement_count: number;
+  legislation_count: number;
+  location_count: number;
+  auto_check_count: number;
+  last_verified_at: string | null;
+  created_at: string | null;
+  locations: JurisdictionLocation[];
+}
+
+export interface JurisdictionTotals {
+  total_jurisdictions: number;
+  total_requirements: number;
+  total_legislation: number;
+}
+
+export interface JurisdictionsResponse {
+  jurisdictions: Jurisdiction[];
+  totals: JurisdictionTotals;
+}
+
+export interface JurisdictionRequirement {
+  id: string;
+  requirement_key: string;
+  category: string;
+  jurisdiction_level: string;
+  jurisdiction_name: string;
+  title: string;
+  description: string | null;
+  current_value: string | null;
+  numeric_value: number | null;
+  source_url: string | null;
+  source_name: string | null;
+  effective_date: string | null;
+  expiration_date: string | null;
+  previous_value: string | null;
+  last_changed_at: string | null;
+  last_verified_at: string | null;
+  updated_at: string | null;
+}
+
+export interface JurisdictionLegislation {
+  id: string;
+  legislation_key: string;
+  category: string | null;
+  title: string;
+  description: string | null;
+  current_status: string;
+  expected_effective_date: string | null;
+  impact_summary: string | null;
+  source_url: string | null;
+  source_name: string | null;
+  confidence: number | null;
+  last_verified_at: string | null;
+  updated_at: string | null;
+}
+
+export interface JurisdictionDetail {
+  id: string;
+  city: string;
+  state: string;
+  county: string | null;
+  requirement_count: number;
+  legislation_count: number;
+  last_verified_at: string | null;
+  created_at: string | null;
+  requirements: JurisdictionRequirement[];
+  legislation: JurisdictionLegislation[];
+  locations: JurisdictionLocation[];
+}
+
+export const adminJurisdictions = {
+  list: (): Promise<JurisdictionsResponse> =>
+    request<JurisdictionsResponse>('/admin/jurisdictions'),
+
+  get: (id: string): Promise<JurisdictionDetail> =>
+    request<JurisdictionDetail>(`/admin/jurisdictions/${id}`),
+};
+
 // Scheduler Admin API
 export interface SchedulerSetting {
   id: string;
@@ -2798,6 +2894,7 @@ export const api = {
   erCopilot,
   irIncidents,
   adminBeta,
+  adminJurisdictions,
   adminSchedulers,
   blogs,
   policies,

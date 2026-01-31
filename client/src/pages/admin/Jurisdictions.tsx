@@ -1,0 +1,555 @@
+import { useState, useEffect, useCallback } from 'react';
+import { adminJurisdictions, adminSchedulers } from '../../api/client';
+import type {
+  Jurisdiction, JurisdictionTotals, JurisdictionDetail,
+  JurisdictionRequirement, JurisdictionLegislation, JurisdictionLocation,
+  SchedulerSetting, SchedulerStatsResponse, SchedulerLogEntry,
+} from '../../api/client';
+
+function formatRelative(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  return `${diffDays}d ago`;
+}
+
+function formatFuture(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = d.getTime() - now.getTime();
+  if (diffMs < 0) return 'Overdue';
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 60) return `in ${diffMin}m`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `in ${diffHr}h`;
+  const diffDays = Math.floor(diffHr / 24);
+  return `in ${diffDays}d`;
+}
+
+const categoryLabel: Record<string, string> = {
+  minimum_wage: 'Minimum Wage',
+  overtime: 'Overtime',
+  sick_leave: 'Sick Leave',
+  workers_comp: "Workers' Comp",
+  business_license: 'Business License',
+  tax_rate: 'Tax Rate',
+  posting_requirements: 'Posting Reqs',
+};
+
+const levelColor: Record<string, string> = {
+  city: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+  county: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
+  state: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  federal: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
+};
+
+const legStatusColor: Record<string, string> = {
+  proposed: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
+  passed: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+  signed: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  effective_soon: 'text-red-400 bg-red-500/10 border-red-500/20',
+  effective: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+  dismissed: 'text-zinc-600 bg-zinc-800/30 border-zinc-700/30',
+};
+
+type DetailTab = 'requirements' | 'legislation' | 'locations';
+
+function JurisdictionDetailPanel({ detail }: { detail: JurisdictionDetail }) {
+  const [tab, setTab] = useState<DetailTab>('requirements');
+
+  const tabs: { key: DetailTab; label: string; count: number }[] = [
+    { key: 'requirements', label: 'Requirements', count: detail.requirements.length },
+    { key: 'legislation', label: 'Legislation', count: detail.legislation.length },
+    { key: 'locations', label: 'Locations', count: detail.locations.length },
+  ];
+
+  // Group requirements by category
+  const reqsByCategory: Record<string, JurisdictionRequirement[]> = {};
+  for (const r of detail.requirements) {
+    const cat = r.category || 'other';
+    if (!reqsByCategory[cat]) reqsByCategory[cat] = [];
+    reqsByCategory[cat].push(r);
+  }
+
+  return (
+    <div className="border-t border-white/5 bg-zinc-950/50">
+      {/* Tab bar */}
+      <div className="flex gap-0 border-b border-white/5">
+        {tabs.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2.5 text-[10px] uppercase tracking-[0.15em] font-mono font-bold transition-colors ${
+              tab === t.key
+                ? 'text-white border-b-2 border-white'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {t.label} <span className="text-zinc-600 ml-1">{t.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Requirements tab */}
+      {tab === 'requirements' && (
+        <div className="divide-y divide-white/5">
+          {detail.requirements.length === 0 && (
+            <div className="px-6 py-4 text-xs text-zinc-600 font-mono italic">No requirements yet</div>
+          )}
+          {Object.entries(reqsByCategory).map(([cat, reqs]) => (
+            <div key={cat}>
+              <div className="px-6 py-2 bg-zinc-900/80">
+                <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500">
+                  {categoryLabel[cat] || cat.replace(/_/g, ' ')}
+                </span>
+                <span className="text-[9px] text-zinc-600 font-mono ml-2">{reqs.length}</span>
+              </div>
+              {reqs.map((r: JurisdictionRequirement) => (
+                <div key={r.id} className="px-6 py-3 hover:bg-white/[0.02] transition-colors">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs text-zinc-200 font-medium">{r.title}</span>
+                        <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${levelColor[r.jurisdiction_level] || levelColor.federal}`}>
+                          {r.jurisdiction_level}
+                        </span>
+                      </div>
+                      {r.description && (
+                        <div className="text-[11px] text-zinc-500 font-mono leading-relaxed mb-1 line-clamp-2">{r.description}</div>
+                      )}
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                        {r.source_name && (
+                          <span className="text-[9px] text-zinc-600 font-mono">
+                            {r.source_url ? <a href={r.source_url} target="_blank" rel="noreferrer" className="hover:text-zinc-400 underline">{r.source_name}</a> : r.source_name}
+                          </span>
+                        )}
+                        {r.effective_date && <span className="text-[9px] text-zinc-600 font-mono">Effective: {r.effective_date}</span>}
+                        {r.last_changed_at && <span className="text-[9px] text-amber-500/70 font-mono">Changed {formatRelative(r.last_changed_at)}</span>}
+                        <span className="text-[9px] text-zinc-700 font-mono">Verified {formatRelative(r.last_verified_at)}</span>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0 min-w-[100px]">
+                      {r.current_value && (
+                        <div className="text-sm text-white font-mono font-bold">{r.current_value}</div>
+                      )}
+                      {r.previous_value && r.previous_value !== r.current_value && (
+                        <div className="text-[9px] text-zinc-600 font-mono line-through">{r.previous_value}</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Legislation tab */}
+      {tab === 'legislation' && (
+        <div className="divide-y divide-white/5">
+          {detail.legislation.length === 0 && (
+            <div className="px-6 py-4 text-xs text-zinc-600 font-mono italic">No legislation tracked</div>
+          )}
+          {detail.legislation.map((l: JurisdictionLegislation) => (
+            <div key={l.id} className="px-6 py-3 hover:bg-white/[0.02] transition-colors">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs text-zinc-200 font-medium">{l.title}</span>
+                    <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${legStatusColor[l.current_status] || legStatusColor.proposed}`}>
+                      {l.current_status.replace(/_/g, ' ')}
+                    </span>
+                    {l.category && (
+                      <span className="text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-600 bg-zinc-800 border border-zinc-700">
+                        {categoryLabel[l.category] || l.category.replace(/_/g, ' ')}
+                      </span>
+                    )}
+                  </div>
+                  {l.description && (
+                    <div className="text-[11px] text-zinc-500 font-mono leading-relaxed mb-1 line-clamp-2">{l.description}</div>
+                  )}
+                  {l.impact_summary && (
+                    <div className="text-[11px] text-zinc-500 font-mono leading-relaxed mb-1 line-clamp-2">Impact: {l.impact_summary}</div>
+                  )}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                    {l.source_name && (
+                      <span className="text-[9px] text-zinc-600 font-mono">
+                        {l.source_url ? <a href={l.source_url} target="_blank" rel="noreferrer" className="hover:text-zinc-400 underline">{l.source_name}</a> : l.source_name}
+                      </span>
+                    )}
+                    {l.confidence != null && <span className="text-[9px] text-zinc-600 font-mono">Confidence: {Math.round(l.confidence * 100)}%</span>}
+                    <span className="text-[9px] text-zinc-700 font-mono">Verified {formatRelative(l.last_verified_at)}</span>
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0 min-w-[100px]">
+                  {l.expected_effective_date && (
+                    <div className="text-xs text-zinc-300 font-mono">{l.expected_effective_date}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Locations tab */}
+      {tab === 'locations' && (
+        <div className="divide-y divide-white/5">
+          {detail.locations.length === 0 && (
+            <div className="px-6 py-4 text-xs text-zinc-600 font-mono italic">No linked locations</div>
+          )}
+          {detail.locations.map((loc: JurisdictionLocation) => (
+            <div key={loc.id} className="px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 hover:bg-white/[0.02]">
+              <div className="min-w-[180px] flex-1">
+                <div className="text-xs text-zinc-300 font-mono">{loc.name || `${loc.city}, ${loc.state}`}</div>
+                <div className="text-[10px] text-zinc-600 font-mono">{loc.company_name}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${
+                  loc.auto_check_enabled
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30'
+                }`}>
+                  {loc.auto_check_enabled ? 'Auto' : 'Manual'}
+                </span>
+                <span className="text-[9px] text-zinc-600 font-mono">{loc.auto_check_interval_days}d</span>
+              </div>
+              <div>
+                <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Next</div>
+                <div className="text-xs text-zinc-400 font-mono">{formatFuture(loc.next_auto_check)}</div>
+              </div>
+              <div>
+                <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Last check</div>
+                <div className="text-xs text-zinc-400 font-mono">{formatRelative(loc.last_compliance_check)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Jurisdictions() {
+  const [jurisdictions, setJurisdictions] = useState<Jurisdiction[]>([]);
+  const [totals, setTotals] = useState<JurisdictionTotals | null>(null);
+  const [schedulers, setSchedulers] = useState<SchedulerSetting[]>([]);
+  const [stats, setStats] = useState<SchedulerStatsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [triggering, setTriggering] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [detailCache, setDetailCache] = useState<Record<string, JurisdictionDetail>>({});
+  const [detailLoading, setDetailLoading] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const [jData, schedulerData, statsData] = await Promise.all([
+        adminJurisdictions.list(),
+        adminSchedulers.list(),
+        adminSchedulers.stats(),
+      ]);
+      setJurisdictions(jData.jurisdictions);
+      setTotals(jData.totals);
+      setSchedulers(schedulerData);
+      setStats(statsData);
+    } catch (err) {
+      console.error('Failed to fetch data:', err);
+      setError('Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const handleToggle = async (taskKey: string, currentEnabled: boolean) => {
+    setToggling(taskKey);
+    try {
+      const updated = await adminSchedulers.update(taskKey, { enabled: !currentEnabled });
+      setSchedulers(prev => prev.map(s => s.task_key === taskKey ? { ...s, ...updated } : s));
+    } catch {
+      setError('Failed to update scheduler');
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  const handleTrigger = async (taskKey: string) => {
+    setTriggering(taskKey);
+    try {
+      await adminSchedulers.trigger(taskKey);
+      setTimeout(fetchData, 2000);
+    } catch {
+      setError('Failed to trigger task');
+    } finally {
+      setTriggering(null);
+    }
+  };
+
+  const handleExpand = async (id: string) => {
+    if (expanded === id) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(id);
+    if (!detailCache[id]) {
+      setDetailLoading(id);
+      try {
+        const detail = await adminJurisdictions.get(id);
+        setDetailCache(prev => ({ ...prev, [id]: detail }));
+      } catch {
+        setError('Failed to load jurisdiction detail');
+        setExpanded(null);
+      } finally {
+        setDetailLoading(null);
+      }
+    }
+  };
+
+  const statusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+      case 'running': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+      case 'failed': return 'bg-red-500/10 text-red-400 border-red-500/20';
+      default: return 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20';
+    }
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-8">
+      {/* Header */}
+      <div className="flex justify-between items-end border-b border-white/10 pb-8">
+        <div>
+          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Jurisdictions</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+            Compliance repository by city &amp; state
+          </p>
+        </div>
+        <button
+          onClick={fetchData}
+          disabled={loading}
+          className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono">
+          {error}
+          <button onClick={() => setError(null)} className="ml-4 underline hover:text-red-300">Dismiss</button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-24">
+          <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse font-mono">Loading...</div>
+        </div>
+      ) : (
+        <>
+          {/* Stats */}
+          {totals && stats && (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {[
+                { label: 'Jurisdictions', value: totals.total_jurisdictions },
+                { label: 'Requirements', value: totals.total_requirements },
+                { label: 'Legislation', value: totals.total_legislation },
+                { label: 'Checks (24h)', value: stats.overview.checks_24h },
+                { label: 'Failed (24h)', value: stats.overview.failed_24h, alert: stats.overview.failed_24h > 0 },
+              ].map((stat) => (
+                <div key={stat.label} className="bg-zinc-900/50 border border-white/10 p-4">
+                  <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-2">{stat.label}</div>
+                  <div className={`text-2xl font-bold font-mono ${'alert' in stat && stat.alert ? 'text-red-400' : 'text-white'}`}>
+                    {stat.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Scheduler Job Cards */}
+          <div className="space-y-4">
+            <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">
+              Scheduled Jobs
+            </div>
+            {schedulers.map((sched) => (
+              <div key={sched.task_key} className="bg-zinc-900/50 border border-white/10">
+                <div className="p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className="text-lg font-bold text-white tracking-tight">{sched.display_name}</h3>
+                        <span className={`text-[9px] px-2 py-0.5 uppercase tracking-wider font-bold border ${
+                          sched.enabled
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30'
+                        }`}>
+                          {sched.enabled ? 'Active' : 'Disabled'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500 font-mono leading-relaxed">{sched.description}</p>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <button
+                        onClick={() => handleToggle(sched.task_key, sched.enabled)}
+                        disabled={toggling === sched.task_key}
+                        className={`relative w-10 h-5 rounded-full transition-colors ${
+                          sched.enabled ? 'bg-emerald-600' : 'bg-zinc-700'
+                        } ${toggling === sched.task_key ? 'opacity-50' : ''}`}
+                      >
+                        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                          sched.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                        }`} />
+                      </button>
+                      <button
+                        onClick={() => handleTrigger(sched.task_key)}
+                        disabled={triggering === sched.task_key}
+                        className="px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase font-mono text-white bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 hover:border-zinc-500 transition-colors disabled:opacity-50"
+                      >
+                        {triggering === sched.task_key ? 'Triggering...' : 'Run Now'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Jurisdictions Table */}
+          {jurisdictions.length > 0 && (
+            <div className="space-y-3">
+              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">
+                Jurisdictions
+              </div>
+              <div className="border border-white/10 bg-zinc-900/30 divide-y divide-white/5">
+                {jurisdictions.map((j) => {
+                  const isExpanded = expanded === j.id;
+                  const detail = detailCache[j.id];
+                  const isLoading = detailLoading === j.id;
+                  return (
+                    <div key={j.id}>
+                      <button
+                        onClick={() => handleExpand(j.id)}
+                        className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className={`text-[10px] font-mono transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                          <span className="text-sm text-white font-medium">
+                            {j.city}, {j.state}
+                          </span>
+                          {j.county && (
+                            <span className="text-[9px] text-zinc-600 font-mono">({j.county} County)</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 flex-shrink-0">
+                          <div className="text-right">
+                            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Reqs</div>
+                            <div className="text-xs text-zinc-300 font-mono font-bold">{j.requirement_count}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Leg.</div>
+                            <div className="text-xs text-zinc-300 font-mono font-bold">{j.legislation_count}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Locations</div>
+                            <div className="text-xs text-zinc-300 font-mono font-bold">{j.location_count}</div>
+                          </div>
+                          <div className="text-right min-w-[80px]">
+                            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Verified</div>
+                            <div className="text-xs text-zinc-400 font-mono">{formatRelative(j.last_verified_at)}</div>
+                          </div>
+                          <span className={`text-[9px] px-2 py-0.5 uppercase tracking-wider font-bold border ${
+                            j.requirement_count > 0
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              : 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30'
+                          }`}>
+                            {j.requirement_count > 0 ? 'Populated' : 'Empty'}
+                          </span>
+                        </div>
+                      </button>
+                      {isExpanded && isLoading && (
+                        <div className="border-t border-white/5 px-6 py-6 flex justify-center">
+                          <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse font-mono">Loading detail...</div>
+                        </div>
+                      )}
+                      {isExpanded && detail && <JurisdictionDetailPanel detail={detail} />}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {jurisdictions.length === 0 && !loading && (
+            <div className="border border-white/10 bg-zinc-900/30 p-8 text-center">
+              <div className="text-xs text-zinc-500 font-mono">No jurisdictions yet. They are created automatically when locations are added.</div>
+            </div>
+          )}
+
+          {/* Recent Activity Log */}
+          {stats && stats.recent_logs.length > 0 && (
+            <div className="space-y-3">
+              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">
+                Recent Activity
+              </div>
+              <div className="border border-white/10 bg-zinc-900/30 overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-white/10 bg-zinc-950">
+                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Location</th>
+                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Type</th>
+                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</th>
+                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Started</th>
+                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Duration</th>
+                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">New</th>
+                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Updated</th>
+                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Alerts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.recent_logs.map((log: SchedulerLogEntry) => (
+                      <tr key={log.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <td className="px-4 py-3 text-xs text-zinc-300 font-mono">{log.location_name || log.location_id.slice(0, 8)}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-400 bg-zinc-800 border border-zinc-700">
+                            {log.check_type}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${statusColor(log.status)}`}>
+                            {log.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono">{formatRelative(log.started_at)}</td>
+                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">
+                          {log.duration_seconds != null ? `${Math.round(log.duration_seconds)}s` : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.new_count}</td>
+                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.updated_count}</td>
+                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.alert_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+export default Jurisdictions;

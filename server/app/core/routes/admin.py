@@ -412,6 +412,200 @@ class SchedulerUpdateRequest(BaseModel):
     max_per_cycle: Optional[int] = None
 
 
+# =============================================================================
+# Jurisdiction Repository
+# =============================================================================
+
+@router.get("/jurisdictions", dependencies=[Depends(require_admin)])
+async def list_jurisdictions():
+    """List all jurisdictions with requirement/legislation counts and linked locations."""
+    async with get_connection() as conn:
+        rows = await conn.fetch("""
+            SELECT
+                j.id,
+                j.city,
+                j.state,
+                j.county,
+                j.requirement_count,
+                j.legislation_count,
+                j.last_verified_at,
+                j.created_at,
+                COUNT(bl.id) AS location_count,
+                COUNT(CASE WHEN bl.auto_check_enabled THEN 1 END) AS auto_check_count
+            FROM jurisdictions j
+            LEFT JOIN business_locations bl ON bl.jurisdiction_id = j.id AND bl.is_active = true
+            GROUP BY j.id
+            ORDER BY j.state, j.city
+        """)
+
+        jurisdictions = []
+        for row in rows:
+            # Get linked locations for this jurisdiction
+            locations = await conn.fetch("""
+                SELECT bl.id, bl.name, bl.city, bl.state, bl.company_id, c.name AS company_name,
+                       bl.auto_check_enabled, bl.auto_check_interval_days,
+                       bl.next_auto_check, bl.last_compliance_check
+                FROM business_locations bl
+                JOIN companies c ON c.id = bl.company_id
+                WHERE bl.jurisdiction_id = $1 AND bl.is_active = true
+                ORDER BY c.name, bl.name
+            """, row["id"])
+
+            jurisdictions.append({
+                "id": str(row["id"]),
+                "city": row["city"],
+                "state": row["state"],
+                "county": row["county"],
+                "requirement_count": row["requirement_count"] or 0,
+                "legislation_count": row["legislation_count"] or 0,
+                "location_count": row["location_count"],
+                "auto_check_count": row["auto_check_count"],
+                "last_verified_at": row["last_verified_at"].isoformat() if row["last_verified_at"] else None,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "locations": [
+                    {
+                        "id": str(loc["id"]),
+                        "name": loc["name"],
+                        "city": loc["city"],
+                        "state": loc["state"],
+                        "company_name": loc["company_name"],
+                        "auto_check_enabled": loc["auto_check_enabled"],
+                        "auto_check_interval_days": loc["auto_check_interval_days"],
+                        "next_auto_check": loc["next_auto_check"].isoformat() if loc["next_auto_check"] else None,
+                        "last_compliance_check": loc["last_compliance_check"].isoformat() if loc["last_compliance_check"] else None,
+                    }
+                    for loc in locations
+                ],
+            })
+
+        # Summary stats
+        totals = await conn.fetchrow("""
+            SELECT
+                COUNT(*) AS total_jurisdictions,
+                COALESCE(SUM(requirement_count), 0) AS total_requirements,
+                COALESCE(SUM(legislation_count), 0) AS total_legislation
+            FROM jurisdictions
+        """)
+
+        return {
+            "jurisdictions": jurisdictions,
+            "totals": {
+                "total_jurisdictions": totals["total_jurisdictions"],
+                "total_requirements": totals["total_requirements"],
+                "total_legislation": totals["total_legislation"],
+            },
+        }
+
+
+@router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
+async def get_jurisdiction_detail(jurisdiction_id: UUID):
+    """Get full detail for a jurisdiction: requirements, legislation, linked locations."""
+    async with get_connection() as conn:
+        j = await conn.fetchrow("SELECT * FROM jurisdictions WHERE id = $1", jurisdiction_id)
+        if not j:
+            raise HTTPException(status_code=404, detail="Jurisdiction not found")
+
+        requirements = await conn.fetch("""
+            SELECT id, requirement_key, category, jurisdiction_level, jurisdiction_name,
+                   title, description, current_value, numeric_value,
+                   source_url, source_name, effective_date, expiration_date,
+                   previous_value, last_changed_at, last_verified_at, created_at, updated_at
+            FROM jurisdiction_requirements
+            WHERE jurisdiction_id = $1
+            ORDER BY category, title
+        """, jurisdiction_id)
+
+        legislation = await conn.fetch("""
+            SELECT id, legislation_key, category, title, description,
+                   current_status, expected_effective_date, impact_summary,
+                   source_url, source_name, confidence, last_verified_at, created_at, updated_at
+            FROM jurisdiction_legislation
+            WHERE jurisdiction_id = $1
+            ORDER BY expected_effective_date ASC NULLS LAST, title
+        """, jurisdiction_id)
+
+        locations = await conn.fetch("""
+            SELECT bl.id, bl.name, bl.city, bl.state, bl.company_id, c.name AS company_name,
+                   bl.auto_check_enabled, bl.auto_check_interval_days,
+                   bl.next_auto_check, bl.last_compliance_check
+            FROM business_locations bl
+            JOIN companies c ON c.id = bl.company_id
+            WHERE bl.jurisdiction_id = $1 AND bl.is_active = true
+            ORDER BY c.name, bl.name
+        """, jurisdiction_id)
+
+        def fmt_date(d):
+            return d.isoformat() if d else None
+
+        def fmt_decimal(v):
+            return float(v) if v is not None else None
+
+        return {
+            "id": str(j["id"]),
+            "city": j["city"],
+            "state": j["state"],
+            "county": j["county"],
+            "requirement_count": j["requirement_count"] or 0,
+            "legislation_count": j["legislation_count"] or 0,
+            "last_verified_at": fmt_date(j["last_verified_at"]),
+            "created_at": fmt_date(j["created_at"]),
+            "requirements": [
+                {
+                    "id": str(r["id"]),
+                    "requirement_key": r["requirement_key"],
+                    "category": r["category"],
+                    "jurisdiction_level": r["jurisdiction_level"],
+                    "jurisdiction_name": r["jurisdiction_name"],
+                    "title": r["title"],
+                    "description": r["description"],
+                    "current_value": r["current_value"],
+                    "numeric_value": fmt_decimal(r["numeric_value"]),
+                    "source_url": r["source_url"],
+                    "source_name": r["source_name"],
+                    "effective_date": fmt_date(r["effective_date"]),
+                    "expiration_date": fmt_date(r["expiration_date"]),
+                    "previous_value": r["previous_value"],
+                    "last_changed_at": fmt_date(r["last_changed_at"]),
+                    "last_verified_at": fmt_date(r["last_verified_at"]),
+                    "updated_at": fmt_date(r["updated_at"]),
+                }
+                for r in requirements
+            ],
+            "legislation": [
+                {
+                    "id": str(l["id"]),
+                    "legislation_key": l["legislation_key"],
+                    "category": l["category"],
+                    "title": l["title"],
+                    "description": l["description"],
+                    "current_status": l["current_status"],
+                    "expected_effective_date": fmt_date(l["expected_effective_date"]),
+                    "impact_summary": l["impact_summary"],
+                    "source_url": l["source_url"],
+                    "source_name": l["source_name"],
+                    "confidence": fmt_decimal(l["confidence"]),
+                    "last_verified_at": fmt_date(l["last_verified_at"]),
+                    "updated_at": fmt_date(l["updated_at"]),
+                }
+                for l in legislation
+            ],
+            "locations": [
+                {
+                    "id": str(loc["id"]),
+                    "name": loc["name"],
+                    "city": loc["city"],
+                    "state": loc["state"],
+                    "company_name": loc["company_name"],
+                    "auto_check_enabled": loc["auto_check_enabled"],
+                    "auto_check_interval_days": loc["auto_check_interval_days"],
+                    "next_auto_check": fmt_date(loc["next_auto_check"]),
+                    "last_compliance_check": fmt_date(loc["last_compliance_check"]),
+                }
+                for loc in locations
+            ],
+        }
+
+
 @router.get("/schedulers", dependencies=[Depends(require_admin)])
 async def list_schedulers():
     """List all scheduler settings with live stats."""
