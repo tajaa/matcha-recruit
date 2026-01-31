@@ -479,6 +479,17 @@ async def run_compliance_check_stream(
             req_title = req.get("title", "")
 
             if existing:
+                # Auto-dismiss stale "New Requirement" alerts for this existing requirement
+                await conn.execute(
+                    """
+                    UPDATE compliance_alerts
+                    SET status = 'dismissed', dismissed_at = NOW()
+                    WHERE requirement_id = $1 AND status IN ('unread', 'read')
+                      AND title LIKE 'New Requirement:%'
+                    """,
+                    existing["id"],
+                )
+
                 old_value = existing.get("current_value")
                 new_value = req.get("current_value")
                 old_num = existing.get("numeric_value")
