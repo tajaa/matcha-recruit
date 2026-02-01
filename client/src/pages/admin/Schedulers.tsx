@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminSchedulers } from '../../api/client';
-import type { SchedulerSetting, SchedulerStatsResponse, SchedulerLogEntry, SchedulerCompanyLocations, SchedulerLocation } from '../../api/client';
+import type { SchedulerSetting, SchedulerStatsResponse, SchedulerLogEntry, SchedulerCompanyLocations } from '../../api/client';
 
 function formatRelative(iso: string | null): string {
   if (!iso) return '—';
@@ -115,7 +115,7 @@ export function Schedulers() {
     });
   };
 
-  const handleLocationUpdate = async (locationId: string, companyId: string, data: { auto_check_enabled?: boolean; auto_check_interval_days?: number }) => {
+  const handleLocationUpdate = async (locationId: string, companyId: string, data: { auto_check_enabled?: boolean; auto_check_interval_days?: number; next_auto_check_minutes?: number }) => {
     setUpdatingLocation(locationId);
     try {
       const updated = await adminSchedulers.updateLocation(locationId, data);
@@ -251,11 +251,11 @@ export function Schedulers() {
                           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono mb-1">Last Run</div>
                           <div className="text-xs text-zinc-300 font-mono">
                             {formatRelative(sched.stats.last_run as string | null)}
-                            {sched.stats.last_run_status && (
+                            {sched.stats.last_run_status ? (
                               <span className={`ml-2 text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${statusColor(sched.stats.last_run_status as string)}`}>
-                                {sched.stats.last_run_status as string}
+                                {String(sched.stats.last_run_status)}
                               </span>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                         <div>

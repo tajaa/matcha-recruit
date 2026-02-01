@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { BusinessLocation, ComplianceRequirement, ComplianceAlert, LocationCreate, UpcomingLegislation } from '../api/compliance';
+import type { BusinessLocation, ComplianceRequirement, LocationCreate } from '../api/compliance';
 import {
     complianceAPI,
     COMPLIANCE_CATEGORY_LABELS,
