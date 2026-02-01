@@ -149,6 +149,8 @@ def _normalize_value_text(value: Optional[str], category: Optional[str] = None) 
     s = value.lower().strip()
     s = s.replace("‑", "-").replace("–", "-").replace("—", "-")
     s = re.sub(r"[$,]", "", s)
+    # Normalize hyphens between numbers and unit words (e.g. "30-min" → "30 min")
+    s = re.sub(r"(\d)-(\w)", r"\1 \2", s)
     s = re.sub(r"\s+", " ", s)
     cat_key = _normalize_category(category)
     is_pay_frequency = cat_key == "pay_frequency"
@@ -1100,8 +1102,11 @@ async def run_compliance_check_stream(
                 await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
 
             # Sync requirements to location (change detection, alerts, history)
+            # Only create alerts for fresh Gemini data — repository data is cached
+            # and shouldn't re-alert on every check.
             sync_result = await _sync_requirements_to_location(
-                conn, location_id, company_id, requirements, create_alerts=True,
+                conn, location_id, company_id, requirements,
+                create_alerts=not used_repository,
             )
             new_count = sync_result["new"]
             updated_count = sync_result["updated"]

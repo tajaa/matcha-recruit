@@ -712,6 +712,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
         _upsert_jurisdiction_legislation,
         _normalize_category,
         _filter_by_jurisdiction_priority,
+        _sync_requirements_to_location,
     )
 
     async with get_connection() as conn:
@@ -767,7 +768,29 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                 except Exception as e:
                     print(f"[Admin] Jurisdiction legislation scan error: {e}")
 
-                yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': 0, 'alerts': 0})}\n\n"
+                # Sync to all company locations linked to this jurisdiction
+                linked_locations = await conn.fetch(
+                    "SELECT id, company_id FROM business_locations WHERE jurisdiction_id = $1 AND is_active = true",
+                    jurisdiction_id,
+                )
+                total_alerts = 0
+                if linked_locations:
+                    yield f"data: {json.dumps({'type': 'syncing', 'message': f'Syncing to {len(linked_locations)} location(s)...'})}\n\n"
+                    for loc in linked_locations:
+                        try:
+                            sync_result = await _sync_requirements_to_location(
+                                conn, loc["id"], loc["company_id"], requirements,
+                                create_alerts=True,
+                            )
+                            total_alerts += sync_result["alerts"]
+                            await conn.execute(
+                                "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+                                loc["id"],
+                            )
+                        except Exception as e:
+                            print(f"[Admin] Failed to sync location {loc['id']}: {e}")
+
+                yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': 0, 'alerts': total_alerts})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
