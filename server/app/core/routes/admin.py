@@ -720,6 +720,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
             raise HTTPException(status_code=404, detail="Jurisdiction not found")
 
     jurisdiction_name = f"{j['city']}, {j['state']}"
+    city, state, county = j["city"], j["state"], j["county"]
 
     async def event_stream():
         try:
@@ -727,22 +728,25 @@ async def check_jurisdiction(jurisdiction_id: UUID):
             yield f"data: {json.dumps({'type': 'researching', 'message': f'Researching requirements for {jurisdiction_name}...'})}\n\n"
 
             service = get_gemini_compliance_service()
-            requirements = await service.research_location_compliance(
-                city=j["city"], state=j["state"], county=j["county"],
-            )
 
-            if not requirements:
-                yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': 0, 'updated': 0, 'alerts': 0})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-
-            for req in requirements:
-                req["category"] = _normalize_category(req.get("category")) or req.get("category")
-            requirements = _filter_by_jurisdiction_priority(requirements)
-
-            yield f"data: {json.dumps({'type': 'processing', 'message': f'Processing {len(requirements)} requirements...'})}\n\n"
-
+            # Acquire connection early and hold it for the entire generator lifecycle
+            # to avoid "Database pool not initialized" errors after long Gemini calls
             async with get_connection() as conn:
+                requirements = await service.research_location_compliance(
+                    city=city, state=state, county=county,
+                )
+
+                if not requirements:
+                    yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': 0, 'updated': 0, 'alerts': 0})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+
+                for req in requirements:
+                    req["category"] = _normalize_category(req.get("category")) or req.get("category")
+                requirements = _filter_by_jurisdiction_priority(requirements)
+
+                yield f"data: {json.dumps({'type': 'processing', 'message': f'Processing {len(requirements)} requirements...'})}\n\n"
+
                 await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
 
                 new_count = len(requirements)
@@ -753,7 +757,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                 yield f"data: {json.dumps({'type': 'scanning', 'message': 'Scanning for upcoming legislation...'})}\n\n"
                 try:
                     legislation_items = await service.scan_upcoming_legislation(
-                        city=j["city"], state=j["state"], county=j["county"],
+                        city=city, state=state, county=county,
                         current_requirements=[dict(r) for r in requirements],
                     )
                     await _upsert_jurisdiction_legislation(conn, jurisdiction_id, legislation_items)
@@ -763,7 +767,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                 except Exception as e:
                     print(f"[Admin] Jurisdiction legislation scan error: {e}")
 
-            yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': 0, 'alerts': 0})}\n\n"
+                yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': 0, 'alerts': 0})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
