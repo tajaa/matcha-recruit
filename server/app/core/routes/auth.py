@@ -572,6 +572,21 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                 """,
                 current_user.id
             )
+
+            # Compute which enabled features still need onboarding setup
+            onboarding_needed = {}
+            if profile:
+                enabled_features = json.loads(profile["enabled_features"]) if isinstance(profile["enabled_features"], str) else profile["enabled_features"]
+                company_id = profile["company_id"]
+
+                if enabled_features.get("compliance"):
+                    has_locations = await conn.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM business_locations WHERE company_id = $1 AND is_active = true)",
+                        company_id
+                    )
+                    if not has_locations:
+                        onboarding_needed["compliance"] = True
+
             return {
                 "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
                 "profile": {
@@ -587,7 +602,8 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "job_title": profile["job_title"],
                     "email": current_user.email,
                     "created_at": profile["created_at"].isoformat()
-                } if profile else None
+                } if profile else None,
+                "onboarding_needed": onboarding_needed,
             }
 
         elif current_user.role == "candidate":

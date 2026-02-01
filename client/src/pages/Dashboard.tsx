@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar } from 'lucide-react';
 import { getAccessToken } from '../api/client';
+import { OnboardingWizard } from '../components/OnboardingWizard';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -40,6 +41,8 @@ export function Dashboard() {
   ];
 
   return (
+    <>
+    <OnboardingWizard />
     <div className="space-y-12 animate-in fade-in duration-500">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/10 pb-8">
@@ -228,6 +231,7 @@ export function Dashboard() {
         </div>
       </div>
     </div>
+    </>
   );
 }
 

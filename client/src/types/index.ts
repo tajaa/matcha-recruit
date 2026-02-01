@@ -500,6 +500,7 @@ export interface CurrentUserResponse {
     allowed_interview_roles?: string[];
   };
   profile: AdminProfile | ClientProfile | CandidateAuthProfile | null;
+  onboarding_needed?: Record<string, boolean>;
 }
 
 // Beta access management types

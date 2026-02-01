@@ -9,6 +9,7 @@ interface AuthContextType {
   interviewPrepTokens: number;
   allowedInterviewRoles: string[];
   companyFeatures: EnabledFeatures;
+  onboardingNeeded: Record<string, boolean>;
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (data: LoginRequest) => Promise<User>;
@@ -30,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [interviewPrepTokens, setInterviewPrepTokens] = useState(0);
   const [allowedInterviewRoles, setAllowedInterviewRoles] = useState<string[]>([]);
   const [companyFeatures, setCompanyFeatures] = useState<EnabledFeatures>({});
+  const [onboardingNeeded, setOnboardingNeeded] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
   const loadingRef = useRef(false);
 
@@ -66,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setInterviewPrepTokens(data.user.interview_prep_tokens || 0);
       setAllowedInterviewRoles(data.user.allowed_interview_roles || []);
       setCompanyFeatures(extractCompanyFeatures(data.profile));
+      setOnboardingNeeded(data.onboarding_needed || {});
     } catch (err) {
       // Only clear tokens and user for auth errors (401), not server errors
       const isAuthError = err instanceof Error &&
@@ -78,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setInterviewPrepTokens(0);
         setAllowedInterviewRoles([]);
         setCompanyFeatures({});
+        setOnboardingNeeded({});
       } else {
         // For non-auth errors (500s, network issues), log but don't clear user
         console.warn('Failed to load user profile:', err);
@@ -125,6 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setInterviewPrepTokens(profileData.user.interview_prep_tokens || 0);
       setAllowedInterviewRoles(profileData.user.allowed_interview_roles || []);
       setCompanyFeatures(extractCompanyFeatures(profileData.profile));
+      setOnboardingNeeded(profileData.onboarding_needed || {});
     } catch (err) {
       // Profile load failed, but login succeeded - keep the basic user info
       console.warn('Failed to load full profile after login:', err);
@@ -138,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setCompanyFeatures({});
+    setOnboardingNeeded({});
   };
 
   const registerBusiness = async (data: BusinessRegister) => {
@@ -190,6 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         interviewPrepTokens,
         allowedInterviewRoles,
         companyFeatures,
+        onboardingNeeded,
         isLoading,
         isAuthenticated: !!user,
         login,
