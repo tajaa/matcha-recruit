@@ -314,6 +314,9 @@ export function Jurisdictions() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState<JurisdictionCreate>({ city: '', state: '' });
   const [creating, setCreating] = useState(false);
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [checkTargetId, setCheckTargetId] = useState<string | null>(null);
+  const [checkMessages, setCheckMessages] = useState<{ type: string; status?: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -417,6 +420,46 @@ export function Jurisdictions() {
       } finally {
         setDetailLoading(null);
       }
+    }
+  };
+
+  const handleCheck = async (id: string) => {
+    if (checkingId) return;
+    setCheckingId(id);
+    setCheckTargetId(id);
+    setCheckMessages([]);
+    setExpanded(id);
+    try {
+      const response = await adminJurisdictions.check(id);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+          const payload = trimmed.slice(6);
+          if (payload === '[DONE]') continue;
+          try {
+            const event = JSON.parse(payload);
+            setCheckMessages(prev => [...prev, event]);
+          } catch { /* skip malformed */ }
+        }
+      }
+      // Refresh data after check completes
+      setDetailCache({});
+      await fetchData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to run jurisdiction check';
+      setCheckMessages(prev => [...prev, { type: 'error', message: msg }]);
+    } finally {
+      setCheckingId(null);
     }
   };
 
@@ -615,10 +658,10 @@ export function Jurisdictions() {
                   const detail = detailCache[j.id];
                   const isLoading = detailLoading === j.id;
                   return (
-                    <div key={j.id}>
+                    <div key={j.id} className="relative">
                       <button
                         onClick={() => handleExpand(j.id)}
-                        className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors text-left"
+                        className="w-full flex items-center justify-between px-4 py-3 pr-28 hover:bg-white/5 transition-colors text-left"
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <span className={`text-[10px] font-mono transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
@@ -665,6 +708,53 @@ export function Jurisdictions() {
                           </span>
                         </div>
                       </button>
+                      {/* Research button — outside the expand toggle */}
+                      <div className="absolute top-2.5 right-4 z-10">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
+                          disabled={checkingId !== null}
+                          className="px-2.5 py-1 text-[9px] tracking-[0.1em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 bg-zinc-900 transition-colors disabled:opacity-40"
+                        >
+                          {checkingId === j.id ? 'Researching...' : 'Research'}
+                        </button>
+                      </div>
+                      {/* Check progress panel */}
+                      {isExpanded && checkTargetId === j.id && checkMessages.length > 0 && (
+                        <div className="border-t border-white/5 bg-zinc-900/30">
+                          {checkMessages.some(m => m.type === 'result') && (
+                            <div className="flex items-center gap-3 px-6 pt-3 pb-2 border-b border-white/5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> New</span>
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Updated</span>
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-600 inline-block" /> Existing</span>
+                            </div>
+                          )}
+                          {checkMessages.map((msg, i) => (
+                            <div key={i} className="flex items-center gap-2 text-xs font-mono px-6 py-1.5">
+                              {msg.type === 'error' ? (
+                                <span className="w-3 h-3 text-red-400 flex-shrink-0">✕</span>
+                              ) : msg.type === 'completed' ? (
+                                <span className="w-3 h-3 text-emerald-400 flex-shrink-0">✓</span>
+                              ) : checkingId === j.id && i === checkMessages.length - 1 ? (
+                                <span className="w-3 h-3 text-blue-400 flex-shrink-0 animate-pulse">●</span>
+                              ) : (
+                                <span className="w-3 h-3 text-zinc-600 flex-shrink-0">✓</span>
+                              )}
+                              <span className={
+                                msg.type === 'error' ? 'text-red-400' :
+                                msg.type === 'completed' ? 'text-emerald-400' :
+                                msg.type === 'result' && msg.status === 'new' ? 'text-emerald-400' :
+                                msg.type === 'result' && msg.status === 'updated' ? 'text-amber-400' :
+                                i === checkMessages.length - 1 && checkingId === j.id ? 'text-zinc-300' :
+                                'text-zinc-600'
+                              }>
+                                {msg.type === 'completed'
+                                  ? `Done — ${msg.new ?? 0} new, ${msg.updated ?? 0} updated`
+                                  : msg.message || msg.location || ''}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {isExpanded && isLoading && (
                         <div className="border-t border-white/5 px-6 py-6 flex justify-center">
                           <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse font-mono">Loading detail...</div>

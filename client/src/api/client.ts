@@ -1597,6 +1597,16 @@ export const adminJurisdictions = {
 
   create: (data: JurisdictionCreate): Promise<Jurisdiction> =>
     request<Jurisdiction>('/admin/jurisdictions', { method: 'POST', body: JSON.stringify(data) }),
+
+  check: async (id: string): Promise<Response> => {
+    const token = getAccessToken();
+    const response = await fetch(`/api/admin/jurisdictions/${id}/check`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error('Failed to start jurisdiction check');
+    return response;
+  },
 };
 
 // Scheduler Admin API

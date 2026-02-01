@@ -6,6 +6,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, Query, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ...database import get_connection
@@ -440,22 +441,30 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
             if not parent:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Parent jurisdiction not found")
 
-        # Reject self-reference before upserting to avoid mutating existing data
-        if request.parent_id is not None:
+            # Reject self-reference before upserting to avoid mutating existing data
             existing = await conn.fetchrow(
                 "SELECT id FROM jurisdictions WHERE city = $1 AND state = $2", city, state
             )
             if existing and existing["id"] == request.parent_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A jurisdiction cannot be its own parent")
 
-        row = await conn.fetchrow("""
-            INSERT INTO jurisdictions (city, state, county, parent_id)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (city, state) DO UPDATE SET
-                parent_id = COALESCE(EXCLUDED.parent_id, jurisdictions.parent_id),
-                county = COALESCE(EXCLUDED.county, jurisdictions.county)
-            RETURNING *
-        """, city, state, request.county, request.parent_id)
+        # Use a savepoint so the upsert is rolled back if anything goes wrong,
+        # preventing partial mutations on error.
+        tr = conn.transaction()
+        await tr.start()
+        try:
+            row = await conn.fetchrow("""
+                INSERT INTO jurisdictions (city, state, county, parent_id)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (city, state) DO UPDATE SET
+                    parent_id = COALESCE(EXCLUDED.parent_id, jurisdictions.parent_id),
+                    county = COALESCE(EXCLUDED.county, jurisdictions.county)
+                RETURNING *
+            """, city, state, request.county, request.parent_id)
+            await tr.commit()
+        except Exception:
+            await tr.rollback()
+            raise
 
         # Fetch parent info if set
         parent_city = None
@@ -692,6 +701,74 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
                 for loc in locations
             ],
         }
+
+
+@router.post("/jurisdictions/{jurisdiction_id}/check", dependencies=[Depends(require_admin)])
+async def check_jurisdiction(jurisdiction_id: UUID):
+    """Run a compliance research check for a jurisdiction. Returns SSE stream with progress."""
+    from ..services.gemini_compliance import get_gemini_compliance_service
+    from ..services.compliance_service import (
+        _upsert_jurisdiction_requirements,
+        _upsert_jurisdiction_legislation,
+        _normalize_category,
+        _filter_by_jurisdiction_priority,
+    )
+
+    async with get_connection() as conn:
+        j = await conn.fetchrow("SELECT * FROM jurisdictions WHERE id = $1", jurisdiction_id)
+        if not j:
+            raise HTTPException(status_code=404, detail="Jurisdiction not found")
+
+    jurisdiction_name = f"{j['city']}, {j['state']}"
+
+    async def event_stream():
+        try:
+            yield f"data: {json.dumps({'type': 'started', 'location': jurisdiction_name})}\n\n"
+            yield f"data: {json.dumps({'type': 'researching', 'message': f'Researching requirements for {jurisdiction_name}...'})}\n\n"
+
+            service = get_gemini_compliance_service()
+            requirements = await service.research_location_compliance(
+                city=j["city"], state=j["state"], county=j["county"],
+            )
+
+            if not requirements:
+                yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': 0, 'updated': 0, 'alerts': 0})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            for req in requirements:
+                req["category"] = _normalize_category(req.get("category")) or req.get("category")
+            requirements = _filter_by_jurisdiction_priority(requirements)
+
+            yield f"data: {json.dumps({'type': 'processing', 'message': f'Processing {len(requirements)} requirements...'})}\n\n"
+
+            async with get_connection() as conn:
+                await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
+
+                new_count = len(requirements)
+                for req in requirements:
+                    yield f"data: {json.dumps({'type': 'result', 'status': 'new', 'message': req.get('title', '')})}\n\n"
+
+                # Legislation scan
+                yield f"data: {json.dumps({'type': 'scanning', 'message': 'Scanning for upcoming legislation...'})}\n\n"
+                try:
+                    legislation_items = await service.scan_upcoming_legislation(
+                        city=j["city"], state=j["state"], county=j["county"],
+                        current_requirements=[dict(r) for r in requirements],
+                    )
+                    await _upsert_jurisdiction_legislation(conn, jurisdiction_id, legislation_items)
+                    leg_count = len(legislation_items)
+                    if leg_count > 0:
+                        yield f"data: {json.dumps({'type': 'legislation', 'message': f'Found {leg_count} upcoming legislative change(s)'})}\n\n"
+                except Exception as e:
+                    print(f"[Admin] Jurisdiction legislation scan error: {e}")
+
+            yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': 0, 'alerts': 0})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/schedulers", dependencies=[Depends(require_admin)])
