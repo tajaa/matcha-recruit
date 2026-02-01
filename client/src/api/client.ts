@@ -1505,6 +1505,10 @@ export interface Jurisdiction {
   city: string;
   state: string;
   county: string | null;
+  parent_id: string | null;
+  parent_city: string | null;
+  parent_state: string | null;
+  children_count: number;
   requirement_count: number;
   legislation_count: number;
   location_count: number;
@@ -1512,6 +1516,13 @@ export interface Jurisdiction {
   last_verified_at: string | null;
   created_at: string | null;
   locations: JurisdictionLocation[];
+}
+
+export interface JurisdictionCreate {
+  city: string;
+  state: string;
+  county?: string;
+  parent_id?: string;
 }
 
 export interface JurisdictionTotals {
@@ -1566,6 +1577,8 @@ export interface JurisdictionDetail {
   city: string;
   state: string;
   county: string | null;
+  parent_id: string | null;
+  children: { id: string; city: string; state: string }[];
   requirement_count: number;
   legislation_count: number;
   last_verified_at: string | null;
@@ -1581,6 +1594,9 @@ export const adminJurisdictions = {
 
   get: (id: string): Promise<JurisdictionDetail> =>
     request<JurisdictionDetail>(`/admin/jurisdictions/${id}`),
+
+  create: (data: JurisdictionCreate): Promise<Jurisdiction> =>
+    request<Jurisdiction>('/admin/jurisdictions', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // Scheduler Admin API

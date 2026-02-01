@@ -1,10 +1,39 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminJurisdictions, adminSchedulers } from '../../api/client';
 import type {
-  Jurisdiction, JurisdictionTotals, JurisdictionDetail,
+  Jurisdiction, JurisdictionTotals, JurisdictionDetail, JurisdictionCreate,
   JurisdictionRequirement, JurisdictionLegislation, JurisdictionLocation,
   SchedulerSetting, SchedulerStatsResponse, SchedulerLogEntry,
 } from '../../api/client';
+
+const US_STATES = [
+  { value: 'AL', label: 'Alabama' }, { value: 'AK', label: 'Alaska' },
+  { value: 'AZ', label: 'Arizona' }, { value: 'AR', label: 'Arkansas' },
+  { value: 'CA', label: 'California' }, { value: 'CO', label: 'Colorado' },
+  { value: 'CT', label: 'Connecticut' }, { value: 'DE', label: 'Delaware' },
+  { value: 'FL', label: 'Florida' }, { value: 'GA', label: 'Georgia' },
+  { value: 'HI', label: 'Hawaii' }, { value: 'ID', label: 'Idaho' },
+  { value: 'IL', label: 'Illinois' }, { value: 'IN', label: 'Indiana' },
+  { value: 'IA', label: 'Iowa' }, { value: 'KS', label: 'Kansas' },
+  { value: 'KY', label: 'Kentucky' }, { value: 'LA', label: 'Louisiana' },
+  { value: 'ME', label: 'Maine' }, { value: 'MD', label: 'Maryland' },
+  { value: 'MA', label: 'Massachusetts' }, { value: 'MI', label: 'Michigan' },
+  { value: 'MN', label: 'Minnesota' }, { value: 'MS', label: 'Mississippi' },
+  { value: 'MO', label: 'Missouri' }, { value: 'MT', label: 'Montana' },
+  { value: 'NE', label: 'Nebraska' }, { value: 'NV', label: 'Nevada' },
+  { value: 'NH', label: 'New Hampshire' }, { value: 'NJ', label: 'New Jersey' },
+  { value: 'NM', label: 'New Mexico' }, { value: 'NY', label: 'New York' },
+  { value: 'NC', label: 'North Carolina' }, { value: 'ND', label: 'North Dakota' },
+  { value: 'OH', label: 'Ohio' }, { value: 'OK', label: 'Oklahoma' },
+  { value: 'OR', label: 'Oregon' }, { value: 'PA', label: 'Pennsylvania' },
+  { value: 'RI', label: 'Rhode Island' }, { value: 'SC', label: 'South Carolina' },
+  { value: 'SD', label: 'South Dakota' }, { value: 'TN', label: 'Tennessee' },
+  { value: 'TX', label: 'Texas' }, { value: 'UT', label: 'Utah' },
+  { value: 'VT', label: 'Vermont' }, { value: 'VA', label: 'Virginia' },
+  { value: 'WA', label: 'Washington' }, { value: 'WV', label: 'West Virginia' },
+  { value: 'WI', label: 'Wisconsin' }, { value: 'WY', label: 'Wyoming' },
+  { value: 'DC', label: 'Washington D.C.' },
+];
 
 function formatRelative(iso: string | null): string {
   if (!iso) return '—';
@@ -62,8 +91,14 @@ const legStatusColor: Record<string, string> = {
 
 type DetailTab = 'requirements' | 'legislation' | 'locations';
 
-function JurisdictionDetailPanel({ detail }: { detail: JurisdictionDetail }) {
+function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate }: {
+  detail: JurisdictionDetail;
+  parentJurisdiction?: Jurisdiction | null;
+  onNavigate?: (id: string) => void;
+}) {
   const [tab, setTab] = useState<DetailTab>('requirements');
+
+  const hasMetroGroup = detail.parent_id || detail.children.length > 0;
 
   const tabs: { key: DetailTab; label: string; count: number }[] = [
     { key: 'requirements', label: 'Requirements', count: detail.requirements.length },
@@ -81,6 +116,32 @@ function JurisdictionDetailPanel({ detail }: { detail: JurisdictionDetail }) {
 
   return (
     <div className="border-t border-white/5 bg-zinc-950/50">
+      {/* Metro Group */}
+      {hasMetroGroup && (
+        <div className="px-6 py-3 border-b border-white/5 bg-zinc-900/60">
+          <div className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500 mb-2">Metro Group</div>
+          <div className="flex flex-wrap gap-2">
+            {detail.parent_id && parentJurisdiction && (
+              <button
+                onClick={() => onNavigate?.(detail.parent_id!)}
+                className="text-[11px] font-mono px-2 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
+              >
+                Parent: {parentJurisdiction.city}, {parentJurisdiction.state}
+              </button>
+            )}
+            {detail.children.map(c => (
+              <button
+                key={c.id}
+                onClick={() => onNavigate?.(c.id)}
+                className="text-[11px] font-mono px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-colors"
+              >
+                {c.city}, {c.state}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tab bar */}
       <div className="flex gap-0 border-b border-white/5">
         {tabs.map(t => (
@@ -250,6 +311,9 @@ export function Jurisdictions() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detailCache, setDetailCache] = useState<Record<string, JurisdictionDetail>>({});
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createForm, setCreateForm] = useState<JurisdictionCreate>({ city: '', state: '' });
+  const [creating, setCreating] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -318,6 +382,44 @@ export function Jurisdictions() {
     }
   };
 
+  const handleCreate = async () => {
+    if (!createForm.city.trim() || !createForm.state) return;
+    setCreating(true);
+    try {
+      await adminJurisdictions.create({
+        city: createForm.city.trim(),
+        state: createForm.state,
+        county: createForm.county?.trim() || undefined,
+        parent_id: createForm.parent_id || undefined,
+      });
+      setCreateForm({ city: '', state: '' });
+      setShowCreateForm(false);
+      setDetailCache({});
+      await fetchData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to create jurisdiction';
+      setError(msg);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleNavigate = async (id: string) => {
+    setExpanded(id);
+    if (!detailCache[id]) {
+      setDetailLoading(id);
+      try {
+        const detail = await adminJurisdictions.get(id);
+        setDetailCache(prev => ({ ...prev, [id]: detail }));
+      } catch {
+        setError('Failed to load jurisdiction detail');
+        setExpanded(null);
+      } finally {
+        setDetailLoading(null);
+      }
+    }
+  };
+
   const statusColor = (status: string) => {
     switch (status) {
       case 'completed': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
@@ -337,19 +439,93 @@ export function Jurisdictions() {
             Compliance repository by city &amp; state
           </p>
         </div>
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
-        >
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowCreateForm(v => !v)}
+            className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-white bg-white/10 border border-zinc-600 hover:bg-white/20 hover:border-zinc-400 transition-colors"
+          >
+            {showCreateForm ? 'Cancel' : '+ Add Jurisdiction'}
+          </button>
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
         <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono">
           {error}
           <button onClick={() => setError(null)} className="ml-4 underline hover:text-red-300">Dismiss</button>
+        </div>
+      )}
+
+      {/* Create Jurisdiction Form */}
+      {showCreateForm && (
+        <div className="border border-white/10 bg-zinc-900/50 p-6 space-y-4">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-3">
+            New Jurisdiction
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">City *</label>
+              <input
+                type="text"
+                value={createForm.city}
+                onChange={e => setCreateForm(f => ({ ...f, city: e.target.value }))}
+                placeholder="e.g. manhattan"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">State *</label>
+              <select
+                value={createForm.state}
+                onChange={e => setCreateForm(f => ({ ...f, state: e.target.value }))}
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono focus:outline-none focus:border-zinc-500"
+              >
+                <option value="">Select state</option>
+                {US_STATES.map(s => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">County</label>
+              <input
+                type="text"
+                value={createForm.county || ''}
+                onChange={e => setCreateForm(f => ({ ...f, county: e.target.value }))}
+                placeholder="optional"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">Parent</label>
+              <select
+                value={createForm.parent_id || ''}
+                onChange={e => setCreateForm(f => ({ ...f, parent_id: e.target.value || undefined }))}
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono focus:outline-none focus:border-zinc-500"
+              >
+                <option value="">None (top-level)</option>
+                {jurisdictions.map(j => (
+                  <option key={j.id} value={j.id}>{j.city}, {j.state}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={handleCreate}
+              disabled={creating || !createForm.city.trim() || !createForm.state}
+              className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-white bg-white/10 border border-zinc-600 hover:bg-white/20 transition-colors disabled:opacity-50"
+            >
+              {creating ? 'Creating...' : 'Create Jurisdiction'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -452,6 +628,16 @@ export function Jurisdictions() {
                           {j.county && (
                             <span className="text-[9px] text-zinc-600 font-mono">({j.county} County)</span>
                           )}
+                          {j.parent_id && j.parent_city && (
+                            <span className="text-[8px] px-1.5 py-0.5 font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                              child of {j.parent_city}, {j.parent_state}
+                            </span>
+                          )}
+                          {j.children_count > 0 && (
+                            <span className="text-[8px] px-1.5 py-0.5 font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                              {j.children_count} {j.children_count === 1 ? 'child' : 'children'}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-4 flex-shrink-0">
                           <div className="text-right">
@@ -484,7 +670,13 @@ export function Jurisdictions() {
                           <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse font-mono">Loading detail...</div>
                         </div>
                       )}
-                      {isExpanded && detail && <JurisdictionDetailPanel detail={detail} />}
+                      {isExpanded && detail && (
+                        <JurisdictionDetailPanel
+                          detail={detail}
+                          parentJurisdiction={detail.parent_id ? jurisdictions.find(p => p.id === detail.parent_id) : null}
+                          onNavigate={handleNavigate}
+                        />
+                      )}
                     </div>
                   );
                 })}

@@ -416,6 +416,74 @@ class SchedulerUpdateRequest(BaseModel):
 # Jurisdiction Repository
 # =============================================================================
 
+class JurisdictionCreateRequest(BaseModel):
+    """Request model for creating/upserting a jurisdiction."""
+    city: str
+    state: str
+    county: Optional[str] = None
+    parent_id: Optional[UUID] = None
+
+
+@router.post("/jurisdictions", dependencies=[Depends(require_admin)])
+async def create_jurisdiction(request: JurisdictionCreateRequest):
+    """Create or upsert a jurisdiction. Idempotent on (city, state)."""
+    city = request.city.lower().strip()
+    state = request.state.upper().strip()[:2]
+
+    if not city or not state:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="City and state are required")
+
+    async with get_connection() as conn:
+        # Validate parent_id if provided
+        if request.parent_id is not None:
+            parent = await conn.fetchrow("SELECT id FROM jurisdictions WHERE id = $1", request.parent_id)
+            if not parent:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Parent jurisdiction not found")
+
+        # Reject self-reference before upserting to avoid mutating existing data
+        if request.parent_id is not None:
+            existing = await conn.fetchrow(
+                "SELECT id FROM jurisdictions WHERE city = $1 AND state = $2", city, state
+            )
+            if existing and existing["id"] == request.parent_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A jurisdiction cannot be its own parent")
+
+        row = await conn.fetchrow("""
+            INSERT INTO jurisdictions (city, state, county, parent_id)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (city, state) DO UPDATE SET
+                parent_id = COALESCE(EXCLUDED.parent_id, jurisdictions.parent_id),
+                county = COALESCE(EXCLUDED.county, jurisdictions.county)
+            RETURNING *
+        """, city, state, request.county, request.parent_id)
+
+        # Fetch parent info if set
+        parent_city = None
+        parent_state = None
+        if row["parent_id"]:
+            prow = await conn.fetchrow("SELECT city, state FROM jurisdictions WHERE id = $1", row["parent_id"])
+            if prow:
+                parent_city = prow["city"]
+                parent_state = prow["state"]
+
+        def fmt_date(d):
+            return d.isoformat() if d else None
+
+        return {
+            "id": str(row["id"]),
+            "city": row["city"],
+            "state": row["state"],
+            "county": row["county"],
+            "parent_id": str(row["parent_id"]) if row["parent_id"] else None,
+            "parent_city": parent_city,
+            "parent_state": parent_state,
+            "requirement_count": row["requirement_count"] or 0,
+            "legislation_count": row["legislation_count"] or 0,
+            "last_verified_at": fmt_date(row["last_verified_at"]),
+            "created_at": fmt_date(row["created_at"]),
+        }
+
+
 @router.get("/jurisdictions", dependencies=[Depends(require_admin)])
 async def list_jurisdictions():
     """List all jurisdictions with requirement/legislation counts and linked locations."""
@@ -426,15 +494,20 @@ async def list_jurisdictions():
                 j.city,
                 j.state,
                 j.county,
+                j.parent_id,
+                pj.city AS parent_city,
+                pj.state AS parent_state,
                 j.requirement_count,
                 j.legislation_count,
                 j.last_verified_at,
                 j.created_at,
                 COUNT(bl.id) AS location_count,
-                COUNT(CASE WHEN bl.auto_check_enabled THEN 1 END) AS auto_check_count
+                COUNT(CASE WHEN bl.auto_check_enabled THEN 1 END) AS auto_check_count,
+                (SELECT COUNT(*) FROM jurisdictions cj WHERE cj.parent_id = j.id) AS children_count
             FROM jurisdictions j
+            LEFT JOIN jurisdictions pj ON pj.id = j.parent_id
             LEFT JOIN business_locations bl ON bl.jurisdiction_id = j.id AND bl.is_active = true
-            GROUP BY j.id
+            GROUP BY j.id, pj.city, pj.state
             ORDER BY j.state, j.city
         """)
 
@@ -456,6 +529,10 @@ async def list_jurisdictions():
                 "city": row["city"],
                 "state": row["state"],
                 "county": row["county"],
+                "parent_id": str(row["parent_id"]) if row["parent_id"] else None,
+                "parent_city": row["parent_city"],
+                "parent_state": row["parent_state"],
+                "children_count": row["children_count"],
                 "requirement_count": row["requirement_count"] or 0,
                 "legislation_count": row["legislation_count"] or 0,
                 "location_count": row["location_count"],
@@ -505,6 +582,12 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
         if not j:
             raise HTTPException(status_code=404, detail="Jurisdiction not found")
 
+        # Fetch children
+        children = await conn.fetch(
+            "SELECT id, city, state FROM jurisdictions WHERE parent_id = $1 ORDER BY state, city",
+            jurisdiction_id
+        )
+
         requirements = await conn.fetch("""
             SELECT id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                    title, description, current_value, numeric_value,
@@ -545,6 +628,11 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
             "city": j["city"],
             "state": j["state"],
             "county": j["county"],
+            "parent_id": str(j["parent_id"]) if j["parent_id"] else None,
+            "children": [
+                {"id": str(c["id"]), "city": c["city"], "state": c["state"]}
+                for c in children
+            ],
             "requirement_count": j["requirement_count"] or 0,
             "legislation_count": j["legislation_count"] or 0,
             "last_verified_at": fmt_date(j["last_verified_at"]),

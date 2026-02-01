@@ -1480,6 +1480,12 @@ async def init_db():
             ON jurisdiction_legislation(jurisdiction_id)
         """)
 
+        # Add parent_id self-referencing FK on jurisdictions
+        await conn.execute("""
+            ALTER TABLE jurisdictions
+            ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES jurisdictions(id) ON DELETE SET NULL
+        """)
+
         # Add jurisdiction_id FK on business_locations
         await conn.execute("""
             ALTER TABLE business_locations
