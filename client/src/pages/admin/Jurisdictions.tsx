@@ -474,6 +474,25 @@ export function Jurisdictions() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-8">
+      <style>{`
+        @keyframes scanX {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(300%); }
+        }
+        @keyframes fadeSlideDown {
+          from { opacity: 0; transform: translateY(-6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes popIn {
+          0% { opacity: 0; transform: scale(0.5); }
+          70% { transform: scale(1.15); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
       {/* Header */}
       <div className="flex justify-between items-end border-b border-white/10 pb-8">
         <div>
@@ -709,55 +728,172 @@ export function Jurisdictions() {
                         </div>
                       </button>
                       {/* Research button — outside the expand toggle */}
-                      <div className="absolute top-2.5 right-4 z-10">
+                      <div className="absolute top-2 right-4 z-10">
                         <button
                           onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
                           disabled={checkingId !== null}
-                          className="px-2.5 py-1 text-[9px] tracking-[0.1em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 bg-zinc-900 transition-colors disabled:opacity-40"
+                          className={`group relative px-3 py-1.5 text-[9px] tracking-[0.12em] uppercase font-mono border bg-zinc-900 transition-all duration-300 overflow-hidden ${
+                            checkingId === j.id
+                              ? 'text-blue-300 border-blue-500/40'
+                              : 'text-zinc-400 border-zinc-700 hover:text-white hover:border-zinc-400 disabled:opacity-30'
+                          }`}
                         >
-                          {checkingId === j.id ? 'Researching...' : 'Research'}
+                          {checkingId === j.id && (
+                            <span className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/10 to-transparent" style={{ animation: 'scanX 1.5s ease-in-out infinite' }} />
+                          )}
+                          <span className="relative flex items-center gap-1.5">
+                            {checkingId === j.id ? (
+                              <>
+                                <svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>
+                                Researching
+                              </>
+                            ) : 'Research'}
+                          </span>
                         </button>
                       </div>
                       {/* Check progress panel */}
-                      {isExpanded && checkTargetId === j.id && checkMessages.length > 0 && (
-                        <div className="border-t border-white/5 bg-zinc-900/30">
-                          {checkMessages.some(m => m.type === 'result') && (
-                            <div className="flex items-center gap-3 px-6 pt-3 pb-2 border-b border-white/5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
-                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> New</span>
-                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Updated</span>
-                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-600 inline-block" /> Existing</span>
+                      {isExpanded && checkTargetId === j.id && checkMessages.length > 0 && (() => {
+                        const isActive = checkingId === j.id;
+                        const completed = checkMessages.find(m => m.type === 'completed');
+                        const hasError = checkMessages.some(m => m.type === 'error');
+                        const resultCount = checkMessages.filter(m => m.type === 'result').length;
+                        return (
+                        <div className="border-t border-white/5 overflow-hidden">
+                          {/* Scanning progress bar */}
+                          {isActive && (
+                            <div className="h-[2px] w-full bg-zinc-800 overflow-hidden">
+                              <div className="h-full w-1/3 bg-gradient-to-r from-transparent via-blue-400 to-transparent" style={{ animation: 'scanX 1.2s ease-in-out infinite' }} />
                             </div>
                           )}
-                          {checkMessages.map((msg, i) => (
-                            <div key={i} className="flex items-center gap-2 text-xs font-mono px-6 py-1.5">
-                              {msg.type === 'error' ? (
-                                <span className="w-3 h-3 text-red-400 flex-shrink-0">✕</span>
-                              ) : msg.type === 'completed' ? (
-                                <span className="w-3 h-3 text-emerald-400 flex-shrink-0">✓</span>
-                              ) : checkingId === j.id && i === checkMessages.length - 1 ? (
-                                <span className="w-3 h-3 text-blue-400 flex-shrink-0 animate-pulse">●</span>
-                              ) : (
-                                <span className="w-3 h-3 text-zinc-600 flex-shrink-0">✓</span>
-                              )}
-                              <span className={
-                                msg.type === 'error' ? 'text-red-400' :
-                                msg.type === 'completed' ? 'text-emerald-400' :
-                                msg.type === 'result' && msg.status === 'new' ? 'text-emerald-400' :
-                                msg.type === 'result' && msg.status === 'updated' ? 'text-amber-400' :
-                                i === checkMessages.length - 1 && checkingId === j.id ? 'text-zinc-300' :
-                                'text-zinc-600'
-                              }>
-                                {msg.type === 'completed'
-                                  ? `Done — ${msg.new ?? 0} new, ${msg.updated ?? 0} updated`
-                                  : msg.message || msg.location || ''}
+                          {/* Completed glow bar */}
+                          {completed && !isActive && (
+                            <div className="h-[2px] w-full bg-emerald-500/60" style={{ animation: 'fadeIn 0.4s ease-out' }} />
+                          )}
+                          {/* Error bar */}
+                          {hasError && !isActive && (
+                            <div className="h-[2px] w-full bg-red-500/60" style={{ animation: 'fadeIn 0.4s ease-out' }} />
+                          )}
+
+                          {/* Legend */}
+                          {resultCount > 0 && (
+                            <div className="flex items-center gap-4 px-6 pt-3 pb-2 border-b border-white/5 bg-zinc-950/40" style={{ animation: 'fadeSlideDown 0.3s ease-out' }}>
+                              <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> New
                               </span>
+                              <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Updated
+                              </span>
+                              <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
+                                <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" /> Existing
+                              </span>
+                              {isActive && <span className="ml-auto text-[10px] text-zinc-600 font-mono tabular-nums">{resultCount} found</span>}
                             </div>
-                          ))}
+                          )}
+
+                          {/* Messages */}
+                          <div className="max-h-56 overflow-y-auto bg-zinc-950/30">
+                            {checkMessages.map((msg, i) => {
+                              const isLast = i === checkMessages.length - 1;
+                              const isResult = msg.type === 'result';
+                              return (
+                              <div
+                                key={i}
+                                className="flex items-center gap-2.5 text-xs font-mono px-6 py-1.5 transition-colors duration-150 hover:bg-white/[0.02]"
+                                style={{ animation: `fadeSlideDown 0.25s ease-out ${Math.min(i * 0.04, 0.4)}s both` }}
+                              >
+                                {/* Icon */}
+                                {msg.type === 'error' ? (
+                                  <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-red-400">
+                                    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                                  </span>
+                                ) : msg.type === 'completed' ? (
+                                  <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-emerald-400" style={{ animation: 'popIn 0.3s ease-out' }}>
+                                    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                                  </span>
+                                ) : isActive && isLast ? (
+                                  <span className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                                    <span className="relative flex h-2.5 w-2.5">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-40" />
+                                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-400" />
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-zinc-700">
+                                    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                                  </span>
+                                )}
+
+                                {/* Status badge for results */}
+                                {isResult && msg.status && (
+                                  <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 border flex-shrink-0 ${
+                                    msg.status === 'new' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' :
+                                    msg.status === 'updated' ? 'bg-amber-500/15 text-amber-400 border-amber-500/25' :
+                                    'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'
+                                  }`} style={{ animation: `fadeSlideDown 0.2s ease-out` }}>
+                                    {msg.status === 'existing' ? 'same' : msg.status}
+                                  </span>
+                                )}
+
+                                {/* Phase badge for non-result steps */}
+                                {!isResult && msg.type !== 'completed' && msg.type !== 'error' && msg.type !== 'started' && (
+                                  <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 border flex-shrink-0 ${
+                                    msg.type === 'researching' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                                    msg.type === 'scanning' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                                    msg.type === 'verifying' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
+                                    msg.type === 'legislation' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                                    'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'
+                                  }`}>
+                                    {msg.type}
+                                  </span>
+                                )}
+
+                                {/* Message text */}
+                                <span className={`truncate ${
+                                  msg.type === 'error' ? 'text-red-400' :
+                                  msg.type === 'completed' ? 'text-emerald-300 font-medium' :
+                                  isResult && msg.status === 'new' ? 'text-emerald-300/80' :
+                                  isResult && msg.status === 'updated' ? 'text-amber-300/80' :
+                                  isActive && isLast ? 'text-zinc-200' :
+                                  isResult ? 'text-zinc-500' :
+                                  'text-zinc-500'
+                                }`}>
+                                  {msg.type === 'completed'
+                                    ? `Complete — ${msg.new ?? 0} requirements, ${msg.updated ?? 0} updated`
+                                    : msg.message || msg.location || ''}
+                                </span>
+                              </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Completed summary */}
+                          {completed && !isActive && (
+                            <div className="px-6 py-3 border-t border-emerald-500/10 bg-emerald-500/[0.03]" style={{ animation: 'fadeSlideDown 0.4s ease-out' }}>
+                              <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2">
+                                  <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40 animate-ping" style={{ animationDuration: '2s' }} /><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" /></span>
+                                  <span className="text-[10px] uppercase tracking-widest font-mono font-bold text-emerald-400">Research Complete</span>
+                                </div>
+                                <div className="flex items-center gap-3 ml-auto text-[11px] font-mono">
+                                  <span className="text-emerald-400">{completed.new ?? 0} <span className="text-zinc-600">reqs</span></span>
+                                  <span className="text-amber-400">{completed.updated ?? 0} <span className="text-zinc-600">updated</span></span>
+                                  <span className="text-zinc-500">{completed.alerts ?? 0} <span className="text-zinc-600">alerts</span></span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
+                        );
+                      })()}
                       {isExpanded && isLoading && (
-                        <div className="border-t border-white/5 px-6 py-6 flex justify-center">
-                          <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse font-mono">Loading detail...</div>
+                        <div className="border-t border-white/5 overflow-hidden">
+                          <div className="h-[2px] w-full bg-zinc-800 overflow-hidden">
+                            <div className="h-full w-1/4 bg-gradient-to-r from-transparent via-zinc-500 to-transparent" style={{ animation: 'scanX 1s ease-in-out infinite' }} />
+                          </div>
+                          <div className="px-6 py-5 flex items-center justify-center gap-2">
+                            <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-zinc-400 opacity-30" /><span className="relative inline-flex rounded-full h-2 w-2 bg-zinc-500" /></span>
+                            <span className="text-xs text-zinc-500 uppercase tracking-wider font-mono">Loading detail</span>
+                          </div>
                         </div>
                       )}
                       {isExpanded && detail && (
