@@ -713,6 +713,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
         _normalize_category,
         _filter_by_jurisdiction_priority,
         _sync_requirements_to_location,
+        _create_alert,
     )
 
     async with get_connection() as conn:
@@ -774,6 +775,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                     jurisdiction_id,
                 )
                 total_alerts = 0
+                total_updated = 0
                 if linked_locations:
                     yield f"data: {json.dumps({'type': 'syncing', 'message': f'Syncing to {len(linked_locations)} location(s)...'})}\n\n"
                     for loc in linked_locations:
@@ -783,6 +785,27 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                                 create_alerts=True,
                             )
                             total_alerts += sync_result["alerts"]
+                            total_updated += sync_result["updated"]
+
+                            # Create alerts for material changes (skipping
+                            # per-change Gemini verification to keep the
+                            # multi-location sync fast)
+                            for change_info in sync_result["changes_to_verify"]:
+                                req = change_info["req"]
+                                existing = change_info["existing"]
+                                change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
+                                if req.get("description"):
+                                    change_msg += f" {req['description']}"
+                                total_alerts += 1
+                                await _create_alert(
+                                    conn, loc["id"], loc["company_id"], existing["id"],
+                                    f"Compliance Change: {req.get('title')}", change_msg,
+                                    "warning", req.get("category"),
+                                    source_url=req.get("source_url"), source_name=req.get("source_name"),
+                                    alert_type="change",
+                                    metadata={"source": "jurisdiction_sync"},
+                                )
+
                             await conn.execute(
                                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
                                 loc["id"],
@@ -790,7 +813,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                         except Exception as e:
                             print(f"[Admin] Failed to sync location {loc['id']}: {e}")
 
-                yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': 0, 'alerts': total_alerts})}\n\n"
+                yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': total_updated, 'alerts': total_alerts})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
