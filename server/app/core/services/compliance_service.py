@@ -555,12 +555,6 @@ async def _sync_requirements_to_location(
                     new_requirement_keys.add(ekey)  # prevent stale deletion
 
         if existing:
-            # Dismiss stale alerts for this requirement
-            await conn.execute(
-                "UPDATE compliance_alerts SET status = 'dismissed', dismissed_at = NOW() WHERE requirement_id = $1 AND status IN ('unread', 'read')",
-                existing["id"],
-            )
-
             old_value = existing.get("current_value")
             new_value = req.get("current_value")
             old_num = existing.get("numeric_value")
@@ -569,6 +563,31 @@ async def _sync_requirements_to_location(
                 old_num = _extract_numeric_value(old_value)
             if new_num is None:
                 new_num = _extract_numeric_value(new_value)
+
+            # Minimum wages virtually never decrease — reject as likely
+            # Gemini hallucination / stale data.  Use `continue` to skip
+            # the entire update (including _update_requirement) so the
+            # bad rate is never persisted.  The requirement_key is already
+            # in new_requirement_keys so it won't be deleted.
+            # Reject BEFORE dismissing alerts so existing alerts survive.
+            if (
+                _normalize_category(req.get("category")) == "minimum_wage"
+                and old_num is not None
+                and new_num is not None
+                and (float(old_num) - float(new_num)) > 0.005
+            ):
+                print(
+                    f"[Compliance] WARNING: Rejecting minimum wage decrease "
+                    f"{old_num} → {new_num} for {req.get('jurisdiction_name')}"
+                )
+                continue
+
+            # Dismiss stale alerts for this requirement (only reached
+            # for non-rejected updates)
+            await conn.execute(
+                "UPDATE compliance_alerts SET status = 'dismissed', dismissed_at = NOW() WHERE requirement_id = $1 AND status IN ('unread', 'read')",
+                existing["id"],
+            )
 
             material_change = False
             if _is_material_numeric_change(old_num, new_num, req.get("category")):
@@ -579,23 +598,13 @@ async def _sync_requirements_to_location(
                 # Gemini rephrases text but numeric value is unchanged.
                 if _is_material_text_change(old_value, new_value, req.get("category")):
                     material_change = True
-
-            # Minimum wages virtually never decrease — reject as likely
-            # Gemini hallucination / stale data.  Use `continue` to skip
-            # the entire update (including _update_requirement) so the
-            # bad rate is never persisted.  The requirement_key is already
-            # in new_requirement_keys so it won't be deleted.
-            if (
-                _normalize_category(req.get("category")) == "minimum_wage"
-                and old_num is not None
-                and new_num is not None
-                and float(new_num) < float(old_num)
+            elif (
+                _normalize_category(req.get("category")) != "minimum_wage"
+                and _is_material_text_change(old_value, new_value, req.get("category"))
             ):
-                print(
-                    f"[Compliance] WARNING: Rejecting minimum wage decrease "
-                    f"{old_num} → {new_num} for {req.get('jurisdiction_name')}"
-                )
-                continue
+                # Non-wage category: numerics match but text substantially
+                # differs (e.g. unit or semantics change). Flag for verification.
+                material_change = True
 
             numeric_changed = old_num is not None and new_num is not None and abs(float(old_num) - float(new_num)) > 0.001
             text_changed = old_value != new_value
@@ -627,6 +636,29 @@ async def _sync_requirements_to_location(
             await _update_requirement(conn, existing["id"], requirement_key, req, previous_value, last_changed_at)
             existing_by_key[requirement_key] = {**existing, "id": existing["id"]}
         else:
+            # Guard: don't insert a min-wage decrease that bypassed the
+            # matched-existing path due to key drift (title changed).
+            if _normalize_category(req.get("category")) == "minimum_wage":
+                new_num_val = req.get("numeric_value") or _extract_numeric_value(req.get("current_value"))
+                if new_num_val is not None:
+                    dominated = False
+                    for ekey, erow in existing_by_key.items():
+                        if not ekey.startswith("minimum_wage:"):
+                            continue
+                        e_num = erow.get("numeric_value") or _extract_numeric_value(erow.get("current_value"))
+                        if e_num is not None and (float(e_num) - float(new_num_val)) > 0.005:
+                            dominated = True
+                            # Preserve old row from stale deletion
+                            new_requirement_keys.add(ekey)
+                            break
+                    if dominated:
+                        print(
+                            f"[Compliance] WARNING: Rejecting min-wage insert "
+                            f"{new_num_val} (lower than existing {e_num}) for "
+                            f"{req.get('jurisdiction_name')}"
+                        )
+                        continue
+
             new_count += 1
             req_id = await _upsert_requirement(conn, location_id, requirement_key, req)
 
