@@ -13,7 +13,9 @@ from ...database import get_connection
 from ..dependencies import require_admin
 from ..services.email import get_email_service
 from ..models.compliance import AutoCheckSettings
-from ..services.compliance_service import update_auto_check_settings
+from ..services.compliance_service import (
+    update_auto_check_settings,
+)
 
 router = APIRouter()
 
@@ -714,7 +716,9 @@ async def check_jurisdiction(jurisdiction_id: UUID):
         _filter_by_jurisdiction_priority,
         _sync_requirements_to_location,
         _create_alert,
+        score_verification_confidence,
     )
+    from ..models.compliance import VerificationResult
 
     async with get_connection() as conn:
         j = await conn.fetchrow("SELECT * FROM jurisdictions WHERE id = $1", jurisdiction_id)
@@ -776,6 +780,10 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                 )
                 total_alerts = 0
                 total_updated = 0
+                # Cache Gemini verification results keyed by (category, old_value, new_value)
+                # so each unique change is verified only once across all locations.
+                verified_changes: dict[tuple, tuple[float, VerificationResult]] = {}
+
                 if linked_locations:
                     yield f"data: {json.dumps({'type': 'syncing', 'message': f'Syncing to {len(linked_locations)} location(s)...'})}\n\n"
                     for loc in linked_locations:
@@ -787,24 +795,68 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                             total_alerts += sync_result["alerts"]
                             total_updated += sync_result["updated"]
 
-                            # Create alerts for material changes (skipping
-                            # per-change Gemini verification to keep the
-                            # multi-location sync fast)
+                            # Verify material changes with Gemini — same flow
+                            # as the regular check in compliance_service.py.
                             for change_info in sync_result["changes_to_verify"]:
                                 req = change_info["req"]
                                 existing = change_info["existing"]
-                                change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
+                                old_val = change_info["old_value"]
+                                new_val = change_info["new_value"]
+                                cat = req.get("category", "")
+
+                                cache_key = (cat, old_val, new_val)
+                                if cache_key not in verified_changes:
+                                    try:
+                                        verification = await service.verify_compliance_change(
+                                            category=cat,
+                                            title=req.get("title", ""),
+                                            jurisdiction_name=req.get("jurisdiction_name", ""),
+                                            old_value=old_val,
+                                            new_value=new_val,
+                                        )
+                                        confidence = max(
+                                            score_verification_confidence(verification.sources),
+                                            verification.confidence,
+                                        )
+                                    except Exception as e:
+                                        print(f"[Admin] Verification failed: {e}")
+                                        verification = VerificationResult(
+                                            confirmed=False, confidence=0.0, sources=[],
+                                            explanation="Verification unavailable",
+                                        )
+                                        confidence = 0.5
+                                    verified_changes[cache_key] = (confidence, verification)
+
+                                confidence, verification = verified_changes[cache_key]
+
+                                change_msg = f"Value changed from {old_val} to {new_val}."
                                 if req.get("description"):
                                     change_msg += f" {req['description']}"
-                                total_alerts += 1
-                                await _create_alert(
-                                    conn, loc["id"], loc["company_id"], existing["id"],
-                                    f"Compliance Change: {req.get('title')}", change_msg,
-                                    "warning", req.get("category"),
-                                    source_url=req.get("source_url"), source_name=req.get("source_name"),
-                                    alert_type="change",
-                                    metadata={"source": "jurisdiction_sync"},
-                                )
+
+                                if confidence >= 0.6:
+                                    total_alerts += 1
+                                    await _create_alert(
+                                        conn, loc["id"], loc["company_id"], existing["id"],
+                                        f"Compliance Change: {req.get('title')}", change_msg,
+                                        "warning", req.get("category"),
+                                        source_url=req.get("source_url"), source_name=req.get("source_name"),
+                                        alert_type="change", confidence_score=round(confidence, 2),
+                                        verification_sources=verification.sources,
+                                        metadata={"source": "jurisdiction_sync", "verification_explanation": verification.explanation},
+                                    )
+                                elif confidence >= 0.3:
+                                    total_alerts += 1
+                                    await _create_alert(
+                                        conn, loc["id"], loc["company_id"], existing["id"],
+                                        f"Unverified: {req.get('title')}", change_msg,
+                                        "info", req.get("category"),
+                                        source_url=req.get("source_url"), source_name=req.get("source_name"),
+                                        alert_type="change", confidence_score=round(confidence, 2),
+                                        verification_sources=verification.sources,
+                                        metadata={"source": "jurisdiction_sync", "verification_explanation": verification.explanation, "unverified": True},
+                                    )
+                                else:
+                                    print(f"[Admin] Low confidence ({confidence:.2f}) for change: {req.get('title')}, skipping alert")
 
                             await conn.execute(
                                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",

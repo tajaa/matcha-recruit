@@ -72,7 +72,7 @@ For EACH requirement, provide:
 - The source URL (official government website preferred)
 - The jurisdiction level (state, county, or city)
 
-Use Google Search to find the most up-to-date information for 2025/2026.
+Today's date is {date.today().isoformat()}. Return ONLY the rates/values that are currently in effect as of today. Do not return upcoming or past rates.
 
 Respond with a JSON object containing a list of requirements under the key "requirements".
 Each requirement object should have:

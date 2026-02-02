@@ -209,6 +209,23 @@ def _normalize_value_text(value: Optional[str], category: Optional[str] = None) 
             r"\1",
             s,
         )
+        # Normalize "X or Y" alternative forms to sorted canonical tokens
+        # e.g. "semimonthly or biweekly" and "biweekly or semimonthly" → "biweekly semimonthly"
+        freq_tokens = {"semimonthly", "biweekly", "weekly", "monthly", "yearly", "daily"}
+        or_parts = [p.strip() for p in s.split(" or ")]
+        if len(or_parts) > 1 and all(p in freq_tokens for p in or_parts):
+            s = " ".join(sorted(set(or_parts)))
+
+    # Decimal multiplier normalization: "2.0x" → "2x"
+    s = re.sub(r"(\d+)\.0x\b", r"\1x", s)
+    # Trailing decimal zeros: "2.0" → "2" (but not "2.05")
+    s = re.sub(r"(\d+)\.0\b", r"\1", s)
+    # Ordinal suffix removal: "1st" → "1", "26th" → "26"
+    s = re.sub(r"\b(\d+)(?:st|nd|rd|th)\b", r"\1", s)
+    # Synonym normalization for leave categories
+    s = re.sub(r"\bcompensated\b", "paid", s)
+    s = re.sub(r"\buncompensated\b", "unpaid", s)
+
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
@@ -556,8 +573,29 @@ async def _sync_requirements_to_location(
             material_change = False
             if _is_material_numeric_change(old_num, new_num, req.get("category")):
                 material_change = True
-            elif _is_material_text_change(old_value, new_value, req.get("category")):
-                material_change = True
+            elif old_num is None or new_num is None:
+                # Only fall back to text comparison when we don't have
+                # numeric values on both sides — avoids false alerts when
+                # Gemini rephrases text but numeric value is unchanged.
+                if _is_material_text_change(old_value, new_value, req.get("category")):
+                    material_change = True
+
+            # Minimum wages virtually never decrease — reject as likely
+            # Gemini hallucination / stale data.  Use `continue` to skip
+            # the entire update (including _update_requirement) so the
+            # bad rate is never persisted.  The requirement_key is already
+            # in new_requirement_keys so it won't be deleted.
+            if (
+                _normalize_category(req.get("category")) == "minimum_wage"
+                and old_num is not None
+                and new_num is not None
+                and float(new_num) < float(old_num)
+            ):
+                print(
+                    f"[Compliance] WARNING: Rejecting minimum wage decrease "
+                    f"{old_num} → {new_num} for {req.get('jurisdiction_name')}"
+                )
+                continue
 
             numeric_changed = old_num is not None and new_num is not None and abs(float(old_num) - float(new_num)) > 0.001
             text_changed = old_value != new_value
