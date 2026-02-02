@@ -520,6 +520,23 @@ async def _sync_requirements_to_location(
         new_requirement_keys.add(requirement_key)
         existing = existing_by_key.get(requirement_key)
 
+        # Fallback: match by category when the title-based key differs.
+        # Only safe when exactly one unclaimed existing row shares the
+        # category — multiple matches means we can't disambiguate and
+        # must let the normal new-insert / stale-delete paths handle it.
+        if not existing:
+            norm_cat = _normalize_category(req.get("category"))
+            if norm_cat:
+                candidates = [
+                    (ekey, erow)
+                    for ekey, erow in existing_by_key.items()
+                    if ekey.startswith(norm_cat + ":") and ekey not in new_requirement_keys
+                ]
+                if len(candidates) == 1:
+                    ekey, erow = candidates[0]
+                    existing = erow
+                    new_requirement_keys.add(ekey)  # prevent stale deletion
+
         if existing:
             # Dismiss stale alerts for this requirement
             await conn.execute(
