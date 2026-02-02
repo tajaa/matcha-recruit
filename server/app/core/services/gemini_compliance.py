@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from typing import List, Optional, Dict, Any
@@ -8,6 +9,9 @@ from google.genai import types
 
 from ...config import get_settings
 from ..models.compliance import ComplianceCategory, JurisdictionLevel, VerificationResult
+
+# Timeout for individual Gemini API calls (seconds)
+GEMINI_CALL_TIMEOUT = 45
 
 class GeminiComplianceService:
     """
@@ -120,14 +124,17 @@ Return at most one requirement per category. Ensure all data is accurate and sou
             # Use Google Search tool
             tools = [types.Tool(google_search=types.GoogleSearch())]
 
-            response = await self.client.aio.models.generate_content(
-                model=self.settings.analysis_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    tools=tools,
-                    response_modalities=["TEXT"],
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.settings.analysis_model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.0,
+                        tools=tools,
+                        response_modalities=["TEXT"],
+                    ),
                 ),
+                timeout=GEMINI_CALL_TIMEOUT,
             )
 
             # Parse JSON from response
@@ -147,6 +154,9 @@ Return at most one requirement per category. Ensure all data is accurate and sou
         except json.JSONDecodeError as e:
             print(f"[Gemini Compliance] Error parsing JSON response: {e}")
             print(f"[Gemini Compliance] Raw response: {response.text[:500] if response else 'No response'}...")
+            return []
+        except (asyncio.TimeoutError, TimeoutError):
+            print(f"[Gemini Compliance] Gemini API timed out after {GEMINI_CALL_TIMEOUT}s for {location_str}")
             return []
         except Exception as e:
             error_msg = str(e)
@@ -210,14 +220,17 @@ Be conservative with confidence scores:
                 return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="No API key configured")
 
             tools = [types.Tool(google_search=types.GoogleSearch())]
-            response = await self.client.aio.models.generate_content(
-                model=self.settings.analysis_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    tools=tools,
-                    response_modalities=["TEXT"],
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.settings.analysis_model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.0,
+                        tools=tools,
+                        response_modalities=["TEXT"],
+                    ),
                 ),
+                timeout=GEMINI_CALL_TIMEOUT,
             )
 
             text = response.text
@@ -233,6 +246,9 @@ Be conservative with confidence scores:
                 sources=data.get("sources", []),
                 explanation=data.get("explanation", ""),
             )
+        except (asyncio.TimeoutError, TimeoutError):
+            print(f"[Gemini Compliance] Verification timed out after {GEMINI_CALL_TIMEOUT}s for {title} in {jurisdiction_name}")
+            return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Verification timed out after {GEMINI_CALL_TIMEOUT}s")
         except Exception as e:
             print(f"[Gemini Compliance] Verification error: {e}")
             return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Verification failed: {e}")
@@ -305,14 +321,17 @@ Return an empty array if no upcoming legislation is found.
             print(f"[Gemini Compliance] Scanning upcoming legislation for {location_str}...")
 
             tools = [types.Tool(google_search=types.GoogleSearch())]
-            response = await self.client.aio.models.generate_content(
-                model=self.settings.analysis_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    tools=tools,
-                    response_modalities=["TEXT"],
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.settings.analysis_model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.0,
+                        tools=tools,
+                        response_modalities=["TEXT"],
+                    ),
                 ),
+                timeout=GEMINI_CALL_TIMEOUT,
             )
 
             text = response.text
@@ -328,6 +347,9 @@ Return an empty array if no upcoming legislation is found.
 
         except json.JSONDecodeError as e:
             print(f"[Gemini Compliance] Error parsing legislation JSON: {e}")
+            return []
+        except (asyncio.TimeoutError, TimeoutError):
+            print(f"[Gemini Compliance] Legislation scan timed out after {GEMINI_CALL_TIMEOUT}s for {location_str}")
             return []
         except Exception as e:
             print(f"[Gemini Compliance] Error scanning legislation: {e}")
