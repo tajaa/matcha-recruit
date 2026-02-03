@@ -280,7 +280,7 @@ class GeminiComplianceService:
 {source_context}
 
 Focus on these specific categories:
-1. Minimum Wage — general/default rate ONLY (not industry-specific, tipped, fast-food, healthcare, hotel, etc.)
+1. Minimum Wage — general/default rate (see special instructions below)
 2. Overtime rules
 3. Paid Sick Leave
 4. Meal and Rest Break Requirements
@@ -288,7 +288,10 @@ Focus on these specific categories:
 
 IMPORTANT RULES:
 - For each category, return ONLY the single most local jurisdiction that applies (city > county > state). Do NOT include overlapping jurisdictions for the same category. For example, if {location_str} has a city minimum wage, return ONLY the city rate, not the state rate.
-- For minimum wage, return ONLY the general/default rate. Do NOT include industry-specific rates (fast food, healthcare, hotel, tipped, etc.).
+- For minimum wage: Return ONE requirement with the general/default rate as current_value and numeric_value. However, in the DESCRIPTION field, you MUST include:
+  * If tip credits are allowed: the tip credit amount and resulting tipped minimum wage
+  * If there are significantly different rates for specific industries (hotel workers, fast food, healthcare): mention these rates
+  * Example: "The minimum wage is $16.82/hr. Tip credit of $3.02/hr is allowed, resulting in a tipped minimum wage of $13.80/hr."
 - Accuracy is critical. Double-check numeric values against official government sources.
 
 For EACH requirement, provide:
@@ -319,14 +322,14 @@ Example JSON structure:
     {{
       "category": "minimum_wage",
       "jurisdiction_level": "city",
-      "jurisdiction_name": "San Francisco",
-      "title": "San Francisco Minimum Wage",
-      "description": "The minimum wage in San Francisco is $18.67 per hour.",
-      "current_value": "$18.67/hr",
-      "numeric_value": 18.67,
+      "jurisdiction_name": "West Hollywood",
+      "title": "West Hollywood Minimum Wage",
+      "description": "The general minimum wage is $19.08/hr. Hotel workers have a higher minimum wage of $19.65/hr.",
+      "current_value": "$19.08/hr",
+      "numeric_value": 19.08,
       "effective_date": "2024-07-01",
-      "source_url": "https://sfgov.org/olse/minimum-wage-ordinance",
-      "source_name": "SF OLSE"
+      "source_url": "https://www.weho.org/business/minimum-wage",
+      "source_name": "City of West Hollywood"
     }}
   ]
 }}
