@@ -5,6 +5,12 @@ import asyncio
 import json
 import re
 
+from .jurisdiction_context import (
+    get_known_sources,
+    record_source,
+    extract_domain,
+    build_context_prompt,
+)
 from ..models.compliance import (
     BusinessLocation,
     ComplianceRequirement,
@@ -1174,6 +1180,25 @@ async def run_compliance_check_stream(
                 used_repository = True
             else:
                 # Stale or missing — call Gemini
+                # First, get known sources for this jurisdiction (or discover them)
+                known_sources = await get_known_sources(conn, jurisdiction_id)
+
+                if not known_sources:
+                    # Bootstrap: discover sources for new jurisdiction
+                    yield {"type": "discovering_sources", "message": f"Learning about {location_name}..."}
+                    discovered = await service.discover_jurisdiction_sources(
+                        city=location.city, state=location.state, county=location.county,
+                    )
+                    for src in discovered:
+                        domain = (src.get("domain") or "").lower()
+                        if domain:
+                            for cat in src.get("categories", []):
+                                await record_source(conn, jurisdiction_id, domain, src.get("name"), cat)
+                    known_sources = await get_known_sources(conn, jurisdiction_id)
+
+                # Build context for research prompt
+                source_context = build_context_prompt(known_sources)
+
                 yield {"type": "researching", "message": f"Researching requirements for {location_name}..."}
                 research_queue = asyncio.Queue()
                 def _on_research_retry(attempt: int, error: str):
@@ -1181,6 +1206,7 @@ async def run_compliance_check_stream(
                 research_task = asyncio.create_task(
                     service.research_location_compliance(
                         city=location.city, state=location.state, county=location.county,
+                        source_context=source_context,
                         on_retry=_on_research_retry,
                     )
                 )
@@ -1217,6 +1243,17 @@ async def run_compliance_check_stream(
             # If Gemini was called, contribute results to jurisdiction repository
             if not used_repository:
                 await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
+
+                # Learn from successful research: record any new sources seen
+                for req in requirements:
+                    source_url = req.get("source_url", "")
+                    if source_url:
+                        domain = extract_domain(source_url)
+                        if domain:
+                            await record_source(
+                                conn, jurisdiction_id, domain,
+                                req.get("source_name"), req.get("category", "")
+                            )
 
             # Sync requirements to location (change detection, alerts, history)
             # Only create alerts for fresh Gemini data — repository data is cached
@@ -1846,8 +1883,27 @@ async def run_compliance_check_background(
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
                 used_repository = True
             else:
+                # Get known sources for this jurisdiction (or discover them)
+                known_sources = await get_known_sources(conn, jurisdiction_id)
+
+                if not known_sources:
+                    # Bootstrap: discover sources for new jurisdiction
+                    discovered = await service.discover_jurisdiction_sources(
+                        city=location.city, state=location.state, county=location.county,
+                    )
+                    for src in discovered:
+                        domain = (src.get("domain") or "").lower()
+                        if domain:
+                            for cat in src.get("categories", []):
+                                await record_source(conn, jurisdiction_id, domain, src.get("name"), cat)
+                    known_sources = await get_known_sources(conn, jurisdiction_id)
+
+                # Build context for research prompt
+                source_context = build_context_prompt(known_sources)
+
                 requirements = await service.research_location_compliance(
                     city=location.city, state=location.state, county=location.county,
+                    source_context=source_context,
                 )
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
@@ -1874,6 +1930,17 @@ async def run_compliance_check_background(
             # Contribute to repository after Gemini call
             if not used_repository:
                 await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
+
+                # Learn from successful research: record any new sources seen
+                for req in requirements:
+                    source_url = req.get("source_url", "")
+                    if source_url:
+                        domain = extract_domain(source_url)
+                        if domain:
+                            await record_source(
+                                conn, jurisdiction_id, domain,
+                                req.get("source_name"), req.get("category", "")
+                            )
 
             # Sync to location
             sync_result = await _sync_requirements_to_location(

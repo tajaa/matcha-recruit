@@ -21,6 +21,29 @@ VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
 # Errors that should not be retried (API config / quota issues)
 _NON_RETRYABLE_KEYWORDS = {"API_KEY", "PERMISSION", "QUOTA", "RATE"}
 
+# Structured correction hints for retry prompts
+CORRECTION_HINTS = {
+    "json_parse": "Return ONLY valid JSON. No markdown fences, no explanation text, no trailing commas.",
+    "missing_key": "Your response was missing the required '{key}' field. Include it in your JSON.",
+    "empty_list": "The '{key}' list was empty. Provide at least one item.",
+    "invalid_category": "You used category '{got}' which is invalid. Use only: {valid}.",
+    "invalid_jurisdiction_level": "You used jurisdiction_level '{got}' which is invalid. Use only: {valid}.",
+    "missing_field": "Requirement missing required field '{field}'. All requirements need: category, jurisdiction_level, jurisdiction_name, title.",
+    "timeout": "Response took too long. Be more concise - return only essential data.",
+    "validation": "Validation failed: {detail}. Fix this specific issue.",
+}
+
+
+def _build_correction_feedback(error_type: str, **kwargs) -> str:
+    """Build structured correction feedback for retry prompts."""
+    template = CORRECTION_HINTS.get(error_type, "Previous attempt failed: {detail}")
+    try:
+        message = template.format(**kwargs)
+    except KeyError:
+        # Fallback if kwargs don't match template
+        message = template
+    return "\n\nPREVIOUS ATTEMPT FAILED: " + message
+
 
 class GeminiExhaustedError(Exception):
     """Raised when all retry attempts are exhausted."""
@@ -194,7 +217,7 @@ class GeminiComplianceService:
                     result = data.get(response_key)
                     if result is None:
                         last_error = f"missing '{response_key}' key in response"
-                        current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}. Return a JSON object with the '{response_key}' key."
+                        current_prompt = prompt + _build_correction_feedback("missing_key", key=response_key)
                         continue
                 else:
                     result = data
@@ -204,19 +227,18 @@ class GeminiComplianceService:
                     validation_error = validate_fn(data)
                     if validation_error:
                         last_error = validation_error
-                        current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}. Please fix and try again."
+                        current_prompt = prompt + _build_correction_feedback("validation", detail=last_error)
                         continue
 
                 return result
 
             except json.JSONDecodeError as e:
                 last_error = f"response was not valid JSON: {e}"
-                snippet = (last_raw or "")[:200]
-                current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}. Raw start: {snippet}... You MUST respond with valid JSON only."
+                current_prompt = prompt + _build_correction_feedback("json_parse")
 
             except (asyncio.TimeoutError, TimeoutError):
                 last_error = f"timed out after {GEMINI_CALL_TIMEOUT}s"
-                current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}. Please respond more concisely."
+                current_prompt = prompt + _build_correction_feedback("timeout")
 
             except Exception as e:
                 error_msg = str(e).upper()
@@ -235,11 +257,19 @@ class GeminiComplianceService:
         city: str,
         state: str,
         county: Optional[str] = None,
+        source_context: str = "",
         on_retry: Optional[Callable[[int, str], Any]] = None,
     ) -> List[Dict]:
         """
         Research compliance requirements for a specific location.
         Returns a list of dictionaries matching the ComplianceRequirement structure.
+
+        Args:
+            city: City name
+            state: State code (e.g., "CA")
+            county: Optional county name
+            source_context: Optional context about known authoritative sources
+            on_retry: Optional callback for retry events
         """
 
         location_str = f"{city}, {state}"
@@ -247,6 +277,7 @@ class GeminiComplianceService:
             location_str += f" ({county})"
 
         prompt = f"""You are a compliance research expert. Research current labor laws and compliance requirements for a business operating in {location_str}.
+{source_context}
 
 Focus on these specific categories:
 1. Minimum Wage — general/default rate ONLY (not industry-specific, tipped, fast-food, healthcare, hotel, etc.)
@@ -360,6 +391,69 @@ Return at most one requirement per category. Ensure all data is accurate and sou
                 print(f"[Gemini Compliance] Rate limit/quota error: {e}")
             else:
                 print(f"[Gemini Compliance] Error researching requirements: {e}")
+            return []
+
+    async def discover_jurisdiction_sources(
+        self,
+        city: str,
+        state: str,
+        county: Optional[str] = None,
+    ) -> List[Dict]:
+        """One-time call to discover authoritative sources for a jurisdiction.
+
+        Used to bootstrap the jurisdiction_sources table for new jurisdictions.
+        Returns a list of source dictionaries with domain, name, categories, and jurisdiction_level.
+        """
+        location_str = f"{city}, {state}"
+        if county:
+            location_str += f" ({county})"
+
+        prompt = f"""What are the official government sources for employment/labor law in {location_str}?
+
+List the authoritative websites for:
+- Minimum wage rates
+- Paid sick leave requirements
+- Overtime rules
+- Meal/rest break requirements
+- Pay frequency requirements
+
+Respond with JSON:
+{{
+  "sources": [
+    {{
+      "domain": "example.gov",
+      "name": "Department Name",
+      "categories": ["minimum_wage", "sick_leave"],
+      "jurisdiction_level": "city" | "county" | "state"
+    }}
+  ]
+}}
+
+Only include official .gov or government-affiliated sources. Be specific to {location_str}.
+Focus on the most authoritative sources (state labor departments, city wage offices, etc.).
+"""
+        try:
+            if not self._has_api_key():
+                print(f"[Gemini Compliance] ERROR: No GEMINI_API_KEY configured for source discovery")
+                return []
+
+            print(f"[Gemini Compliance] Discovering jurisdiction sources for {location_str}...")
+
+            sources = await self._call_with_retry(
+                prompt, "sources", max_retries=0, label=f"Discover sources {location_str}"
+            )
+
+            if not isinstance(sources, list):
+                return []
+
+            print(f"[Gemini Compliance] Discovered {len(sources)} sources for {location_str}")
+            return sources
+
+        except GeminiExhaustedError as e:
+            print(f"[Gemini Compliance] Source discovery exhausted: {e}")
+            return []
+        except Exception as e:
+            print(f"[Gemini Compliance] Source discovery error: {e}")
             return []
 
     async def verify_compliance_change(
