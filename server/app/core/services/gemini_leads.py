@@ -16,6 +16,7 @@ from google import genai
 from google.genai import types
 
 from ...config import get_settings
+from .rate_limiter import get_rate_limiter, RateLimitExceeded
 from ..models.leads_agent import (
     GeminiAnalysis,
     Lead,
@@ -158,6 +159,9 @@ Analyze this position and respond with a JSON object containing:
 Respond ONLY with the JSON object, no other text."""
 
         try:
+            # Check rate limit before calling Gemini
+            await get_rate_limiter().check_and_record("gemini_leads", "analyze_position")
+
             response = await self.client.aio.models.generate_content(
                 model=self.settings.analysis_model,
                 contents=prompt,
@@ -166,7 +170,7 @@ Respond ONLY with the JSON object, no other text."""
                     max_output_tokens=1000,
                 ),
             )
-            
+
             # Parse JSON response
             text = self._clean_json_text(response.text)
             if not text:
@@ -259,6 +263,9 @@ Respond with a JSON object:
 Respond ONLY with the JSON object."""
 
         try:
+            # Check rate limit before calling Gemini
+            await get_rate_limiter().check_and_record("gemini_leads", "rank_contacts")
+
             response = await self.client.aio.models.generate_content(
                 model=self.settings.analysis_model,
                 contents=prompt,
@@ -267,20 +274,21 @@ Respond ONLY with the JSON object."""
                     max_output_tokens=200,
                 ),
             )
-            
+
             text = self._clean_json_text(response.text)
-            
+
             data = json.loads(text)
             selected_index = data.get("selected_index", 1) - 1  # Convert to 0-based
             reasoning = data.get("reasoning", "Selected as best match")
-            selected_index = data.get("selected_index", 1) - 1  # Convert to 0-based
-            reasoning = data.get("reasoning", "Selected as best match")
-            
+
             if 0 <= selected_index < len(contacts):
                 return contacts[selected_index], reasoning
             else:
                 return contacts[0], "Default selection (index out of range)"
-                
+
+        except RateLimitExceeded:
+            # Default to first contact on rate limit
+            return contacts[0], "Default selection (rate limit)"
         except Exception as e:
             # Default to first contact on error
             return contacts[0], f"Default selection (error: {str(e)})"
@@ -334,30 +342,11 @@ Respond with a JSON object:
 
 Respond ONLY with the JSON object."""
 
-        try:
-            response = await self.client.aio.models.generate_content(
-                model=self.settings.analysis_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.7,
-                    max_output_tokens=500,
-                ),
-            )
-            
-            text = self._clean_json_text(response.text)
-            
-            data = json.loads(text)
-            subject = data.get("subject", f"Executive Search Partnership - {lead.title}")
-            body = data.get("body", "").replace("\\n", "\n")
-            
-            return subject, body
-            
-        except Exception as e:
-            # Return a basic template on error
-            subject = f"Executive Search Partnership - {lead.title} at {lead.company_name}"
+        # Fallback template for errors/rate limits
+        def _fallback_email():
+            subj = f"Executive Search Partnership - {lead.title} at {lead.company_name}"
             recipient_first_name = contact.first_name if contact and contact.first_name else contact_name.split()[0] if contact else "[Hiring Manager]"
-            
-            body = f"""Hi {recipient_first_name},
+            body_text = f"""Hi {recipient_first_name},
 
 I noticed your team is hiring a {lead.title}. At {sender_company}, we specialize in executive search with AI-powered culture matching that helps find leaders who truly fit.
 
@@ -366,7 +355,33 @@ Would you be open to a brief call this week to discuss how we might help?
 Best regards,
 {sender_name}
 {sender_company}"""
+            return subj, body_text
+
+        try:
+            # Check rate limit before calling Gemini
+            await get_rate_limiter().check_and_record("gemini_leads", "generate_email")
+
+            response = await self.client.aio.models.generate_content(
+                model=self.settings.analysis_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.7,
+                    max_output_tokens=500,
+                ),
+            )
+
+            text = self._clean_json_text(response.text)
+
+            data = json.loads(text)
+            subject = data.get("subject", f"Executive Search Partnership - {lead.title}")
+            body = data.get("body", "").replace("\\n", "\n")
+
             return subject, body
+
+        except RateLimitExceeded:
+            return _fallback_email()
+        except Exception as e:
+            return _fallback_email()
 
 
     async def find_decision_maker_from_search(
@@ -406,6 +421,9 @@ Respond with a JSON object:
         Respond ONLY with the JSON object."""
 
         try:
+            # Check rate limit before calling Gemini
+            await get_rate_limiter().check_and_record("gemini_leads", "find_decision_maker")
+
             response = await self.client.aio.models.generate_content(
                 model=self.settings.analysis_model,
                 contents=prompt,
@@ -413,13 +431,16 @@ Respond with a JSON object:
                     temperature=0.2,
                     max_output_tokens=2000,
                 ),
-            )            
+            )
             text = self._clean_json_text(response.text)
             if not text or text == "null":
                 return None
-            
+
             return json.loads(text)
-            
+
+        except RateLimitExceeded:
+            print(f"[Gemini] Rate limit hit during find_decision_maker")
+            return None
         except Exception as e:
             raw = response.text if 'response' in locals() and hasattr(response, 'text') else 'N/A'
             print(f"[Gemini] Error finding decision maker: {e}. Raw: {raw}")

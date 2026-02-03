@@ -70,6 +70,10 @@ class Settings:
     celery_broker_url: Optional[str] = None  # Falls back to redis_url
     celery_result_backend: Optional[str] = None  # Falls back to redis_url
 
+    # Gemini API Rate Limits
+    gemini_hourly_limit: int = 15
+    gemini_daily_limit: int = 25
+
 
 # Global settings instance
 _settings: Optional[Settings] = None

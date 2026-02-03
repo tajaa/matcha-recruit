@@ -5,6 +5,7 @@ from typing import AsyncIterator, Optional
 from google import genai
 from google.genai import types
 
+from .rate_limiter import get_rate_limiter, RateLimitExceeded
 
 from typing import Literal
 
@@ -490,6 +491,9 @@ class GeminiLiveSession:
         tutor_interview_role: Optional[str] = None,  # Role being practiced for (e.g., "CTO")
     ) -> None:
         """Connect to Gemini with appropriate interview prompt based on type."""
+        # Check rate limit before starting a live session
+        await get_rate_limiter().check_and_record("gemini_session", interview_type)
+
         if interview_type == "tutor_interview":
             # Tutor interview prep mode
             role = tutor_interview_role or "General Professional"

@@ -15,6 +15,8 @@ from typing import Optional, Any, Callable
 
 from google import genai
 
+from ...core.services.rate_limiter import get_rate_limiter, RateLimitExceeded
+
 
 # ===========================================
 # Constants and Exceptions
@@ -432,6 +434,7 @@ class IRAnalyzer:
         validate_fn: Callable[[dict], Optional[str]],
         *,
         max_retries: int = 1,
+        label: str = "ir_analysis",
     ) -> dict[str, Any]:
         """
         Call Gemini with retry logic and feedback on failure.
@@ -440,16 +443,27 @@ class IRAnalyzer:
             build_prompt_fn: Function that takes feedback (or None) and returns prompt.
             validate_fn: Function that validates result, returns error string or None.
             max_retries: Number of retries after initial attempt.
+            label: Label for rate limiting tracking.
 
         Returns:
             Validated result dictionary.
 
         Raises:
             IRAnalysisError: If all attempts fail.
+            RateLimitExceeded: If rate limit is hit.
         """
+        rate_limiter = get_rate_limiter()
+
+        # Check rate limit before starting (fail fast if already at limit)
+        await rate_limiter.check_limit("ir_analysis", label)
+
         last_error = None
 
         for attempt in range(1 + max_retries):
+            # Check limit again before each retry attempt
+            if attempt > 0:
+                await rate_limiter.check_limit("ir_analysis", label)
+
             prompt = build_prompt_fn(feedback=last_error if attempt > 0 else None)
 
             try:
@@ -460,6 +474,9 @@ class IRAnalyzer:
                     ),
                     timeout=GEMINI_CALL_TIMEOUT,
                 )
+
+                # Record the actual API call
+                await rate_limiter.record_call("ir_analysis", label)
 
                 result = self._parse_json_response(response.text)
 
@@ -510,7 +527,7 @@ class IRAnalyzer:
                 prompt += f"\n\n{feedback}"
             return prompt
 
-        result = await self._call_with_retry(build_prompt, _validate_categorization)
+        result = await self._call_with_retry(build_prompt, _validate_categorization, label="categorize")
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -547,7 +564,7 @@ class IRAnalyzer:
                 prompt += f"\n\n{feedback}"
             return prompt
 
-        result = await self._call_with_retry(build_prompt, _validate_severity)
+        result = await self._call_with_retry(build_prompt, _validate_severity, label="severity")
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -590,7 +607,7 @@ class IRAnalyzer:
                 prompt += f"\n\n{feedback}"
             return prompt
 
-        result = await self._call_with_retry(build_prompt, _validate_root_cause)
+        result = await self._call_with_retry(build_prompt, _validate_root_cause, label="root_cause")
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -646,7 +663,7 @@ class IRAnalyzer:
                 prompt += f"\n\n{feedback}"
             return prompt
 
-        result = await self._call_with_retry(build_prompt, _validate_recommendations)
+        result = await self._call_with_retry(build_prompt, _validate_recommendations, label="recommendations")
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -692,7 +709,7 @@ class IRAnalyzer:
                 prompt += f"\n\n{feedback}"
             return prompt
 
-        result = await self._call_with_retry(build_prompt, _validate_similar_incidents)
+        result = await self._call_with_retry(build_prompt, _validate_similar_incidents, label="similar_incidents")
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 

@@ -18,8 +18,16 @@ from ..services.compliance_service import (
     update_auto_check_settings,
     _jurisdiction_row_to_dict,
 )
+from ..services.rate_limiter import get_rate_limiter
 
 router = APIRouter()
+
+
+@router.get("/api-usage", dependencies=[Depends(require_admin)])
+async def get_api_usage():
+    """Return current Gemini API usage stats for rate limiting monitoring."""
+    limiter = get_rate_limiter()
+    return await limiter.get_usage()
 
 
 @router.get("/overview", dependencies=[Depends(require_admin)])

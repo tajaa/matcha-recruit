@@ -10,6 +10,7 @@ from google.genai import types
 
 from ...config import get_settings
 from ..models.compliance import ComplianceCategory, JurisdictionLevel, VerificationResult
+from .rate_limiter import get_rate_limiter, RateLimitExceeded
 
 # Timeout for individual Gemini API calls (seconds)
 GEMINI_CALL_TIMEOUT = 45
@@ -149,10 +150,19 @@ class GeminiComplianceService:
         last_raw: Optional[str] = None
         last_error: Optional[str] = None
         current_prompt = prompt
+        rate_limiter = get_rate_limiter()
+
+        # Check rate limit before starting (fail fast if already at limit)
+        try:
+            await rate_limiter.check_limit("gemini_compliance", label)
+        except RateLimitExceeded as e:
+            raise GeminiExhaustedError(f"{label}: Rate limit exceeded - {e}", last_raw=None)
 
         for attempt in range(1 + max_retries):
             try:
+                # Check limit again before each retry attempt
                 if attempt > 0:
+                    await rate_limiter.check_limit("gemini_compliance", label)
                     print(f"[Gemini Compliance] {label}: Attempt {attempt + 1} (retrying: {last_error})")
                     if on_retry is not None:
                         on_retry(attempt, last_error)
@@ -169,6 +179,9 @@ class GeminiComplianceService:
                     ),
                     timeout=GEMINI_CALL_TIMEOUT,
                 )
+
+                # Record the actual API call
+                await rate_limiter.record_call("gemini_compliance", label)
 
                 raw_text = response.text
                 last_raw = raw_text
@@ -487,6 +500,13 @@ Be conservative with confidence scores:
 """
         try:
             if not self._has_api_key():
+                return first
+
+            # Check rate limit for adaptive retry
+            try:
+                await get_rate_limiter().check_and_record("gemini_compliance", f"adaptive_verify_{title[:30]}")
+            except RateLimitExceeded:
+                print(f"[Gemini Compliance] Rate limit hit during adaptive retry, returning first result")
                 return first
 
             tools = [types.Tool(google_search=types.GoogleSearch())]

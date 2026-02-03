@@ -2416,13 +2416,31 @@ Creator: ___________________ Date: ___________',
             )
         """)
 
-        # Seed scheduler settings
+        # Seed scheduler settings (disabled by default for safety)
         await conn.execute("""
             INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
             VALUES
-                ('compliance_checks', 'Compliance Auto-Checks', 'Automated compliance checks for business locations on a recurring schedule.', true, 2),
-                ('deadline_escalation', 'Deadline Escalation', 'Re-evaluate deadline severities for upcoming legislation based on proximity to effective dates.', true, 0)
+                ('compliance_checks', 'Compliance Auto-Checks', 'Automated compliance checks for business locations on a recurring schedule.', false, 2),
+                ('deadline_escalation', 'Deadline Escalation', 'Re-evaluate deadline severities for upcoming legislation based on proximity to effective dates.', false, 0)
             ON CONFLICT (task_key) DO NOTHING
+        """)
+
+        # ===========================================
+        # API Rate Limits Table (for Gemini rate limiting)
+        # ===========================================
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS api_rate_limits (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                service_name VARCHAR(50) NOT NULL,
+                endpoint VARCHAR(100),
+                called_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rate_limits_called_at ON api_rate_limits(called_at)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rate_limits_service ON api_rate_limits(service_name)
         """)
 
         # Create default chat rooms if none exist
