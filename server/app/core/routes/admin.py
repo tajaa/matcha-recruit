@@ -1,5 +1,6 @@
 """Admin routes for business registration approval workflow and company feature management."""
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Optional
@@ -15,6 +16,7 @@ from ..services.email import get_email_service
 from ..models.compliance import AutoCheckSettings
 from ..services.compliance_service import (
     update_auto_check_settings,
+    _jurisdiction_row_to_dict,
 )
 
 router = APIRouter()
@@ -738,9 +740,47 @@ async def check_jurisdiction(jurisdiction_id: UUID):
             # Acquire connection early and hold it for the entire generator lifecycle
             # to avoid "Database pool not initialized" errors after long Gemini calls
             async with get_connection() as conn:
-                requirements = await service.research_location_compliance(
-                    city=city, state=state, county=county,
+                used_repository = False
+                research_queue = asyncio.Queue()
+                def _on_retry(attempt, error):
+                    research_queue.put_nowait({"type": "retrying", "message": f"Retrying research (attempt {attempt + 1})..."})
+
+                research_task = asyncio.create_task(
+                    service.research_location_compliance(
+                        city=city, state=state, county=county,
+                        on_retry=_on_retry,
+                    )
                 )
+                try:
+                    while not research_task.done():
+                        while not research_queue.empty():
+                            evt = research_queue.get_nowait()
+                            yield f"data: {json.dumps(evt)}\n\n"
+                        done, _ = await asyncio.wait({research_task}, timeout=8)
+                        if done:
+                            break
+                        yield ": heartbeat\n\n"
+                except asyncio.CancelledError:
+                    if not research_task.done():
+                        research_task.cancel()
+                    raise
+                # Final drain of retry events
+                while not research_queue.empty():
+                    evt = research_queue.get_nowait()
+                    yield f"data: {json.dumps(evt)}\n\n"
+                requirements = research_task.result()
+
+                # Stale-data fallback: if Gemini returned nothing, try cached data
+                if not requirements:
+                    j_reqs = await conn.fetch(
+                        "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1 ORDER BY category",
+                        jurisdiction_id,
+                    )
+                    if j_reqs:
+                        requirements = [_jurisdiction_row_to_dict(dict(r)) for r in j_reqs]
+                        used_repository = True
+                        print(f"[Admin] Falling back to stale repository data ({len(requirements)} cached requirements)")
+                        yield f"data: {json.dumps({'type': 'fallback', 'message': 'Using cached data (live research unavailable)'})}\n\n"
 
                 if not requirements:
                     yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': 0, 'updated': 0, 'alerts': 0})}\n\n"
@@ -753,7 +793,8 @@ async def check_jurisdiction(jurisdiction_id: UUID):
 
                 yield f"data: {json.dumps({'type': 'processing', 'message': f'Processing {len(requirements)} requirements...'})}\n\n"
 
-                await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
+                if not used_repository:
+                    await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
 
                 new_count = len(requirements)
                 for req in requirements:
@@ -762,10 +803,23 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                 # Legislation scan
                 yield f"data: {json.dumps({'type': 'scanning', 'message': 'Scanning for upcoming legislation...'})}\n\n"
                 try:
-                    legislation_items = await service.scan_upcoming_legislation(
-                        city=city, state=state, county=county,
-                        current_requirements=[dict(r) for r in requirements],
+                    leg_task = asyncio.create_task(
+                        service.scan_upcoming_legislation(
+                            city=city, state=state, county=county,
+                            current_requirements=[dict(r) for r in requirements],
+                        )
                     )
+                    try:
+                        while not leg_task.done():
+                            done, _ = await asyncio.wait({leg_task}, timeout=8)
+                            if done:
+                                break
+                            yield ": heartbeat\n\n"
+                    except asyncio.CancelledError:
+                        if not leg_task.done():
+                            leg_task.cancel()
+                        raise
+                    legislation_items = leg_task.result()
                     await _upsert_jurisdiction_legislation(conn, jurisdiction_id, legislation_items)
                     leg_count = len(legislation_items)
                     if leg_count > 0:
@@ -807,13 +861,26 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                                 cache_key = (cat, old_val, new_val)
                                 if cache_key not in verified_changes:
                                     try:
-                                        verification = await service.verify_compliance_change_adaptive(
-                                            category=cat,
-                                            title=req.get("title", ""),
-                                            jurisdiction_name=req.get("jurisdiction_name", ""),
-                                            old_value=old_val,
-                                            new_value=new_val,
+                                        verify_task = asyncio.create_task(
+                                            service.verify_compliance_change_adaptive(
+                                                category=cat,
+                                                title=req.get("title", ""),
+                                                jurisdiction_name=req.get("jurisdiction_name", ""),
+                                                old_value=old_val,
+                                                new_value=new_val,
+                                            )
                                         )
+                                        try:
+                                            while not verify_task.done():
+                                                done, _ = await asyncio.wait({verify_task}, timeout=8)
+                                                if done:
+                                                    break
+                                                yield ": heartbeat\n\n"
+                                        except asyncio.CancelledError:
+                                            if not verify_task.done():
+                                                verify_task.cancel()
+                                            raise
+                                        verification = verify_task.result()
                                         confidence = max(
                                             score_verification_confidence(verification.sources),
                                             verification.confidence,
@@ -870,7 +937,11 @@ async def check_jurisdiction(jurisdiction_id: UUID):
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/schedulers", dependencies=[Depends(require_admin)])

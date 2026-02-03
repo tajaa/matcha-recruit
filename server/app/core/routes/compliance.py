@@ -87,12 +87,19 @@ async def check_location_compliance_endpoint(
     async def event_stream():
         try:
             async for event in run_compliance_check_stream(loc_uuid, company_id):
-                yield f"data: {json.dumps(event)}\n\n"
+                if event.get("type") == "heartbeat":
+                    yield ": heartbeat\n\n"
+                else:
+                    yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/locations", response_model=List[dict])

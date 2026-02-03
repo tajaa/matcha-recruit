@@ -1,6 +1,7 @@
 from typing import Optional, List, AsyncGenerator, Dict, Any
 from uuid import UUID
 from datetime import date, datetime, timedelta
+import asyncio
 import json
 import re
 
@@ -301,6 +302,28 @@ def _pick_most_restrictive_wage(reqs):
 
 
 MAX_VERIFICATIONS_PER_CHECK = 3
+HEARTBEAT_INTERVAL = 8
+
+
+async def _heartbeat_while(task, *, queue=None, interval=HEARTBEAT_INTERVAL):
+    """Yield progress events from queue and heartbeat dicts while a task runs."""
+    try:
+        while not task.done():
+            if queue is not None:
+                while not queue.empty():
+                    yield queue.get_nowait()
+            done, _ = await asyncio.wait({task}, timeout=interval)
+            if done:
+                break
+            yield {"type": "heartbeat"}
+    except asyncio.CancelledError:
+        if not task.done():
+            task.cancel()
+        raise
+    # Final drain
+    if queue is not None:
+        while not queue.empty():
+            yield queue.get_nowait()
 
 
 # ── Jurisdiction Repository Helpers ──────────────────────────────────────
@@ -1152,23 +1175,26 @@ async def run_compliance_check_stream(
             else:
                 # Stale or missing — call Gemini
                 yield {"type": "researching", "message": f"Researching requirements for {location_name}..."}
-                retry_events = []
+                research_queue = asyncio.Queue()
                 def _on_research_retry(attempt: int, error: str):
-                    retry_events.append({"type": "retrying", "message": f"Retrying research (attempt {attempt + 1})..."})
-                requirements = await service.research_location_compliance(
-                    city=location.city, state=location.state, county=location.county,
-                    on_retry=_on_research_retry,
+                    research_queue.put_nowait({"type": "retrying", "message": f"Retrying research (attempt {attempt + 1})..."})
+                research_task = asyncio.create_task(
+                    service.research_location_compliance(
+                        city=location.city, state=location.state, county=location.county,
+                        on_retry=_on_research_retry,
+                    )
                 )
-                for evt in retry_events:
+                async for evt in _heartbeat_while(research_task, queue=research_queue):
                     yield evt
+                requirements = research_task.result()
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
-            # Do NOT set used_repository — fallback data should still go through
-            # the normal alert/verification flow.
+            # Set used_repository = True to skip fresh-data logic (upserts, alerts, verification).
             if not requirements and not used_repository:
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
                 if j_reqs:
                     requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+                    used_repository = True
                     print(f"[Compliance] Falling back to stale repository data ({len(requirements)} cached requirements)")
                     yield {"type": "fallback", "message": "Using cached data (live research unavailable)"}
 
@@ -1219,20 +1245,28 @@ async def run_compliance_check_stream(
 
             # Verify material changes with Gemini (skip verification when using cached repository data)
             if changes_to_verify and not used_repository:
-                yield {"type": "verifying", "message": f"Verifying {min(len(changes_to_verify), MAX_VERIFICATIONS_PER_CHECK)} change(s)..."}
+                verify_total = min(len(changes_to_verify), MAX_VERIFICATIONS_PER_CHECK)
+                yield {"type": "verifying", "message": f"Verifying {verify_total} change(s)..."}
                 verification_count = 0
-                for change_info in changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK]:
+                for idx, change_info in enumerate(changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK]):
                     req = change_info["req"]
                     existing = change_info["existing"]
 
+                    yield {"type": "verifying_item", "message": f"Verifying {req.get('title', 'change')}...", "current": idx + 1, "total": verify_total}
+
                     try:
-                        verification = await service.verify_compliance_change_adaptive(
-                            category=req.get("category", ""),
-                            title=req.get("title", ""),
-                            jurisdiction_name=req.get("jurisdiction_name", ""),
-                            old_value=change_info["old_value"],
-                            new_value=change_info["new_value"],
+                        verify_task = asyncio.create_task(
+                            service.verify_compliance_change_adaptive(
+                                category=req.get("category", ""),
+                                title=req.get("title", ""),
+                                jurisdiction_name=req.get("jurisdiction_name", ""),
+                                old_value=change_info["old_value"],
+                                new_value=change_info["new_value"],
+                            )
                         )
+                        async for evt in _heartbeat_while(verify_task):
+                            yield evt
+                        verification = verify_task.result()
                         confidence = score_verification_confidence(verification.sources)
                         confidence = max(confidence, verification.confidence)
                     except Exception as e:
@@ -1295,10 +1329,15 @@ async def run_compliance_check_stream(
                 yield {"type": "scanning", "message": "Scanning for upcoming legislation..."}
                 try:
                     current_reqs = [dict(r) for r in existing_by_key.values() if r.get("id")]
-                    legislation_items = await service.scan_upcoming_legislation(
-                        city=location.city, state=location.state, county=location.county,
-                        current_requirements=current_reqs,
+                    leg_task = asyncio.create_task(
+                        service.scan_upcoming_legislation(
+                            city=location.city, state=location.state, county=location.county,
+                            current_requirements=current_reqs,
+                        )
                     )
+                    async for evt in _heartbeat_while(leg_task):
+                        yield evt
+                    legislation_items = leg_task.result()
                     # Contribute to jurisdiction repository
                     await _upsert_jurisdiction_legislation(conn, jurisdiction_id, legislation_items)
                     leg_count = await process_upcoming_legislation(conn, location_id, company_id, legislation_items)
@@ -1812,12 +1851,12 @@ async def run_compliance_check_background(
                 )
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
-            # Do NOT set used_repository — fallback data should still go through
-            # the normal alert/verification flow.
+            # Set used_repository = True to skip fresh-data logic (upserts, alerts, verification).
             if not requirements and not used_repository:
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
                 if j_reqs:
                     requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+                    used_repository = True
                     print(f"[Compliance] Background: falling back to stale repository data ({len(requirements)} cached requirements)")
 
             if not requirements:
