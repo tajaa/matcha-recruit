@@ -837,6 +837,34 @@ async def _create_alert(
     )
 
 
+async def _log_verification_outcome(
+    conn,
+    jurisdiction_id: Optional[UUID],
+    alert_id: Optional[UUID],
+    requirement_key: str,
+    category: Optional[str],
+    predicted_confidence: float,
+    predicted_is_change: bool,
+    verification_sources: Optional[list] = None,
+) -> int:
+    """Log a verification outcome for confidence calibration analysis.
+
+    Returns the ID of the created record.
+    """
+    return await conn.fetchval(
+        """
+        INSERT INTO verification_outcomes
+        (jurisdiction_id, alert_id, requirement_key, category,
+         predicted_confidence, predicted_is_change, verification_sources)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        RETURNING id
+        """,
+        jurisdiction_id, alert_id, requirement_key, category,
+        round(predicted_confidence, 2), predicted_is_change,
+        json.dumps(verification_sources) if verification_sources else None,
+    )
+
+
 async def _upsert_requirement(
     conn, location_id: UUID, requirement_key: str, req: dict
 ) -> UUID:
@@ -1325,9 +1353,12 @@ async def run_compliance_check_stream(
                     if description:
                         change_msg += f" {description}"
 
+                    # Compute requirement key for logging
+                    req_key = _compute_requirement_key(req)
+
                     if confidence >= 0.6:
                         alert_count += 1
-                        await _create_alert(
+                        alert_id = await _create_alert(
                             conn, location_id, company_id, existing["id"],
                             f"Compliance Change: {req.get('title')}",
                             change_msg, "warning", req.get("category"),
@@ -1336,10 +1367,15 @@ async def run_compliance_check_stream(
                             verification_sources=verification.sources,
                             metadata={"verification_explanation": verification.explanation},
                         )
+                        # Log verification outcome for calibration
+                        await _log_verification_outcome(
+                            conn, jurisdiction_id, alert_id, req_key, req.get("category"),
+                            confidence, predicted_is_change=True, verification_sources=verification.sources,
+                        )
                         verification_count += 1
                     elif confidence >= 0.3:
                         alert_count += 1
-                        await _create_alert(
+                        alert_id = await _create_alert(
                             conn, location_id, company_id, existing["id"],
                             f"Unverified: {req.get('title')}",
                             change_msg, "info", req.get("category"),
@@ -1348,8 +1384,18 @@ async def run_compliance_check_stream(
                             verification_sources=verification.sources,
                             metadata={"verification_explanation": verification.explanation, "unverified": True},
                         )
+                        # Log verification outcome for calibration
+                        await _log_verification_outcome(
+                            conn, jurisdiction_id, alert_id, req_key, req.get("category"),
+                            confidence, predicted_is_change=True, verification_sources=verification.sources,
+                        )
                         verification_count += 1
                     else:
+                        # Log low-confidence rejections too for calibration
+                        await _log_verification_outcome(
+                            conn, jurisdiction_id, None, req_key, req.get("category"),
+                            confidence, predicted_is_change=False, verification_sources=verification.sources,
+                        )
                         print(f"[Compliance] Low confidence ({confidence:.2f}) for change: {req.get('title')}, skipping alert")
 
                 for change_info in changes_to_verify[MAX_VERIFICATIONS_PER_CHECK:]:
@@ -1650,6 +1696,81 @@ async def dismiss_alert(alert_id: UUID, company_id: UUID) -> bool:
             company_id,
         )
         return result == "UPDATE 1"
+
+
+async def record_verification_feedback(
+    alert_id: UUID,
+    user_id: UUID,
+    actual_is_change: bool,
+    admin_notes: Optional[str] = None,
+    correction_reason: Optional[str] = None,
+) -> bool:
+    """Record admin feedback on a verification outcome for calibration.
+
+    Args:
+        alert_id: The alert being reviewed
+        user_id: The admin reviewing
+        actual_is_change: Whether the change actually occurred
+        admin_notes: Optional notes explaining the decision
+        correction_reason: Category of error if prediction was wrong (misread_date, wrong_jurisdiction, hallucination, etc.)
+
+    Returns:
+        True if feedback was recorded, False if no matching outcome found
+    """
+    from ...database import get_connection
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """
+            UPDATE verification_outcomes
+            SET actual_is_change = $1,
+                reviewed_by = $2,
+                reviewed_at = NOW(),
+                admin_notes = $3,
+                correction_reason = $4
+            WHERE alert_id = $5
+            """,
+            actual_is_change, user_id, admin_notes, correction_reason, alert_id,
+        )
+        return "UPDATE 1" in result
+
+
+async def get_calibration_stats(
+    category: Optional[str] = None,
+    days: int = 30,
+) -> dict:
+    """Get confidence calibration statistics for analysis.
+
+    Returns aggregated stats on prediction accuracy by confidence bucket.
+    """
+    from ...database import get_connection
+    async with get_connection() as conn:
+        query = """
+            SELECT
+                CASE
+                    WHEN predicted_confidence >= 0.8 THEN 'high (0.8+)'
+                    WHEN predicted_confidence >= 0.6 THEN 'medium (0.6-0.8)'
+                    WHEN predicted_confidence >= 0.3 THEN 'low (0.3-0.6)'
+                    ELSE 'very_low (<0.3)'
+                END as confidence_bucket,
+                COUNT(*) as total,
+                COUNT(actual_is_change) as reviewed,
+                SUM(CASE WHEN predicted_is_change = actual_is_change THEN 1 ELSE 0 END) as correct,
+                AVG(predicted_confidence) as avg_confidence
+            FROM verification_outcomes
+            WHERE created_at > NOW() - INTERVAL '%s days'
+        """
+        params = [days]
+        if category:
+            query += " AND category = $2"
+            params.append(category)
+        query += " GROUP BY confidence_bucket ORDER BY avg_confidence DESC"
+
+        rows = await conn.fetch(query % days, *params[1:])
+        return {
+            "buckets": [dict(r) for r in rows],
+            "days": days,
+            "category_filter": category,
+        }
 
 
 async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:

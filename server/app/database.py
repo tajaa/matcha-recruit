@@ -1391,6 +1391,42 @@ async def init_db():
             ADD COLUMN IF NOT EXISTS rate_type VARCHAR(50)
         """)
 
+        # Verification outcomes for confidence calibration (Phase 1.2)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS verification_outcomes (
+                id SERIAL PRIMARY KEY,
+                jurisdiction_id UUID REFERENCES jurisdictions(id) ON DELETE SET NULL,
+                alert_id UUID REFERENCES compliance_alerts(id) ON DELETE SET NULL,
+                requirement_key TEXT NOT NULL,
+                category VARCHAR(50),
+                predicted_confidence DECIMAL(3,2) NOT NULL,
+                predicted_is_change BOOLEAN NOT NULL,
+                verification_sources JSONB,
+                actual_is_change BOOLEAN,
+                reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                reviewed_at TIMESTAMP,
+                admin_notes TEXT,
+                correction_reason VARCHAR(100),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_verification_outcomes_jurisdiction_id
+            ON verification_outcomes(jurisdiction_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_verification_outcomes_category
+            ON verification_outcomes(category)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_verification_outcomes_predicted_confidence
+            ON verification_outcomes(predicted_confidence)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_verification_outcomes_actual_is_change
+            ON verification_outcomes(actual_is_change)
+        """)
+
         # Upcoming legislation tracking table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS upcoming_legislation (

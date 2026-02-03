@@ -31,6 +31,8 @@ from ..services.compliance_service import (
     run_compliance_check_stream,
     get_check_log,
     get_upcoming_legislation,
+    record_verification_feedback,
+    get_calibration_stats,
 )
 
 router = APIRouter()
@@ -355,3 +357,58 @@ async def get_compliance_summary_endpoint(
         raise HTTPException(status_code=403, detail="Access denied")
 
     return await get_compliance_summary(company_id)
+
+
+# =====================================================
+# Verification Calibration Endpoints (Phase 1.2)
+# =====================================================
+
+from pydantic import BaseModel
+
+
+class VerificationFeedbackRequest(BaseModel):
+    actual_is_change: bool
+    admin_notes: Optional[str] = None
+    correction_reason: Optional[str] = None  # "misread_date", "wrong_jurisdiction", "hallucination", etc.
+
+
+@router.post("/alerts/{alert_id}/feedback")
+async def record_verification_feedback_endpoint(
+    alert_id: str,
+    data: VerificationFeedbackRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Record admin feedback on whether a verification prediction was correct.
+
+    This data is used to calibrate confidence thresholds and improve accuracy.
+    """
+    try:
+        alert_uuid = UUID(alert_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid alert ID")
+
+    success = await record_verification_feedback(
+        alert_uuid,
+        current_user.user_id,
+        data.actual_is_change,
+        data.admin_notes,
+        data.correction_reason,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="No verification outcome found for this alert")
+
+    return {"message": "Feedback recorded"}
+
+
+@router.get("/calibration/stats")
+async def get_calibration_stats_endpoint(
+    category: Optional[str] = None,
+    days: int = 30,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get confidence calibration statistics.
+
+    Returns prediction accuracy grouped by confidence bucket.
+    Useful for tuning confidence thresholds.
+    """
+    return await get_calibration_stats(category, days)
