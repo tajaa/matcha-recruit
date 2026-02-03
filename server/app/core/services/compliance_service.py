@@ -227,6 +227,10 @@ def _normalize_value_text(value: Optional[str], category: Optional[str] = None) 
     s = re.sub(r"\bcompensated\b", "paid", s)
     s = re.sub(r"\buncompensated\b", "unpaid", s)
 
+    # Strip parenthetical annotations (e.g., "(unpaid)", "(paid)", "(per shift)")
+    # These are clarifying notes, not part of the actual requirement value
+    s = re.sub(r"\s*\([^)]*\)", "", s)
+
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
@@ -638,13 +642,9 @@ async def _sync_requirements_to_location(
                 # Gemini rephrases text but numeric value is unchanged.
                 if _is_material_text_change(old_value, new_value, req.get("category")):
                     material_change = True
-            elif (
-                _normalize_category(req.get("category")) != "minimum_wage"
-                and _is_material_text_change(old_value, new_value, req.get("category"))
-            ):
-                # Non-wage category: numerics match but text substantially
-                # differs (e.g. unit or semantics change). Flag for verification.
-                material_change = True
+            # When numerics match for non-wage categories, trust the numeric comparison.
+            # Text-only differences (after normalization) are usually just Gemini rephrasing
+            # (e.g., "(unpaid)" annotations, word order changes). Don't flag as material.
 
             numeric_changed = old_num is not None and new_num is not None and abs(float(old_num) - float(new_num)) > 0.001
             text_changed = old_value != new_value
