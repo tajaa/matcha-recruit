@@ -52,6 +52,7 @@ export function IRDetail() {
   const [documents, setDocuments] = useState<IRDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [categorization, setCategorization] = useState<IRCategorizationAnalysis | null>(null);
   const [severityAnalysis, setSeverityAnalysis] = useState<IRSeverityAnalysis | null>(null);
@@ -90,12 +91,16 @@ export function IRDetail() {
 
   const updateIncident = async (data: IRIncidentUpdate) => {
     if (!id) return;
+    setError(null);
     try {
       setUpdating(true);
       const updated = await irIncidents.updateIncident(id, data);
       setIncident(updated);
     } catch (err) {
       console.error('Failed to update incident:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update incident');
+      // Re-fetch to ensure UI is in sync with server
+      fetchIncident();
     } finally {
       setUpdating(false);
     }
@@ -183,18 +188,23 @@ export function IRDetail() {
           <h1 className="text-xl font-medium text-white">{incident.title}</h1>
         </div>
 
-        <select
-          value={incident.status}
-          onChange={(e) => updateIncident({ status: e.target.value as IRStatus })}
-          disabled={updating}
-          className="px-2 py-1 bg-transparent border-b border-zinc-800 text-xs text-zinc-400 focus:outline-none focus:border-zinc-500 cursor-pointer"
-        >
-          {STATUS_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        <div>
+          <select
+            value={incident.status}
+            onChange={(e) => updateIncident({ status: e.target.value as IRStatus })}
+            disabled={updating}
+            className={`px-2 py-1 bg-transparent border-b border-zinc-800 text-xs text-zinc-400 focus:outline-none focus:border-zinc-500 cursor-pointer ${updating ? 'opacity-50' : ''}`}
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          {error && (
+            <div className="text-xs text-red-400 mt-1">{error}</div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-12">
