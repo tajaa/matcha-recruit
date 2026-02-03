@@ -73,10 +73,12 @@ def test_category_normalization_groups_titles():
     assert "California Minimum Wage" not in titles
 
 
-def test_minimum_wage_keeps_special_categories_and_general():
+def test_minimum_wage_keeps_different_rate_types():
+    """Tests that different rate_type variants are kept as separate entries."""
     requirements = [
         {
             "category": "minimum_wage",
+            "rate_type": "general",
             "jurisdiction_level": "state",
             "jurisdiction_name": "California",
             "title": "California Minimum Wage",
@@ -84,6 +86,7 @@ def test_minimum_wage_keeps_special_categories_and_general():
         },
         {
             "category": "minimum_wage",
+            "rate_type": "general",
             "jurisdiction_level": "city",
             "jurisdiction_name": "West Hollywood",
             "title": "West Hollywood Minimum Wage",
@@ -91,6 +94,7 @@ def test_minimum_wage_keeps_special_categories_and_general():
         },
         {
             "category": "minimum_wage",
+            "rate_type": "hotel",
             "jurisdiction_level": "city",
             "jurisdiction_name": "West Hollywood",
             "title": "West Hollywood Hotel Worker Minimum Wage",
@@ -98,6 +102,7 @@ def test_minimum_wage_keeps_special_categories_and_general():
         },
         {
             "category": "minimum_wage",
+            "rate_type": "hotel",
             "jurisdiction_level": "state",
             "jurisdiction_name": "California",
             "title": "California Hotel Worker Minimum Wage",
@@ -108,10 +113,70 @@ def test_minimum_wage_keeps_special_categories_and_general():
     filtered = cs._filter_by_jurisdiction_priority(requirements)
     titles = {req["title"] for req in filtered}
 
+    # General rate: city overrides state
     assert "West Hollywood Minimum Wage" in titles
     assert "California Minimum Wage" not in titles
+    # Hotel rate: city overrides state
     assert "West Hollywood Hotel Worker Minimum Wage" in titles
     assert "California Hotel Worker Minimum Wage" not in titles
+    # Both general and hotel rates are kept
+    assert len(filtered) == 2
+
+
+def test_minimum_wage_rate_type_tipped_and_general():
+    """Tests that tipped and general minimum wage are kept separately."""
+    requirements = [
+        {
+            "category": "minimum_wage",
+            "rate_type": "general",
+            "jurisdiction_level": "city",
+            "jurisdiction_name": "Boulder",
+            "title": "Boulder Minimum Wage",
+            "current_value": "$16.82",
+        },
+        {
+            "category": "minimum_wage",
+            "rate_type": "tipped",
+            "jurisdiction_level": "city",
+            "jurisdiction_name": "Boulder",
+            "title": "Boulder Tipped Minimum Wage",
+            "current_value": "$13.80",
+        },
+    ]
+
+    filtered = cs._filter_by_jurisdiction_priority(requirements)
+    titles = {req["title"] for req in filtered}
+
+    assert "Boulder Minimum Wage" in titles
+    assert "Boulder Tipped Minimum Wage" in titles
+    assert len(filtered) == 2
+
+
+def test_compute_requirement_key_includes_rate_type():
+    """Tests that rate_type is included in requirement key for minimum_wage."""
+    general_req = {
+        "category": "minimum_wage",
+        "rate_type": "general",
+        "title": "Boulder Minimum Wage",
+        "jurisdiction_name": "Boulder",
+    }
+    tipped_req = {
+        "category": "minimum_wage",
+        "rate_type": "tipped",
+        "title": "Boulder Tipped Minimum Wage",
+        "jurisdiction_name": "Boulder",
+    }
+    overtime_req = {
+        "category": "overtime",
+        "title": "Colorado Overtime",
+        "jurisdiction_name": "Colorado",
+    }
+
+    # Different rate_types produce different keys
+    assert cs._compute_requirement_key(general_req) == "minimum_wage:general"
+    assert cs._compute_requirement_key(tipped_req) == "minimum_wage:tipped"
+    # Non-minimum_wage categories don't use rate_type
+    assert cs._compute_requirement_key(overtime_req) == "overtime:overtime"
 
 
 def test_normalize_value_text_handles_wording_only_changes():

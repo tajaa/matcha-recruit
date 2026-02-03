@@ -44,8 +44,13 @@ MATERIAL_CHANGE_THRESHOLDS = {
 }
 
 JURISDICTION_PRIORITY = {'city': 1, 'county': 2, 'state': 3, 'federal': 4}
-MIN_WAGE_GENERAL_KEYS = {"minimum wage", "minimum wage rate", "general minimum wage"}
-MIN_WAGE_SPECIAL_KEYWORDS = {
+# Valid rate_types for minimum_wage requirements
+VALID_RATE_TYPES = {"general", "tipped", "hotel", "fast_food", "healthcare", "large_employer", "small_employer"}
+
+# Legacy constants kept for backwards compatibility during transition
+# TODO: Remove after migration is complete
+_MIN_WAGE_GENERAL_KEYS = {"minimum wage", "minimum wage rate", "general minimum wage"}
+_MIN_WAGE_SPECIAL_KEYWORDS = {
     "tipped",
     "tip credit",
     "subminimum",
@@ -242,12 +247,13 @@ def _normalize_value_text(value: Optional[str], category: Optional[str] = None) 
 
 
 def _is_special_min_wage(base_key: str, title: Optional[str], description: Optional[str]) -> bool:
+    """DEPRECATED: Use rate_type field instead. Kept for backwards compatibility."""
     if not base_key:
         return False
-    if base_key in MIN_WAGE_GENERAL_KEYS:
+    if base_key in _MIN_WAGE_GENERAL_KEYS:
         return False
     text = " ".join(filter(None, [base_key, title or "", description or ""])).lower()
-    return any(keyword in text for keyword in MIN_WAGE_SPECIAL_KEYWORDS)
+    return any(keyword in text for keyword in _MIN_WAGE_SPECIAL_KEYWORDS)
 
 
 def _is_material_numeric_change(old_num: Optional[float], new_num: Optional[float], category: Optional[str]) -> bool:
@@ -302,6 +308,7 @@ def _pick_best_by_priority(reqs):
 
 
 def _pick_most_restrictive_wage(reqs):
+    """DEPRECATED: Use rate_type-based grouping instead. Kept for backwards compatibility."""
     if not reqs:
         return None
     with_nums = [(r, _get_numeric_from_req(r)) for r in reqs]
@@ -391,6 +398,7 @@ def _jurisdiction_row_to_dict(jr: dict) -> dict:
     """Convert a jurisdiction_requirements row to a dict compatible with sync functions."""
     return {
         "category": jr["category"],
+        "rate_type": jr.get("rate_type"),
         "jurisdiction_level": jr["jurisdiction_level"],
         "jurisdiction_name": jr["jurisdiction_name"],
         "title": jr["title"],
@@ -413,12 +421,13 @@ async def _upsert_jurisdiction_requirements(conn, jurisdiction_id: UUID, reqs: L
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
-                (jurisdiction_id, requirement_key, category, jurisdiction_level, jurisdiction_name,
+                (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
+                rate_type = EXCLUDED.rate_type,
                 jurisdiction_level = EXCLUDED.jurisdiction_level,
                 jurisdiction_name = EXCLUDED.jurisdiction_name,
                 title = EXCLUDED.title,
@@ -437,8 +446,8 @@ async def _upsert_jurisdiction_requirements(conn, jurisdiction_id: UUID, reqs: L
                 updated_at = NOW()
             """,
             jurisdiction_id, requirement_key,
-            req.get("category"), req.get("jurisdiction_level"), req.get("jurisdiction_name"),
-            req.get("title"), req.get("description"),
+            req.get("category"), req.get("rate_type"), req.get("jurisdiction_level"),
+            req.get("jurisdiction_name"), req.get("title"), req.get("description"),
             req.get("current_value"), req.get("numeric_value"),
             req.get("source_url"), req.get("source_name"),
             parse_date(req.get("effective_date")), parse_date(req.get("expiration_date")),
@@ -742,10 +751,15 @@ def _compute_requirement_key(req) -> str:
     cat = req.get("category") if isinstance(req, dict) else req.category
     title = req.get("title") if isinstance(req, dict) else req.title
     jname = req.get("jurisdiction_name") if isinstance(req, dict) else getattr(req, "jurisdiction_name", None)
-    level = req.get("jurisdiction_level") if isinstance(req, dict) else req.jurisdiction_level
+    rate_type = req.get("rate_type") if isinstance(req, dict) else getattr(req, "rate_type", None)
     cat_key = _normalize_category(cat) or ""
     base_title = _base_title(title or "", jname)
     base_key = _normalize_title_key(base_title)
+
+    # Include rate_type in key for minimum_wage to allow multiple entries per jurisdiction
+    if cat_key == "minimum_wage" and rate_type:
+        return f"{cat_key}:{rate_type}"
+
     return f"{cat_key}:{base_key}"
 
 
@@ -830,14 +844,14 @@ async def _upsert_requirement(
     return await conn.fetchval(
         """
         INSERT INTO compliance_requirements
-        (location_id, requirement_key, category, jurisdiction_level, jurisdiction_name, title, description,
+        (location_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name, title, description,
          current_value, numeric_value, source_url, source_name, effective_date)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING id
         """,
-        location_id, requirement_key, req.get("category"), req.get("jurisdiction_level"),
-        req.get("jurisdiction_name"), req.get("title"), req.get("description"),
-        req.get("current_value"), req.get("numeric_value"),
+        location_id, requirement_key, req.get("category"), req.get("rate_type"),
+        req.get("jurisdiction_level"), req.get("jurisdiction_name"), req.get("title"),
+        req.get("description"), req.get("current_value"), req.get("numeric_value"),
         req.get("source_url"), req.get("source_name"), parse_date(req.get("effective_date")),
     )
 
@@ -850,15 +864,15 @@ async def _update_requirement(
     await conn.execute(
         """
         UPDATE compliance_requirements
-        SET requirement_key = $1, category = $2, jurisdiction_name = $3, title = $4,
-            current_value = $5, numeric_value = $6, previous_value = $7, last_changed_at = $8,
-            description = $9, source_url = $10, source_name = $11, effective_date = $12,
+        SET requirement_key = $1, category = $2, rate_type = $3, jurisdiction_name = $4, title = $5,
+            current_value = $6, numeric_value = $7, previous_value = $8, last_changed_at = $9,
+            description = $10, source_url = $11, source_name = $12, effective_date = $13,
             updated_at = NOW()
-        WHERE id = $13
+        WHERE id = $14
         """,
-        requirement_key, req.get("category"), req.get("jurisdiction_name"), req.get("title"),
-        req.get("current_value"), req.get("numeric_value"), previous_value, last_changed_at,
-        req.get("description"), req.get("source_url"), req.get("source_name"),
+        requirement_key, req.get("category"), req.get("rate_type"), req.get("jurisdiction_name"),
+        req.get("title"), req.get("current_value"), req.get("numeric_value"), previous_value,
+        last_changed_at, req.get("description"), req.get("source_url"), req.get("source_name"),
         parse_date(req.get("effective_date")), existing_id,
     )
 
@@ -868,11 +882,11 @@ async def _snapshot_to_history(conn, row_dict: dict, location_id: UUID):
     await conn.execute(
         """
         INSERT INTO compliance_requirement_history
-        (requirement_id, location_id, category, jurisdiction_level, jurisdiction_name,
+        (requirement_id, location_id, category, rate_type, jurisdiction_level, jurisdiction_name,
          title, description, current_value, numeric_value, source_url, source_name, effective_date)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         """,
-        row_dict["id"], location_id, row_dict.get("category"),
+        row_dict["id"], location_id, row_dict.get("category"), row_dict.get("rate_type"),
         row_dict.get("jurisdiction_level"), row_dict.get("jurisdiction_name"),
         row_dict.get("title"), row_dict.get("description"),
         row_dict.get("current_value"), row_dict.get("numeric_value"),
@@ -1013,48 +1027,43 @@ async def escalate_upcoming_deadlines(conn, company_id: UUID) -> int:
     return escalated
 
 def _filter_by_jurisdiction_priority(requirements):
-    """For each distinct requirement within a category, keep only the most
-    specific jurisdiction level.
+    """For each distinct requirement key, keep only the most local jurisdiction.
 
-    Titles are compared after stripping jurisdiction-name prefixes so that
-    e.g. "California Minimum Wage" (state) and "West Hollywood Minimum Wage"
-    (city) are recognised as the same rule, while genuinely different
-    requirements (e.g. separate meal / rest break entries) within one category
-    are preserved.
+    For minimum_wage, requirements are grouped by rate_type (general, tipped, etc.)
+    allowing multiple wage entries per jurisdiction when they have different rate types.
+
+    For other categories, titles are compared after stripping jurisdiction-name prefixes
+    so that e.g. "California Overtime" (state) and "San Francisco Overtime" (city)
+    are recognized as the same rule, while genuinely different requirements
+    (e.g. separate meal / rest break entries) within one category are preserved.
     """
     by_key = {}
-    min_wage_general = []
+
     for req in requirements:
         cat = req['category'] if isinstance(req, dict) else req.category
-        title = req['title'] if isinstance(req, dict) else req.title
-        jname = (req['jurisdiction_name'] if isinstance(req, dict)
-                 else getattr(req, 'jurisdiction_name', None))
-        base = _base_title(title, jname)
-        base_key = _normalize_title_key(base)
+        rate_type = req.get('rate_type') if isinstance(req, dict) else getattr(req, 'rate_type', None)
         cat_key = _normalize_category(cat)
 
+        # For minimum_wage, group by rate_type to allow multiple entries
         if cat_key == "minimum_wage":
-            desc = req.get("description") if isinstance(req, dict) else getattr(req, "description", None)
-            if _is_special_min_wage(base_key, title, desc):
-                by_key.setdefault((cat_key, base_key), []).append(req)
-            else:
-                min_wage_general.append(req)
+            key = ("minimum_wage", rate_type or "general")
         else:
-            by_key.setdefault((cat_key, base_key), []).append(req)
+            # For other categories, use existing logic based on title
+            title = req['title'] if isinstance(req, dict) else req.title
+            jname = (req['jurisdiction_name'] if isinstance(req, dict)
+                     else getattr(req, 'jurisdiction_name', None))
+            base = _base_title(title, jname)
+            base_key = _normalize_title_key(base)
+            key = (cat_key, base_key)
 
+        by_key.setdefault(key, []).append(req)
+
+    # For each key, keep the most local jurisdiction
     filtered = []
-
-    # General minimum wage: pick single most restrictive option
-    if min_wage_general:
-        best_general = _pick_most_restrictive_wage(min_wage_general)
-        if best_general:
-            filtered.append(best_general)
-
-    # Special minimum wage + other categories: keep one per base title
     for reqs in by_key.values():
-        best_req = _pick_best_by_priority(reqs)
-        if best_req:
-            filtered.append(best_req)
+        best = _pick_best_by_priority(reqs)
+        if best:
+            filtered.append(best)
 
     return filtered
 

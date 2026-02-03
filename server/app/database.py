@@ -1287,6 +1287,15 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_compliance_requirements_location_key
             ON compliance_requirements(location_id, requirement_key)
         """)
+        # Add rate_type column for minimum wage variants
+        await conn.execute("""
+            ALTER TABLE compliance_requirements
+            ADD COLUMN IF NOT EXISTS rate_type VARCHAR(50)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_requirements_rate_type
+            ON compliance_requirements(rate_type)
+        """)
 
         # Compliance alerts table
         await conn.execute("""
@@ -1376,6 +1385,11 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_compliance_requirement_history_location
             ON compliance_requirement_history(location_id, captured_at)
         """)
+        # Add rate_type column for minimum wage variants history
+        await conn.execute("""
+            ALTER TABLE compliance_requirement_history
+            ADD COLUMN IF NOT EXISTS rate_type VARCHAR(50)
+        """)
 
         # Upcoming legislation tracking table
         await conn.execute("""
@@ -1461,6 +1475,15 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_jurisdiction_requirements_jurisdiction
             ON jurisdiction_requirements(jurisdiction_id)
+        """)
+        # Add rate_type column for minimum wage variants
+        await conn.execute("""
+            ALTER TABLE jurisdiction_requirements
+            ADD COLUMN IF NOT EXISTS rate_type VARCHAR(50)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jurisdiction_requirements_rate_type
+            ON jurisdiction_requirements(rate_type)
         """)
 
         # Jurisdiction legislation — upcoming/pending legislation per jurisdiction

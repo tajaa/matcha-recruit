@@ -17,6 +17,7 @@ GEMINI_CALL_TIMEOUT = 45
 
 VALID_CATEGORIES = {"minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency"}
 VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
+VALID_RATE_TYPES = {"general", "tipped", "hotel", "fast_food", "healthcare", "large_employer", "small_employer"}
 
 # Errors that should not be retried (API config / quota issues)
 _NON_RETRYABLE_KEYWORDS = {"API_KEY", "PERMISSION", "QUOTA", "RATE"}
@@ -98,6 +99,12 @@ def _validate_requirement(req: dict) -> Optional[str]:
 
     if not req.get("jurisdiction_name"):
         return "missing jurisdiction_name"
+
+    # Validate rate_type for minimum_wage category
+    if cat == "minimum_wage":
+        rate_type = req.get("rate_type")
+        if rate_type is not None and rate_type not in VALID_RATE_TYPES:
+            return f"invalid rate_type '{rate_type}' for minimum_wage"
 
     return None
 
@@ -280,18 +287,25 @@ class GeminiComplianceService:
 {source_context}
 
 Focus on these specific categories:
-1. Minimum Wage — general/default rate (see special instructions below)
+1. Minimum Wage — ALL applicable rate types (see instructions below)
 2. Overtime rules
 3. Paid Sick Leave
 4. Meal and Rest Break Requirements
 5. Pay Frequency Requirements
 
 IMPORTANT RULES:
-- For each category, return ONLY the single most local jurisdiction that applies (city > county > state). Do NOT include overlapping jurisdictions for the same category. For example, if {location_str} has a city minimum wage, return ONLY the city rate, not the state rate.
-- For minimum wage: Return ONE requirement with the general/default rate as current_value and numeric_value. However, in the DESCRIPTION field, you MUST include:
-  * If tip credits are allowed: the tip credit amount and resulting tipped minimum wage
-  * If there are significantly different rates for specific industries (hotel workers, fast food, healthcare): mention these rates
-  * Example: "The minimum wage is $16.82/hr. Tip credit of $3.02/hr is allowed, resulting in a tipped minimum wage of $13.80/hr."
+- For each category except minimum_wage, return ONLY the single most local jurisdiction that applies (city > county > state).
+- For MINIMUM WAGE specifically:
+  * Return SEPARATE requirements for each rate type that exists in this jurisdiction:
+    - "general" - the standard/default minimum wage (ALWAYS include this)
+    - "tipped" - if tip credits are allowed, return the tipped minimum wage as a separate requirement
+    - "hotel" - if hotel workers have a different rate
+    - "fast_food" - if fast food workers have a different rate (e.g., CA $20/hr)
+    - "healthcare" - if healthcare workers have a different rate
+    - "large_employer" / "small_employer" - if rates differ by employer size
+  * Each rate type should be a SEPARATE requirement object with its own rate_type field
+  * Only include rate types that actually exist for this jurisdiction
+  * For each rate type, use the most local jurisdiction (city > county > state)
 - Accuracy is critical. Double-check numeric values against official government sources.
 
 For EACH requirement, provide:
@@ -306,12 +320,13 @@ Today's date is {date.today().isoformat()}. Return ONLY the rates/values that ar
 Respond with a JSON object containing a list of requirements under the key "requirements".
 Each requirement object should have:
 - "category": One of ["minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency"]
+- "rate_type": For minimum_wage ONLY: "general", "tipped", "hotel", "fast_food", "healthcare", "large_employer", "small_employer". Null for other categories.
 - "jurisdiction_level": One of ["state", "county", "city"]
 - "jurisdiction_name": Name of the jurisdiction (e.g., "California" or "San Francisco")
-- "title": Short title (e.g., "California Minimum Wage")
-- "description": Detailed explanation of the rule
-- "current_value": The specific value (e.g., "$16.00/hr")
-- "numeric_value": Float value if applicable (e.g., 16.00), else null
+- "title": Short title (e.g., "Boulder Minimum Wage" or "Boulder Tipped Minimum Wage")
+- "description": Detailed explanation including any tip credit amounts or conditions
+- "current_value": The specific value (e.g., "$16.82/hr" or "$13.80/hr")
+- "numeric_value": Float value if applicable (e.g., 16.82 or 13.80), else null
 - "effective_date": "YYYY-MM-DD" if known, else null
 - "source_url": URL to the official source
 - "source_name": Name of the source (e.g., "CA Dept of Industrial Relations")
@@ -321,20 +336,34 @@ Example JSON structure:
   "requirements": [
     {{
       "category": "minimum_wage",
+      "rate_type": "general",
       "jurisdiction_level": "city",
-      "jurisdiction_name": "West Hollywood",
-      "title": "West Hollywood Minimum Wage",
-      "description": "The general minimum wage is $19.08/hr. Hotel workers have a higher minimum wage of $19.65/hr.",
-      "current_value": "$19.08/hr",
-      "numeric_value": 19.08,
-      "effective_date": "2024-07-01",
-      "source_url": "https://www.weho.org/business/minimum-wage",
-      "source_name": "City of West Hollywood"
+      "jurisdiction_name": "Boulder",
+      "title": "Boulder Minimum Wage",
+      "description": "The general minimum wage in Boulder is $16.82/hr.",
+      "current_value": "$16.82/hr",
+      "numeric_value": 16.82,
+      "effective_date": "2025-01-01",
+      "source_url": "https://bouldercolorado.gov/...",
+      "source_name": "City of Boulder"
+    }},
+    {{
+      "category": "minimum_wage",
+      "rate_type": "tipped",
+      "jurisdiction_level": "city",
+      "jurisdiction_name": "Boulder",
+      "title": "Boulder Tipped Minimum Wage",
+      "description": "Tipped employees: $13.80/hr minimum cash wage. Tip credit of $3.02/hr is allowed.",
+      "current_value": "$13.80/hr",
+      "numeric_value": 13.80,
+      "effective_date": "2025-01-01",
+      "source_url": "https://bouldercolorado.gov/...",
+      "source_name": "City of Boulder"
     }}
   ]
 }}
 
-Return at most one requirement per category. Ensure all data is accurate and sourced.
+For non-minimum_wage categories, return at most one requirement per category. Ensure all data is accurate and sourced.
 """
 
         try:
