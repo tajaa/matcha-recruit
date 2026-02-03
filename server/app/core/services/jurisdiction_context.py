@@ -3,8 +3,10 @@
 This module handles learning and retrieving authoritative sources for jurisdictions,
 enabling better first-attempt accuracy in compliance research by providing Gemini
 with known good sources.
+
+Phase 3.2 adds source reputation tracking for confidence score blending.
 """
-from typing import Optional, List
+from typing import Optional, List, Dict
 from urllib.parse import urlparse
 import asyncpg
 
@@ -92,3 +94,131 @@ def build_context_prompt(known_sources: List[dict]) -> str:
         lines.append(f"- {domain} ({source_name}) - covers: {cat_str}")
 
     return "\n".join(lines)
+
+
+# =============================================================================
+# Phase 3.2: Source Reputation Tracking
+# =============================================================================
+
+async def get_source_accuracy(
+    conn: asyncpg.Connection,
+    jurisdiction_id,
+    domain: str,
+) -> float:
+    """Get accuracy score for a source domain with Laplace smoothing.
+
+    Returns a value between 0.0 and 1.0 representing historical accuracy.
+    Uses Laplace smoothing (add-1) to handle sources with little data.
+
+    Args:
+        conn: Database connection
+        jurisdiction_id: UUID of the jurisdiction
+        domain: Source domain to look up
+
+    Returns:
+        Float between 0.0 and 1.0 (0.5 for unknown sources)
+    """
+    if not domain:
+        return 0.5  # Neutral for unknown
+
+    domain = domain.lower().strip()
+
+    row = await conn.fetchrow("""
+        SELECT accurate_count, inaccurate_count
+        FROM jurisdiction_sources
+        WHERE jurisdiction_id = $1 AND domain = $2
+    """, jurisdiction_id, domain)
+
+    if not row:
+        return 0.5  # Neutral for unknown sources
+
+    accurate = row["accurate_count"] or 0
+    inaccurate = row["inaccurate_count"] or 0
+
+    # Laplace smoothing: (accurate + 1) / (total + 2)
+    # This prevents 0/0 and provides a reasonable prior
+    total = accurate + inaccurate
+    return (accurate + 1) / (total + 2)
+
+
+async def get_source_reputations(
+    conn: asyncpg.Connection,
+    jurisdiction_id,
+    domains: List[str],
+) -> Dict[str, float]:
+    """Batch lookup of accuracy scores for multiple domains.
+
+    Args:
+        conn: Database connection
+        jurisdiction_id: UUID of the jurisdiction
+        domains: List of source domains to look up
+
+    Returns:
+        Dict mapping domain -> accuracy score (0.0-1.0)
+    """
+    if not domains:
+        return {}
+
+    # Normalize domains
+    normalized = [d.lower().strip() for d in domains if d]
+    if not normalized:
+        return {}
+
+    rows = await conn.fetch("""
+        SELECT domain, accurate_count, inaccurate_count
+        FROM jurisdiction_sources
+        WHERE jurisdiction_id = $1 AND domain = ANY($2)
+    """, jurisdiction_id, normalized)
+
+    result = {}
+    found_domains = set()
+
+    for row in rows:
+        domain = row["domain"]
+        found_domains.add(domain)
+        accurate = row["accurate_count"] or 0
+        inaccurate = row["inaccurate_count"] or 0
+        total = accurate + inaccurate
+        result[domain] = (accurate + 1) / (total + 2)
+
+    # Fill in unknown domains with neutral 0.5
+    for domain in normalized:
+        if domain not in found_domains:
+            result[domain] = 0.5
+
+    return result
+
+
+async def update_source_accuracy(
+    conn: asyncpg.Connection,
+    jurisdiction_id,
+    domain: str,
+    was_accurate: bool,
+):
+    """Update accuracy counters for a source domain.
+
+    Args:
+        conn: Database connection
+        jurisdiction_id: UUID of the jurisdiction
+        domain: Source domain
+        was_accurate: True if the source provided accurate information
+    """
+    if not domain:
+        return
+
+    domain = domain.lower().strip()
+
+    if was_accurate:
+        await conn.execute("""
+            UPDATE jurisdiction_sources
+            SET accurate_count = COALESCE(accurate_count, 0) + 1,
+                last_accuracy_update = NOW()
+            WHERE jurisdiction_id = $1 AND domain = $2
+        """, jurisdiction_id, domain)
+    else:
+        await conn.execute("""
+            UPDATE jurisdiction_sources
+            SET inaccurate_count = COALESCE(inaccurate_count, 0) + 1,
+                last_accuracy_update = NOW()
+            WHERE jurisdiction_id = $1 AND domain = $2
+        """, jurisdiction_id, domain)

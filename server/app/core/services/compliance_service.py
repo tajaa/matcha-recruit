@@ -10,6 +10,8 @@ from .jurisdiction_context import (
     record_source,
     extract_domain,
     build_context_prompt,
+    get_source_reputations,
+    update_source_accuracy,
 )
 from ..models.compliance import (
     BusinessLocation,
@@ -773,6 +775,98 @@ def score_verification_confidence(sources: List[dict]) -> float:
         source_type = source.get("type", "other")
         score += weights.get(source_type, 0.05)
     return min(score, 1.0)
+
+
+async def score_verification_confidence_with_reputation(
+    sources: List[dict],
+    jurisdiction_id: UUID,
+    conn,
+) -> float:
+    """Score confidence blending type-based scoring (70%) with historical accuracy (30%).
+
+    Phase 3.2: Enhanced confidence scoring that incorporates source reputation.
+
+    Args:
+        sources: List of source dicts with 'type' and 'url' fields
+        jurisdiction_id: UUID of the jurisdiction for reputation lookup
+        conn: Database connection
+
+    Returns:
+        Float confidence score between 0.0 and 1.0
+    """
+    if not sources:
+        return 0.0
+
+    # Get base type-based score (existing logic)
+    type_score = score_verification_confidence(sources)
+
+    # Extract domains from sources
+    domains = []
+    for source in sources:
+        url = source.get("url", "")
+        domain = extract_domain(url)
+        if domain:
+            domains.append(domain)
+
+    if not domains:
+        # No domains to look up, return type-based score only
+        return type_score
+
+    # Get historical accuracy for these domains
+    reputations = await get_source_reputations(conn, jurisdiction_id, domains)
+
+    if not reputations:
+        return type_score
+
+    # Compute weighted average reputation (weight by source type)
+    type_weights = {"official": 0.5, "news": 0.25, "blog": 0.1, "other": 0.1}
+    total_weight = 0.0
+    weighted_reputation = 0.0
+
+    for source in sources:
+        url = source.get("url", "")
+        domain = extract_domain(url)
+        if domain and domain in reputations:
+            source_type = source.get("type", "other")
+            weight = type_weights.get(source_type, 0.1)
+            weighted_reputation += reputations[domain] * weight
+            total_weight += weight
+
+    if total_weight == 0:
+        return type_score
+
+    avg_reputation = weighted_reputation / total_weight
+
+    # Blend: 70% type-based, 30% historical accuracy
+    blended_score = (type_score * 0.7) + (avg_reputation * 0.3)
+
+    return min(blended_score, 1.0)
+
+
+async def update_source_reputation(
+    conn,
+    jurisdiction_id: UUID,
+    sources: List[dict],
+    was_accurate: bool,
+):
+    """Update accuracy counters for sources based on admin review.
+
+    Phase 3.2: Called when admin marks a verification outcome as correct/incorrect.
+
+    Args:
+        conn: Database connection
+        jurisdiction_id: UUID of the jurisdiction
+        sources: List of source dicts with 'url' field
+        was_accurate: True if the sources provided accurate information
+    """
+    if not sources or not jurisdiction_id:
+        return
+
+    for source in sources:
+        url = source.get("url", "")
+        domain = extract_domain(url)
+        if domain:
+            await update_source_accuracy(conn, jurisdiction_id, domain, was_accurate)
 
 
 async def _create_check_log(conn, location_id: UUID, company_id: UUID, check_type: str = "manual") -> UUID:
@@ -1740,6 +1834,17 @@ async def record_verification_feedback(
     """
     from ...database import get_connection
     async with get_connection() as conn:
+        # First, fetch the outcome data for reputation update (Phase 3.2)
+        outcome_row = await conn.fetchrow(
+            """
+            SELECT jurisdiction_id, predicted_is_change, verification_sources
+            FROM verification_outcomes
+            WHERE alert_id = $1
+            """,
+            alert_id,
+        )
+
+        # Update the verification outcome
         result = await conn.execute(
             """
             UPDATE verification_outcomes
@@ -1752,7 +1857,34 @@ async def record_verification_feedback(
             """,
             actual_is_change, user_id, admin_notes, correction_reason, alert_id,
         )
-        return "UPDATE 1" in result
+
+        updated = "UPDATE 1" in result
+
+        # Phase 3.2: Update source reputation based on accuracy
+        if updated and outcome_row:
+            jurisdiction_id = outcome_row["jurisdiction_id"]
+            predicted_is_change = outcome_row["predicted_is_change"]
+            verification_sources = outcome_row["verification_sources"]
+
+            if jurisdiction_id and verification_sources:
+                # Determine if the sources were accurate
+                # Sources are accurate if the prediction matched reality
+                was_accurate = (predicted_is_change == actual_is_change)
+
+                # Parse sources if stored as JSON string
+                sources = verification_sources
+                if isinstance(sources, str):
+                    try:
+                        sources = json.loads(sources)
+                    except (json.JSONDecodeError, TypeError):
+                        sources = []
+
+                if sources:
+                    await update_source_reputation(
+                        conn, jurisdiction_id, sources, was_accurate
+                    )
+
+        return updated
 
 
 async def get_calibration_stats(

@@ -2,6 +2,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from typing import List, Optional
 from uuid import UUID
 
@@ -380,8 +381,6 @@ async def get_compliance_summary_endpoint(
 # =====================================================
 # Verification Calibration Endpoints (Phase 1.2)
 # =====================================================
-
-from pydantic import BaseModel
 
 
 class VerificationFeedbackRequest(BaseModel):

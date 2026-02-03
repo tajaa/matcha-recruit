@@ -11,6 +11,7 @@ from google.genai import types
 from ...config import get_settings
 from ..models.compliance import ComplianceCategory, JurisdictionLevel, VerificationResult
 from .rate_limiter import get_rate_limiter, RateLimitExceeded
+from .search_strategy import build_search_strategy_prompt
 
 # Timeout for individual Gemini API calls (seconds)
 GEMINI_CALL_TIMEOUT = 45
@@ -289,6 +290,11 @@ class GeminiComplianceService:
         context_section = source_context
         if corrections_context:
             context_section += f"\n\n{corrections_context}"
+
+        # Phase 2.2: Add dynamic search strategy guidance
+        search_strategy = build_search_strategy_prompt(state)
+        if search_strategy:
+            context_section += f"\n\n{search_strategy}"
 
         prompt = f"""You are a compliance research expert. Research current labor laws and compliance requirements for a business operating in {location_str}.
 {context_section}
