@@ -265,6 +265,7 @@ class GeminiComplianceService:
         state: str,
         county: Optional[str] = None,
         source_context: str = "",
+        corrections_context: str = "",
         on_retry: Optional[Callable[[int, str], Any]] = None,
     ) -> List[Dict]:
         """
@@ -276,6 +277,7 @@ class GeminiComplianceService:
             state: State code (e.g., "CA")
             county: Optional county name
             source_context: Optional context about known authoritative sources
+            corrections_context: Optional context about past false positives to avoid (Phase 3.1)
             on_retry: Optional callback for retry events
         """
 
@@ -283,8 +285,13 @@ class GeminiComplianceService:
         if county:
             location_str += f" ({county})"
 
+        # Build context section from sources and corrections
+        context_section = source_context
+        if corrections_context:
+            context_section += f"\n\n{corrections_context}"
+
         prompt = f"""You are a compliance research expert. Research current labor laws and compliance requirements for a business operating in {location_str}.
-{source_context}
+{context_section}
 
 Focus on these specific categories:
 1. Minimum Wage — ALL applicable rate types (see instructions below)

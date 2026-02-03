@@ -327,9 +327,17 @@ async def mark_alert_read_endpoint(
     return {"message": "Alert marked as read"}
 
 
+class DismissAlertRequest(BaseModel):
+    """Optional correction data when dismissing an alert (Phase 3.1)."""
+    is_false_positive: bool = True  # True if the alert was incorrect/not a real change
+    correction_reason: Optional[str] = None  # "misread_date", "wrong_jurisdiction", "hallucination", "outdated_source"
+    admin_notes: Optional[str] = None
+
+
 @router.put("/alerts/{alert_id}/dismiss")
 async def dismiss_alert_endpoint(
     alert_id: str,
+    data: Optional[DismissAlertRequest] = None,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
@@ -341,11 +349,21 @@ async def dismiss_alert_endpoint(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid alert ID")
 
+    # Record feedback if provided (Phase 3.1: Admin Feedback Loop)
+    if data:
+        await record_verification_feedback(
+            alert_uuid,
+            current_user.user_id,
+            actual_is_change=not data.is_false_positive,
+            admin_notes=data.admin_notes,
+            correction_reason=data.correction_reason,
+        )
+
     success = await dismiss_alert(alert_uuid, company_id)
     if not success:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    return {"message": "Alert dismissed"}
+    return {"message": "Alert dismissed", "feedback_recorded": data is not None}
 
 
 @router.get("/summary", response_model=ComplianceSummary)

@@ -1236,6 +1236,10 @@ async def run_compliance_check_stream(
                 # Build context for research prompt
                 source_context = build_context_prompt(known_sources)
 
+                # Phase 3.1: Get recent corrections to avoid repeating false positives
+                corrections = await get_recent_corrections(jurisdiction_id)
+                corrections_context = format_corrections_for_prompt(corrections)
+
                 yield {"type": "researching", "message": f"Researching requirements for {location_name}..."}
                 research_queue = asyncio.Queue()
                 def _on_research_retry(attempt: int, error: str):
@@ -1244,6 +1248,7 @@ async def run_compliance_check_stream(
                     service.research_location_compliance(
                         city=location.city, state=location.state, county=location.county,
                         source_context=source_context,
+                        corrections_context=corrections_context,
                         on_retry=_on_research_retry,
                     )
                 )
@@ -1789,6 +1794,64 @@ async def get_calibration_stats(
         }
 
 
+async def get_recent_corrections(
+    jurisdiction_id: UUID,
+    category: Optional[str] = None,
+    limit: int = 5,
+) -> List[Dict]:
+    """Get recent false positive corrections for a jurisdiction.
+
+    Used in Phase 3.1 to inject correction context into future research prompts.
+
+    Returns:
+        List of dicts with: requirement_key, category, correction_reason, admin_notes, created_at
+    """
+    from ...database import get_connection
+    async with get_connection() as conn:
+        query = """
+            SELECT
+                vo.requirement_key,
+                vo.category,
+                vo.correction_reason,
+                vo.admin_notes,
+                vo.created_at,
+                ca.title as alert_title
+            FROM verification_outcomes vo
+            LEFT JOIN compliance_alerts ca ON vo.alert_id = ca.id
+            WHERE vo.jurisdiction_id = $1
+              AND vo.actual_is_change = false
+              AND vo.predicted_is_change = true
+              AND vo.reviewed_at IS NOT NULL
+        """
+        params = [jurisdiction_id]
+        if category:
+            query += " AND vo.category = $2"
+            params.append(category)
+        query += " ORDER BY vo.created_at DESC LIMIT $" + str(len(params) + 1)
+        params.append(limit)
+
+        rows = await conn.fetch(query, *params)
+        return [dict(r) for r in rows]
+
+
+def format_corrections_for_prompt(corrections: List[Dict]) -> str:
+    """Format corrections list into a prompt-friendly string."""
+    if not corrections:
+        return ""
+
+    lines = ["PREVIOUS ERRORS TO AVOID (false positives from past research):"]
+    for c in corrections:
+        reason = c.get("correction_reason") or "unspecified"
+        title = c.get("alert_title") or c.get("requirement_key", "unknown")
+        notes = c.get("admin_notes")
+        line = f"- {title}: marked as false positive (reason: {reason})"
+        if notes:
+            line += f" — Admin note: {notes}"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
 async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
     from ...database import get_connection
     async with get_connection() as conn:
@@ -2047,9 +2110,14 @@ async def run_compliance_check_background(
                 # Build context for research prompt
                 source_context = build_context_prompt(known_sources)
 
+                # Phase 3.1: Get recent corrections to avoid repeating false positives
+                corrections = await get_recent_corrections(jurisdiction_id)
+                corrections_context = format_corrections_for_prompt(corrections)
+
                 requirements = await service.research_location_compliance(
                     city=location.city, state=location.state, county=location.county,
                     source_context=source_context,
+                    corrections_context=corrections_context,
                 )
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
