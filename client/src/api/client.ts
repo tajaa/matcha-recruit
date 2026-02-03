@@ -332,6 +332,12 @@ export const companies = {
       body: JSON.stringify(data),
     }),
 
+  update: (id: string, data: Partial<CompanyCreate>) =>
+    request<Company>(`/companies/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
   delete: (id: string) =>
     request<{ status: string }>(`/companies/${id}`, {
       method: 'DELETE',

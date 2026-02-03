@@ -221,6 +221,27 @@ export function IRDetail() {
               </div>
             </div>
 
+            {/* Company/Location Context */}
+            {(incident.company_name || incident.location_city) && (
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-900">
+                {incident.company_name && (
+                  <div>
+                    <div className={labelClass}>Company</div>
+                    <div className="text-sm text-white mt-1">{incident.company_name}</div>
+                  </div>
+                )}
+                {incident.location_city && (
+                  <div>
+                    <div className={labelClass}>Business Location</div>
+                    <div className="text-sm text-white mt-1">
+                      {incident.location_name ? `${incident.location_name} - ` : ''}
+                      {incident.location_city}, {incident.location_state}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {incident.description && (
               <div>
                 <div className={labelClass}>Description</div>
@@ -388,25 +409,44 @@ export function IRDetail() {
                   {key === 'categorization' && categorization && (
                     <div className="mt-2 text-[10px] text-zinc-500">
                       {TYPE_LABELS[categorization.suggested_type]} ({(categorization.confidence * 100).toFixed(0)}%)
+                      {categorization.from_cache && (
+                        <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
+                      )}
                     </div>
                   )}
                   {key === 'severity' && severityAnalysis && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${SEVERITY_COLORS[severityAnalysis.suggested_severity]}`} />
-                      <span className="text-[10px] text-zinc-500 capitalize">{severityAnalysis.suggested_severity}</span>
+                    <div className="mt-2">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${SEVERITY_COLORS[severityAnalysis.suggested_severity]}`} />
+                        <span className="text-[10px] text-zinc-500 capitalize">{severityAnalysis.suggested_severity}</span>
+                      </div>
+                      {severityAnalysis.from_cache && (
+                        <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
+                      )}
                     </div>
                   )}
                   {key === 'root_cause' && rootCause && (
-                    <div className="mt-2 text-[10px] text-zinc-500 line-clamp-2">{rootCause.primary_cause}</div>
+                    <div className="mt-2">
+                      <div className="text-[10px] text-zinc-500 line-clamp-2">{rootCause.primary_cause}</div>
+                      {rootCause.from_cache && (
+                        <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
+                      )}
+                    </div>
                   )}
                   {key === 'recommendations' && recommendations && (
                     <div className="mt-2 text-[10px] text-zinc-500">
                       {recommendations.recommendations.length} actions suggested
+                      {recommendations.from_cache && (
+                        <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
+                      )}
                     </div>
                   )}
                   {key === 'similar' && similarIncidents && (
                     <div className="mt-2 text-[10px] text-zinc-500">
                       {similarIncidents.similar_incidents.length} similar found
+                      {similarIncidents.from_cache && (
+                        <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
+                      )}
                     </div>
                   )}
                 </div>

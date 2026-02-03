@@ -115,6 +115,12 @@ def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:
         root_cause=row["root_cause"],
         corrective_actions=row["corrective_actions"],
         document_count=document_count,
+        company_id=row.get("company_id"),
+        location_id=row.get("location_id"),
+        company_name=row.get("company_name"),
+        location_name=row.get("location_name"),
+        location_city=row.get("location_city"),
+        location_state=row.get("location_state"),
         created_by=row["created_by"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -146,9 +152,9 @@ async def create_incident(
             INSERT INTO ir_incidents (
                 incident_number, title, description, incident_type, severity,
                 occurred_at, location, reported_by_name, reported_by_email,
-                witnesses, category_data, created_by
+                witnesses, category_data, company_id, location_id, created_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING *
             """,
             incident_number,
@@ -162,8 +168,34 @@ async def create_incident(
             incident.reported_by_email,
             json.dumps([w.model_dump() for w in incident.witnesses]),
             json.dumps(incident.category_data or {}),
+            str(incident.company_id) if incident.company_id else None,
+            str(incident.location_id) if incident.location_id else None,
             str(current_user.id),
         )
+
+        # Fetch company/location names for response
+        company_name = None
+        location_name = None
+        location_city = None
+        location_state = None
+
+        if row.get("company_id"):
+            company = await conn.fetchrow(
+                "SELECT name FROM companies WHERE id = $1",
+                row["company_id"],
+            )
+            if company:
+                company_name = company["name"]
+
+        if row.get("location_id"):
+            loc = await conn.fetchrow(
+                "SELECT name, city, state FROM business_locations WHERE id = $1",
+                row["location_id"],
+            )
+            if loc:
+                location_name = loc["name"]
+                location_city = loc["city"]
+                location_state = loc["state"]
 
         # Log audit
         await log_audit(
@@ -177,7 +209,14 @@ async def create_incident(
             request.client.host if request.client else None,
         )
 
-        return row_to_response(row, 0)
+        # Build response with context
+        response_row = dict(row)
+        response_row["company_name"] = company_name
+        response_row["location_name"] = location_name
+        response_row["location_city"] = location_city
+        response_row["location_state"] = location_state
+
+        return row_to_response(response_row, 0)
 
 
 @router.get("", response_model=IRIncidentListResponse)
@@ -241,13 +280,19 @@ async def list_incidents(
         count_query = f"SELECT COUNT(*) FROM ir_incidents i{where_clause}"
         total = await conn.fetchval(count_query, *params)
 
-        # Get incidents with document count
+        # Get incidents with document count and company/location context
         query = f"""
-            SELECT i.*, COUNT(d.id) as document_count
+            SELECT i.*, COUNT(d.id) as document_count,
+                   c.name as company_name,
+                   bl.name as location_name,
+                   bl.city as location_city,
+                   bl.state as location_state
             FROM ir_incidents i
             LEFT JOIN ir_incident_documents d ON i.id = d.incident_id
+            LEFT JOIN companies c ON i.company_id = c.id
+            LEFT JOIN business_locations bl ON i.location_id = bl.id
             {where_clause}
-            GROUP BY i.id
+            GROUP BY i.id, c.name, bl.name, bl.city, bl.state
             ORDER BY i.occurred_at DESC
             LIMIT ${param_idx} OFFSET ${param_idx + 1}
         """
@@ -270,11 +315,17 @@ async def get_incident(
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT i.*, COUNT(d.id) as document_count
+            SELECT i.*, COUNT(d.id) as document_count,
+                   c.name as company_name,
+                   bl.name as location_name,
+                   bl.city as location_city,
+                   bl.state as location_state
             FROM ir_incidents i
             LEFT JOIN ir_incident_documents d ON i.id = d.incident_id
+            LEFT JOIN companies c ON i.company_id = c.id
+            LEFT JOIN business_locations bl ON i.location_id = bl.id
             WHERE i.id = $1
-            GROUP BY i.id
+            GROUP BY i.id, c.name, bl.name, bl.city, bl.state
             """,
             str(incident_id),
         )
@@ -377,6 +428,18 @@ async def update_incident(
             params.append(incident.root_cause)
             param_idx += 1
 
+        if incident.company_id is not None:
+            updates.append(f"company_id = ${param_idx}")
+            params.append(str(incident.company_id))
+            changes["company_id"] = str(incident.company_id)
+            param_idx += 1
+
+        if incident.location_id is not None:
+            updates.append(f"location_id = ${param_idx}")
+            params.append(str(incident.location_id))
+            changes["location_id"] = str(incident.location_id)
+            param_idx += 1
+
         if incident.corrective_actions is not None:
             updates.append(f"corrective_actions = ${param_idx}")
             params.append(incident.corrective_actions)
@@ -405,6 +468,30 @@ async def update_incident(
             str(incident_id),
         )
 
+        # Fetch company/location names for response
+        company_name = None
+        location_name = None
+        location_city = None
+        location_state = None
+
+        if row.get("company_id"):
+            company = await conn.fetchrow(
+                "SELECT name FROM companies WHERE id = $1",
+                row["company_id"],
+            )
+            if company:
+                company_name = company["name"]
+
+        if row.get("location_id"):
+            loc = await conn.fetchrow(
+                "SELECT name, city, state FROM business_locations WHERE id = $1",
+                row["location_id"],
+            )
+            if loc:
+                location_name = loc["name"]
+                location_city = loc["city"]
+                location_state = loc["state"]
+
         # Log audit
         await log_audit(
             conn,
@@ -417,7 +504,14 @@ async def update_incident(
             request.client.host if request.client else None,
         )
 
-        return row_to_response(row, doc_count)
+        # Build response with context
+        response_row = dict(row)
+        response_row["company_name"] = company_name
+        response_row["location_name"] = location_name
+        response_row["location_city"] = location_city
+        response_row["location_state"] = location_state
+
+        return row_to_response(response_row, doc_count)
 
 
 @router.delete("/{incident_id}")
@@ -865,7 +959,7 @@ async def analyze_categorization(
     current_user=Depends(require_admin_or_client),
 ):
     """Auto-categorize an incident using AI."""
-    from ..services.ir_analysis import get_ir_analyzer
+    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -894,14 +988,28 @@ async def analyze_categorization(
                 generated_at=result["generated_at"],
             )
 
-        # Run AI analysis
-        analyzer = get_ir_analyzer()
-        result = await analyzer.categorize_incident(
-            title=row["title"],
-            description=row["description"],
-            location=row["location"],
-            reported_by=row["reported_by_name"],
-        )
+        # Run AI analysis with fallback to stale cache on failure
+        try:
+            analyzer = get_ir_analyzer()
+            result = await analyzer.categorize_incident(
+                title=row["title"],
+                description=row["description"],
+                location=row["location"],
+                reported_by=row["reported_by_name"],
+            )
+        except IRAnalysisError as e:
+            # Gemini failed - try to return stale cache if available
+            if cached:
+                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                return CategorizationAnalysis(
+                    suggested_type=result["suggested_type"],
+                    confidence=result["confidence"],
+                    reasoning=result["reasoning"],
+                    generated_at=result["generated_at"],
+                    from_cache=True,
+                    cache_reason=str(e),
+                )
+            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
 
         # Cache the result
         await conn.execute(
@@ -940,7 +1048,7 @@ async def analyze_severity(
     current_user=Depends(require_admin_or_client),
 ):
     """Assess incident severity using AI."""
-    from ..services.ir_analysis import get_ir_analyzer
+    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -969,17 +1077,31 @@ async def analyze_severity(
                 generated_at=result["generated_at"],
             )
 
-        # Run AI analysis
-        analyzer = get_ir_analyzer()
-        category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
+        # Run AI analysis with fallback to stale cache on failure
+        try:
+            analyzer = get_ir_analyzer()
+            category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
 
-        result = await analyzer.assess_severity(
-            title=row["title"],
-            description=row["description"],
-            incident_type=row["incident_type"],
-            location=row["location"],
-            category_data=category_data,
-        )
+            result = await analyzer.assess_severity(
+                title=row["title"],
+                description=row["description"],
+                incident_type=row["incident_type"],
+                location=row["location"],
+                category_data=category_data,
+            )
+        except IRAnalysisError as e:
+            # Gemini failed - try to return stale cache if available
+            if cached:
+                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                return SeverityAnalysis(
+                    suggested_severity=result["suggested_severity"],
+                    factors=result["factors"],
+                    reasoning=result["reasoning"],
+                    generated_at=result["generated_at"],
+                    from_cache=True,
+                    cache_reason=str(e),
+                )
+            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
 
         # Cache the result
         await conn.execute(
@@ -1018,7 +1140,7 @@ async def analyze_root_cause(
     current_user=Depends(require_admin_or_client),
 ):
     """Perform root cause analysis using AI."""
-    from ..services.ir_analysis import get_ir_analyzer
+    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -1048,20 +1170,35 @@ async def analyze_root_cause(
                 generated_at=result["generated_at"],
             )
 
-        # Run AI analysis
-        analyzer = get_ir_analyzer()
-        category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
-        witnesses = parse_witnesses(row.get("witnesses"))
+        # Run AI analysis with fallback to stale cache on failure
+        try:
+            analyzer = get_ir_analyzer()
+            category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
+            witnesses = parse_witnesses(row.get("witnesses"))
 
-        result = await analyzer.analyze_root_cause(
-            title=row["title"],
-            description=row["description"],
-            incident_type=row["incident_type"],
-            severity=row["severity"],
-            location=row["location"],
-            category_data=category_data,
-            witnesses=[w.model_dump() for w in witnesses],
-        )
+            result = await analyzer.analyze_root_cause(
+                title=row["title"],
+                description=row["description"],
+                incident_type=row["incident_type"],
+                severity=row["severity"],
+                location=row["location"],
+                category_data=category_data,
+                witnesses=[w.model_dump() for w in witnesses],
+            )
+        except IRAnalysisError as e:
+            # Gemini failed - try to return stale cache if available
+            if cached:
+                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                return RootCauseAnalysis(
+                    primary_cause=result["primary_cause"],
+                    contributing_factors=result["contributing_factors"],
+                    prevention_suggestions=result["prevention_suggestions"],
+                    reasoning=result["reasoning"],
+                    generated_at=result["generated_at"],
+                    from_cache=True,
+                    cache_reason=str(e),
+                )
+            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
 
         # Cache the result
         await conn.execute(
@@ -1101,7 +1238,8 @@ async def analyze_recommendations(
     current_user=Depends(require_admin_or_client),
 ):
     """Generate corrective action recommendations using AI."""
-    from ..services.ir_analysis import get_ir_analyzer
+    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from ..models.ir_incident import RecommendationItem
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -1110,6 +1248,36 @@ async def analyze_recommendations(
         )
         if not row:
             raise HTTPException(status_code=404, detail="Incident not found")
+
+        # Fetch company context
+        company_name = None
+        industry = None
+        company_size = None
+        ir_guidance_blurb = None
+
+        if row.get("company_id"):
+            company = await conn.fetchrow(
+                "SELECT name, industry, size, ir_guidance_blurb FROM companies WHERE id = $1",
+                row["company_id"],
+            )
+            if company:
+                company_name = company["name"]
+                industry = company["industry"]
+                company_size = company["size"]
+                ir_guidance_blurb = company["ir_guidance_blurb"]
+
+        # Fetch location context
+        city = None
+        state = None
+
+        if row.get("location_id"):
+            location = await conn.fetchrow(
+                "SELECT city, state FROM business_locations WHERE id = $1",
+                row["location_id"],
+            )
+            if location:
+                city = location["city"]
+                state = location["state"]
 
         # Check for cached analysis
         cached = await conn.fetchrow(
@@ -1123,22 +1291,40 @@ async def analyze_recommendations(
 
         if cached:
             result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
-            from ..models.ir_incident import RecommendationItem
             return RecommendationsAnalysis(
                 recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
                 summary=result["summary"],
                 generated_at=result["generated_at"],
             )
 
-        # Run AI analysis
-        analyzer = get_ir_analyzer()
-        result = await analyzer.generate_recommendations(
-            title=row["title"],
-            description=row["description"],
-            incident_type=row["incident_type"],
-            severity=row["severity"],
-            root_cause=row["root_cause"],
-        )
+        # Run AI analysis with fallback to stale cache on failure
+        try:
+            analyzer = get_ir_analyzer()
+            result = await analyzer.generate_recommendations(
+                title=row["title"],
+                description=row["description"],
+                incident_type=row["incident_type"],
+                severity=row["severity"],
+                root_cause=row["root_cause"],
+                company_name=company_name,
+                industry=industry,
+                company_size=company_size,
+                city=city,
+                state=state,
+                ir_guidance_blurb=ir_guidance_blurb,
+            )
+        except IRAnalysisError as e:
+            # Gemini failed - try to return stale cache if available
+            if cached:
+                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                return RecommendationsAnalysis(
+                    recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
+                    summary=result["summary"],
+                    generated_at=result["generated_at"],
+                    from_cache=True,
+                    cache_reason=str(e),
+                )
+            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
 
         # Cache the result
         await conn.execute(
@@ -1162,7 +1348,6 @@ async def analyze_recommendations(
             request.client.host if request.client else None,
         )
 
-        from ..models.ir_incident import RecommendationItem
         return RecommendationsAnalysis(
             recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
             summary=result["summary"],
@@ -1177,7 +1362,8 @@ async def analyze_similar_incidents(
     current_user=Depends(require_admin_or_client),
 ):
     """Find similar historical incidents using AI."""
-    from ..services.ir_analysis import get_ir_analyzer
+    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from ..models.ir_incident import SimilarIncident
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -1186,6 +1372,37 @@ async def analyze_similar_incidents(
         )
         if not row:
             raise HTTPException(status_code=404, detail="Incident not found")
+
+        # Check for cached analysis
+        cached = await conn.fetchrow(
+            """
+            SELECT analysis_data FROM ir_incident_analysis
+            WHERE incident_id = $1 AND analysis_type = 'similar'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            str(incident_id),
+        )
+
+        if cached:
+            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+            similar_incidents = []
+            for s in result.get("similar_incidents", []):
+                try:
+                    similar_incidents.append(SimilarIncident(
+                        incident_id=s["incident_id"],
+                        incident_number=s["incident_number"],
+                        title=s["title"],
+                        incident_type=s.get("incident_type", row["incident_type"]),
+                        similarity_score=s["similarity_score"],
+                        common_factors=s["common_factors"],
+                    ))
+                except Exception:
+                    continue
+            return SimilarIncidentsAnalysis(
+                similar_incidents=similar_incidents,
+                pattern_summary=result.get("pattern_summary"),
+                generated_at=result["generated_at"],
+            )
 
         # Get historical incidents (last 12 months, excluding current)
         twelve_months_ago = datetime.utcnow() - timedelta(days=365)
@@ -1214,16 +1431,42 @@ async def analyze_similar_incidents(
             for h in historical
         ]
 
-        # Run AI analysis
-        analyzer = get_ir_analyzer()
-        result = await analyzer.find_similar_incidents(
-            title=row["title"],
-            description=row["description"],
-            incident_type=row["incident_type"],
-            location=row["location"],
-            occurred_at=row["occurred_at"],
-            historical_incidents=historical_list,
-        )
+        # Run AI analysis with fallback to stale cache on failure
+        try:
+            analyzer = get_ir_analyzer()
+            result = await analyzer.find_similar_incidents(
+                title=row["title"],
+                description=row["description"],
+                incident_type=row["incident_type"],
+                location=row["location"],
+                occurred_at=row["occurred_at"],
+                historical_incidents=historical_list,
+            )
+        except IRAnalysisError as e:
+            # Gemini failed - try to return stale cache if available
+            if cached:
+                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                similar_incidents = []
+                for s in result.get("similar_incidents", []):
+                    try:
+                        similar_incidents.append(SimilarIncident(
+                            incident_id=s["incident_id"],
+                            incident_number=s["incident_number"],
+                            title=s["title"],
+                            incident_type=s.get("incident_type", row["incident_type"]),
+                            similarity_score=s["similarity_score"],
+                            common_factors=s["common_factors"],
+                        ))
+                    except Exception:
+                        continue
+                return SimilarIncidentsAnalysis(
+                    similar_incidents=similar_incidents,
+                    pattern_summary=result.get("pattern_summary"),
+                    generated_at=result["generated_at"],
+                    from_cache=True,
+                    cache_reason=str(e),
+                )
+            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
 
         # Cache the result
         await conn.execute(
@@ -1247,7 +1490,6 @@ async def analyze_similar_incidents(
             request.client.host if request.client else None,
         )
 
-        from ..models.ir_incident import SimilarIncident
         similar_incidents = []
         for s in result.get("similar_incidents", []):
             try:

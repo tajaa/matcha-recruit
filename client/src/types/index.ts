@@ -4,6 +4,7 @@ export interface Company {
   name: string;
   industry: string | null;
   size: string | null;
+  ir_guidance_blurb: string | null;
   created_at: string;
   culture_profile: CultureProfile | null;
   interview_count: number;
@@ -13,6 +14,30 @@ export interface CompanyCreate {
   name: string;
   industry?: string;
   size?: string;
+  ir_guidance_blurb?: string;
+}
+
+export interface CompanyUpdate {
+  name?: string;
+  industry?: string;
+  size?: string;
+  ir_guidance_blurb?: string;
+}
+
+// Business Location types
+export interface BusinessLocation {
+  id: string;
+  company_id: string;
+  name: string | null;
+  address: string | null;
+  city: string;
+  state: string;
+  county: string | null;
+  zipcode: string;
+  is_active: boolean;
+  last_compliance_check: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CultureProfile {
@@ -1224,6 +1249,12 @@ export interface IRIncident {
   root_cause: string | null;
   corrective_actions: string | null;
   document_count: number;
+  company_id: string | null;
+  location_id: string | null;
+  company_name: string | null;
+  location_name: string | null;
+  location_city: string | null;
+  location_state: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -1241,6 +1272,8 @@ export interface IRIncidentCreate {
   reported_by_email?: string;
   witnesses?: IRWitness[];
   category_data?: Record<string, unknown>;
+  company_id?: string;
+  location_id?: string;
 }
 
 export interface IRIncidentUpdate {
@@ -1256,6 +1289,8 @@ export interface IRIncidentUpdate {
   category_data?: Record<string, unknown>;
   root_cause?: string;
   corrective_actions?: string;
+  company_id?: string;
+  location_id?: string;
 }
 
 export interface IRIncidentListResponse {
@@ -1320,6 +1355,8 @@ export interface IRCategorizationAnalysis {
   confidence: number;
   reasoning: string;
   generated_at: string;
+  from_cache?: boolean;
+  cache_reason?: string;
 }
 
 export interface IRSeverityAnalysis {
@@ -1327,6 +1364,8 @@ export interface IRSeverityAnalysis {
   factors: string[];
   reasoning: string;
   generated_at: string;
+  from_cache?: boolean;
+  cache_reason?: string;
 }
 
 export interface IRRootCauseAnalysis {
@@ -1335,6 +1374,8 @@ export interface IRRootCauseAnalysis {
   prevention_suggestions: string[];
   reasoning: string;
   generated_at: string;
+  from_cache?: boolean;
+  cache_reason?: string;
 }
 
 export interface IRRecommendationItem {
@@ -1348,6 +1389,8 @@ export interface IRRecommendationsAnalysis {
   recommendations: IRRecommendationItem[];
   summary: string;
   generated_at: string;
+  from_cache?: boolean;
+  cache_reason?: string;
 }
 
 export interface IRSimilarIncident {
@@ -1363,6 +1406,8 @@ export interface IRSimilarIncidentsAnalysis {
   similar_incidents: IRSimilarIncident[];
   pattern_summary: string | null;
   generated_at: string;
+  from_cache?: boolean;
+  cache_reason?: string;
 }
 
 // Audit log

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { irIncidents } from '../api/client';
+import { complianceAPI, type BusinessLocation } from '../api/compliance';
 import type { IRIncidentType, IRSeverity, IRWitness, IRIncidentCreate } from '../types';
 
 const TYPES: { value: IRIncidentType; label: string }[] = [
@@ -38,6 +39,16 @@ export function IRCreate() {
   const [witnesses, setWitnesses] = useState<IRWitness[]>([]);
   const [categoryData, setCategoryData] = useState<Record<string, unknown>>({});
 
+  // Business location for context
+  const [businessLocations, setBusinessLocations] = useState<BusinessLocation[]>([]);
+  const [selectedLocationId, setSelectedLocationId] = useState<string>('');
+
+  useEffect(() => {
+    complianceAPI.getLocations().then(setBusinessLocations).catch(() => {
+      // Locations may not be available if compliance feature isn't enabled
+    });
+  }, []);
+
   const updateCategory = (field: string, value: unknown) => {
     setCategoryData({ ...categoryData, [field]: value });
   };
@@ -53,6 +64,10 @@ export function IRCreate() {
     setError(null);
 
     try {
+      // Derive company_id from the selected location
+      const selectedLocation = businessLocations.find((loc) => loc.id === selectedLocationId);
+      const companyId = selectedLocation?.company_id;
+
       const data: IRIncidentCreate = {
         title: title.trim(),
         description: description.trim() || undefined,
@@ -64,6 +79,8 @@ export function IRCreate() {
         reported_by_email: reportedByEmail.trim() || undefined,
         witnesses: witnesses.filter((w) => w.name.trim()),
         category_data: Object.keys(categoryData).length > 0 ? categoryData : undefined,
+        company_id: companyId || undefined,
+        location_id: selectedLocationId || undefined,
       };
 
       const created = await irIncidents.createIncident(data);
@@ -175,11 +192,33 @@ export function IRCreate() {
               type="text"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              placeholder="Location"
+              placeholder="Specific location (e.g., Warehouse B)"
               className={inputClass}
             />
           </div>
         </div>
+
+        {/* Business Location */}
+        {businessLocations.length > 0 && (
+          <div>
+            <div className={labelClass}>Business Location</div>
+            <select
+              value={selectedLocationId}
+              onChange={(e) => setSelectedLocationId(e.target.value)}
+              className={`${inputClass} cursor-pointer`}
+            >
+              <option value="">Select location...</option>
+              {businessLocations.map((loc) => (
+                <option key={loc.id} value={loc.id}>
+                  {loc.name ? `${loc.name} - ` : ''}{loc.city}, {loc.state}
+                </option>
+              ))}
+            </select>
+            <div className="text-[10px] text-zinc-600 mt-1">
+              Links to company location for compliance context
+            </div>
+          </div>
+        )}
 
         {/* Category-specific fields */}
         {incidentType === 'safety' && (

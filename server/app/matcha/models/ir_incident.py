@@ -80,6 +80,8 @@ class IRIncidentCreate(BaseModel):
     reported_by_email: Optional[str] = None
     witnesses: list[Witness] = []
     category_data: Optional[dict[str, Any]] = None
+    company_id: Optional[UUID] = None
+    location_id: Optional[UUID] = None
 
 
 class IRIncidentUpdate(BaseModel):
@@ -96,6 +98,8 @@ class IRIncidentUpdate(BaseModel):
     category_data: Optional[dict[str, Any]] = None
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
+    company_id: Optional[UUID] = None
+    location_id: Optional[UUID] = None
 
 
 class IRIncidentResponse(BaseModel):
@@ -118,6 +122,13 @@ class IRIncidentResponse(BaseModel):
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
     document_count: int = 0
+    company_id: Optional[UUID] = None
+    location_id: Optional[UUID] = None
+    # Denormalized context fields for display
+    company_name: Optional[str] = None
+    location_name: Optional[str] = None
+    location_city: Optional[str] = None
+    location_state: Optional[str] = None
     created_by: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -162,6 +173,8 @@ class CategorizationAnalysis(BaseModel):
     confidence: float
     reasoning: str
     generated_at: datetime
+    from_cache: bool = False
+    cache_reason: Optional[str] = None
 
 
 class SeverityAnalysis(BaseModel):
@@ -170,6 +183,8 @@ class SeverityAnalysis(BaseModel):
     factors: list[str]
     reasoning: str
     generated_at: datetime
+    from_cache: bool = False
+    cache_reason: Optional[str] = None
 
 
 class RootCauseAnalysis(BaseModel):
@@ -179,6 +194,8 @@ class RootCauseAnalysis(BaseModel):
     prevention_suggestions: list[str]
     reasoning: str
     generated_at: datetime
+    from_cache: bool = False
+    cache_reason: Optional[str] = None
 
 
 class RecommendationItem(BaseModel):
@@ -194,6 +211,8 @@ class RecommendationsAnalysis(BaseModel):
     recommendations: list[RecommendationItem]
     summary: str
     generated_at: datetime
+    from_cache: bool = False
+    cache_reason: Optional[str] = None
 
 
 class SimilarIncident(BaseModel):
@@ -211,6 +230,8 @@ class SimilarIncidentsAnalysis(BaseModel):
     similar_incidents: list[SimilarIncident]
     pattern_summary: Optional[str] = None
     generated_at: datetime
+    from_cache: bool = False
+    cache_reason: Optional[str] = None
 
 
 # ===========================================

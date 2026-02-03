@@ -8,11 +8,120 @@ AI-powered analysis for incident reporting:
 - Similar incident detection
 """
 
+import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 
 from google import genai
+
+
+# ===========================================
+# Constants and Exceptions
+# ===========================================
+
+GEMINI_CALL_TIMEOUT = 45  # seconds
+
+
+class IRAnalysisError(Exception):
+    """Raised when IR analysis fails after all retries."""
+    pass
+
+
+# ===========================================
+# Validation Functions
+# ===========================================
+
+VALID_INCIDENT_TYPES = {"safety", "behavioral", "property", "near_miss", "other"}
+VALID_SEVERITIES = {"critical", "high", "medium", "low"}
+
+
+def _validate_categorization(result: dict) -> Optional[str]:
+    """Validate categorization response. Returns error message or None."""
+    if result.get("suggested_type") not in VALID_INCIDENT_TYPES:
+        return f"Invalid suggested_type: {result.get('suggested_type')}. Must be one of: {VALID_INCIDENT_TYPES}"
+
+    confidence = result.get("confidence")
+    if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+        return f"Invalid confidence: {confidence} (must be number between 0.0 and 1.0)"
+
+    if not result.get("reasoning"):
+        return "Missing required field: reasoning"
+
+    return None
+
+
+def _validate_severity(result: dict) -> Optional[str]:
+    """Validate severity response. Returns error message or None."""
+    if result.get("suggested_severity") not in VALID_SEVERITIES:
+        return f"Invalid suggested_severity: {result.get('suggested_severity')}. Must be one of: {VALID_SEVERITIES}"
+
+    if not isinstance(result.get("factors"), list):
+        return "Invalid factors: must be a list"
+
+    if not result.get("reasoning"):
+        return "Missing required field: reasoning"
+
+    return None
+
+
+def _validate_root_cause(result: dict) -> Optional[str]:
+    """Validate root cause analysis response. Returns error message or None."""
+    if not result.get("primary_cause"):
+        return "Missing required field: primary_cause"
+
+    if not isinstance(result.get("contributing_factors"), list):
+        return "Invalid contributing_factors: must be a list"
+
+    if not isinstance(result.get("prevention_suggestions"), list):
+        return "Invalid prevention_suggestions: must be a list"
+
+    if not result.get("reasoning"):
+        return "Missing required field: reasoning"
+
+    return None
+
+
+def _validate_recommendations(result: dict) -> Optional[str]:
+    """Validate recommendations response. Returns error message or None."""
+    if not isinstance(result.get("recommendations"), list):
+        return "Invalid recommendations: must be a list"
+
+    if len(result.get("recommendations", [])) == 0:
+        return "recommendations list cannot be empty"
+
+    valid_priorities = {"immediate", "short_term", "long_term"}
+    for i, rec in enumerate(result.get("recommendations", [])):
+        if not isinstance(rec, dict):
+            return f"recommendations[{i}] must be an object"
+        if not rec.get("action"):
+            return f"recommendations[{i}] missing required field: action"
+        if rec.get("priority") not in valid_priorities:
+            return f"recommendations[{i}] invalid priority: {rec.get('priority')}. Must be one of: {valid_priorities}"
+
+    if not result.get("summary"):
+        return "Missing required field: summary"
+
+    return None
+
+
+def _validate_similar_incidents(result: dict) -> Optional[str]:
+    """Validate similar incidents response. Returns error message or None."""
+    if not isinstance(result.get("similar_incidents"), list):
+        return "Invalid similar_incidents: must be a list"
+
+    for i, inc in enumerate(result.get("similar_incidents", [])):
+        if not isinstance(inc, dict):
+            return f"similar_incidents[{i}] must be an object"
+        if not inc.get("incident_id"):
+            return f"similar_incidents[{i}] missing required field: incident_id"
+        if not inc.get("incident_number"):
+            return f"similar_incidents[{i}] missing required field: incident_number"
+        score = inc.get("similarity_score")
+        if not isinstance(score, (int, float)) or not 0 <= score <= 1:
+            return f"similar_incidents[{i}] invalid similarity_score: {score}"
+
+    return None
 
 
 # ===========================================
@@ -167,12 +276,25 @@ Type: {incident_type}
 Severity: {severity}
 Root Cause Analysis: {root_cause}
 
+COMPANY CONTEXT:
+Company: {company_name}
+Industry: {industry}
+Company Size: {company_size}
+Location: {city}, {state}
+
+COMPANY-SPECIFIC GUIDANCE:
+{ir_guidance_blurb}
+
 Generate practical, actionable recommendations for:
 1. Immediate actions (within 24-48 hours)
 2. Short-term improvements (within 1-2 weeks)
 3. Long-term systemic changes (within 1-3 months)
 
 Consider:
+- Industry-specific regulations and best practices for {industry}
+- State/local requirements for {state}
+- Company size constraints ({company_size})
+- The company's specific guidance above (if provided)
 - Regulatory compliance requirements
 - Resource constraints (time, budget, personnel)
 - Effectiveness and measurability
@@ -304,6 +426,60 @@ class IRAnalyzer:
 
         return json.loads(text.strip())
 
+    async def _call_with_retry(
+        self,
+        build_prompt_fn: Callable[[Optional[str]], str],
+        validate_fn: Callable[[dict], Optional[str]],
+        *,
+        max_retries: int = 1,
+    ) -> dict[str, Any]:
+        """
+        Call Gemini with retry logic and feedback on failure.
+
+        Args:
+            build_prompt_fn: Function that takes feedback (or None) and returns prompt.
+            validate_fn: Function that validates result, returns error string or None.
+            max_retries: Number of retries after initial attempt.
+
+        Returns:
+            Validated result dictionary.
+
+        Raises:
+            IRAnalysisError: If all attempts fail.
+        """
+        last_error = None
+
+        for attempt in range(1 + max_retries):
+            prompt = build_prompt_fn(feedback=last_error if attempt > 0 else None)
+
+            try:
+                response = await asyncio.wait_for(
+                    self.client.aio.models.generate_content(
+                        model=self.model,
+                        contents=prompt,
+                    ),
+                    timeout=GEMINI_CALL_TIMEOUT,
+                )
+
+                result = self._parse_json_response(response.text)
+
+                # Validate the result
+                validation_error = validate_fn(result)
+                if validation_error:
+                    last_error = f"PREVIOUS ATTEMPT FAILED VALIDATION: {validation_error}. Please fix and return valid JSON."
+                    continue
+
+                return result
+
+            except asyncio.TimeoutError:
+                last_error = f"PREVIOUS ATTEMPT TIMED OUT after {GEMINI_CALL_TIMEOUT}s. Please respond more concisely."
+            except json.JSONDecodeError as e:
+                last_error = f"PREVIOUS ATTEMPT FAILED JSON PARSE: {e}. Return ONLY valid JSON, no markdown."
+            except Exception as e:
+                last_error = f"PREVIOUS ATTEMPT FAILED: {e}"
+
+        raise IRAnalysisError(f"Analysis failed after {max_retries + 1} attempts: {last_error}")
+
     async def categorize_incident(
         self,
         title: str,
@@ -323,19 +499,18 @@ class IRAnalyzer:
         Returns:
             Categorization analysis with suggested type and confidence.
         """
-        prompt = CATEGORIZATION_PROMPT.format(
-            title=title,
-            description=description or "No description provided",
-            location=location or "Not specified",
-            reported_by=reported_by or "Not specified",
-        )
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = CATEGORIZATION_PROMPT.format(
+                title=title,
+                description=description or "No description provided",
+                location=location or "Not specified",
+                reported_by=reported_by or "Not specified",
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        result = await self._call_with_retry(build_prompt, _validate_categorization)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -360,20 +535,19 @@ class IRAnalyzer:
         Returns:
             Severity assessment with suggested level and factors.
         """
-        prompt = SEVERITY_ASSESSMENT_PROMPT.format(
-            title=title,
-            description=description or "No description provided",
-            incident_type=incident_type,
-            location=location or "Not specified",
-            category_data=json.dumps(category_data) if category_data else "None",
-        )
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = SEVERITY_ASSESSMENT_PROMPT.format(
+                title=title,
+                description=description or "No description provided",
+                incident_type=incident_type,
+                location=location or "Not specified",
+                category_data=json.dumps(category_data) if category_data else "None",
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        result = await self._call_with_retry(build_prompt, _validate_severity)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -402,22 +576,21 @@ class IRAnalyzer:
         Returns:
             Root cause analysis with primary cause, contributing factors, and prevention suggestions.
         """
-        prompt = ROOT_CAUSE_PROMPT.format(
-            title=title,
-            description=description or "No description provided",
-            incident_type=incident_type,
-            severity=severity,
-            location=location or "Not specified",
-            category_data=json.dumps(category_data) if category_data else "None",
-            witnesses=json.dumps(witnesses) if witnesses else "No witness statements",
-        )
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = ROOT_CAUSE_PROMPT.format(
+                title=title,
+                description=description or "No description provided",
+                incident_type=incident_type,
+                severity=severity,
+                location=location or "Not specified",
+                category_data=json.dumps(category_data) if category_data else "None",
+                witnesses=json.dumps(witnesses) if witnesses else "No witness statements",
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        result = await self._call_with_retry(build_prompt, _validate_root_cause)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -428,6 +601,13 @@ class IRAnalyzer:
         incident_type: str,
         severity: str,
         root_cause: Optional[str] = None,
+        # Company/location context parameters
+        company_name: Optional[str] = None,
+        industry: Optional[str] = None,
+        company_size: Optional[str] = None,
+        city: Optional[str] = None,
+        state: Optional[str] = None,
+        ir_guidance_blurb: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Generate corrective action recommendations.
@@ -438,24 +618,35 @@ class IRAnalyzer:
             incident_type: Type of incident.
             severity: Incident severity.
             root_cause: Root cause analysis results.
+            company_name: Name of the company.
+            industry: Company industry.
+            company_size: Company size (startup, mid, enterprise).
+            city: Location city.
+            state: Location state.
+            ir_guidance_blurb: Company-specific IR guidance.
 
         Returns:
             Recommendations with prioritized actions.
         """
-        prompt = RECOMMENDATIONS_PROMPT.format(
-            title=title,
-            description=description or "No description provided",
-            incident_type=incident_type,
-            severity=severity,
-            root_cause=root_cause or "Not yet analyzed",
-        )
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = RECOMMENDATIONS_PROMPT.format(
+                title=title,
+                description=description or "No description provided",
+                incident_type=incident_type,
+                severity=severity,
+                root_cause=root_cause or "Not yet analyzed",
+                company_name=company_name or "Not specified",
+                industry=industry or "Not specified",
+                company_size=company_size or "Not specified",
+                city=city or "Not specified",
+                state=state or "Not specified",
+                ir_guidance_blurb=ir_guidance_blurb or "No specific guidance provided",
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        result = await self._call_with_retry(build_prompt, _validate_recommendations)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -488,21 +679,20 @@ class IRAnalyzer:
             for inc in historical_incidents
         ]) if historical_incidents else "No historical incidents available."
 
-        prompt = SIMILAR_INCIDENTS_PROMPT.format(
-            title=title,
-            description=description or "No description provided",
-            incident_type=incident_type,
-            location=location or "Not specified",
-            occurred_at=occurred_at.isoformat() if occurred_at else "Not specified",
-            historical_incidents=historical_text,
-        )
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = SIMILAR_INCIDENTS_PROMPT.format(
+                title=title,
+                description=description or "No description provided",
+                incident_type=incident_type,
+                location=location or "Not specified",
+                occurred_at=occurred_at.isoformat() if occurred_at else "Not specified",
+                historical_incidents=historical_text,
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        result = await self._call_with_retry(build_prompt, _validate_similar_incidents)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 

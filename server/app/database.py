@@ -144,6 +144,7 @@ async def init_db():
                 approved_at TIMESTAMPTZ,
                 approved_by UUID REFERENCES users(id),
                 rejection_reason TEXT,
+                ir_guidance_blurb TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
@@ -864,6 +865,8 @@ async def init_db():
                 category_data JSONB DEFAULT '{}',
                 root_cause TEXT,
                 corrective_actions TEXT,
+                company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
+                location_id UUID REFERENCES business_locations(id) ON DELETE SET NULL,
                 created_by UUID REFERENCES users(id),
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW(),
@@ -884,6 +887,12 @@ async def init_db():
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_ir_incidents_location ON ir_incidents(location)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incidents_company_id ON ir_incidents(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incidents_location_id ON ir_incidents(location_id)
         """)
 
         # IR Incident Documents table (photos, forms, attachments)

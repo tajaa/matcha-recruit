@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Card, CardHeader, CardContent, Modal, PositionCard, PositionForm } from '../components';
 import { companies as companiesApi, interviews as interviewsApi, matching as matchingApi, positions as positionsApi } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import type { Company, Interview, MatchResult, Position } from '../types';
 
 export function CompanyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { hasFeature } = useAuth();
   const [company, setCompany] = useState<Company | null>(null);
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [matches, setMatches] = useState<MatchResult[]>([]);
@@ -21,6 +23,11 @@ export function CompanyDetail() {
   const [matching, setMatching] = useState(false);
   const [creatingPosition, setCreatingPosition] = useState(false);
 
+  // IR Guidance Blurb state
+  const [editingIRGuidance, setEditingIRGuidance] = useState(false);
+  const [irGuidanceBlurb, setIrGuidanceBlurb] = useState('');
+  const [savingIRGuidance, setSavingIRGuidance] = useState(false);
+
   const fetchData = async () => {
     if (!id) return;
     try {
@@ -34,6 +41,7 @@ export function CompanyDetail() {
       setInterviews(interviewsData);
       setMatches(matchesData);
       setPositions(positionsData);
+      setIrGuidanceBlurb(companyData.ir_guidance_blurb || '');
     } catch (err) {
       console.error('Failed to fetch data:', err);
     } finally {
@@ -98,6 +106,20 @@ export function CompanyDetail() {
       console.error('Failed to create position:', err);
     } finally {
       setCreatingPosition(false);
+    }
+  };
+
+  const handleSaveIRGuidance = async () => {
+    if (!id) return;
+    setSavingIRGuidance(true);
+    try {
+      const updated = await companiesApi.update(id, { ir_guidance_blurb: irGuidanceBlurb });
+      setCompany(updated);
+      setEditingIRGuidance(false);
+    } catch (err) {
+      console.error('Failed to save IR guidance:', err);
+    } finally {
+      setSavingIRGuidance(false);
     }
   };
 
@@ -249,6 +271,62 @@ export function CompanyDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {/* IR Guidance Section - only show if IR feature is enabled */}
+      {hasFeature('incidents') && (
+        <Card>
+          <CardHeader className="flex justify-between items-center border-zinc-800">
+            <h2 className="text-lg font-semibold text-zinc-100">IR Recommendations Guidance</h2>
+            {!editingIRGuidance && (
+              <Button size="sm" variant="secondary" onClick={() => setEditingIRGuidance(true)}>
+                Edit
+              </Button>
+            )}
+          </CardHeader>
+          <CardContent>
+            {editingIRGuidance ? (
+              <div className="space-y-4">
+                <textarea
+                  value={irGuidanceBlurb}
+                  onChange={(e) => setIrGuidanceBlurb(e.target.value)}
+                  placeholder="Enter custom guidance for IR recommendations (e.g., company policies, escalation preferences, cultural values to consider)..."
+                  rows={4}
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-white focus:border-transparent text-zinc-100 outline-none transition-all resize-none"
+                />
+                <p className="text-xs text-zinc-500">
+                  This guidance will be included when AI generates corrective action recommendations for incidents.
+                  Examples: "Prioritize employee wellbeing. Always recommend counseling resources for behavioral incidents."
+                </p>
+                <div className="flex justify-end gap-3">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setIrGuidanceBlurb(company?.ir_guidance_blurb || '');
+                      setEditingIRGuidance(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleSaveIRGuidance} disabled={savingIRGuidance}>
+                    {savingIRGuidance ? 'Saving...' : 'Save'}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2">
+                {company?.ir_guidance_blurb ? (
+                  <p className="text-zinc-300 leading-relaxed whitespace-pre-wrap">{company.ir_guidance_blurb}</p>
+                ) : (
+                  <p className="text-zinc-500 text-center py-4">
+                    No custom IR guidance set. Add guidance to customize AI recommendations for your company.
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Screening Interviews Section */}
       <Card>
