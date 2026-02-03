@@ -675,6 +675,153 @@ Be conservative with confidence scores:
             print(f"[Gemini Compliance] Adaptive retry failed: {e}")
             return first
 
+    async def verify_compliance_changes_batch(
+        self,
+        changes: List[Dict],
+        jurisdiction_name: str,
+    ) -> List[VerificationResult]:
+        """
+        Verify multiple compliance changes in a single API call for efficiency.
+        All changes should be for the same jurisdiction to share context.
+
+        Args:
+            changes: List of dicts with keys: category, title, old_value, new_value, index
+            jurisdiction_name: The jurisdiction these changes apply to
+
+        Returns:
+            List of VerificationResults in the same order as input changes
+        """
+        if not changes:
+            return []
+
+        if len(changes) == 1:
+            # Single change - use regular verification
+            c = changes[0]
+            result = await self.verify_compliance_change(
+                category=c.get("category", ""),
+                title=c.get("title", ""),
+                jurisdiction_name=jurisdiction_name,
+                old_value=c.get("old_value"),
+                new_value=c.get("new_value"),
+            )
+            return [result]
+
+        # Build batch prompt
+        changes_text = "\n".join([
+            f"{i+1}. Category: {c.get('category')}\n"
+            f"   Rule: {c.get('title')}\n"
+            f"   Previous value: {c.get('old_value') or 'N/A'}\n"
+            f"   New value: {c.get('new_value') or 'N/A'}"
+            for i, c in enumerate(changes)
+        ])
+
+        prompt = f"""You are a compliance verification expert. A compliance monitoring system detected the following {len(changes)} changes for {jurisdiction_name}:
+
+{changes_text}
+
+Your task:
+1. Use Google Search to verify whether EACH of these changes is accurate
+2. Check official government sources (.gov domains preferred) for {jurisdiction_name}
+3. Confirm or deny EACH change with supporting evidence
+
+IMPORTANT: Verify each change independently but share your research context across all of them.
+This is more efficient than separate searches for each change.
+
+Respond with a JSON object containing an array of results, one for each change IN THE SAME ORDER:
+{{
+  "results": [
+    {{
+      "change_number": 1,
+      "confirmed": true/false,
+      "confidence": 0.0 to 1.0,
+      "sources": [
+        {{
+          "url": "https://...",
+          "name": "Source Name",
+          "type": "official" | "news" | "blog" | "other",
+          "snippet": "Brief relevant excerpt"
+        }}
+      ],
+      "explanation": "Brief explanation of your findings"
+    }},
+    // ... one entry for each change
+  ]
+}}
+
+Be conservative with confidence scores:
+- 0.9+ only if confirmed by official .gov source
+- 0.6-0.9 if confirmed by reputable news sources
+- 0.3-0.6 if only found in blogs or unverified sources
+- Below 0.3 if you cannot find confirmation
+
+You MUST return exactly {len(changes)} results, one for each change listed above.
+"""
+        try:
+            if not self._has_api_key():
+                return [VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="No API key configured")] * len(changes)
+
+            # Check rate limit
+            try:
+                await get_rate_limiter().check_and_record("gemini_compliance", f"batch_verify_{jurisdiction_name[:20]}")
+            except RateLimitExceeded:
+                print(f"[Gemini Compliance] Rate limit hit during batch verification")
+                return [VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Rate limit exceeded")] * len(changes)
+
+            tools = [types.Tool(google_search=types.GoogleSearch())]
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.settings.analysis_model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.0,
+                        tools=tools,
+                        response_modalities=["TEXT"],
+                    ),
+                ),
+                timeout=GEMINI_CALL_TIMEOUT * 2,  # Double timeout for batch
+            )
+
+            raw_text = response.text
+            cleaned = _clean_json_text(raw_text)
+            data = json.loads(cleaned)
+
+            results_list = data.get("results", [])
+            if not isinstance(results_list, list):
+                print(f"[Gemini Compliance] Batch verification returned non-list results")
+                return [VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Invalid batch response")] * len(changes)
+
+            # Map results to VerificationResult objects
+            verification_results = []
+            for i, change in enumerate(changes):
+                # Find matching result by change_number or use index
+                result_data = None
+                for r in results_list:
+                    if r.get("change_number") == i + 1:
+                        result_data = r
+                        break
+                if result_data is None and i < len(results_list):
+                    result_data = results_list[i]
+
+                if result_data:
+                    verification_results.append(VerificationResult(
+                        confirmed=result_data.get("confirmed", False),
+                        confidence=float(result_data.get("confidence", 0.0)),
+                        sources=result_data.get("sources", []),
+                        explanation=result_data.get("explanation", ""),
+                    ))
+                else:
+                    verification_results.append(VerificationResult(
+                        confirmed=False, confidence=0.0, sources=[],
+                        explanation=f"No result returned for change {i+1}",
+                    ))
+
+            print(f"[Gemini Compliance] Batch verified {len(changes)} changes in single call")
+            return verification_results
+
+        except Exception as e:
+            print(f"[Gemini Compliance] Batch verification error: {e}")
+            return [VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Batch verification failed: {e}")] * len(changes)
+
     async def scan_upcoming_legislation(
         self,
         city: str,

@@ -1318,35 +1318,50 @@ async def run_compliance_check_stream(
                     yield {"type": "result", "status": "new", "message": req_title}
 
             # Verify material changes with Gemini (skip verification when using cached repository data)
+            # Phase 2.3: Use batched verification for efficiency
             if changes_to_verify and not used_repository:
                 verify_total = min(len(changes_to_verify), MAX_VERIFICATIONS_PER_CHECK)
-                yield {"type": "verifying", "message": f"Verifying {verify_total} change(s)..."}
+                yield {"type": "verifying", "message": f"Verifying {verify_total} change(s) in batch..."}
                 verification_count = 0
-                for idx, change_info in enumerate(changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK]):
+
+                # Prepare batch of changes for verification
+                changes_batch = []
+                for change_info in changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK]:
+                    req = change_info["req"]
+                    changes_batch.append({
+                        "category": req.get("category", ""),
+                        "title": req.get("title", ""),
+                        "old_value": change_info["old_value"],
+                        "new_value": change_info["new_value"],
+                    })
+
+                # Get jurisdiction name from first change (all same jurisdiction)
+                jurisdiction_name = changes_to_verify[0]["req"].get("jurisdiction_name", f"{location.city}, {location.state}")
+
+                try:
+                    yield {"type": "verifying_item", "message": f"Batch verifying {verify_total} changes...", "current": 1, "total": 1}
+                    verify_task = asyncio.create_task(
+                        service.verify_compliance_changes_batch(
+                            changes=changes_batch,
+                            jurisdiction_name=jurisdiction_name,
+                        )
+                    )
+                    async for evt in _heartbeat_while(verify_task):
+                        yield evt
+                    verification_results = verify_task.result()
+                except Exception as e:
+                    print(f"[Compliance] Batch verification failed: {e}")
+                    verification_results = [
+                        VerificationResult(confirmed=False, confidence=0.5, sources=[], explanation="Batch verification unavailable")
+                    ] * len(changes_batch)
+
+                # Process each verification result
+                for idx, (change_info, verification) in enumerate(zip(changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK], verification_results)):
                     req = change_info["req"]
                     existing = change_info["existing"]
 
-                    yield {"type": "verifying_item", "message": f"Verifying {req.get('title', 'change')}...", "current": idx + 1, "total": verify_total}
-
-                    try:
-                        verify_task = asyncio.create_task(
-                            service.verify_compliance_change_adaptive(
-                                category=req.get("category", ""),
-                                title=req.get("title", ""),
-                                jurisdiction_name=req.get("jurisdiction_name", ""),
-                                old_value=change_info["old_value"],
-                                new_value=change_info["new_value"],
-                            )
-                        )
-                        async for evt in _heartbeat_while(verify_task):
-                            yield evt
-                        verification = verify_task.result()
-                        confidence = score_verification_confidence(verification.sources)
-                        confidence = max(confidence, verification.confidence)
-                    except Exception as e:
-                        print(f"[Compliance] Verification failed: {e}")
-                        verification = VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Verification unavailable")
-                        confidence = 0.5
+                    confidence = score_verification_confidence(verification.sources)
+                    confidence = max(confidence, verification.confidence)
 
                     change_msg = f"Value changed from {change_info['old_value']} to {change_info['new_value']}."
                     description = req.get("description")
@@ -1398,6 +1413,7 @@ async def run_compliance_check_stream(
                         )
                         print(f"[Compliance] Low confidence ({confidence:.2f}) for change: {req.get('title')}, skipping alert")
 
+                # Handle overflow changes without verification
                 for change_info in changes_to_verify[MAX_VERIFICATIONS_PER_CHECK:]:
                     req = change_info["req"]
                     existing = change_info["existing"]
