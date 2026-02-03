@@ -354,6 +354,23 @@ async def _load_jurisdiction_legislation(conn, jurisdiction_id: UUID) -> List[Di
     return [dict(r) for r in rows]
 
 
+def _jurisdiction_row_to_dict(jr: dict) -> dict:
+    """Convert a jurisdiction_requirements row to a dict compatible with sync functions."""
+    return {
+        "category": jr["category"],
+        "jurisdiction_level": jr["jurisdiction_level"],
+        "jurisdiction_name": jr["jurisdiction_name"],
+        "title": jr["title"],
+        "description": jr["description"],
+        "current_value": jr["current_value"],
+        "numeric_value": jr["numeric_value"],
+        "source_url": jr["source_url"],
+        "source_name": jr["source_name"],
+        "effective_date": jr["effective_date"].isoformat() if jr.get("effective_date") else None,
+        "expiration_date": jr["expiration_date"].isoformat() if jr.get("expiration_date") else None,
+    }
+
+
 async def _upsert_jurisdiction_requirements(conn, jurisdiction_id: UUID, reqs: List[Dict]):
     """Write Gemini results into the jurisdiction repository. Remove stale rows."""
     new_keys = set()
@@ -1048,22 +1065,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
         has_repository_data = len(j_reqs) > 0
 
         if has_repository_data:
-            # Convert jurisdiction_requirements rows into dicts compatible with _sync_requirements_to_location
-            req_dicts = []
-            for jr in j_reqs:
-                req_dicts.append({
-                    "category": jr["category"],
-                    "jurisdiction_level": jr["jurisdiction_level"],
-                    "jurisdiction_name": jr["jurisdiction_name"],
-                    "title": jr["title"],
-                    "description": jr["description"],
-                    "current_value": jr["current_value"],
-                    "numeric_value": jr["numeric_value"],
-                    "source_url": jr["source_url"],
-                    "source_name": jr["source_name"],
-                    "effective_date": jr["effective_date"].isoformat() if jr.get("effective_date") else None,
-                    "expiration_date": jr["expiration_date"].isoformat() if jr.get("expiration_date") else None,
-                })
+            req_dicts = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
 
             # Clone requirements to location — no alerts for initial clone
             await _sync_requirements_to_location(
@@ -1145,28 +1147,30 @@ async def run_compliance_check_stream(
                 # Load from repository — skip Gemini
                 yield {"type": "repository", "message": f"Loading compliance data for {location_name}..."}
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
-                requirements = []
-                for jr in j_reqs:
-                    requirements.append({
-                        "category": jr["category"],
-                        "jurisdiction_level": jr["jurisdiction_level"],
-                        "jurisdiction_name": jr["jurisdiction_name"],
-                        "title": jr["title"],
-                        "description": jr["description"],
-                        "current_value": jr["current_value"],
-                        "numeric_value": jr["numeric_value"],
-                        "source_url": jr["source_url"],
-                        "source_name": jr["source_name"],
-                        "effective_date": jr["effective_date"].isoformat() if jr.get("effective_date") else None,
-                        "expiration_date": jr["expiration_date"].isoformat() if jr.get("expiration_date") else None,
-                    })
+                requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
                 used_repository = True
             else:
                 # Stale or missing — call Gemini
                 yield {"type": "researching", "message": f"Researching requirements for {location_name}..."}
+                retry_events = []
+                def _on_research_retry(attempt: int, error: str):
+                    retry_events.append({"type": "retrying", "message": f"Retrying research (attempt {attempt + 1})..."})
                 requirements = await service.research_location_compliance(
                     city=location.city, state=location.state, county=location.county,
+                    on_retry=_on_research_retry,
                 )
+                for evt in retry_events:
+                    yield evt
+
+            # Stale-data fallback: if Gemini returned nothing, try cached data.
+            # Do NOT set used_repository — fallback data should still go through
+            # the normal alert/verification flow.
+            if not requirements and not used_repository:
+                j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+                if j_reqs:
+                    requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+                    print(f"[Compliance] Falling back to stale repository data ({len(requirements)} cached requirements)")
+                    yield {"type": "fallback", "message": "Using cached data (live research unavailable)"}
 
             if not requirements:
                 await conn.execute(
@@ -1222,7 +1226,7 @@ async def run_compliance_check_stream(
                     existing = change_info["existing"]
 
                     try:
-                        verification = await service.verify_compliance_change(
+                        verification = await service.verify_compliance_change_adaptive(
                             category=req.get("category", ""),
                             title=req.get("title", ""),
                             jurisdiction_name=req.get("jurisdiction_name", ""),
@@ -1800,26 +1804,21 @@ async def run_compliance_check_background(
             threshold = location.auto_check_interval_days or 7
             if await _is_jurisdiction_fresh(conn, jurisdiction_id, threshold):
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
-                requirements = []
-                for jr in j_reqs:
-                    requirements.append({
-                        "category": jr["category"],
-                        "jurisdiction_level": jr["jurisdiction_level"],
-                        "jurisdiction_name": jr["jurisdiction_name"],
-                        "title": jr["title"],
-                        "description": jr["description"],
-                        "current_value": jr["current_value"],
-                        "numeric_value": jr["numeric_value"],
-                        "source_url": jr["source_url"],
-                        "source_name": jr["source_name"],
-                        "effective_date": jr["effective_date"].isoformat() if jr.get("effective_date") else None,
-                        "expiration_date": jr["expiration_date"].isoformat() if jr.get("expiration_date") else None,
-                    })
+                requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
                 used_repository = True
             else:
                 requirements = await service.research_location_compliance(
                     city=location.city, state=location.state, county=location.county,
                 )
+
+            # Stale-data fallback: if Gemini returned nothing, try cached data.
+            # Do NOT set used_repository — fallback data should still go through
+            # the normal alert/verification flow.
+            if not requirements and not used_repository:
+                j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+                if j_reqs:
+                    requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+                    print(f"[Compliance] Background: falling back to stale repository data ({len(requirements)} cached requirements)")
 
             if not requirements:
                 await conn.execute(
@@ -1853,7 +1852,7 @@ async def run_compliance_check_background(
                     req = change_info["req"]
                     existing = change_info["existing"]
                     try:
-                        verification = await service.verify_compliance_change(
+                        verification = await service.verify_compliance_change_adaptive(
                             category=req.get("category", ""), title=req.get("title", ""),
                             jurisdiction_name=req.get("jurisdiction_name", ""),
                             old_value=change_info["old_value"], new_value=change_info["new_value"],

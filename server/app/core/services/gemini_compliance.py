@@ -1,7 +1,8 @@
 import asyncio
 import json
+import re
 import os
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable
 from datetime import datetime, date
 
 from google import genai
@@ -12,6 +13,88 @@ from ..models.compliance import ComplianceCategory, JurisdictionLevel, Verificat
 
 # Timeout for individual Gemini API calls (seconds)
 GEMINI_CALL_TIMEOUT = 45
+
+VALID_CATEGORIES = {"minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency"}
+VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
+
+# Errors that should not be retried (API config / quota issues)
+_NON_RETRYABLE_KEYWORDS = {"API_KEY", "PERMISSION", "QUOTA", "RATE"}
+
+
+class GeminiExhaustedError(Exception):
+    """Raised when all retry attempts are exhausted."""
+
+    def __init__(self, message: str, last_raw: Optional[str] = None):
+        super().__init__(message)
+        self.last_raw = last_raw
+
+
+def _clean_json_text(text: str) -> str:
+    """Clean JSON text by removing markdown fences and fixing Python booleans."""
+    text = text.strip()
+
+    # Strip markdown fences (handles unclosed blocks)
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+
+    if text.endswith("```"):
+        text = text[:-3]
+
+    text = text.strip()
+
+    # Find the first '{' and last '}' to extract JSON from surrounding text
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start != -1 and end != -1:
+        text = text[start : end + 1]
+
+    # Fix common LLM JSON errors (Python booleans/None)
+    text = re.sub(r":\s*True\b", ": true", text)
+    text = re.sub(r":\s*False\b", ": false", text)
+    text = re.sub(r":\s*None\b", ": null", text)
+
+    return text
+
+
+def _validate_requirement(req: dict) -> Optional[str]:
+    """Validate a single requirement dict. Returns error string or None if valid."""
+    cat = req.get("category")
+    if cat not in VALID_CATEGORIES:
+        return f"invalid category '{cat}'"
+
+    level = req.get("jurisdiction_level")
+    if level not in VALID_JURISDICTION_LEVELS:
+        return f"invalid jurisdiction_level '{level}'"
+
+    if not req.get("title"):
+        return "missing title"
+
+    if not req.get("jurisdiction_name"):
+        return "missing jurisdiction_name"
+
+    return None
+
+
+def _validate_verification(data: dict) -> Optional[str]:
+    """Validate verification response dict. Returns error string or None if valid."""
+    if "confirmed" not in data:
+        return "missing 'confirmed' field"
+
+    confidence = data.get("confidence")
+    if confidence is None:
+        return "missing 'confidence' field"
+    try:
+        c = float(confidence)
+        if not (0.0 <= c <= 1.0):
+            return f"confidence {c} not in [0.0, 1.0]"
+    except (TypeError, ValueError):
+        return f"confidence '{confidence}' is not numeric"
+
+    return None
+
 
 class GeminiComplianceService:
     """
@@ -40,17 +123,112 @@ class GeminiComplianceService:
                 self._client = genai.Client(api_key=self.settings.gemini_api_key)
         return self._client
 
+    def _has_api_key(self) -> bool:
+        api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
+        return bool(api_key) or self.settings.use_vertex
+
+    async def _call_with_retry(
+        self,
+        prompt: str,
+        response_key: Optional[str],
+        *,
+        max_retries: int = 1,
+        validate_fn: Optional[Callable[[Any], Optional[str]]] = None,
+        label: str = "Gemini call",
+        on_retry: Optional[Callable[[int, str], Any]] = None,
+    ) -> Any:
+        """Call Gemini with retry-on-failure loop.
+
+        On each retry, appends feedback about what went wrong to the prompt.
+        Non-retryable errors (API key, permission, quota, rate) raise immediately.
+        When ``response_key`` is a string, returns ``data[response_key]``.
+        When ``response_key`` is ``None``, returns the full parsed dict.
+        Raises ``GeminiExhaustedError`` when all attempts fail.
+        """
+        tools = [types.Tool(google_search=types.GoogleSearch())]
+        last_raw: Optional[str] = None
+        last_error: Optional[str] = None
+        current_prompt = prompt
+
+        for attempt in range(1 + max_retries):
+            try:
+                if attempt > 0:
+                    print(f"[Gemini Compliance] {label}: Attempt {attempt + 1} (retrying: {last_error})")
+                    if on_retry is not None:
+                        on_retry(attempt, last_error)
+
+                response = await asyncio.wait_for(
+                    self.client.aio.models.generate_content(
+                        model=self.settings.analysis_model,
+                        contents=current_prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.0,
+                            tools=tools,
+                            response_modalities=["TEXT"],
+                        ),
+                    ),
+                    timeout=GEMINI_CALL_TIMEOUT,
+                )
+
+                raw_text = response.text
+                last_raw = raw_text
+
+                # Parse JSON
+                cleaned = _clean_json_text(raw_text)
+                data = json.loads(cleaned)
+
+                if response_key is not None:
+                    result = data.get(response_key)
+                    if result is None:
+                        last_error = f"missing '{response_key}' key in response"
+                        current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}. Return a JSON object with the '{response_key}' key."
+                        continue
+                else:
+                    result = data
+
+                # Run per-item validation if provided
+                if validate_fn is not None:
+                    validation_error = validate_fn(data)
+                    if validation_error:
+                        last_error = validation_error
+                        current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}. Please fix and try again."
+                        continue
+
+                return result
+
+            except json.JSONDecodeError as e:
+                last_error = f"response was not valid JSON: {e}"
+                snippet = (last_raw or "")[:200]
+                current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}. Raw start: {snippet}... You MUST respond with valid JSON only."
+
+            except (asyncio.TimeoutError, TimeoutError):
+                last_error = f"timed out after {GEMINI_CALL_TIMEOUT}s"
+                current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}. Please respond more concisely."
+
+            except Exception as e:
+                error_msg = str(e).upper()
+                if any(kw in error_msg for kw in _NON_RETRYABLE_KEYWORDS):
+                    raise
+                last_error = str(e)
+                current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}"
+
+        raise GeminiExhaustedError(
+            f"{label}: Exhausted {1 + max_retries} attempts. Last error: {last_error}",
+            last_raw=last_raw,
+        )
+
     async def research_location_compliance(
         self,
         city: str,
         state: str,
-        county: Optional[str] = None
+        county: Optional[str] = None,
+        on_retry: Optional[Callable[[int, str], Any]] = None,
     ) -> List[Dict]:
         """
         Research compliance requirements for a specific location.
         Returns a list of dictionaries matching the ComplianceRequirement structure.
         """
-        
+
         location_str = f"{city}, {state}"
         if county:
             location_str += f" ({county})"
@@ -113,50 +291,53 @@ Return at most one requirement per category. Ensure all data is accurate and sou
 """
 
         try:
-            # Check for API key
-            api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
-            if not api_key and not self.settings.use_vertex:
+            if not self._has_api_key():
                 print(f"[Gemini Compliance] ERROR: No GEMINI_API_KEY configured")
                 return []
 
             print(f"[Gemini Compliance] Researching compliance for {location_str}...")
 
-            # Use Google Search tool
-            tools = [types.Tool(google_search=types.GoogleSearch())]
+            def _validate_research(data: dict) -> Optional[str]:
+                reqs = data.get("requirements")
+                if not isinstance(reqs, list) or len(reqs) == 0:
+                    return "requirements list is empty"
+                return None
 
-            response = await asyncio.wait_for(
-                self.client.aio.models.generate_content(
-                    model=self.settings.analysis_model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.0,
-                        tools=tools,
-                        response_modalities=["TEXT"],
-                    ),
-                ),
-                timeout=GEMINI_CALL_TIMEOUT,
+            requirements = await self._call_with_retry(
+                prompt,
+                "requirements",
+                max_retries=1,
+                validate_fn=_validate_research,
+                label=f"Research {location_str}",
+                on_retry=on_retry,
             )
 
-            # Parse JSON from response
-            text = response.text
+            # Filter out invalid items
+            valid = []
+            for req in requirements:
+                error = _validate_requirement(req)
+                if error:
+                    print(f"[Gemini Compliance] Dropping invalid requirement: {error} — {req.get('title', '?')}")
+                else:
+                    valid.append(req)
 
-            # Clean up markdown code blocks if present
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0]
-            elif "```" in text:
-                text = text.split("```")[1].split("```")[0]
+            print(f"[Gemini Compliance] Found {len(valid)} requirements for {location_str}")
+            return valid
 
-            data = json.loads(text.strip())
-            requirements = data.get("requirements", [])
-            print(f"[Gemini Compliance] Found {len(requirements)} requirements for {location_str}")
-            return requirements
-
-        except json.JSONDecodeError as e:
-            print(f"[Gemini Compliance] Error parsing JSON response: {e}")
-            print(f"[Gemini Compliance] Raw response: {response.text[:500] if response else 'No response'}...")
-            return []
-        except (asyncio.TimeoutError, TimeoutError):
-            print(f"[Gemini Compliance] Gemini API timed out after {GEMINI_CALL_TIMEOUT}s for {location_str}")
+        except GeminiExhaustedError as e:
+            print(f"[Gemini Compliance] {e}")
+            # Attempt to salvage valid requirements from the last raw response
+            if e.last_raw:
+                try:
+                    cleaned = _clean_json_text(e.last_raw)
+                    data = json.loads(cleaned)
+                    raw_reqs = data.get("requirements", [])
+                    salvaged = [r for r in raw_reqs if _validate_requirement(r) is None]
+                    if salvaged:
+                        print(f"[Gemini Compliance] Salvaged {len(salvaged)} valid requirements from partial response")
+                        return salvaged
+                except Exception:
+                    pass
             return []
         except Exception as e:
             error_msg = str(e)
@@ -215,15 +396,104 @@ Be conservative with confidence scores:
 - Below 0.3 if you cannot find confirmation
 """
         try:
-            api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
-            if not api_key and not self.settings.use_vertex:
+            if not self._has_api_key():
                 return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="No API key configured")
+
+            data = await self._call_with_retry(
+                prompt,
+                None,
+                max_retries=1,
+                validate_fn=_validate_verification,
+                label=f"Verify {title}",
+            )
+
+            return VerificationResult(
+                confirmed=data.get("confirmed", False),
+                confidence=float(data.get("confidence", 0.0)),
+                sources=data.get("sources", []),
+                explanation=data.get("explanation", ""),
+            )
+
+        except GeminiExhaustedError as e:
+            print(f"[Gemini Compliance] {e}")
+            return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Verification exhausted retries: {e}")
+        except Exception as e:
+            error_msg = str(e)
+            if "API_KEY" in error_msg.upper() or "PERMISSION" in error_msg.upper():
+                print(f"[Gemini Compliance] Verification API Key/Permission error: {e}")
+            else:
+                print(f"[Gemini Compliance] Verification error: {e}")
+            return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Verification failed: {e}")
+
+    async def verify_compliance_change_adaptive(
+        self,
+        category: str,
+        title: str,
+        jurisdiction_name: str,
+        old_value: Optional[str],
+        new_value: Optional[str],
+    ) -> VerificationResult:
+        """Adaptive verification: retry with refined prompt if confidence is in the grey zone (0.3-0.6)."""
+        first = await self.verify_compliance_change(
+            category=category, title=title, jurisdiction_name=jurisdiction_name,
+            old_value=old_value, new_value=new_value,
+        )
+
+        # Confident enough or hopeless — return as-is
+        if first.confidence >= 0.6 or first.confidence < 0.3:
+            return first
+
+        # Grey zone: retry with a more targeted prompt
+        print(f"[Gemini Compliance] Adaptive retry for {title}: first confidence={first.confidence:.2f}")
+
+        refined_prompt = f"""You are a compliance verification expert performing a SECOND verification pass.
+
+A previous verification attempt returned LOW CONFIDENCE ({first.confidence:.2f}) for the following change:
+
+Category: {category}
+Rule: {title}
+Jurisdiction: {jurisdiction_name}
+Previous value: {old_value or 'N/A'}
+New value: {new_value or 'N/A'}
+
+Previous explanation: {first.explanation}
+
+Your task for this second pass:
+1. Search SPECIFICALLY for official .gov sources for {jurisdiction_name}
+2. Look for the exact value "{new_value}" on government websites
+3. Check the official labor department or wage board for {jurisdiction_name}
+4. If the category is minimum_wage, search for "{jurisdiction_name} minimum wage {new_value}"
+
+Respond with a JSON object:
+{{
+  "confirmed": true/false,
+  "confidence": 0.0 to 1.0,
+  "sources": [
+    {{
+      "url": "https://...",
+      "name": "Source Name",
+      "type": "official" | "news" | "blog" | "other",
+      "snippet": "Brief relevant excerpt"
+    }}
+  ],
+  "explanation": "Brief explanation of your findings"
+}}
+
+Be conservative with confidence scores:
+- 0.9+ only if confirmed by official .gov source
+- 0.6-0.9 if confirmed by reputable news sources
+- 0.3-0.6 if only found in blogs or unverified sources
+- Below 0.3 if you cannot find confirmation
+"""
+        try:
+            if not self._has_api_key():
+                return first
 
             tools = [types.Tool(google_search=types.GoogleSearch())]
             response = await asyncio.wait_for(
                 self.client.aio.models.generate_content(
                     model=self.settings.analysis_model,
-                    contents=prompt,
+                    contents=refined_prompt,
                     config=types.GenerateContentConfig(
                         temperature=0.0,
                         tools=tools,
@@ -233,25 +503,31 @@ Be conservative with confidence scores:
                 timeout=GEMINI_CALL_TIMEOUT,
             )
 
-            text = response.text
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0]
-            elif "```" in text:
-                text = text.split("```")[1].split("```")[0]
+            raw_text = response.text
+            cleaned = _clean_json_text(raw_text)
+            data = json.loads(cleaned)
 
-            data = json.loads(text.strip())
-            return VerificationResult(
+            val_err = _validate_verification(data)
+            if val_err:
+                print(f"[Gemini Compliance] Adaptive retry validation failed: {val_err}")
+                return first
+
+            second = VerificationResult(
                 confirmed=data.get("confirmed", False),
                 confidence=float(data.get("confidence", 0.0)),
                 sources=data.get("sources", []),
                 explanation=data.get("explanation", ""),
             )
-        except (asyncio.TimeoutError, TimeoutError):
-            print(f"[Gemini Compliance] Verification timed out after {GEMINI_CALL_TIMEOUT}s for {title} in {jurisdiction_name}")
-            return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Verification timed out after {GEMINI_CALL_TIMEOUT}s")
+
+            # Return whichever has higher confidence
+            if second.confidence > first.confidence:
+                print(f"[Gemini Compliance] Adaptive retry improved confidence: {first.confidence:.2f} -> {second.confidence:.2f}")
+                return second
+            return first
+
         except Exception as e:
-            print(f"[Gemini Compliance] Verification error: {e}")
-            return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Verification failed: {e}")
+            print(f"[Gemini Compliance] Adaptive retry failed: {e}")
+            return first
 
     async def scan_upcoming_legislation(
         self,
@@ -314,46 +590,37 @@ Only include items you can verify through search. Be conservative with confidenc
 Return an empty array if no upcoming legislation is found.
 """
         try:
-            api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
-            if not api_key and not self.settings.use_vertex:
+            if not self._has_api_key():
                 return []
 
             print(f"[Gemini Compliance] Scanning upcoming legislation for {location_str}...")
 
-            tools = [types.Tool(google_search=types.GoogleSearch())]
-            response = await asyncio.wait_for(
-                self.client.aio.models.generate_content(
-                    model=self.settings.analysis_model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.0,
-                        tools=tools,
-                        response_modalities=["TEXT"],
-                    ),
-                ),
-                timeout=GEMINI_CALL_TIMEOUT,
+            # Best-effort: max_retries=0 (not worth the latency for supplementary data)
+            upcoming = await self._call_with_retry(
+                prompt,
+                "upcoming",
+                max_retries=0,
+                label=f"Legislation scan {location_str}",
             )
+            if not isinstance(upcoming, list):
+                upcoming = []
 
-            text = response.text
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0]
-            elif "```" in text:
-                text = text.split("```")[1].split("```")[0]
-
-            data = json.loads(text.strip())
-            upcoming = data.get("upcoming", [])
             print(f"[Gemini Compliance] Found {len(upcoming)} upcoming legislative items for {location_str}")
             return upcoming
 
-        except json.JSONDecodeError as e:
-            print(f"[Gemini Compliance] Error parsing legislation JSON: {e}")
-            return []
-        except (asyncio.TimeoutError, TimeoutError):
-            print(f"[Gemini Compliance] Legislation scan timed out after {GEMINI_CALL_TIMEOUT}s for {location_str}")
+        except GeminiExhaustedError as e:
+            print(f"[Gemini Compliance] Legislation scan exhausted: {e}")
             return []
         except Exception as e:
-            print(f"[Gemini Compliance] Error scanning legislation: {e}")
+            error_msg = str(e)
+            if "API_KEY" in error_msg.upper() or "PERMISSION" in error_msg.upper():
+                print(f"[Gemini Compliance] API Key/Permission error: {e}")
+            elif "QUOTA" in error_msg.upper() or "RATE" in error_msg.upper():
+                print(f"[Gemini Compliance] Rate limit/quota error: {e}")
+            else:
+                print(f"[Gemini Compliance] Error scanning legislation: {e}")
             return []
+
 
 # Singleton instance
 _gemini_compliance: Optional[GeminiComplianceService] = None

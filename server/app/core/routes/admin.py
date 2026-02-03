@@ -807,7 +807,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                                 cache_key = (cat, old_val, new_val)
                                 if cache_key not in verified_changes:
                                     try:
-                                        verification = await service.verify_compliance_change(
+                                        verification = await service.verify_compliance_change_adaptive(
                                             category=cat,
                                             title=req.get("title", ""),
                                             jurisdiction_name=req.get("jurisdiction_name", ""),
