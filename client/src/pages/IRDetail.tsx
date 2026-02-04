@@ -12,6 +12,11 @@ import type {
   IRRecommendationsAnalysis,
   IRSimilarIncidentsAnalysis,
 } from '../types';
+import { CategorizationAnalysisModal } from '../components/ir/CategorizationAnalysisModal';
+import { SeverityAnalysisModal } from '../components/ir/SeverityAnalysisModal';
+import { RootCauseAnalysisModal } from '../components/ir/RootCauseAnalysisModal';
+import { RecommendationsAnalysisModal } from '../components/ir/RecommendationsAnalysisModal';
+import { SimilarIncidentsAnalysisModal } from '../components/ir/SimilarIncidentsAnalysisModal';
 
 const STATUS_OPTIONS: { value: IRStatus; label: string }[] = [
   { value: 'reported', label: 'Reported' },
@@ -65,6 +70,12 @@ export function IRDetail() {
   const [editingActions, setEditingActions] = useState(false);
   const [rootCauseText, setRootCauseText] = useState('');
   const [correctiveActionsText, setCorrectiveActionsText] = useState('');
+
+  const [showCategorizationModal, setShowCategorizationModal] = useState(false);
+  const [showSeverityModal, setShowSeverityModal] = useState(false);
+  const [showRootCauseModal, setShowRootCauseModal] = useState(false);
+  const [showRecommendationsModal, setShowRecommendationsModal] = useState(false);
+  const [showSimilarModal, setShowSimilarModal] = useState(false);
 
   const fetchIncident = useCallback(async () => {
     if (!id) return;
@@ -399,12 +410,12 @@ export function IRDetail() {
             <div className={`${labelClass} mb-4`}>AI Analysis</div>
             <div className="space-y-3">
               {[
-                { key: 'categorization', label: 'Category', data: categorization },
-                { key: 'severity', label: 'Severity', data: severityAnalysis },
-                { key: 'root_cause', label: 'Root Cause', data: rootCause },
-                { key: 'recommendations', label: 'Actions', data: recommendations },
-                { key: 'similar', label: 'Similar', data: similarIncidents },
-              ].map(({ key, label, data }) => (
+                { key: 'categorization', label: 'Category', data: categorization, onClick: () => setShowCategorizationModal(true) },
+                { key: 'severity', label: 'Severity', data: severityAnalysis, onClick: () => setShowSeverityModal(true) },
+                { key: 'root_cause', label: 'Root Cause', data: rootCause, onClick: () => setShowRootCauseModal(true) },
+                { key: 'recommendations', label: 'Actions', data: recommendations, onClick: () => setShowRecommendationsModal(true) },
+                { key: 'similar', label: 'Similar', data: similarIncidents, onClick: () => setShowSimilarModal(true) },
+              ].map(({ key, label, data, onClick }) => (
                 <div key={key} className="py-2 border-b border-zinc-900">
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-zinc-400">{label}</span>
@@ -417,18 +428,30 @@ export function IRDetail() {
                     </button>
                   </div>
                   {key === 'categorization' && categorization && (
-                    <div className="mt-2 text-[10px] text-zinc-500">
-                      {TYPE_LABELS[categorization.suggested_type]} ({(categorization.confidence * 100).toFixed(0)}%)
+                    <div
+                      onClick={onClick}
+                      className="mt-2 text-[10px] text-zinc-500 cursor-pointer hover:bg-zinc-900 rounded p-2 -m-2 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>{TYPE_LABELS[categorization.suggested_type]} ({(categorization.confidence * 100).toFixed(0)}%)</span>
+                        <span className="text-zinc-700">→</span>
+                      </div>
                       {categorization.from_cache && (
                         <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
                       )}
                     </div>
                   )}
                   {key === 'severity' && severityAnalysis && (
-                    <div className="mt-2">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${SEVERITY_COLORS[severityAnalysis.suggested_severity]}`} />
-                        <span className="text-[10px] text-zinc-500 capitalize">{severityAnalysis.suggested_severity}</span>
+                    <div
+                      onClick={onClick}
+                      className="mt-2 cursor-pointer hover:bg-zinc-900 rounded p-2 -m-2 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${SEVERITY_COLORS[severityAnalysis.suggested_severity]}`} />
+                          <span className="text-[10px] text-zinc-500 capitalize">{severityAnalysis.suggested_severity}</span>
+                        </div>
+                        <span className="text-zinc-700">→</span>
                       </div>
                       {severityAnalysis.from_cache && (
                         <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
@@ -436,24 +459,42 @@ export function IRDetail() {
                     </div>
                   )}
                   {key === 'root_cause' && rootCause && (
-                    <div className="mt-2">
-                      <div className="text-[10px] text-zinc-500 line-clamp-2">{rootCause.primary_cause}</div>
+                    <div
+                      onClick={onClick}
+                      className="mt-2 cursor-pointer hover:bg-zinc-900 rounded p-2 -m-2 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-[10px] text-zinc-500 line-clamp-2 flex-1">{rootCause.primary_cause}</div>
+                        <span className="text-zinc-700">→</span>
+                      </div>
                       {rootCause.from_cache && (
                         <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
                       )}
                     </div>
                   )}
                   {key === 'recommendations' && recommendations && (
-                    <div className="mt-2 text-[10px] text-zinc-500">
-                      {recommendations.recommendations.length} actions suggested
+                    <div
+                      onClick={onClick}
+                      className="mt-2 text-[10px] text-zinc-500 cursor-pointer hover:bg-zinc-900 rounded p-2 -m-2 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>{recommendations.recommendations.length} actions suggested</span>
+                        <span className="text-zinc-700">→</span>
+                      </div>
                       {recommendations.from_cache && (
                         <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
                       )}
                     </div>
                   )}
                   {key === 'similar' && similarIncidents && (
-                    <div className="mt-2 text-[10px] text-zinc-500">
-                      {similarIncidents.similar_incidents.length} similar found
+                    <div
+                      onClick={onClick}
+                      className="mt-2 text-[10px] text-zinc-500 cursor-pointer hover:bg-zinc-900 rounded p-2 -m-2 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>{similarIncidents.similar_incidents.length} similar found</span>
+                        <span className="text-zinc-700">→</span>
+                      </div>
                       {similarIncidents.from_cache && (
                         <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
                       )}
@@ -503,6 +544,33 @@ export function IRDetail() {
           </div>
         </div>
       </div>
+
+      {/* Analysis Detail Modals */}
+      <CategorizationAnalysisModal
+        isOpen={showCategorizationModal}
+        onClose={() => setShowCategorizationModal(false)}
+        analysis={categorization}
+      />
+      <SeverityAnalysisModal
+        isOpen={showSeverityModal}
+        onClose={() => setShowSeverityModal(false)}
+        analysis={severityAnalysis}
+      />
+      <RootCauseAnalysisModal
+        isOpen={showRootCauseModal}
+        onClose={() => setShowRootCauseModal(false)}
+        analysis={rootCause}
+      />
+      <RecommendationsAnalysisModal
+        isOpen={showRecommendationsModal}
+        onClose={() => setShowRecommendationsModal(false)}
+        analysis={recommendations}
+      />
+      <SimilarIncidentsAnalysisModal
+        isOpen={showSimilarModal}
+        onClose={() => setShowSimilarModal(false)}
+        analysis={similarIncidents}
+      />
     </div>
   );
 }
