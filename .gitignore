@@ -47,3 +47,9 @@ service-account*.json
 node_modules/
 client/node_modules/
 client/dist/
+
+# Xcode
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.xcuserstate
