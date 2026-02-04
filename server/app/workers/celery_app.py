@@ -26,6 +26,7 @@ celery_app = Celery(
         "app.workers.tasks.compliance_checks",
         "app.workers.tasks.legislation_watch",
         "app.workers.tasks.pattern_recognition",
+        "app.workers.tasks.structured_data_fetch",
     ],
 )
 
@@ -98,6 +99,12 @@ def on_worker_ready(**kwargs):
     )
     from app.workers.tasks.legislation_watch import run_legislation_watch
     from app.workers.tasks.pattern_recognition import run_pattern_recognition
+    from app.workers.tasks.structured_data_fetch import fetch_structured_data_sources
+
+    if _is_scheduler_enabled("structured_data_fetch"):
+        fetch_structured_data_sources.delay()
+    else:
+        print("[Worker] Structured data fetch scheduler is disabled, skipping.")
 
     if _is_scheduler_enabled("compliance_checks"):
         enqueue_scheduled_compliance_checks.delay()

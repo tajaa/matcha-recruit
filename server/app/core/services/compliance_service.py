@@ -1307,15 +1307,38 @@ async def run_compliance_check_stream(
                     jurisdiction_id, location_id,
                 )
 
-            # Check if jurisdiction repository is fresh enough
+            # ============================================================
+            # TIER 1: Check for fresh structured data from authoritative sources
+            # ============================================================
+            from .structured_data import StructuredDataService
+            structured_service = StructuredDataService()
+
+            tier1_data = await structured_service.get_tier1_data(
+                conn, jurisdiction_id,
+                city=location.city, state=location.state, county=location.county,
+                categories=["minimum_wage"],
+                freshness_hours=168,  # 7 days
+            )
+
+            if tier1_data:
+                yield {"type": "tier1", "message": f"Loading verified data for {location_name}..."}
+                requirements = tier1_data
+                used_repository = True  # Skip Gemini and fresh-data logic
+
+            # ============================================================
+            # TIER 2: Check if jurisdiction repository is fresh enough
+            # ============================================================
             # Use the location's auto_check_interval_days as the freshness threshold
-            threshold = location.auto_check_interval_days or 7
-            if await _is_jurisdiction_fresh(conn, jurisdiction_id, threshold):
+            elif await _is_jurisdiction_fresh(conn, jurisdiction_id, location.auto_check_interval_days or 7):
                 # Load from repository — skip Gemini
                 yield {"type": "repository", "message": f"Loading compliance data for {location_name}..."}
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
                 used_repository = True
+
+            # ============================================================
+            # TIER 3: Research with Gemini (stale or missing data)
+            # ============================================================
             else:
                 # Stale or missing — call Gemini
                 # First, get known sources for this jurisdiction (or discover them)
