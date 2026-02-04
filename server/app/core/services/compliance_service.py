@@ -1318,6 +1318,7 @@ async def run_compliance_check_stream(
                 city=location.city, state=location.state, county=location.county,
                 categories=["minimum_wage"],
                 freshness_hours=168,  # 7 days
+                triggered_by="stream_check",
             )
 
             if tier1_data:
@@ -2268,6 +2269,7 @@ async def run_compliance_check_background(
                 city=location.city, state=location.state, county=location.county,
                 categories=["minimum_wage"],
                 freshness_hours=168,
+                triggered_by="background_check",
             )
 
             # Check repository freshness threshold

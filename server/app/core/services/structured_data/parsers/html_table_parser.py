@@ -9,6 +9,7 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+from ..http_utils import fetch_with_retry
 from .base import BaseParser, ParsedRequirement
 
 
@@ -35,18 +36,25 @@ class HTMLTableParser(BaseParser):
             print("[HTML Parser] beautifulsoup4 not installed, skipping HTML parse")
             return []
 
-        # Fetch the HTML content
+        # Fetch the HTML content with retry logic
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(
-                    source_url,
-                    follow_redirects=True,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (compatible; MatchaComplianceBot/1.0)"
-                    },
-                )
-                response.raise_for_status()
-                content = response.text
+            response = await fetch_with_retry(
+                source_url,
+                timeout=60.0,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; MatchaComplianceBot/1.0)"
+                },
+            )
+
+            # Validate content-type
+            content_type = response.headers.get("content-type", "").lower()
+            if "text/html" not in content_type and "application/xhtml" not in content_type:
+                # Allow if URL ends in .html or .htm regardless of content-type
+                if not any(source_url.lower().endswith(ext) for ext in [".html", ".htm"]):
+                    print(f"[HTML Parser] Unexpected content-type '{content_type}' for {source_url}")
+                    return []
+
+            content = response.text
         except httpx.HTTPError as e:
             print(f"[HTML Parser] HTTP error fetching {source_url}: {e}")
             return []
@@ -187,6 +195,20 @@ class HTMLTableParser(BaseParser):
 
             # Extract numeric value
             numeric_value = self.extract_numeric_value(current_wage)
+
+            # Validate wage bounds
+            if numeric_value is not None:
+                is_valid, error_msg = self.validate_wage_bounds(numeric_value, "minimum_wage")
+                if not is_valid:
+                    print(f"[HTML Parser] Rejected {jurisdiction_name}: {error_msg}")
+                    return None
+
+            # Validate effective date
+            if effective_date is not None:
+                is_valid, error_msg = self.validate_effective_date(effective_date)
+                if not is_valid:
+                    print(f"[HTML Parser] Rejected {jurisdiction_name}: {error_msg}")
+                    return None
 
             return ParsedRequirement(
                 jurisdiction_key=jurisdiction_key,

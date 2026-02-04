@@ -3,10 +3,23 @@
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 from ..sources import STATE_CODES
+
+# Validation bounds for different wage categories
+WAGE_BOUNDS: dict[str, tuple[float, float]] = {
+    "minimum_wage": (2.00, 50.00),      # Federal min is $7.25, highest state ~$17
+    "tipped_wage": (2.00, 25.00),       # Tipped minimum can be $2.13 federally
+    "youth_wage": (2.00, 35.00),        # Youth wages can be lower
+    "large_employer": (2.00, 50.00),    # Same as general
+    "small_employer": (2.00, 50.00),    # Same as general
+}
+
+# Date validation bounds
+DATE_MAX_PAST_YEARS = 2   # Reject effective dates more than 2 years ago
+DATE_MAX_FUTURE_YEARS = 2  # Reject effective dates more than 2 years in future
 
 
 @dataclass
@@ -215,3 +228,58 @@ class BaseParser(ABC):
             return "county"
 
         return "city"
+
+    @staticmethod
+    def validate_wage_bounds(
+        value: float, category: str = "minimum_wage"
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Validate that a wage value falls within reasonable bounds.
+
+        Args:
+            value: The numeric wage value
+            category: The wage category for bound lookup
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if value is None:
+            return True, None  # None values are handled elsewhere
+
+        bounds = WAGE_BOUNDS.get(category, WAGE_BOUNDS["minimum_wage"])
+        min_wage, max_wage = bounds
+
+        if value < min_wage:
+            return False, f"Wage ${value:.2f} below minimum bound ${min_wage:.2f}"
+        if value > max_wage:
+            return False, f"Wage ${value:.2f} above maximum bound ${max_wage:.2f}"
+
+        return True, None
+
+    @staticmethod
+    def validate_effective_date(
+        effective_date: date, allow_none: bool = True
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Validate that an effective date is within reasonable bounds.
+
+        Args:
+            effective_date: The date to validate
+            allow_none: Whether None dates are acceptable
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if effective_date is None:
+            return allow_none, None if allow_none else "Effective date is required"
+
+        today = date.today()
+        min_date = today - timedelta(days=DATE_MAX_PAST_YEARS * 365)
+        max_date = today + timedelta(days=DATE_MAX_FUTURE_YEARS * 365)
+
+        if effective_date < min_date:
+            return False, f"Effective date {effective_date} is more than {DATE_MAX_PAST_YEARS} years in the past"
+        if effective_date > max_date:
+            return False, f"Effective date {effective_date} is more than {DATE_MAX_FUTURE_YEARS} years in the future"
+
+        return True, None

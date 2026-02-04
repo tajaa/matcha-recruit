@@ -6,6 +6,7 @@ from typing import Optional
 
 import httpx
 
+from ..http_utils import fetch_with_retry
 from .base import BaseParser, ParsedRequirement
 
 
@@ -28,12 +29,20 @@ class CSVParser(BaseParser):
         Returns:
             List of parsed requirements
         """
-        # Fetch the CSV content
+        # Fetch the CSV content with retry logic
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(source_url, follow_redirects=True)
-                response.raise_for_status()
-                content = response.text
+            response = await fetch_with_retry(source_url, timeout=60.0)
+
+            # Validate content-type
+            content_type = response.headers.get("content-type", "").lower()
+            valid_types = ["text/csv", "text/plain", "application/csv", "application/octet-stream"]
+            if not any(vt in content_type for vt in valid_types):
+                # Allow if URL ends in .csv regardless of content-type
+                if not source_url.lower().endswith(".csv"):
+                    print(f"[CSV Parser] Unexpected content-type '{content_type}' for {source_url}")
+                    return []
+
+            content = response.text
         except httpx.HTTPError as e:
             print(f"[CSV Parser] HTTP error fetching {source_url}: {e}")
             return []
@@ -113,6 +122,20 @@ class CSVParser(BaseParser):
 
             # Extract numeric value
             numeric_value = self.extract_numeric_value(current_wage)
+
+            # Validate wage bounds
+            if numeric_value is not None:
+                is_valid, error_msg = self.validate_wage_bounds(numeric_value, "minimum_wage")
+                if not is_valid:
+                    print(f"[CSV Parser] Rejected {jurisdiction_name}: {error_msg}")
+                    return None
+
+            # Validate effective date
+            if effective_date is not None:
+                is_valid, error_msg = self.validate_effective_date(effective_date)
+                if not is_valid:
+                    print(f"[CSV Parser] Rejected {jurisdiction_name}: {error_msg}")
+                    return None
 
             # Get rate type from config or default
             rate_type = parser_config.get("rate_type", "general")

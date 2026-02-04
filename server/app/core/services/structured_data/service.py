@@ -21,8 +21,21 @@ from uuid import UUID
 
 import asyncpg
 
+from .audit import (
+    log_fetch_start,
+    log_fetch_success,
+    log_fetch_error,
+    log_tier1_use,
+    log_tier1_skip,
+)
+from .circuit_breaker import circuit_breaker
 from .parsers import get_parser, ParsedRequirement
 from .sources import get_source_for_jurisdiction
+
+
+# Retry configuration
+MAX_RETRIES = 3
+RETRY_DELAYS = [1, 2, 4]  # Exponential backoff in seconds
 
 
 class StructuredDataService:
@@ -37,6 +50,8 @@ class StructuredDataService:
         county: Optional[str],
         categories: list[str] | None = None,
         freshness_hours: int = 168,  # 7 days default
+        triggered_by: str = "unknown",
+        require_verified: bool = True,
     ) -> Optional[list[dict]]:
         """
         Get fresh Tier 1 data for a jurisdiction.
@@ -52,6 +67,8 @@ class StructuredDataService:
             county: County name (if applicable)
             categories: List of categories to fetch (default: all)
             freshness_hours: Maximum age of cached data in hours
+            triggered_by: What triggered this lookup (for audit logging)
+            require_verified: If True, only return verified data (default: True)
 
         Returns:
             List of requirement dicts if fresh data available, None otherwise
@@ -78,10 +95,22 @@ class StructuredDataService:
         # Check for cached data within freshness window
         cutoff = datetime.utcnow() - timedelta(hours=freshness_hours)
 
+        # Build verification filter
+        # Data from approved sources (requires_initial_review = false) is considered verified
+        # For unapproved sources, require explicit verification_status = 'verified'
+        verification_filter = ""
+        if require_verified:
+            verification_filter = """
+                  AND (
+                      s.requires_initial_review = false
+                      OR c.verification_status = 'verified'
+                  )
+            """
+
         results = []
+        all_cache_ids = []  # Accumulate cache IDs across all categories
         for category in categories:
-            rows = await conn.fetch(
-                """
+            query = f"""
                 SELECT
                     c.id,
                     c.jurisdiction_key,
@@ -97,9 +126,11 @@ class StructuredDataService:
                     c.next_scheduled_value,
                     c.notes,
                     c.fetched_at,
+                    c.verification_status,
                     s.source_name,
                     s.source_url,
-                    s.id as source_id
+                    s.id as source_id,
+                    s.requires_initial_review
                 FROM structured_data_cache c
                 JOIN structured_data_sources s ON c.source_id = s.id
                 WHERE c.state = $1
@@ -110,22 +141,39 @@ class StructuredDataService:
                       c.jurisdiction_key = $4
                       OR c.jurisdiction_level = 'state'
                   )
+                  {verification_filter}
                 ORDER BY
                     CASE c.jurisdiction_level
                         WHEN 'city' THEN 1
                         WHEN 'county' THEN 2
                         WHEN 'state' THEN 3
                     END
-                """,
+            """
+            rows = await conn.fetch(
+                query,
                 state, category, cutoff, jurisdiction_key,
             )
 
             for row in rows:
                 results.append(self._cache_row_to_requirement(row))
+                all_cache_ids.append(row["id"])
 
         if not results:
             print(f"[Tier 1] No fresh data for {jurisdiction_key} (cutoff: {cutoff})")
+            await log_tier1_skip(
+                conn, jurisdiction_id,
+                reason=f"No fresh data (cutoff: {cutoff.isoformat()})",
+                triggered_by=triggered_by,
+            )
             return None
+
+        # Log successful Tier 1 usage with all cache IDs
+        await log_tier1_use(
+            conn, jurisdiction_id,
+            cache_ids=all_cache_ids,
+            category=",".join(categories) if len(categories) > 1 else categories[0],
+            triggered_by=triggered_by,
+        )
 
         print(f"[Tier 1] Found {len(results)} fresh requirements for {jurisdiction_key}")
         return results
@@ -165,7 +213,15 @@ class StructuredDataService:
         if isinstance(parser_config, str):
             parser_config = json.loads(parser_config)
 
+        # Check circuit breaker
+        if await circuit_breaker.is_open(conn, source_id):
+            print(f"[Tier 1] Skipping {source_key} - circuit breaker open")
+            return {"status": "circuit_open", "source": source_key}
+
         print(f"[Tier 1] Fetching {source_key} from {source_url}")
+
+        # Log fetch start
+        await log_fetch_start(conn, source_id, source_url, triggered_by="scheduler")
 
         try:
             # Get appropriate parser
@@ -178,6 +234,7 @@ class StructuredDataService:
                 await self._update_source_status(
                     conn, source_id, "empty", "No requirements parsed"
                 )
+                await log_fetch_success(conn, source_id, 0, triggered_by="scheduler")
                 return {"status": "empty", "count": 0, "source": source_key}
 
             # Upsert to cache
@@ -186,12 +243,25 @@ class StructuredDataService:
             # Update source status
             await self._update_source_status(conn, source_id, "success", None, count)
 
+            # Record success with circuit breaker (resets failure count)
+            await circuit_breaker.record_success(conn, source_id)
+
+            # Log fetch success
+            await log_fetch_success(conn, source_id, count, triggered_by="scheduler")
+
             return {"status": "success", "count": count, "source": source_key}
 
         except Exception as e:
             error_msg = str(e)[:500]
             print(f"[Tier 1] Error fetching {source_key}: {error_msg}")
             await self._update_source_status(conn, source_id, "error", error_msg)
+
+            # Record failure with circuit breaker
+            circuit_opened = await circuit_breaker.record_failure(conn, source_id)
+            if circuit_opened:
+                print(f"[Tier 1] Circuit breaker opened for {source_key}")
+
+            await log_fetch_error(conn, source_id, error_msg, triggered_by="scheduler")
             return {"status": "error", "error": error_msg, "source": source_key}
 
     async def fetch_all_due_sources(self, conn: asyncpg.Connection) -> dict[str, Any]:
@@ -208,7 +278,7 @@ class StructuredDataService:
         Returns:
             Dict with summary of fetch results
         """
-        # Find due sources
+        # Find due sources (excluding those with open circuit breakers)
         due_sources = await conn.fetch(
             """
             SELECT id, source_key, fetch_interval_hours
@@ -218,6 +288,7 @@ class StructuredDataService:
                   last_fetched_at IS NULL
                   OR last_fetched_at + (fetch_interval_hours || ' hours')::interval < NOW()
               )
+              AND (circuit_open_until IS NULL OR circuit_open_until < NOW())
             ORDER BY
                 CASE WHEN last_fetched_at IS NULL THEN 0 ELSE 1 END,
                 last_fetched_at
@@ -334,6 +405,178 @@ class StructuredDataService:
             """,
             source_id, status, error, record_count,
         )
+
+    async def verify_cache_entry(
+        self,
+        conn: asyncpg.Connection,
+        cache_id: UUID,
+        status: str = "verified",
+        confidence_score: float = 1.0,
+    ) -> None:
+        """
+        Mark a cache entry as verified or rejected.
+
+        Args:
+            conn: Database connection
+            cache_id: UUID of the cache entry
+            status: 'verified' or 'rejected'
+            confidence_score: Confidence level (0.0 to 1.0)
+        """
+        await conn.execute(
+            """
+            UPDATE structured_data_cache
+            SET verification_status = $2,
+                confidence_score = $3,
+                verified_at = NOW()
+            WHERE id = $1
+            """,
+            cache_id, status, confidence_score,
+        )
+
+    async def get_pending_verification(
+        self,
+        conn: asyncpg.Connection,
+        limit: int = 50,
+    ) -> list[dict]:
+        """
+        Get cache entries pending verification from non-trusted sources.
+
+        Args:
+            conn: Database connection
+            limit: Maximum entries to return
+
+        Returns:
+            List of cache entries needing verification
+        """
+        rows = await conn.fetch(
+            """
+            SELECT
+                c.id, c.jurisdiction_key, c.jurisdiction_name, c.state,
+                c.category, c.rate_type, c.current_value, c.numeric_value,
+                c.effective_date, c.fetched_at,
+                s.source_name, s.source_url
+            FROM structured_data_cache c
+            JOIN structured_data_sources s ON c.source_id = s.id
+            WHERE c.verification_status = 'pending'
+              AND s.requires_initial_review = true
+            ORDER BY c.fetched_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+        return [dict(row) for row in rows]
+
+    async def approve_source(
+        self,
+        conn: asyncpg.Connection,
+        source_id: UUID,
+        reviewer: str,
+    ) -> None:
+        """
+        Approve a source for use without individual verification.
+
+        Args:
+            conn: Database connection
+            source_id: UUID of the source to approve
+            reviewer: Name/ID of the reviewer
+        """
+        await conn.execute(
+            """
+            UPDATE structured_data_sources
+            SET requires_initial_review = false,
+                initial_review_completed_at = NOW(),
+                initial_review_by = $2
+            WHERE id = $1
+            """,
+            source_id, reviewer,
+        )
+
+    async def get_sources_pending_review(
+        self,
+        conn: asyncpg.Connection,
+    ) -> list[dict]:
+        """
+        Get sources that require initial review before their data can be used.
+
+        Returns:
+            List of source dicts with their cached record counts
+        """
+        rows = await conn.fetch(
+            """
+            SELECT
+                s.id,
+                s.source_key,
+                s.source_name,
+                s.source_url,
+                s.source_type,
+                s.domain,
+                s.categories,
+                s.coverage_scope,
+                s.created_at,
+                s.last_fetched_at,
+                s.last_fetch_status,
+                s.record_count,
+                COUNT(c.id) as cached_records
+            FROM structured_data_sources s
+            LEFT JOIN structured_data_cache c ON c.source_id = s.id
+            WHERE s.requires_initial_review = true
+              AND s.is_active = true
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
+            """,
+        )
+        return [dict(row) for row in rows]
+
+    async def add_source(
+        self,
+        conn: asyncpg.Connection,
+        source_key: str,
+        source_name: str,
+        source_url: str,
+        source_type: str,
+        domain: str,
+        categories: list[str],
+        coverage_scope: str,
+        parser_config: dict,
+        coverage_states: Optional[list[str]] = None,
+        fetch_interval_hours: int = 168,
+    ) -> UUID:
+        """
+        Add a new structured data source.
+
+        New sources require initial review before their data is used.
+
+        Args:
+            conn: Database connection
+            source_key: Unique key for the source
+            source_name: Human-readable name
+            source_url: URL to fetch data from
+            source_type: Parser type ('csv' or 'html_table')
+            domain: Source domain
+            categories: List of categories this source provides
+            coverage_scope: 'state' or 'city_county'
+            parser_config: Configuration for the parser
+            coverage_states: Optional list of state codes this source covers
+            fetch_interval_hours: How often to fetch (default 168 = 7 days)
+
+        Returns:
+            UUID of the created source
+        """
+        row = await conn.fetchrow(
+            """
+            INSERT INTO structured_data_sources (
+                source_key, source_name, source_url, source_type, domain,
+                categories, coverage_scope, coverage_states, parser_config,
+                fetch_interval_hours, requires_initial_review
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+            RETURNING id
+            """,
+            source_key, source_name, source_url, source_type, domain,
+            categories, coverage_scope, coverage_states,
+            json.dumps(parser_config), fetch_interval_hours,
+        )
+        return row["id"]
 
     @staticmethod
     def _cache_row_to_requirement(row: asyncpg.Record) -> dict:
