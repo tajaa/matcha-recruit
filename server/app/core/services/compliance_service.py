@@ -2259,9 +2259,24 @@ async def run_compliance_check_background(
                     jurisdiction_id, location_id,
                 )
 
-            # Check repository freshness
+            # TIER 1: Check for fresh structured data from authoritative sources
+            from .structured_data import StructuredDataService
+            structured_service = StructuredDataService()
+
+            tier1_data = await structured_service.get_tier1_data(
+                conn, jurisdiction_id,
+                city=location.city, state=location.state, county=location.county,
+                categories=["minimum_wage"],
+                freshness_hours=168,
+            )
+
+            # Check repository freshness threshold
             threshold = location.auto_check_interval_days or 7
-            if await _is_jurisdiction_fresh(conn, jurisdiction_id, threshold):
+
+            if tier1_data:
+                requirements = tier1_data
+                used_repository = True
+            elif await _is_jurisdiction_fresh(conn, jurisdiction_id, threshold):
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
                 used_repository = True

@@ -105,9 +105,10 @@ class StructuredDataService:
                 WHERE c.state = $1
                   AND c.category = $2
                   AND c.fetched_at >= $3
+                  AND s.is_active = true
                   AND (
                       c.jurisdiction_key = $4
-                      OR (c.jurisdiction_level = 'state' AND $5 = 'state')
+                      OR c.jurisdiction_level = 'state'
                   )
                 ORDER BY
                     CASE c.jurisdiction_level
@@ -116,7 +117,7 @@ class StructuredDataService:
                         WHEN 'state' THEN 3
                     END
                 """,
-                state, category, cutoff, jurisdiction_key, level,
+                state, category, cutoff, jurisdiction_key,
             )
 
             for row in rows:

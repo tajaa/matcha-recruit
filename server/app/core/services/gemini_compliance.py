@@ -362,6 +362,7 @@ class GeminiComplianceService:
                     max_retries=1,
                     validate_fn=_validate,
                     label=f"Research {category} for {location_str}",
+                    on_retry=on_retry,
                 )
                 return result if isinstance(result, list) else []
             except GeminiExhaustedError as e:

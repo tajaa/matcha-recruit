@@ -165,12 +165,12 @@ class HTMLTableParser(BaseParser):
                 return None
 
             # Parse dates
-            effective_date_str = self._get_cell_value(cells, effective_col) if effective_col else None
-            next_date_str = self._get_cell_value(cells, next_date_col) if next_date_col else None
-            next_wage_str = self._get_cell_value(cells, next_wage_col) if next_wage_col else None
+            effective_date_str = self._get_cell_value(cells, effective_col) if effective_col is not None else None
+            next_date_str = self._get_cell_value(cells, next_date_col) if next_date_col is not None else None
+            next_wage_str = self._get_cell_value(cells, next_wage_col) if next_wage_col is not None else None
 
             # Handle future_changes column (combines next wage and date)
-            future_changes = self._get_cell_value(cells, future_col) if future_col else None
+            future_changes = self._get_cell_value(cells, future_col) if future_col is not None else None
             if future_changes and not next_wage_str:
                 # Try to parse combined future changes text
                 next_wage_str, next_date_str = self._parse_future_changes(future_changes)
