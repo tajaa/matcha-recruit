@@ -128,6 +128,67 @@ def _validate_verification(data: dict) -> Optional[str]:
     return None
 
 
+def _build_category_prompt(
+    location_str: str,
+    category: str,
+    context_section: str = "",
+) -> str:
+    """Build a focused prompt for a single compliance category."""
+
+    category_instructions = {
+        "minimum_wage": """Research MINIMUM WAGE requirements.
+Return SEPARATE requirements for each rate type that exists:
+- "general" - standard minimum wage (ALWAYS include)
+- "tipped" - if tip credits allowed
+- "hotel", "fast_food", "healthcare" - if special rates exist
+- "large_employer" / "small_employer" - if rates differ by size
+Use the most local jurisdiction (city > county > state) for each rate type.""",
+
+        "overtime": """Research OVERTIME requirements.
+Return ONLY the single most local jurisdiction's overtime rules (city > county > state).
+Include daily/weekly overtime thresholds and multipliers.""",
+
+        "sick_leave": """Research PAID SICK LEAVE requirements.
+Return ONLY the single most local jurisdiction's sick leave rules.
+Include accrual rate, cap, and usage rules.""",
+
+        "meal_breaks": """Research MEAL AND REST BREAK requirements.
+Return ONLY the single most local jurisdiction's break rules.
+Include timing, duration, and waiver conditions.""",
+
+        "pay_frequency": """Research PAY FREQUENCY requirements.
+Return ONLY the single most local jurisdiction's pay frequency rules.
+Include required pay periods and final pay rules.""",
+    }
+
+    return f"""You are a compliance research expert. Research current {category.replace('_', ' ')} laws for a business operating in {location_str}.
+{context_section}
+
+{category_instructions.get(category, "")}
+
+Today's date is {date.today().isoformat()}. Return ONLY rates/values currently in effect.
+
+Respond with JSON:
+{{
+  "requirements": [
+    {{
+      "category": "{category}",
+      "rate_type": <for minimum_wage only, else null>,
+      "jurisdiction_level": "state" | "county" | "city",
+      "jurisdiction_name": "Name",
+      "title": "Short title",
+      "description": "Detailed explanation",
+      "current_value": "$X.XX/hr" or description,
+      "numeric_value": <float or null>,
+      "effective_date": "YYYY-MM-DD" or null,
+      "source_url": "https://...",
+      "source_name": "Source Name"
+    }}
+  ]
+}}
+"""
+
+
 class GeminiComplianceService:
     """
     Service for researching compliance requirements using Gemini with Google Search.
@@ -260,6 +321,73 @@ class GeminiComplianceService:
             last_raw=last_raw,
         )
 
+    async def research_location_compliance_parallel(
+        self,
+        city: str,
+        state: str,
+        county: Optional[str] = None,
+        source_context: str = "",
+        corrections_context: str = "",
+        on_retry: Optional[Callable[[int, str], Any]] = None,
+    ) -> List[Dict]:
+        """Research compliance using parallel category-specific calls."""
+
+        location_str = f"{city}, {state}"
+        if county:
+            location_str += f" ({county})"
+
+        # Build context
+        context_section = source_context
+        if corrections_context:
+            context_section += f"\n\n{corrections_context}"
+        search_strategy = build_search_strategy_prompt(state)
+        if search_strategy:
+            context_section += f"\n\n{search_strategy}"
+
+        categories = ["minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency"]
+
+        async def research_category(category: str) -> List[Dict]:
+            """Research a single category with retry."""
+            prompt = _build_category_prompt(location_str, category, context_section)
+            try:
+                def _validate(data: dict) -> Optional[str]:
+                    reqs = data.get("requirements")
+                    if not isinstance(reqs, list):
+                        return "requirements must be a list"
+                    return None
+
+                result = await self._call_with_retry(
+                    prompt,
+                    "requirements",
+                    max_retries=1,
+                    validate_fn=_validate,
+                    label=f"Research {category} for {location_str}",
+                )
+                return result if isinstance(result, list) else []
+            except GeminiExhaustedError as e:
+                print(f"[Gemini Compliance] {category} exhausted: {e}")
+                return []
+            except Exception as e:
+                print(f"[Gemini Compliance] {category} error: {e}")
+                return []
+
+        # Run all categories in parallel
+        print(f"[Gemini Compliance] Researching {location_str} (5 parallel calls)...")
+        results = await asyncio.gather(*[research_category(c) for c in categories])
+
+        # Flatten and validate
+        all_requirements = []
+        for category_results in results:
+            for req in category_results:
+                error = _validate_requirement(req)
+                if error:
+                    print(f"[Gemini Compliance] Dropping invalid: {error}")
+                else:
+                    all_requirements.append(req)
+
+        print(f"[Gemini Compliance] Found {len(all_requirements)} requirements for {location_str}")
+        return all_requirements
+
     async def research_location_compliance(
         self,
         city: str,
@@ -269,174 +397,14 @@ class GeminiComplianceService:
         corrections_context: str = "",
         on_retry: Optional[Callable[[int, str], Any]] = None,
     ) -> List[Dict]:
-        """
-        Research compliance requirements for a specific location.
-        Returns a list of dictionaries matching the ComplianceRequirement structure.
-
-        Args:
-            city: City name
-            state: State code (e.g., "CA")
-            county: Optional county name
-            source_context: Optional context about known authoritative sources
-            corrections_context: Optional context about past false positives to avoid (Phase 3.1)
-            on_retry: Optional callback for retry events
-        """
-
-        location_str = f"{city}, {state}"
-        if county:
-            location_str += f" ({county})"
-
-        # Build context section from sources and corrections
-        context_section = source_context
-        if corrections_context:
-            context_section += f"\n\n{corrections_context}"
-
-        # Phase 2.2: Add dynamic search strategy guidance
-        search_strategy = build_search_strategy_prompt(state)
-        if search_strategy:
-            context_section += f"\n\n{search_strategy}"
-
-        prompt = f"""You are a compliance research expert. Research current labor laws and compliance requirements for a business operating in {location_str}.
-{context_section}
-
-Focus on these specific categories:
-1. Minimum Wage — ALL applicable rate types (see instructions below)
-2. Overtime rules
-3. Paid Sick Leave
-4. Meal and Rest Break Requirements
-5. Pay Frequency Requirements
-
-IMPORTANT RULES:
-- For each category except minimum_wage, return ONLY the single most local jurisdiction that applies (city > county > state).
-- For MINIMUM WAGE specifically:
-  * Return SEPARATE requirements for each rate type that exists in this jurisdiction:
-    - "general" - the standard/default minimum wage (ALWAYS include this)
-    - "tipped" - if tip credits are allowed, return the tipped minimum wage as a separate requirement
-    - "hotel" - if hotel workers have a different rate
-    - "fast_food" - if fast food workers have a different rate (e.g., CA $20/hr)
-    - "healthcare" - if healthcare workers have a different rate
-    - "large_employer" / "small_employer" - if rates differ by employer size
-  * Each rate type should be a SEPARATE requirement object with its own rate_type field
-  * Only include rate types that actually exist for this jurisdiction
-  * For each rate type, use the most local jurisdiction (city > county > state)
-- Accuracy is critical. Double-check numeric values against official government sources.
-
-For EACH requirement, provide:
-- The specific requirement/rule
-- The current value (e.g., "$16.00/hr")
-- The effective date of this rule
-- The source URL (official government website preferred)
-- The jurisdiction level (state, county, or city)
-
-Today's date is {date.today().isoformat()}. Return ONLY the rates/values that are currently in effect as of today. Do not return upcoming or past rates.
-
-Respond with a JSON object containing a list of requirements under the key "requirements".
-Each requirement object should have:
-- "category": One of ["minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency"]
-- "rate_type": For minimum_wage ONLY: "general", "tipped", "hotel", "fast_food", "healthcare", "large_employer", "small_employer". Null for other categories.
-- "jurisdiction_level": One of ["state", "county", "city"]
-- "jurisdiction_name": Name of the jurisdiction (e.g., "California" or "San Francisco")
-- "title": Short title (e.g., "Boulder Minimum Wage" or "Boulder Tipped Minimum Wage")
-- "description": Detailed explanation including any tip credit amounts or conditions
-- "current_value": The specific value (e.g., "$16.82/hr" or "$13.80/hr")
-- "numeric_value": Float value if applicable (e.g., 16.82 or 13.80), else null
-- "effective_date": "YYYY-MM-DD" if known, else null
-- "source_url": URL to the official source
-- "source_name": Name of the source (e.g., "CA Dept of Industrial Relations")
-
-Example JSON structure:
-{{
-  "requirements": [
-    {{
-      "category": "minimum_wage",
-      "rate_type": "general",
-      "jurisdiction_level": "city",
-      "jurisdiction_name": "Boulder",
-      "title": "Boulder Minimum Wage",
-      "description": "The general minimum wage in Boulder is $16.82/hr.",
-      "current_value": "$16.82/hr",
-      "numeric_value": 16.82,
-      "effective_date": "2025-01-01",
-      "source_url": "https://bouldercolorado.gov/...",
-      "source_name": "City of Boulder"
-    }},
-    {{
-      "category": "minimum_wage",
-      "rate_type": "tipped",
-      "jurisdiction_level": "city",
-      "jurisdiction_name": "Boulder",
-      "title": "Boulder Tipped Minimum Wage",
-      "description": "Tipped employees: $13.80/hr minimum cash wage. Tip credit of $3.02/hr is allowed.",
-      "current_value": "$13.80/hr",
-      "numeric_value": 13.80,
-      "effective_date": "2025-01-01",
-      "source_url": "https://bouldercolorado.gov/...",
-      "source_name": "City of Boulder"
-    }}
-  ]
-}}
-
-For non-minimum_wage categories, return at most one requirement per category. Ensure all data is accurate and sourced.
-"""
-
-        try:
-            if not self._has_api_key():
-                print(f"[Gemini Compliance] ERROR: No GEMINI_API_KEY configured")
-                return []
-
-            print(f"[Gemini Compliance] Researching compliance for {location_str}...")
-
-            def _validate_research(data: dict) -> Optional[str]:
-                reqs = data.get("requirements")
-                if not isinstance(reqs, list) or len(reqs) == 0:
-                    return "requirements list is empty"
-                return None
-
-            requirements = await self._call_with_retry(
-                prompt,
-                "requirements",
-                max_retries=1,
-                validate_fn=_validate_research,
-                label=f"Research {location_str}",
-                on_retry=on_retry,
-            )
-
-            # Filter out invalid items
-            valid = []
-            for req in requirements:
-                error = _validate_requirement(req)
-                if error:
-                    print(f"[Gemini Compliance] Dropping invalid requirement: {error} — {req.get('title', '?')}")
-                else:
-                    valid.append(req)
-
-            print(f"[Gemini Compliance] Found {len(valid)} requirements for {location_str}")
-            return valid
-
-        except GeminiExhaustedError as e:
-            print(f"[Gemini Compliance] {e}")
-            # Attempt to salvage valid requirements from the last raw response
-            if e.last_raw:
-                try:
-                    cleaned = _clean_json_text(e.last_raw)
-                    data = json.loads(cleaned)
-                    raw_reqs = data.get("requirements", [])
-                    salvaged = [r for r in raw_reqs if _validate_requirement(r) is None]
-                    if salvaged:
-                        print(f"[Gemini Compliance] Salvaged {len(salvaged)} valid requirements from partial response")
-                        return salvaged
-                except Exception:
-                    pass
+        """Research compliance requirements for a location (uses parallel calls)."""
+        if not self._has_api_key():
+            print(f"[Gemini Compliance] ERROR: No GEMINI_API_KEY configured")
             return []
-        except Exception as e:
-            error_msg = str(e)
-            if "API_KEY" in error_msg.upper() or "PERMISSION" in error_msg.upper():
-                print(f"[Gemini Compliance] API Key/Permission error: {e}")
-            elif "QUOTA" in error_msg.upper() or "RATE" in error_msg.upper():
-                print(f"[Gemini Compliance] Rate limit/quota error: {e}")
-            else:
-                print(f"[Gemini Compliance] Error researching requirements: {e}")
-            return []
+
+        return await self.research_location_compliance_parallel(
+            city, state, county, source_context, corrections_context, on_retry
+        )
 
     async def discover_jurisdiction_sources(
         self,
