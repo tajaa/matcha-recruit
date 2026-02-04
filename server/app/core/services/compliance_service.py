@@ -1540,11 +1540,14 @@ async def run_compliance_check_stream(
                 corrections_context = format_corrections_for_prompt(corrections)
 
                 # Load preemption rules for this state to guide Gemini prompts
-                preemption_rows = await conn.fetch(
-                    "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
-                    location.state.upper(),
-                )
-                preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+                try:
+                    preemption_rows = await conn.fetch(
+                        "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+                        location.state.upper(),
+                    )
+                    preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+                except asyncpg.UndefinedTableError:
+                    preemption_rules = {}
 
                 yield {"type": "researching", "message": f"Researching requirements for {location_name}..."}
                 research_queue = asyncio.Queue()
@@ -2488,11 +2491,14 @@ async def run_compliance_check_background(
                 corrections_context = format_corrections_for_prompt(corrections)
 
                 # Load preemption rules for this state
-                preemption_rows = await conn.fetch(
-                    "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
-                    location.state.upper(),
-                )
-                preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+                try:
+                    preemption_rows = await conn.fetch(
+                        "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+                        location.state.upper(),
+                    )
+                    preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+                except asyncpg.UndefinedTableError:
+                    preemption_rules = {}
 
                 requirements = await service.research_location_compliance(
                     city=location.city, state=location.state, county=location.county,
