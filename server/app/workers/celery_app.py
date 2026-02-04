@@ -24,6 +24,8 @@ celery_app = Celery(
         "app.workers.tasks.er_document_processing",
         "app.workers.tasks.er_analysis",
         "app.workers.tasks.compliance_checks",
+        "app.workers.tasks.legislation_watch",
+        "app.workers.tasks.pattern_recognition",
     ],
 )
 
@@ -56,7 +58,11 @@ celery_app.conf.update(
 
 
 def _is_scheduler_enabled(task_key: str) -> bool:
-    """Check if a scheduler task is enabled in the database."""
+    """Check if a scheduler task is enabled in the database.
+
+    Returns False if no row exists or table doesn't exist (safe default).
+    Tasks must be explicitly enabled in scheduler_settings after migration.
+    """
     import asyncio
     from app.workers.utils import get_db_connection
 
@@ -67,10 +73,11 @@ def _is_scheduler_enabled(task_key: str) -> bool:
                 "SELECT enabled FROM scheduler_settings WHERE task_key = $1",
                 task_key,
             )
-            # Default to enabled if no row (table may not exist yet)
-            return row["enabled"] if row else True
+            # Default to disabled if no row (table may not exist or not seeded)
+            return row["enabled"] if row else False
         except Exception:
-            return True
+            # Table doesn't exist or other DB error - default to disabled
+            return False
         finally:
             await conn.close()
 
@@ -89,6 +96,8 @@ def on_worker_ready(**kwargs):
         enqueue_scheduled_compliance_checks,
         run_deadline_escalation,
     )
+    from app.workers.tasks.legislation_watch import run_legislation_watch
+    from app.workers.tasks.pattern_recognition import run_pattern_recognition
 
     if _is_scheduler_enabled("compliance_checks"):
         enqueue_scheduled_compliance_checks.delay()
@@ -99,3 +108,13 @@ def on_worker_ready(**kwargs):
         run_deadline_escalation.delay()
     else:
         print("[Worker] Deadline escalation scheduler is disabled, skipping.")
+
+    if _is_scheduler_enabled("legislation_watch"):
+        run_legislation_watch.delay()
+    else:
+        print("[Worker] Legislation watch scheduler is disabled, skipping.")
+
+    if _is_scheduler_enabled("pattern_recognition"):
+        run_pattern_recognition.delay()
+    else:
+        print("[Worker] Pattern recognition scheduler is disabled, skipping.")
