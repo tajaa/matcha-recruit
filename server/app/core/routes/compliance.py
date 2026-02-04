@@ -358,6 +358,7 @@ async def dismiss_alert_endpoint(
             actual_is_change=not data.is_false_positive,
             admin_notes=data.admin_notes,
             correction_reason=data.correction_reason,
+            company_id=company_id,
         )
 
     success = await dismiss_alert(alert_uuid, company_id)
@@ -399,6 +400,10 @@ async def record_verification_feedback_endpoint(
 
     This data is used to calibrate confidence thresholds and improve accuracy.
     """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     try:
         alert_uuid = UUID(alert_id)
     except ValueError:
@@ -410,6 +415,7 @@ async def record_verification_feedback_endpoint(
         data.actual_is_change,
         data.admin_notes,
         data.correction_reason,
+        company_id=company_id,
     )
     if not success:
         raise HTTPException(status_code=404, detail="No verification outcome found for this alert")

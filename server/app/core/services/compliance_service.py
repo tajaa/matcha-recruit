@@ -695,12 +695,19 @@ async def _sync_requirements_to_location(
         else:
             # Guard: don't insert a min-wage decrease that bypassed the
             # matched-existing path due to key drift (title changed).
+            # Only compare against entries with the SAME rate_type to avoid
+            # rejecting legitimate lower variants (tipped, hotel, etc.).
             if _normalize_category(req.get("category")) == "minimum_wage":
                 new_num_val = req.get("numeric_value") or _extract_numeric_value(req.get("current_value"))
+                new_rate_type = req.get("rate_type") or "general"
                 if new_num_val is not None:
                     dominated = False
                     for ekey, erow in existing_by_key.items():
                         if not ekey.startswith("minimum_wage:"):
+                            continue
+                        # Only compare same rate_type (e.g., don't reject tipped $13.80 because general is $16.82)
+                        existing_rate_type = erow.get("rate_type") or "general"
+                        if existing_rate_type != new_rate_type:
                             continue
                         e_num = erow.get("numeric_value") or _extract_numeric_value(erow.get("current_value"))
                         if e_num is not None and (float(e_num) - float(new_num_val)) > 0.005:
@@ -712,7 +719,7 @@ async def _sync_requirements_to_location(
                         print(
                             f"[Compliance] WARNING: Rejecting min-wage insert "
                             f"{new_num_val} (lower than existing {e_num}) for "
-                            f"{req.get('jurisdiction_name')}"
+                            f"{req.get('jurisdiction_name')} rate_type={new_rate_type}"
                         )
                         continue
 
@@ -1591,7 +1598,7 @@ async def get_location_counts(location_id: UUID) -> dict:
     from ...database import get_connection
     async with get_connection() as conn:
         rows = await conn.fetch(
-            "SELECT category, jurisdiction_level, title, jurisdiction_name FROM compliance_requirements WHERE location_id = $1",
+            "SELECT category, jurisdiction_level, title, jurisdiction_name, rate_type FROM compliance_requirements WHERE location_id = $1",
             location_id,
         )
         filtered = _filter_by_jurisdiction_priority([dict(r) for r in rows])
@@ -1819,6 +1826,7 @@ async def record_verification_feedback(
     actual_is_change: bool,
     admin_notes: Optional[str] = None,
     correction_reason: Optional[str] = None,
+    company_id: Optional[UUID] = None,
 ) -> bool:
     """Record admin feedback on a verification outcome for calibration.
 
@@ -1828,12 +1836,23 @@ async def record_verification_feedback(
         actual_is_change: Whether the change actually occurred
         admin_notes: Optional notes explaining the decision
         correction_reason: Category of error if prediction was wrong (misread_date, wrong_jurisdiction, hallucination, etc.)
+        company_id: The company owning the alert (for security verification)
 
     Returns:
-        True if feedback was recorded, False if no matching outcome found
+        True if feedback was recorded, False if no matching outcome found or unauthorized
     """
     from ...database import get_connection
     async with get_connection() as conn:
+        # Security: Verify the alert belongs to the caller's company
+        if company_id is not None:
+            alert_company = await conn.fetchval(
+                "SELECT company_id FROM compliance_alerts WHERE id = $1",
+                alert_id,
+            )
+            if alert_company is None or alert_company != company_id:
+                print(f"[Compliance] Unauthorized feedback attempt: alert {alert_id} not owned by company {company_id}")
+                return False
+
         # First, fetch the outcome data for reputation update (Phase 3.2)
         outcome_row = await conn.fetchrow(
             """
@@ -1910,7 +1929,7 @@ async def get_calibration_stats(
                 SUM(CASE WHEN predicted_is_change = actual_is_change THEN 1 ELSE 0 END) as correct,
                 AVG(predicted_confidence) as avg_confidence
             FROM verification_outcomes
-            WHERE created_at > NOW() - INTERVAL '%s days'
+            WHERE created_at > NOW() - INTERVAL '1 day' * $1
         """
         params = [days]
         if category:
@@ -1918,7 +1937,7 @@ async def get_calibration_stats(
             params.append(category)
         query += " GROUP BY confidence_bucket ORDER BY avg_confidence DESC"
 
-        rows = await conn.fetch(query % days, *params[1:])
+        rows = await conn.fetch(query, *params)
         return {
             "buckets": [dict(r) for r in rows],
             "days": days,

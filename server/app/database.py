@@ -1548,6 +1548,36 @@ async def init_db():
             ON jurisdiction_legislation(jurisdiction_id)
         """)
 
+        # Jurisdiction sources — learned authoritative sources per jurisdiction
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS jurisdiction_sources (
+                id SERIAL PRIMARY KEY,
+                jurisdiction_id UUID NOT NULL REFERENCES jurisdictions(id) ON DELETE CASCADE,
+                domain TEXT NOT NULL,
+                source_name TEXT,
+                categories TEXT[],
+                success_count INTEGER DEFAULT 1 NOT NULL,
+                last_seen_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                accurate_count INTEGER DEFAULT 0,
+                inaccurate_count INTEGER DEFAULT 0,
+                last_accuracy_update TIMESTAMP,
+                UNIQUE(jurisdiction_id, domain)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jurisdiction_sources_jurisdiction_id
+            ON jurisdiction_sources(jurisdiction_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jurisdiction_sources_domain
+            ON jurisdiction_sources(domain)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jurisdiction_sources_accuracy
+            ON jurisdiction_sources(jurisdiction_id, accurate_count, inaccurate_count)
+        """)
+
         # Add parent_id self-referencing FK on jurisdictions
         await conn.execute("""
             ALTER TABLE jurisdictions
