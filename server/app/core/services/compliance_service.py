@@ -5,6 +5,8 @@ import asyncio
 import json
 import re
 
+import asyncpg
+
 from .jurisdiction_context import (
     get_known_sources,
     record_source,
@@ -348,9 +350,27 @@ async def _heartbeat_while(task, *, queue=None, interval=HEARTBEAT_INTERVAL):
 # ── Jurisdiction Repository Helpers ──────────────────────────────────────
 
 async def _get_or_create_jurisdiction(conn, city: str, state: str, county: Optional[str] = None) -> UUID:
-    """Find or create a jurisdiction row. Returns the jurisdiction id."""
+    """Find or create a jurisdiction row with hierarchy resolution.
+
+    Auto-resolves county from jurisdiction_reference when not provided,
+    then links city -> county -> state via parent_id.
+    """
     norm_city = city.lower().strip()
     norm_state = state.upper().strip()
+
+    # 1. Auto-resolve county from reference table if not provided
+    if not county:
+        try:
+            ref = await conn.fetchrow(
+                "SELECT county FROM jurisdiction_reference WHERE city = $1 AND state = $2",
+                norm_city, norm_state,
+            )
+            if ref:
+                county = ref["county"]
+        except asyncpg.UndefinedTableError:
+            pass
+
+    # 2. Get or create city jurisdiction
     await conn.execute(
         """
         INSERT INTO jurisdictions (city, state, county)
@@ -359,11 +379,80 @@ async def _get_or_create_jurisdiction(conn, city: str, state: str, county: Optio
         """,
         norm_city, norm_state, county,
     )
-    row = await conn.fetchrow(
-        "SELECT id FROM jurisdictions WHERE city = $1 AND state = $2",
+    city_row = await conn.fetchrow(
+        "SELECT id, county, parent_id FROM jurisdictions WHERE city = $1 AND state = $2",
         norm_city, norm_state,
     )
-    return row["id"]
+    city_id = city_row["id"]
+
+    # 3. Get or create state jurisdiction (uses empty-string city convention)
+    state_j = await conn.fetchrow(
+        "SELECT id FROM jurisdictions WHERE city = '' AND state = $1",
+        norm_state,
+    )
+    if not state_j:
+        await conn.execute(
+            "INSERT INTO jurisdictions (city, state) VALUES ('', $1) ON CONFLICT (city, state) DO NOTHING",
+            norm_state,
+        )
+        state_j = await conn.fetchrow(
+            "SELECT id FROM jurisdictions WHERE city = '' AND state = $1",
+            norm_state,
+        )
+    state_id = state_j["id"]
+
+    # 4. Link county -> state, city -> county (or city -> state if no county)
+    if county:
+        # Update city's county field if it was auto-resolved
+        if not city_row["county"]:
+            await conn.execute(
+                "UPDATE jurisdictions SET county = $2 WHERE id = $1",
+                city_id, county,
+            )
+
+        # Get or create county jurisdiction
+        county_norm = county.lower().strip()
+        county_j = await conn.fetchrow(
+            "SELECT id FROM jurisdictions WHERE city = $1 AND state = $2",
+            f"_county_{county_norm}", norm_state,
+        )
+        if not county_j:
+            await conn.execute(
+                """
+                INSERT INTO jurisdictions (city, state, county, parent_id)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (city, state) DO NOTHING
+                """,
+                f"_county_{county_norm}", norm_state, county, state_id,
+            )
+            county_j = await conn.fetchrow(
+                "SELECT id FROM jurisdictions WHERE city = $1 AND state = $2",
+                f"_county_{county_norm}", norm_state,
+            )
+
+        county_id = county_j["id"]
+
+        # Ensure county -> state link
+        await conn.execute(
+            "UPDATE jurisdictions SET parent_id = $2 WHERE id = $1 AND parent_id IS NULL",
+            county_id, state_id,
+        )
+
+        # Link city -> county
+        if not city_row["parent_id"]:
+            await conn.execute(
+                "UPDATE jurisdictions SET parent_id = $2 WHERE id = $1",
+                city_id, county_id,
+            )
+    else:
+        # No county: link city -> state directly
+        if not city_row["parent_id"]:
+            await conn.execute(
+                "UPDATE jurisdictions SET parent_id = $2 WHERE id = $1",
+                city_id, state_id,
+            )
+
+    return city_id
 
 
 async def _is_jurisdiction_fresh(conn, jurisdiction_id: UUID, threshold_days: int) -> bool:
@@ -1197,6 +1286,91 @@ def _filter_by_jurisdiction_priority(requirements):
     return filtered
 
 
+async def _filter_with_preemption(conn, requirements, state: str):
+    """Preemption-aware jurisdiction filter.
+
+    For each category group:
+    1. Check state_preemption_rules to see if local override is allowed.
+    2. If preempted: keep only state-level requirements.
+    3. If allowed (or no rule): apply most-beneficial-to-employee for wage
+       categories, or most-local for others (existing behavior).
+    """
+    norm_state = state.upper().strip()
+
+    # Load all preemption rules for this state in one query
+    try:
+        preemption_rows = await conn.fetch(
+            "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+            norm_state,
+        )
+        preemption_map = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+    except asyncpg.UndefinedTableError:
+        preemption_map = {}
+
+    # Group requirements the same way as _filter_by_jurisdiction_priority
+    by_key = {}
+    for req in requirements:
+        cat = req['category'] if isinstance(req, dict) else req.category
+        rate_type = req.get('rate_type') if isinstance(req, dict) else getattr(req, 'rate_type', None)
+        cat_key = _normalize_category(cat)
+
+        if cat_key == "minimum_wage":
+            key = ("minimum_wage", rate_type or "general")
+        else:
+            title = req['title'] if isinstance(req, dict) else req.title
+            jname = (req['jurisdiction_name'] if isinstance(req, dict)
+                     else getattr(req, 'jurisdiction_name', None))
+            base = _base_title(title, jname)
+            base_key = _normalize_title_key(base)
+            key = (cat_key, base_key)
+
+        by_key.setdefault(key, []).append(req)
+
+    filtered = []
+    for key, reqs in by_key.items():
+        category = key[0]
+        allows_local = preemption_map.get(category)
+
+        if allows_local is False:
+            # State preempts local: only keep state-level requirements
+            state_reqs = [
+                r for r in reqs
+                if (r['jurisdiction_level'] if isinstance(r, dict) else r.jurisdiction_level) == 'state'
+            ]
+            if state_reqs:
+                best = _pick_best_by_priority(state_reqs)
+                if best:
+                    filtered.append(best)
+            else:
+                # Preempted but no state-level requirement found — drop this group entirely.
+                # Returning a local rule here would violate preemption.
+                print(
+                    f"[Compliance] WARNING: Category '{category}' is preempted in {norm_state} "
+                    f"but no state-level requirement found — dropping {len(reqs)} local-only requirement(s)"
+                )
+            continue
+
+        # Not preempted (allows_local is True or None/unknown)
+        # For wage categories: most-beneficial-to-employee (highest numeric value)
+        if category == "minimum_wage":
+            # Among all jurisdiction levels, pick the one with the highest rate
+            reqs_with_num = [(r, _get_numeric_from_req(r)) for r in reqs]
+            reqs_with_num_valid = [pair for pair in reqs_with_num if pair[1] is not None]
+            if reqs_with_num_valid:
+                best = max(reqs_with_num_valid, key=lambda x: x[1])[0]
+            else:
+                best = _pick_best_by_priority(reqs)
+            if best:
+                filtered.append(best)
+        else:
+            # Non-wage: most local wins (existing behavior)
+            best = _pick_best_by_priority(reqs)
+            if best:
+                filtered.append(best)
+
+    return filtered
+
+
 async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
     """Create a location, map it to a jurisdiction, and clone repository data if available.
 
@@ -1365,6 +1539,13 @@ async def run_compliance_check_stream(
                 corrections = await get_recent_corrections(jurisdiction_id)
                 corrections_context = format_corrections_for_prompt(corrections)
 
+                # Load preemption rules for this state to guide Gemini prompts
+                preemption_rows = await conn.fetch(
+                    "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+                    location.state.upper(),
+                )
+                preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+
                 yield {"type": "researching", "message": f"Researching requirements for {location_name}..."}
                 research_queue = asyncio.Queue()
                 def _on_research_retry(attempt: int, error: str):
@@ -1374,6 +1555,7 @@ async def run_compliance_check_stream(
                         city=location.city, state=location.state, county=location.county,
                         source_context=source_context,
                         corrections_context=corrections_context,
+                        preemption_rules=preemption_rules,
                         on_retry=_on_research_retry,
                     )
                 )
@@ -1400,10 +1582,10 @@ async def run_compliance_check_stream(
                 yield {"type": "completed", "location": location_name, "new": 0, "updated": 0, "alerts": 0}
                 return
 
-            # Normalize and filter
+            # Normalize and filter (with preemption awareness)
             for req in requirements:
                 req["category"] = _normalize_category(req.get("category")) or req.get("category")
-            requirements = _filter_by_jurisdiction_priority(requirements)
+            requirements = await _filter_with_preemption(conn, requirements, location.state)
 
             yield {"type": "processing", "message": f"Processing {len(requirements)} requirements..."}
 
@@ -2305,10 +2487,18 @@ async def run_compliance_check_background(
                 corrections = await get_recent_corrections(jurisdiction_id)
                 corrections_context = format_corrections_for_prompt(corrections)
 
+                # Load preemption rules for this state
+                preemption_rows = await conn.fetch(
+                    "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+                    location.state.upper(),
+                )
+                preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+
                 requirements = await service.research_location_compliance(
                     city=location.city, state=location.state, county=location.county,
                     source_context=source_context,
                     corrections_context=corrections_context,
+                    preemption_rules=preemption_rules,
                 )
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
@@ -2330,7 +2520,7 @@ async def run_compliance_check_background(
 
             for req in requirements:
                 req["category"] = _normalize_category(req.get("category")) or req.get("category")
-            requirements = _filter_by_jurisdiction_priority(requirements)
+            requirements = await _filter_with_preemption(conn, requirements, location.state)
 
             # Contribute to repository after Gemini call
             if not used_repository:

@@ -77,6 +77,8 @@ class StructuredDataService:
             categories = ["minimum_wage"]
 
         # Build jurisdiction key for lookups
+        from .parsers.base import BaseParser
+
         if city:
             level = "city"
             name = city
@@ -89,8 +91,23 @@ class StructuredDataService:
             name = CODE_TO_STATE.get(state, state)
 
         # Normalize to jurisdiction key format
-        from .parsers.base import BaseParser
         jurisdiction_key = BaseParser.normalize_jurisdiction_key(name, state, level)
+
+        # Build county key for fallback matching (city -> county -> state)
+        county_key = None
+        if city and county:
+            county_key = BaseParser.normalize_jurisdiction_key(county, state, "county")
+        elif city and not county:
+            # Try auto-resolving county from jurisdiction_reference
+            try:
+                ref = await conn.fetchrow(
+                    "SELECT county FROM jurisdiction_reference WHERE city = $1 AND state = $2",
+                    city.lower().strip(), state.upper().strip(),
+                )
+                if ref and ref["county"]:
+                    county_key = BaseParser.normalize_jurisdiction_key(ref["county"], state, "county")
+            except asyncpg.UndefinedTableError:
+                pass
 
         # Check for cached data within freshness window
         cutoff = datetime.utcnow() - timedelta(hours=freshness_hours)
@@ -110,6 +127,25 @@ class StructuredDataService:
         results = []
         all_cache_ids = []  # Accumulate cache IDs across all categories
         for category in categories:
+            # Build jurisdiction match clause with optional county fallback
+            if county_key:
+                jurisdiction_match = """
+                  AND (
+                      c.jurisdiction_key = $4
+                      OR c.jurisdiction_key = $5
+                      OR c.jurisdiction_level = 'state'
+                  )
+                """
+                query_params = [state, category, cutoff, jurisdiction_key, county_key]
+            else:
+                jurisdiction_match = """
+                  AND (
+                      c.jurisdiction_key = $4
+                      OR c.jurisdiction_level = 'state'
+                  )
+                """
+                query_params = [state, category, cutoff, jurisdiction_key]
+
             query = f"""
                 SELECT
                     c.id,
@@ -137,10 +173,7 @@ class StructuredDataService:
                   AND c.category = $2
                   AND c.fetched_at >= $3
                   AND s.is_active = true
-                  AND (
-                      c.jurisdiction_key = $4
-                      OR c.jurisdiction_level = 'state'
-                  )
+                  {jurisdiction_match}
                   {verification_filter}
                 ORDER BY
                     CASE c.jurisdiction_level
@@ -149,10 +182,7 @@ class StructuredDataService:
                         WHEN 'state' THEN 3
                     END
             """
-            rows = await conn.fetch(
-                query,
-                state, category, cutoff, jurisdiction_key,
-            )
+            rows = await conn.fetch(query, *query_params)
 
             for row in rows:
                 results.append(self._cache_row_to_requirement(row))

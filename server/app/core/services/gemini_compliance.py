@@ -132,6 +132,7 @@ def _build_category_prompt(
     location_str: str,
     category: str,
     context_section: str = "",
+    preemption_context: str = "",
 ) -> str:
     """Build a focused prompt for a single compliance category."""
 
@@ -163,7 +164,7 @@ Include required pay periods and final pay rules.""",
 
     return f"""You are a compliance research expert. Research current {category.replace('_', ' ')} laws for a business operating in {location_str}.
 {context_section}
-
+{preemption_context}
 {category_instructions.get(category, "")}
 
 Today's date is {date.today().isoformat()}. Return ONLY rates/values currently in effect.
@@ -328,9 +329,15 @@ class GeminiComplianceService:
         county: Optional[str] = None,
         source_context: str = "",
         corrections_context: str = "",
+        preemption_rules: Optional[Dict[str, bool]] = None,
         on_retry: Optional[Callable[[int, str], Any]] = None,
     ) -> List[Dict]:
-        """Research compliance using parallel category-specific calls."""
+        """Research compliance using parallel category-specific calls.
+
+        Args:
+            preemption_rules: Optional dict mapping category -> allows_local_override.
+                When provided, prompts are enhanced with preemption awareness.
+        """
 
         location_str = f"{city}, {state}"
         if county:
@@ -344,11 +351,36 @@ class GeminiComplianceService:
         if search_strategy:
             context_section += f"\n\n{search_strategy}"
 
+        # Build per-category preemption context strings
+        preemption_map = preemption_rules or {}
+
+        def _preemption_context_for(cat: str) -> str:
+            allows = preemption_map.get(cat)
+            if allows is None:
+                return ""
+            state_name = state  # 2-letter code
+            if allows:
+                return (
+                    f"\nIMPORTANT: {state_name} allows local jurisdictions to set their own "
+                    f"{cat.replace('_', ' ')} rules. Check if {city} has its own local ordinance. "
+                    f"Always include the state baseline AND any local override if one exists."
+                )
+            else:
+                return (
+                    f"\nIMPORTANT: {state_name} PREEMPTS local {cat.replace('_', ' ')} ordinances. "
+                    f"Local cities/counties cannot set their own rates. "
+                    f"Return ONLY state-level {cat.replace('_', ' ')} requirements. "
+                    f"Do NOT return city or county level requirements for this category."
+                )
+
         categories = ["minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency"]
 
         async def research_category(category: str) -> List[Dict]:
             """Research a single category with retry."""
-            prompt = _build_category_prompt(location_str, category, context_section)
+            prompt = _build_category_prompt(
+                location_str, category, context_section,
+                preemption_context=_preemption_context_for(category),
+            )
             try:
                 def _validate(data: dict) -> Optional[str]:
                     reqs = data.get("requirements")
@@ -396,6 +428,7 @@ class GeminiComplianceService:
         county: Optional[str] = None,
         source_context: str = "",
         corrections_context: str = "",
+        preemption_rules: Optional[Dict[str, bool]] = None,
         on_retry: Optional[Callable[[int, str], Any]] = None,
     ) -> List[Dict]:
         """Research compliance requirements for a location (uses parallel calls)."""
@@ -404,7 +437,8 @@ class GeminiComplianceService:
             return []
 
         return await self.research_location_compliance_parallel(
-            city, state, county, source_context, corrections_context, on_retry
+            city, state, county, source_context, corrections_context,
+            preemption_rules=preemption_rules, on_retry=on_retry,
         )
 
     async def discover_jurisdiction_sources(
