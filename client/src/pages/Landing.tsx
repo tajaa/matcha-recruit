@@ -1,6 +1,6 @@
 import { useRef, lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, useScroll, useTransform } from "framer-motion";
 import {
   ArrowUpRight,
   Terminal,
@@ -42,6 +42,15 @@ const Marquee = ({ children }: { children: React.ReactNode }) => (
 
 export function Landing() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const complianceSectionRef = useRef<HTMLDivElement>(null);
+
+  const { scrollYProgress } = useScroll({
+    target: complianceSectionRef,
+    offset: ["start end", "end start"],
+  });
+
+  const card1Y = useTransform(scrollYProgress, [0, 1], [100, -100]);
+  const card2Y = useTransform(scrollYProgress, [0, 1], [150, -150]);
 
   return (
     <div
@@ -157,7 +166,10 @@ export function Landing() {
       </section>
 
       {/* COMPLIANCE SECTION */}
-      <section className="py-32 px-6 border-b border-white/5 bg-zinc-950 relative overflow-hidden">
+      <section
+        ref={complianceSectionRef}
+        className="py-32 px-6 border-b border-white/5 bg-zinc-950 relative overflow-hidden"
+      >
         {/* Texture Overlay */}
         <div className="absolute inset-0 bg-noise opacity-[0.15] mix-blend-soft-light pointer-events-none" />
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-zinc-950/50 to-zinc-950 pointer-events-none" />
@@ -221,33 +233,51 @@ export function Landing() {
             </div>
           </div>
 
-          <div className="relative">
+          <div className="relative perspective-[1000px]">
             {/* Mock UI */}
             <div className="space-y-6 relative z-10">
               {/* San Francisco Card */}
               <motion.div
-                initial={{ x: 40, y: 20, opacity: 0, rotate: 2 }}
-                whileInView={{ x: 0, y: 0, opacity: 1, rotate: 0 }}
+                style={{ y: card1Y }}
+                initial={{ opacity: 0, rotateX: 10, rotateY: -5 }}
+                whileInView={{ 
+                  opacity: 1, 
+                  rotateX: [10, 0, 10],
+                  rotateY: [-5, 5, -5]
+                }}
                 viewport={{ once: true }}
-                transition={{ duration: 0.8, type: "spring", bounce: 0.4 }}
-                className="bg-zinc-900 border border-white/10 p-6 shadow-2xl relative z-20"
+                transition={{ 
+                  duration: 12, 
+                  repeat: Infinity, 
+                  ease: "easeInOut",
+                  opacity: { duration: 0.8, repeat: 0 }
+                }}
+                className="bg-zinc-900 border border-white/10 p-6 shadow-2xl relative z-20 overflow-hidden group"
               >
-                <motion.div
-                  animate={{ y: [0, -5, 0] }}
-                  transition={{
-                    duration: 4,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                >
+                {/* Continuous Shimmer */}
+                <motion.div 
+                  animate={{ x: ["-100%", "200%"] }}
+                  transition={{ duration: 4, repeat: Infinity, ease: "linear", delay: 1 }}
+                  className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent pointer-events-none" 
+                />
+                
+                {/* Continuous Scan Line */}
+                <motion.div 
+                  animate={{ top: ["-10%", "110%"] }}
+                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                  className="absolute left-0 right-0 h-px bg-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.8)] z-30" 
+                />
+
+                <div className="relative z-10">
                   <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
                     <div className="flex items-center gap-3">
                       <MapPin className="w-4 h-4 text-zinc-500" />
-                      <span className="text-xs font-mono uppercase tracking-widest">
+                      <span className="text-xs font-mono uppercase tracking-widest text-zinc-300">
                         San Francisco, CA
                       </span>
                     </div>
-                    <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[10px] font-mono uppercase">
+                    <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[10px] font-mono uppercase flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                       Active
                     </div>
                   </div>
@@ -278,7 +308,9 @@ export function Landing() {
                         <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
                           {row.label}
                         </span>
-                        <span
+                        <motion.span
+                          animate={{ opacity: [0.7, 1, 0.7] }}
+                          transition={{ duration: 2, repeat: Infinity, delay: i * 0.4 }}
                           className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${
                             row.color === "emerald"
                               ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
@@ -286,38 +318,43 @@ export function Landing() {
                           }`}
                         >
                           {row.badge}
-                        </span>
+                        </motion.span>
                       </div>
                     ))}
                   </div>
-                </motion.div>
+                </div>
               </motion.div>
 
               {/* Del Mar Card */}
               <motion.div
-                initial={{ x: 60, y: 40, opacity: 0, rotate: -2 }}
-                whileInView={{ x: 20, y: 0, opacity: 0.6, rotate: 0 }}
-                viewport={{ once: true }}
-                transition={{
-                  duration: 0.8,
-                  delay: 0.2,
-                  type: "spring",
-                  bounce: 0.4,
+                style={{ y: card2Y }}
+                initial={{ opacity: 0, rotateX: 5, rotateY: 5 }}
+                whileInView={{ 
+                  opacity: 0.8, 
+                  rotateX: [5, -5, 5],
+                  rotateY: [5, -5, 5]
                 }}
-                className="bg-zinc-900 border border-white/10 p-6 shadow-2xl scale-95 origin-right"
+                viewport={{ once: true }}
+                transition={{ 
+                  duration: 10, 
+                  repeat: Infinity, 
+                  ease: "easeInOut",
+                  opacity: { duration: 0.8, delay: 0.2, repeat: 0 }
+                }}
+                className="bg-zinc-900 border border-white/10 p-6 shadow-2xl scale-95 origin-right relative overflow-hidden"
               >
-                <motion.div
-                  animate={{ y: [0, 5, 0] }}
-                  transition={{
-                    duration: 5,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                >
+                {/* Continuous Shimmer */}
+                <motion.div 
+                  animate={{ x: ["-100%", "200%"] }}
+                  transition={{ duration: 5, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent pointer-events-none" 
+                />
+
+                <div className="relative z-10">
                   <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
                     <div className="flex items-center gap-3">
                       <MapPin className="w-4 h-4 text-zinc-500" />
-                      <span className="text-xs font-mono uppercase tracking-widest">
+                      <span className="text-xs font-mono uppercase tracking-widest text-zinc-300">
                         Del Mar, CA
                       </span>
                     </div>
@@ -332,7 +369,7 @@ export function Landing() {
                       </span>
                     </div>
                   </div>
-                </motion.div>
+                </div>
               </motion.div>
             </div>
 
