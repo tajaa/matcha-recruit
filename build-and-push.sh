@@ -28,6 +28,8 @@ PUSH_TO_ECR=true
 TRIGGER_DEPLOY=false
 PLATFORM="linux/arm64"
 NO_CACHE=false
+BUILD_BACKEND=true
+BUILD_FRONTEND=true
 
 ################################################################################
 # Helper Functions
@@ -67,6 +69,8 @@ OPTIONS:
     --no-cache         Do not use cache when building the image
     --deploy           Trigger deployment after pushing (sets deploy flag)
     --platform ARCH    Target platform (default: linux/arm64)
+    --backend-only     Build only the backend image
+    --frontend-only    Build only the frontend image
     -h, --help         Show this help message
 
 ENVIRONMENT VARIABLES (required):
@@ -84,6 +88,12 @@ EXAMPLES:
 
     # Build, push, and trigger deployment
     $0 --deploy
+
+    # Build only the backend
+    $0 --backend-only
+
+    # Build only the frontend without pushing
+    $0 --no-push --frontend-only
 EOF
 }
 
@@ -101,6 +111,14 @@ parse_args() {
                 ;;
             --deploy)
                 TRIGGER_DEPLOY=true
+                shift
+                ;;
+            --backend-only)
+                BUILD_FRONTEND=false
+                shift
+                ;;
+            --frontend-only)
+                BUILD_BACKEND=false
                 shift
                 ;;
             --platform)
@@ -334,13 +352,47 @@ main() {
     # Authenticate with ECR
     ecr_login
 
-    # Build images
-    build_backend
-    build_frontend
+    # Build images in parallel
+    local pids=()
+    local services=()
 
-    # Push images
-    push_image "Backend" "${BACKEND_ECR_URI}"
-    push_image "Frontend" "${FRONTEND_ECR_URI}"
+    if [ "$BUILD_BACKEND" = true ]; then
+        build_backend &
+        pids+=($!)
+        services+=("Backend")
+    else
+        log_warning "Skipping backend build (--frontend-only)"
+    fi
+
+    if [ "$BUILD_FRONTEND" = true ]; then
+        build_frontend &
+        pids+=($!)
+        services+=("Frontend")
+    else
+        log_warning "Skipping frontend build (--backend-only)"
+    fi
+
+    # Wait for all builds to complete
+    local failed=false
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}"; then
+            log_error "${services[$i]} build failed"
+            failed=true
+        fi
+    done
+
+    if [ "$failed" = true ]; then
+        log_error "One or more builds failed"
+        exit 1
+    fi
+
+    # Push images (only after all builds succeed to preserve atomicity)
+    if [ "$BUILD_BACKEND" = true ]; then
+        push_image "Backend" "${BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_FRONTEND" = true ]; then
+        push_image "Frontend" "${FRONTEND_ECR_URI}"
+    fi
 
     # Deployment trigger
     if [ "$TRIGGER_DEPLOY" = true ]; then
@@ -351,8 +403,12 @@ main() {
 
     log_section "Build Complete"
     log_success "All operations completed successfully!"
-    log_info "Backend: ${BACKEND_ECR_URI}:latest"
-    log_info "Frontend: ${FRONTEND_ECR_URI}:latest"
+    if [ "$BUILD_BACKEND" = true ]; then
+        log_info "Backend: ${BACKEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_FRONTEND" = true ]; then
+        log_info "Frontend: ${FRONTEND_ECR_URI}:latest"
+    fi
 }
 
 ################################################################################
@@ -360,4 +416,10 @@ main() {
 ################################################################################
 
 parse_args "$@"
+
+if [ "$BUILD_BACKEND" = false ] && [ "$BUILD_FRONTEND" = false ]; then
+    log_error "--backend-only and --frontend-only cannot be used together"
+    exit 1
+fi
+
 main
