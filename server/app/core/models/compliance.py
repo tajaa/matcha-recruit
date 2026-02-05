@@ -121,7 +121,7 @@ class LocationCreate(BaseModel):
     city: str
     state: str
     county: Optional[str] = None
-    zipcode: str
+    zipcode: Optional[str] = None
 
 
 class LocationUpdate(BaseModel):

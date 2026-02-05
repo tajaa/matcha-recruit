@@ -39,6 +39,37 @@ from ..services.compliance_service import (
 router = APIRouter()
 
 
+@router.get("/jurisdictions")
+async def list_jurisdictions(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List jurisdictions that have requirement data in the repository."""
+    from ...database import get_connection
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT j.city, j.state, j.county,
+                   COALESCE(jr.has_local_ordinance, false) AS has_local_ordinance
+            FROM jurisdictions j
+            LEFT JOIN jurisdiction_reference jr
+                ON LOWER(jr.city) = LOWER(j.city) AND jr.state = j.state
+            WHERE j.requirement_count > 0
+              AND j.city <> ''
+              AND j.city NOT LIKE '_county_%'
+            ORDER BY j.state, j.city
+            """
+        )
+    return [
+        {
+            "city": row["city"],
+            "state": row["state"],
+            "county": row["county"],
+            "has_local_ordinance": row["has_local_ordinance"],
+        }
+        for row in rows
+    ]
+
+
 @router.post("/locations", response_model=dict)
 async def create_location_endpoint(
     data: LocationCreate,

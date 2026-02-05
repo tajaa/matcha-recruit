@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { BusinessLocation, ComplianceRequirement, LocationCreate } from '../api/compliance';
+import type { BusinessLocation, ComplianceRequirement, LocationCreate, JurisdictionOption } from '../api/compliance';
 import {
     complianceAPI,
     COMPLIANCE_CATEGORY_LABELS,
     JURISDICTION_LEVEL_LABELS
 } from '../api/compliance';
+import { useAuth } from '../context/AuthContext';
 import {
     MapPin, Plus, Trash2, Edit2, X,
     ChevronDown, ChevronRight, AlertTriangle, Bell, CheckCircle,
@@ -61,6 +62,7 @@ interface LocationFormData {
     state: string;
     county: string;
     zipcode: string;
+    jurisdictionKey: string;
 }
 
 const emptyFormData: LocationFormData = {
@@ -69,12 +71,16 @@ const emptyFormData: LocationFormData = {
     city: '',
     state: '',
     county: '',
-    zipcode: ''
+    zipcode: '',
+    jurisdictionKey: ''
 };
 
 export function Compliance() {
+    const { user } = useAuth();
+    const isClient = user?.role === 'client';
     const queryClient = useQueryClient();
     const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+    const [jurisdictionSearch, setJurisdictionSearch] = useState('');
     const [showAddModal, setShowAddModal] = useState(false);
     const [editingLocation, setEditingLocation] = useState<BusinessLocation | null>(null);
     const [formData, setFormData] = useState<LocationFormData>(emptyFormData);
@@ -111,6 +117,41 @@ export function Compliance() {
         queryFn: () => selectedLocationId ? complianceAPI.getCheckLog(selectedLocationId, 10) : Promise.resolve([]),
         enabled: !!selectedLocationId
     });
+
+    const { data: jurisdictions } = useQuery({
+        queryKey: ['compliance-jurisdictions'],
+        queryFn: complianceAPI.getJurisdictions,
+        enabled: isClient,
+    });
+
+    const jurisdictionsByState = useMemo(() => {
+        if (!jurisdictions) return {};
+        const grouped: Record<string, JurisdictionOption[]> = {};
+        for (const j of jurisdictions) {
+            if (!grouped[j.state]) grouped[j.state] = [];
+            grouped[j.state].push(j);
+        }
+        return grouped;
+    }, [jurisdictions]);
+
+    const filteredJurisdictions = useMemo(() => {
+        if (!jurisdictions) return {};
+        const search = jurisdictionSearch.toLowerCase().trim();
+        if (!search) return jurisdictionsByState;
+        const filtered: Record<string, JurisdictionOption[]> = {};
+        for (const [state, items] of Object.entries(jurisdictionsByState)) {
+            const stateLabel = US_STATES.find(s => s.value === state)?.label || state;
+            const matches = items.filter(j =>
+                j.city.toLowerCase().includes(search) ||
+                state.toLowerCase().includes(search) ||
+                stateLabel.toLowerCase().includes(search)
+            );
+            if (matches.length > 0) filtered[state] = matches;
+        }
+        return filtered;
+    }, [jurisdictions, jurisdictionSearch, jurisdictionsByState]);
+
+    const makeJurisdictionKey = (j: JurisdictionOption) => `${j.city}|${j.state}|${j.county || ''}`;
 
     const createLocationMutation = useMutation({
         mutationFn: (data: LocationCreate) => complianceAPI.createLocation(data),
@@ -184,7 +225,8 @@ export function Compliance() {
 
     const handleSubmitLocation = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.city || !formData.state || !formData.zipcode) return;
+        if (!formData.city || !formData.state) return;
+        if (!isClient && !formData.zipcode) return;
 
         const data: LocationCreate = {
             name: formData.name || undefined,
@@ -192,7 +234,7 @@ export function Compliance() {
             city: formData.city,
             state: formData.state,
             county: formData.county || undefined,
-            zipcode: formData.zipcode
+            zipcode: formData.zipcode || undefined,
         };
 
         if (editingLocation) {
@@ -204,13 +246,15 @@ export function Compliance() {
 
     const openEditModal = (location: BusinessLocation) => {
         setEditingLocation(location);
+        setJurisdictionSearch('');
         setFormData({
             name: location.name || '',
             address: location.address || '',
             city: location.city,
             state: location.state,
             county: location.county || '',
-            zipcode: location.zipcode
+            zipcode: location.zipcode,
+            jurisdictionKey: `${location.city}|${location.state}|${location.county || ''}`,
         });
     };
 
@@ -283,6 +327,7 @@ export function Compliance() {
                     onClick={() => {
                         setFormData(emptyFormData);
                         setEditingLocation(null);
+                        setJurisdictionSearch('');
                         setShowAddModal(true);
                     }}
                     className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
@@ -1007,6 +1052,7 @@ export function Compliance() {
                             setShowAddModal(false);
                             setEditingLocation(null);
                             setFormData(emptyFormData);
+                            setJurisdictionSearch('');
                         }}
                     >
                         <motion.div
@@ -1025,6 +1071,7 @@ export function Compliance() {
                                         setShowAddModal(false);
                                         setEditingLocation(null);
                                         setFormData(emptyFormData);
+                                        setJurisdictionSearch('');
                                     }}
                                     className="p-1 text-zinc-500 hover:text-white transition-colors"
                                 >
@@ -1046,81 +1093,153 @@ export function Compliance() {
                                     />
                                 </div>
 
-                                <div>
-                                    <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                        Street Address (optional)
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={formData.address}
-                                        onChange={e => setFormData(prev => ({ ...prev, address: e.target.value }))}
-                                        placeholder="123 Main St"
-                                        className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
-                                    />
-                                </div>
+                                {isClient && !editingLocation ? (
+                                    <div>
+                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                                            Jurisdiction <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={jurisdictionSearch}
+                                            onChange={e => setJurisdictionSearch(e.target.value)}
+                                            placeholder="Search by city or state..."
+                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700 mb-2"
+                                        />
+                                        <div className="max-h-48 overflow-y-auto border border-zinc-800 rounded bg-zinc-900">
+                                            {Object.keys(filteredJurisdictions).length === 0 ? (
+                                                <div className="px-3 py-4 text-center text-zinc-600 text-xs">
+                                                    {jurisdictionSearch ? 'No matching jurisdictions' : 'Loading jurisdictions...'}
+                                                </div>
+                                            ) : (
+                                                Object.entries(filteredJurisdictions).map(([state, items]) => {
+                                                    const stateLabel = US_STATES.find(s => s.value === state)?.label || state;
+                                                    return (
+                                                        <div key={state}>
+                                                            <div className="px-3 py-1.5 bg-zinc-950 text-[10px] text-zinc-500 font-bold uppercase tracking-wider sticky top-0">
+                                                                {stateLabel}
+                                                            </div>
+                                                            {items.map(j => {
+                                                                const key = makeJurisdictionKey(j);
+                                                                const isSelected = formData.jurisdictionKey === key;
+                                                                return (
+                                                                    <button
+                                                                        key={key}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setFormData(prev => ({
+                                                                                ...prev,
+                                                                                city: j.city,
+                                                                                state: j.state,
+                                                                                county: j.county || '',
+                                                                                jurisdictionKey: key,
+                                                                            }));
+                                                                        }}
+                                                                        className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between ${
+                                                                            isSelected
+                                                                                ? 'bg-white/10 text-white'
+                                                                                : 'text-zinc-400 hover:bg-white/5 hover:text-white'
+                                                                        }`}
+                                                                    >
+                                                                        <span>{j.city}, {j.state}</span>
+                                                                        {j.has_local_ordinance && (
+                                                                            <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded uppercase tracking-wider font-bold">
+                                                                                Local
+                                                                            </span>
+                                                                        )}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+                                        {formData.jurisdictionKey && (
+                                            <div className="mt-2 px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded text-xs text-zinc-300">
+                                                Selected: <span className="text-white font-bold">{formData.city}, {formData.state}</span>
+                                                {formData.county && <span className="text-zinc-500 ml-1">({formData.county} County)</span>}
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div>
+                                            <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                                                Street Address (optional)
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={formData.address}
+                                                onChange={e => setFormData(prev => ({ ...prev, address: e.target.value }))}
+                                                placeholder="123 Main St"
+                                                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                            />
+                                        </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                            City <span className="text-red-500">*</span>
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={formData.city}
-                                            onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))}
-                                            required
-                                            placeholder="San Francisco"
-                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                            State <span className="text-red-500">*</span>
-                                        </label>
-                                        <select
-                                            value={formData.state}
-                                            onChange={e => setFormData(prev => ({ ...prev, state: e.target.value }))}
-                                            required
-                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
-                                        >
-                                            <option value="">Select...</option>
-                                            {US_STATES.map(state => (
-                                                <option key={state.value} value={state.value}>
-                                                    {state.label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                                                    City <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={formData.city}
+                                                    onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))}
+                                                    required
+                                                    placeholder="San Francisco"
+                                                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                                                    State <span className="text-red-500">*</span>
+                                                </label>
+                                                <select
+                                                    value={formData.state}
+                                                    onChange={e => setFormData(prev => ({ ...prev, state: e.target.value }))}
+                                                    required
+                                                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
+                                                >
+                                                    <option value="">Select...</option>
+                                                    {US_STATES.map(state => (
+                                                        <option key={state.value} value={state.value}>
+                                                            {state.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                            County (optional)
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={formData.county}
-                                            onChange={e => setFormData(prev => ({ ...prev, county: e.target.value }))}
-                                            placeholder="San Francisco"
-                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                            ZIP Code <span className="text-red-500">*</span>
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={formData.zipcode}
-                                            onChange={e => setFormData(prev => ({ ...prev, zipcode: e.target.value }))}
-                                            required
-                                            placeholder="94105"
-                                            maxLength={10}
-                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
-                                        />
-                                    </div>
-                                </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                                                    County (optional)
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={formData.county}
+                                                    onChange={e => setFormData(prev => ({ ...prev, county: e.target.value }))}
+                                                    placeholder="San Francisco"
+                                                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                                                    ZIP Code {!isClient && <span className="text-red-500">*</span>}
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={formData.zipcode}
+                                                    onChange={e => setFormData(prev => ({ ...prev, zipcode: e.target.value }))}
+                                                    required={!isClient}
+                                                    placeholder="94105"
+                                                    maxLength={10}
+                                                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                                />
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
 
                                 <div className="flex gap-3 pt-6 border-t border-white/10">
                                     <button
@@ -1129,6 +1248,7 @@ export function Compliance() {
                                             setShowAddModal(false);
                                             setEditingLocation(null);
                                             setFormData(emptyFormData);
+                                            setJurisdictionSearch('');
                                         }}
                                         className="flex-1 px-4 py-2 bg-transparent border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded text-xs font-bold uppercase tracking-wider transition-colors"
                                     >
@@ -1136,7 +1256,7 @@ export function Compliance() {
                                     </button>
                                     <button
                                         type="submit"
-                                        disabled={createLocationMutation.isPending || updateLocationMutation.isPending}
+                                        disabled={createLocationMutation.isPending || updateLocationMutation.isPending || (isClient && !editingLocation && !formData.jurisdictionKey)}
                                         className="flex-1 px-4 py-2 bg-white hover:bg-zinc-200 text-black rounded text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
                                     >
                                         {createLocationMutation.isPending || updateLocationMutation.isPending

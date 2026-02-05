@@ -1460,7 +1460,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             data.city,
             data.state.upper(),
             data.county,
-            data.zipcode,
+            data.zipcode or "",
         )
 
         # Map to jurisdiction

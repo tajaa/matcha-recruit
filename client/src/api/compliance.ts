@@ -24,7 +24,14 @@ export interface LocationCreate {
     city: string;
     state: string;
     county?: string;
-    zipcode: string;
+    zipcode?: string;
+}
+
+export interface JurisdictionOption {
+    city: string;
+    state: string;
+    county: string | null;
+    has_local_ordinance: boolean;
 }
 
 export interface LocationUpdate {
@@ -139,6 +146,16 @@ export interface ComplianceSummary {
 import { getAccessToken } from './client';
 
 export const complianceAPI = {
+    async getJurisdictions(): Promise<JurisdictionOption[]> {
+        const response = await fetch('/api/compliance/jurisdictions', {
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+            },
+        });
+        if (!response.ok) throw new Error('Failed to fetch jurisdictions');
+        return response.json();
+    },
+
     async getLocations(): Promise<BusinessLocation[]> {
         const response = await fetch('/api/compliance/locations', {
             headers: {
