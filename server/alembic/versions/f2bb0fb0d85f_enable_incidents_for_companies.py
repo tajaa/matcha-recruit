@@ -27,7 +27,7 @@ def upgrade() -> None:
             '{incidents}',
             'true'
         )
-        WHERE status = 'approved'
+        WHERE status = 'approved' OR status IS NULL
     """)
 
 
@@ -36,5 +36,5 @@ def downgrade() -> None:
     op.execute("""
         UPDATE companies
         SET enabled_features = enabled_features - 'incidents'
-        WHERE status = 'approved'
+        WHERE status = 'approved' OR status IS NULL
     """)

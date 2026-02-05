@@ -438,8 +438,8 @@ async def _get_or_create_jurisdiction(conn, city: str, state: str, county: Optio
             county_id, state_id,
         )
 
-        # Link city -> county
-        if not city_row["parent_id"]:
+        # Link city -> county (even if previously linked directly to state)
+        if not city_row["parent_id"] or city_row["parent_id"] == state_id:
             await conn.execute(
                 "UPDATE jurisdictions SET parent_id = $2 WHERE id = $1",
                 city_id, county_id,
