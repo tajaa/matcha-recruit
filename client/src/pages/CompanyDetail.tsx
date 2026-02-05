@@ -1,9 +1,43 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Card, CardHeader, CardContent, Modal, PositionCard, PositionForm } from '../components';
 import { companies as companiesApi, interviews as interviewsApi, matching as matchingApi, positions as positionsApi } from '../api/client';
+import { complianceAPI } from '../api/compliance';
+import type { BusinessLocation, LocationCreate, JurisdictionOption } from '../api/compliance';
 import { useAuth } from '../context/AuthContext';
 import type { Company, Interview, MatchResult, Position } from '../types';
+import { MapPin, Plus, Edit2, Trash2, X, Shield } from 'lucide-react';
+
+const US_STATES = [
+  { value: 'AL', label: 'Alabama' }, { value: 'AK', label: 'Alaska' },
+  { value: 'AZ', label: 'Arizona' }, { value: 'AR', label: 'Arkansas' },
+  { value: 'CA', label: 'California' }, { value: 'CO', label: 'Colorado' },
+  { value: 'CT', label: 'Connecticut' }, { value: 'DE', label: 'Delaware' },
+  { value: 'FL', label: 'Florida' }, { value: 'GA', label: 'Georgia' },
+  { value: 'HI', label: 'Hawaii' }, { value: 'ID', label: 'Idaho' },
+  { value: 'IL', label: 'Illinois' }, { value: 'IN', label: 'Indiana' },
+  { value: 'IA', label: 'Iowa' }, { value: 'KS', label: 'Kansas' },
+  { value: 'KY', label: 'Kentucky' }, { value: 'LA', label: 'Louisiana' },
+  { value: 'ME', label: 'Maine' }, { value: 'MD', label: 'Maryland' },
+  { value: 'MA', label: 'Massachusetts' }, { value: 'MI', label: 'Michigan' },
+  { value: 'MN', label: 'Minnesota' }, { value: 'MS', label: 'Mississippi' },
+  { value: 'MO', label: 'Missouri' }, { value: 'MT', label: 'Montana' },
+  { value: 'NE', label: 'Nebraska' }, { value: 'NV', label: 'Nevada' },
+  { value: 'NH', label: 'New Hampshire' }, { value: 'NJ', label: 'New Jersey' },
+  { value: 'NM', label: 'New Mexico' }, { value: 'NY', label: 'New York' },
+  { value: 'NC', label: 'North Carolina' }, { value: 'ND', label: 'North Dakota' },
+  { value: 'OH', label: 'Ohio' }, { value: 'OK', label: 'Oklahoma' },
+  { value: 'OR', label: 'Oregon' }, { value: 'PA', label: 'Pennsylvania' },
+  { value: 'RI', label: 'Rhode Island' }, { value: 'SC', label: 'South Carolina' },
+  { value: 'SD', label: 'South Dakota' }, { value: 'TN', label: 'Tennessee' },
+  { value: 'TX', label: 'Texas' }, { value: 'UT', label: 'Utah' },
+  { value: 'VT', label: 'Vermont' }, { value: 'VA', label: 'Virginia' },
+  { value: 'WA', label: 'Washington' }, { value: 'WV', label: 'West Virginia' },
+  { value: 'WI', label: 'Wisconsin' }, { value: 'WY', label: 'Wyoming' },
+  { value: 'DC', label: 'Washington D.C.' }
+];
+
+const emptyShopForm = { name: '', address: '', city: '', state: '', county: '', zipcode: '', jurisdictionKey: '' };
 
 export function CompanyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -28,19 +62,58 @@ export function CompanyDetail() {
   const [irGuidanceBlurb, setIrGuidanceBlurb] = useState('');
   const [savingIRGuidance, setSavingIRGuidance] = useState(false);
 
+  // Shops state
+  const [shops, setShops] = useState<BusinessLocation[]>([]);
+  const [showShopModal, setShowShopModal] = useState(false);
+  const [editingShop, setEditingShop] = useState<BusinessLocation | null>(null);
+  const [shopSaving, setShopSaving] = useState(false);
+  const [shopForm, setShopForm] = useState(emptyShopForm);
+  const [useManualEntry, setUseManualEntry] = useState(false);
+  const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
+  const [jurisdictionSearch, setJurisdictionSearch] = useState('');
+
+  const jurisdictionsByState = useMemo(() => {
+    const grouped: Record<string, JurisdictionOption[]> = {};
+    for (const j of jurisdictions) {
+      if (!grouped[j.state]) grouped[j.state] = [];
+      grouped[j.state].push(j);
+    }
+    return grouped;
+  }, [jurisdictions]);
+
+  const filteredJurisdictions = useMemo(() => {
+    const search = jurisdictionSearch.toLowerCase().trim();
+    if (!search) return jurisdictionsByState;
+    const filtered: Record<string, JurisdictionOption[]> = {};
+    for (const [state, items] of Object.entries(jurisdictionsByState)) {
+      const stateLabel = US_STATES.find(s => s.value === state)?.label || state;
+      const matches = items.filter(j =>
+        j.city.toLowerCase().includes(search) ||
+        state.toLowerCase().includes(search) ||
+        stateLabel.toLowerCase().includes(search)
+      );
+      if (matches.length > 0) filtered[state] = matches;
+    }
+    return filtered;
+  }, [jurisdictions, jurisdictionSearch, jurisdictionsByState]);
+
+  const makeJurisdictionKey = (j: JurisdictionOption) => `${j.city}|${j.state}|${j.county || ''}`;
+
   const fetchData = async () => {
     if (!id) return;
     try {
-      const [companyData, interviewsData, matchesData, positionsData] = await Promise.all([
+      const [companyData, interviewsData, matchesData, positionsData, shopsData] = await Promise.all([
         companiesApi.get(id),
         interviewsApi.list(id),
         matchingApi.list(id).catch(() => []),
         positionsApi.listByCompany(id).catch(() => []),
+        complianceAPI.getLocations(id).catch(() => []),
       ]);
       setCompany(companyData);
       setInterviews(interviewsData);
       setMatches(matchesData);
       setPositions(positionsData);
+      setShops(shopsData);
       setIrGuidanceBlurb(companyData.ir_guidance_blurb || '');
     } catch (err) {
       console.error('Failed to fetch data:', err);
@@ -52,6 +125,10 @@ export function CompanyDetail() {
   useEffect(() => {
     fetchData();
   }, [id]);
+
+  useEffect(() => {
+    complianceAPI.getJurisdictions().then(setJurisdictions).catch(() => {});
+  }, []);
 
   const handleStartInterview = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,6 +199,66 @@ export function CompanyDetail() {
       setSavingIRGuidance(false);
     }
   };
+
+  const handleSubmitShop = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || !shopForm.city || !shopForm.state) return;
+    setShopSaving(true);
+    try {
+      const data: LocationCreate = {
+        name: shopForm.name || undefined,
+        address: shopForm.address || undefined,
+        city: shopForm.city,
+        state: shopForm.state,
+        county: shopForm.county || undefined,
+        zipcode: shopForm.zipcode || undefined,
+      };
+      if (editingShop) {
+        await complianceAPI.updateLocation(editingShop.id, data, id);
+      } else {
+        await complianceAPI.createLocation(data, id);
+      }
+      setShowShopModal(false);
+      setEditingShop(null);
+      setShopForm(emptyShopForm);
+      setUseManualEntry(false);
+      setJurisdictionSearch('');
+      const updated = await complianceAPI.getLocations(id);
+      setShops(updated);
+    } catch (err) {
+      console.error('Failed to save shop:', err);
+    } finally {
+      setShopSaving(false);
+    }
+  };
+
+  const handleDeleteShop = async (shopId: string) => {
+    if (!id || !confirm('Delete this shop?')) return;
+    try {
+      await complianceAPI.deleteLocation(shopId, id);
+      setShops(prev => prev.filter(s => s.id !== shopId));
+    } catch (err) {
+      console.error('Failed to delete shop:', err);
+    }
+  };
+
+  const openEditShop = (shop: BusinessLocation) => {
+    setEditingShop(shop);
+    setShopForm({
+      name: shop.name || '',
+      address: shop.address || '',
+      city: shop.city,
+      state: shop.state,
+      county: shop.county || '',
+      zipcode: shop.zipcode,
+      jurisdictionKey: `${shop.city}|${shop.state}|${shop.county || ''}`,
+    });
+    setUseManualEntry(true);
+    setJurisdictionSearch('');
+    setShowShopModal(true);
+  };
+
+  const showJurisdictionPicker = !editingShop && !useManualEntry;
 
   if (loading) {
     return <div className="text-center py-12 text-zinc-500">Loading...</div>;
@@ -434,6 +571,100 @@ export function CompanyDetail() {
         </CardContent>
       </Card>
 
+      {/* Shops Section */}
+      <Card>
+        <CardHeader className="flex justify-between items-center border-zinc-800">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold text-zinc-100">Shops</h2>
+            <span className="text-xs text-zinc-500 font-mono">{shops.length} location{shops.length !== 1 ? 's' : ''}</span>
+          </div>
+          <Button size="sm" onClick={() => {
+            setShopForm(emptyShopForm);
+            setEditingShop(null);
+            setUseManualEntry(false);
+            setJurisdictionSearch('');
+            setShowShopModal(true);
+          }}>
+            <Plus size={14} className="mr-1" />
+            Add Shop
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {shops.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-800/50 border border-zinc-700 flex items-center justify-center">
+                <MapPin size={20} className="text-zinc-500" />
+              </div>
+              <p className="text-zinc-500 text-sm mb-3">No shops yet</p>
+              <button
+                onClick={() => {
+                  setShopForm(emptyShopForm);
+                  setEditingShop(null);
+                  setUseManualEntry(false);
+                  setJurisdictionSearch('');
+                  setShowShopModal(true);
+                }}
+                className="text-white text-xs font-bold hover:text-zinc-300 uppercase tracking-wider underline underline-offset-4"
+              >
+                Add your first shop
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2 mt-2">
+              {shops.map(shop => (
+                <div
+                  key={shop.id}
+                  className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-lg border border-zinc-800/50 hover:border-zinc-700 transition-colors group"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-9 h-9 bg-zinc-800 border border-zinc-700 rounded flex items-center justify-center shrink-0">
+                      <MapPin size={16} className="text-zinc-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-zinc-200 truncate">
+                        {shop.name || `${shop.city}, ${shop.state}`}
+                      </p>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        <span className="text-xs text-zinc-500 font-mono truncate">
+                          {shop.address ? `${shop.address}, ` : ''}{shop.city}, {shop.state} {shop.zipcode}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 mt-1.5 text-[10px] uppercase tracking-wider">
+                        <span className="text-zinc-500 flex items-center gap-1">
+                          <Shield size={10} />
+                          {shop.requirements_count} reqs
+                        </span>
+                        {shop.last_compliance_check && (
+                          <span className="text-zinc-600">
+                            Checked {new Date(shop.last_compliance_check).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 ml-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => openEditShop(shop)}
+                      className="p-1.5 text-zinc-500 hover:text-white rounded transition-colors"
+                      title="Edit"
+                    >
+                      <Edit2 size={13} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteShop(shop.id)}
+                      className="p-1.5 text-zinc-500 hover:text-red-400 rounded transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Matches Section */}
       {company.culture_profile && (
         <Card>
@@ -576,6 +807,217 @@ export function CompanyDetail() {
           onCancel={() => setShowPositionModal(false)}
           isLoading={creatingPosition}
         />
+      </Modal>
+
+      {/* Shop Modal */}
+      <Modal
+        isOpen={showShopModal}
+        onClose={() => {
+          setShowShopModal(false);
+          setEditingShop(null);
+          setShopForm(emptyShopForm);
+          setJurisdictionSearch('');
+          setUseManualEntry(false);
+        }}
+        title={editingShop ? 'Edit Shop' : 'Add Shop'}
+      >
+        <form onSubmit={handleSubmitShop} className="space-y-4">
+          <div>
+            <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+              Shop Name (optional)
+            </label>
+            <input
+              type="text"
+              value={shopForm.name}
+              onChange={e => setShopForm(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="e.g., Main Office, Warehouse"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm rounded-lg focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+            />
+          </div>
+
+          {showJurisdictionPicker ? (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500">
+                  Jurisdiction <span className="text-red-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => { setUseManualEntry(true); setShopForm(prev => ({ ...prev, jurisdictionKey: '' })); }}
+                  className="text-[10px] text-zinc-600 hover:text-zinc-400 uppercase tracking-wider transition-colors"
+                >
+                  Enter manually
+                </button>
+              </div>
+              <input
+                type="text"
+                value={jurisdictionSearch}
+                onChange={e => setJurisdictionSearch(e.target.value)}
+                placeholder="Search by city or state..."
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm rounded-lg focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700 mb-2"
+              />
+              <div className="max-h-48 overflow-y-auto border border-zinc-800 rounded-lg bg-zinc-900">
+                {Object.keys(filteredJurisdictions).length === 0 ? (
+                  <div className="px-3 py-4 text-center text-zinc-600 text-xs">
+                    {jurisdictionSearch ? 'No matching jurisdictions' : 'Loading jurisdictions...'}
+                  </div>
+                ) : (
+                  Object.entries(filteredJurisdictions).map(([state, items]) => {
+                    const stateLabel = US_STATES.find(s => s.value === state)?.label || state;
+                    return (
+                      <div key={state}>
+                        <div className="px-3 py-1.5 bg-zinc-950 text-[10px] text-zinc-500 font-bold uppercase tracking-wider sticky top-0">
+                          {stateLabel}
+                        </div>
+                        {items.map(j => {
+                          const key = makeJurisdictionKey(j);
+                          const isSelected = shopForm.jurisdictionKey === key;
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => {
+                                setShopForm(prev => ({
+                                  ...prev,
+                                  city: j.city,
+                                  state: j.state,
+                                  county: j.county || '',
+                                  jurisdictionKey: key,
+                                }));
+                              }}
+                              className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between ${
+                                isSelected
+                                  ? 'bg-white/10 text-white'
+                                  : 'text-zinc-400 hover:bg-white/5 hover:text-white'
+                              }`}
+                            >
+                              <span>{j.city}, {j.state}</span>
+                              {j.has_local_ordinance && (
+                                <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded uppercase tracking-wider font-bold">
+                                  Local
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              {shopForm.jurisdictionKey && (
+                <div className="mt-2 px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded-lg text-xs text-zinc-300">
+                  Selected: <span className="text-white font-bold">{shopForm.city}, {shopForm.state}</span>
+                  {shopForm.county && <span className="text-zinc-500 ml-1">({shopForm.county} County)</span>}
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {!editingShop && useManualEntry && (
+                <button
+                  type="button"
+                  onClick={() => { setUseManualEntry(false); setShopForm(emptyShopForm); }}
+                  className="text-[10px] text-zinc-600 hover:text-zinc-400 uppercase tracking-wider transition-colors"
+                >
+                  Use jurisdiction picker
+                </button>
+              )}
+              <div>
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                  Street Address (optional)
+                </label>
+                <input
+                  type="text"
+                  value={shopForm.address}
+                  onChange={e => setShopForm(prev => ({ ...prev, address: e.target.value }))}
+                  placeholder="123 Main St"
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm rounded-lg focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                    City <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={shopForm.city}
+                    onChange={e => setShopForm(prev => ({ ...prev, city: e.target.value }))}
+                    required
+                    placeholder="San Francisco"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm rounded-lg focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                    State <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={shopForm.state}
+                    onChange={e => setShopForm(prev => ({ ...prev, state: e.target.value }))}
+                    required
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm rounded-lg focus:outline-none focus:border-white/20 transition-colors"
+                  >
+                    <option value="">Select...</option>
+                    {US_STATES.map(state => (
+                      <option key={state.value} value={state.value}>{state.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                    County (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={shopForm.county}
+                    onChange={e => setShopForm(prev => ({ ...prev, county: e.target.value }))}
+                    placeholder="San Francisco"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm rounded-lg focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
+                    ZIP Code
+                  </label>
+                  <input
+                    type="text"
+                    value={shopForm.zipcode}
+                    onChange={e => setShopForm(prev => ({ ...prev, zipcode: e.target.value }))}
+                    placeholder="94105"
+                    maxLength={10}
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm rounded-lg focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-zinc-800 mt-6">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setShowShopModal(false);
+                setEditingShop(null);
+                setShopForm(emptyShopForm);
+                setJurisdictionSearch('');
+                setUseManualEntry(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={shopSaving || (showJurisdictionPicker && !shopForm.jurisdictionKey)}
+            >
+              {shopSaving ? 'Saving...' : editingShop ? 'Update Shop' : 'Add Shop'}
+            </Button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { adminOverview } from '../../api/client';
 import type { AdminOverviewCompany, AdminOverviewTotals } from '../../api/client';
 import { Building2, Users, UserCheck, UserPlus, Calendar } from 'lucide-react';
 
 export function AdminOverview() {
+  const navigate = useNavigate();
   const [companies, setCompanies] = useState<AdminOverviewCompany[]>([]);
   const [totals, setTotals] = useState<AdminOverviewTotals | null>(null);
   const [loading, setLoading] = useState(true);
@@ -173,7 +175,8 @@ export function AdminOverview() {
                 {companies.map((company) => (
                   <tr
                     key={company.id}
-                    className="border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950"
+                    onClick={() => navigate(`/app/companies/${company.id}`)}
+                    className="border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950 cursor-pointer"
                   >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-4">

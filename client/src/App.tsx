@@ -50,6 +50,7 @@ const AdminOverview = lazy(() => import('./pages/admin/AdminOverview'));
 const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
 const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
 const Jurisdictions = lazy(() => import('./pages/admin/Jurisdictions'));
+const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -436,6 +437,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <Jurisdictions />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="companies/:id"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <CompanyDetail />
                   </ProtectedRoute>
                 }
               />
