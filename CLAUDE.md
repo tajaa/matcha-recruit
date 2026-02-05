@@ -7,6 +7,8 @@ AI-powered recruiting and HR platform. Two domains:
 - **Matcha** — Recruiting (candidates, interviews, matching, offer letters) and HR ops (employees, onboarding, PTO, experience analytics)
 - **Core** — Auth, admin, compliance monitoring, AI chat, policies, leads agent
 
+This is the matcha app (`server/` + `client/`). A second app, Gummfit Agency (creator economy platform), lives in `gummfit-agency/` with its own server and client. See `ARCHITECTURE.md` for how the dual-app system works, and `gummfit-agency/CLAUDE.md` for gummfit-specific docs.
+
 ## Stack
 
 - **Framework**: FastAPI + uvicorn (async)
@@ -92,4 +94,12 @@ python3 -m pytest tests/ -v
 ```bash
 cd server
 python3 run.py
+# Starts on port 8001
+```
+
+## Running Both Apps
+
+```bash
+./scripts/dev.sh
+# Matcha on :8001/:5174, Gummfit on :8003/:5175
 ```
