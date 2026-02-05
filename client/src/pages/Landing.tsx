@@ -1,6 +1,6 @@
-import { useRef, lazy, Suspense } from "react";
+import { useRef, lazy, Suspense, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { motion, useScroll, useTransform } from "framer-motion";
+import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
 import {
   ArrowUpRight,
   Terminal,
@@ -40,9 +40,26 @@ const Marquee = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
+const LOCAL_JURISDICTIONS = [
+  "San Francisco Local",
+  "West Hollywood Local",
+  "Los Angeles Local",
+  "Berkeley Local",
+  "Emeryville Local",
+  "Seattle Local",
+];
+
 export function Landing() {
   const containerRef = useRef<HTMLDivElement>(null);
   const complianceSectionRef = useRef<HTMLDivElement>(null);
+  const [jurisdictionIndex, setJurisdictionIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setJurisdictionIndex((prev) => (prev + 1) % LOCAL_JURISDICTIONS.length);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
 
   const { scrollYProgress } = useScroll({
     target: complianceSectionRef,
@@ -273,7 +290,7 @@ export function Landing() {
                     <div className="flex items-center gap-3">
                       <MapPin className="w-4 h-4 text-zinc-500" />
                       <span className="text-xs font-mono uppercase tracking-widest text-zinc-300">
-                        San Francisco, CA
+                        Global Coverage
                       </span>
                     </div>
                     <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[10px] font-mono uppercase flex items-center gap-1">
@@ -286,8 +303,9 @@ export function Landing() {
                     {[
                       {
                         label: "Minimum Wage",
-                        badge: "San Francisco Local",
+                        badge: LOCAL_JURISDICTIONS[jurisdictionIndex],
                         color: "emerald",
+                        isDynamic: true,
                       },
                       {
                         label: "Sick Leave",
@@ -303,22 +321,29 @@ export function Landing() {
                     ].map((row, i) => (
                       <div
                         key={i}
-                        className="flex items-center justify-between p-4 bg-zinc-950"
+                        className="flex items-center justify-between p-4 bg-zinc-950 min-h-[52px]"
                       >
                         <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
                           {row.label}
                         </span>
-                        <motion.span
-                          animate={{ opacity: [0.7, 1, 0.7] }}
-                          transition={{ duration: 2, repeat: Infinity, delay: i * 0.4 }}
-                          className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${
-                            row.color === "emerald"
-                              ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                              : "bg-blue-500/15 text-blue-400 border-blue-500/30"
-                          }`}
-                        >
-                          {row.badge}
-                        </motion.span>
+                        <div className="relative flex justify-end min-w-[140px]">
+                          <AnimatePresence mode="wait">
+                            <motion.span
+                              key={row.badge}
+                              initial={{ opacity: 0, y: 5 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -5 }}
+                              transition={{ duration: 0.3 }}
+                              className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${
+                                row.color === "emerald"
+                                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                  : "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                              }`}
+                            >
+                              {row.badge}
+                            </motion.span>
+                          </AnimatePresence>
+                        </div>
                       </div>
                     ))}
                   </div>
