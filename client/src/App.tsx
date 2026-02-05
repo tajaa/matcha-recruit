@@ -5,7 +5,6 @@ import { Layout, ProtectedRoute } from './components';
 
 // Static imports for critical path (landing + auth)
 import { Landing } from './pages/Landing';
-import { GumFitLanding } from './pages/GumFitLanding';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Unauthorized } from './pages/Unauthorized';
@@ -77,36 +76,6 @@ const ChatLayout = lazy(() => import('./pages/chat/ChatLayout'));
 const ChatLobby = lazy(() => import('./pages/chat/ChatLobby'));
 const ChatRoom = lazy(() => import('./pages/chat/ChatRoom'));
 
-// Creator Pages
-const CreatorDashboard = lazy(() => import('./pages/creator/CreatorDashboard'));
-const RevenueDashboard = lazy(() => import('./pages/creator/RevenueDashboard'));
-const ExpenseTracker = lazy(() => import('./pages/creator/ExpenseTracker'));
-const PlatformConnections = lazy(() => import('./pages/creator/PlatformConnections'));
-const DealMarketplace = lazy(() => import('./pages/creator/DealMarketplace'));
-const MyApplications = lazy(() => import('./pages/creator/MyApplications'));
-const MyContracts = lazy(() => import('./pages/creator/MyContracts'));
-const CampaignOffers = lazy(() => import('./pages/creator/CampaignOffers').then(m => ({ default: m.CampaignOffers })));
-const OfferDetail = lazy(() => import('./pages/creator/CampaignOffers').then(m => ({ default: m.OfferDetail })));
-const AffiliateDashboard = lazy(() => import('./pages/creator/AffiliateDashboard'));
-
-// Agency Pages
-const AgencyDashboard = lazy(() => import('./pages/agency/AgencyDashboard'));
-const DealManager = lazy(() => import('./pages/agency/DealManager'));
-const CampaignManager = lazy(() => import('./pages/agency/CampaignManager'));
-const CampaignDetail = lazy(() => import('./pages/agency/CampaignDetail'));
-const CreatorDiscovery = lazy(() => import('./pages/agency/CreatorDiscovery'));
-const CreatorProfile = lazy(() => import('./pages/agency/CreatorProfile'));
-const ApplicationReview = lazy(() => import('./pages/agency/ApplicationReview'));
-const ContractManager = lazy(() => import('./pages/agency/ContractManager'));
-
-// GumFit Admin Pages
-const GumFitDashboard = lazy(() => import('./pages/gumfit/GumFitDashboard'));
-const GumFitCreators = lazy(() => import('./pages/gumfit/GumFitCreators'));
-const GumFitAgencies = lazy(() => import('./pages/gumfit/GumFitAgencies'));
-const GumFitUsers = lazy(() => import('./pages/gumfit/GumFitUsers'));
-const GumFitInvites = lazy(() => import('./pages/gumfit/GumFitInvites'));
-const GumFitAssets = lazy(() => import('./pages/gumfit/GumFitAssets'));
-
 // AI Chat
 const AIChat = lazy(() => import('./pages/AIChat'));
 
@@ -143,7 +112,6 @@ function App() {
             <Routes>
               {/* Public routes */}
               <Route path="/" element={<Landing />} />
-              <Route path="/gumfit-landing" element={<GumFitLanding />} />
               <Route path="/for-candidates" element={<ForCandidates />} />
               <Route path="/work-with-us" element={<WorkWithUs />} />
               <Route path="/login" element={<Login />} />
@@ -601,203 +569,6 @@ function App() {
                 }
               />
 
-              {/* Creator Routes */}
-              <Route
-                path="gumfit"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <CreatorDashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/revenue"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <RevenueDashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/expenses"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <ExpenseTracker />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/platforms"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <PlatformConnections />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/deals"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <DealMarketplace />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/applications"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <MyApplications />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/contracts"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <MyContracts />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/offers"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <CampaignOffers />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/offers/:offerId"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <OfferDetail />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/affiliate"
-                element={
-                  <ProtectedRoute roles={['creator']}>
-                    <AffiliateDashboard />
-                  </ProtectedRoute>
-                }
-              />
-
-              {/* Agency Routes */}
-              <Route
-                path="gumfit/agency"
-                element={
-                  <ProtectedRoute roles={['agency']}>
-                    <AgencyDashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="agency/deals"
-                element={
-                  <ProtectedRoute roles={['agency']}>
-                    <DealManager />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="agency/campaigns"
-                element={
-                  <ProtectedRoute roles={['agency']}>
-                    <CampaignManager />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="agency/campaigns/:campaignId"
-                element={
-                  <ProtectedRoute roles={['agency']}>
-                    <CampaignDetail />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="agency/creators"
-                element={
-                  <ProtectedRoute roles={['agency']}>
-                    <CreatorDiscovery />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="agency/creators/:creatorId"
-                element={
-                  <ProtectedRoute roles={['agency']}>
-                    <CreatorProfile />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="agency/applications"
-                element={
-                  <ProtectedRoute roles={['agency']}>
-                    <ApplicationReview />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="agency/contracts"
-                element={
-                  <ProtectedRoute roles={['agency']}>
-                    <ContractManager />
-                  </ProtectedRoute>
-                }
-              />
-
-              {/* GumFit Admin Routes */}
-              <Route
-                path="gumfit/admin"
-                element={
-                  <ProtectedRoute roles={['gumfit_admin']}>
-                    <GumFitDashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/admin/creators"
-                element={
-                  <ProtectedRoute roles={['gumfit_admin']}>
-                    <GumFitCreators />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/admin/agencies"
-                element={
-                  <ProtectedRoute roles={['gumfit_admin']}>
-                    <GumFitAgencies />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/admin/users"
-                element={
-                  <ProtectedRoute roles={['gumfit_admin']}>
-                    <GumFitUsers />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/admin/invites"
-                element={
-                  <ProtectedRoute roles={['gumfit_admin']}>
-                    <GumFitInvites />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="gumfit/admin/assets"
-                element={
-                  <ProtectedRoute roles={['gumfit_admin']}>
-                    <GumFitAssets />
-                  </ProtectedRoute>
-                }
-              />
 
             </Route>
           </Routes>

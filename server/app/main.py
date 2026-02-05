@@ -64,12 +64,10 @@ app.add_middleware(
 # Import and include domain routers
 from .core.routes import core_router, chat_ws_router
 from .matcha.routes import matcha_router
-from .gummfit.routes import gummfit_router
 
 # Mount domain routers
 app.include_router(core_router, prefix="/api")
 app.include_router(matcha_router, prefix="/api")
-app.include_router(gummfit_router, prefix="/api")
 
 # WebSocket routes (separate prefix)
 app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])

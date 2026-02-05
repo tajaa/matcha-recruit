@@ -3,7 +3,6 @@ DEPRECATED: Services have been reorganized into domains.
 
 - Core services: server/app/core/services/
 - Matcha (HR/Recruiting) services: server/app/matcha/services/
-- Gummfit (Creator Agency) services: server/app/gummfit/services/
 
 These re-exports are provided for backward compatibility.
 """

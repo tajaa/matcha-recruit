@@ -9,9 +9,9 @@ from uuid import UUID
 from ..models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
     AdminRegister, ClientRegister, CandidateRegister, EmployeeRegister,
-    CreatorRegister, AgencyRegister, BusinessRegister,
+    BusinessRegister,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
-    CreatorProfile, AgencyProfile, CurrentUser,
+    CurrentUser,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
     TokenAwardRequest, AllowedRolesRequest, CandidateSessionSummary
@@ -405,140 +405,6 @@ async def register_candidate(request: CandidateRegister):
         )
 
 
-def slugify(text: str) -> str:
-    """Convert text to URL-friendly slug."""
-    import re
-    text = text.lower()
-    text = re.sub(r'[^\w\s-]', '', text)
-    text = re.sub(r'[\s_-]+', '-', text)
-    text = re.sub(r'^-+|-+$', '', text)
-    return text
-
-
-@router.post("/register/creator", response_model=TokenResponse)
-async def register_creator(request: CreatorRegister):
-    """Register a new creator."""
-    async with get_connection() as conn:
-        # Check if email exists in users
-        existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
-        if existing:
-            raise HTTPException(status_code=400, detail="Email already registered")
-
-        # Create user
-        password_hash = hash_password(request.password)
-        user = await conn.fetchrow(
-            """
-            INSERT INTO users (email, password_hash, role)
-            VALUES ($1, $2, 'creator')
-            RETURNING id, email, role, is_active, created_at
-            """,
-            request.email, password_hash
-        )
-
-        # Create creator profile
-        await conn.execute(
-            """
-            INSERT INTO creators (user_id, display_name, bio, niches, social_handles)
-            VALUES ($1, $2, $3, $4, $5)
-            """,
-            user["id"],
-            request.display_name,
-            request.bio,
-            json.dumps(request.niches) if request.niches else "[]",
-            json.dumps(request.social_handles) if request.social_handles else "{}"
-        )
-
-        settings = get_settings()
-        access_token = create_access_token(user["id"], user["email"], user["role"])
-        refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
-
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_in=settings.jwt_access_token_expire_minutes * 60,
-            user=UserResponse(
-                id=user["id"],
-                email=user["email"],
-                role=user["role"],
-                is_active=user["is_active"],
-                created_at=user["created_at"],
-                last_login=None
-            )
-        )
-
-
-@router.post("/register/agency", response_model=TokenResponse)
-async def register_agency(request: AgencyRegister):
-    """Register a new agency and its owner."""
-    async with get_connection() as conn:
-        # Check if email exists in users
-        existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
-        if existing:
-            raise HTTPException(status_code=400, detail="Email already registered")
-
-        # Generate unique slug
-        base_slug = slugify(request.agency_name)
-        slug = base_slug
-        counter = 1
-        while await conn.fetchval("SELECT id FROM agencies WHERE slug = $1", slug):
-            slug = f"{base_slug}-{counter}"
-            counter += 1
-
-        # Create user
-        password_hash = hash_password(request.password)
-        user = await conn.fetchrow(
-            """
-            INSERT INTO users (email, password_hash, role)
-            VALUES ($1, $2, 'agency')
-            RETURNING id, email, role, is_active, created_at
-            """,
-            request.email, password_hash
-        )
-
-        # Create agency
-        agency = await conn.fetchrow(
-            """
-            INSERT INTO agencies (name, slug, agency_type, description, website_url, industries)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id
-            """,
-            request.agency_name,
-            slug,
-            request.agency_type,
-            request.description,
-            request.website_url,
-            json.dumps(request.industries) if request.industries else "[]"
-        )
-
-        # Create agency membership as owner
-        await conn.execute(
-            """
-            INSERT INTO agency_members (agency_id, user_id, role, joined_at)
-            VALUES ($1, $2, 'owner', NOW())
-            """,
-            agency["id"],
-            user["id"]
-        )
-
-        settings = get_settings()
-        access_token = create_access_token(user["id"], user["email"], user["role"])
-        refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
-
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_in=settings.jwt_access_token_expire_minutes * 60,
-            user=UserResponse(
-                id=user["id"],
-                email=user["email"],
-                role=user["role"],
-                is_active=user["is_active"],
-                created_at=user["created_at"],
-                last_login=None
-            )
-        )
-
-
 @router.get("/me")
 async def get_current_user_profile(current_user: CurrentUser = Depends(get_current_user)):
     """Get current user with full profile."""
@@ -666,69 +532,6 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "manager_id": str(profile["manager_id"]) if profile["manager_id"] else None,
                     "created_at": profile["created_at"].isoformat()
                 } if profile else None
-            }
-
-        elif current_user.role == "creator":
-            profile = await conn.fetchrow(
-                """
-                SELECT id, user_id, display_name, bio, profile_image_url,
-                       niches, social_handles, audience_demographics, metrics,
-                       is_verified, is_public, created_at
-                FROM creators WHERE user_id = $1
-                """,
-                current_user.id
-            )
-            return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
-                "profile": {
-                    "id": str(profile["id"]),
-                    "user_id": str(profile["user_id"]),
-                    "display_name": profile["display_name"],
-                    "bio": profile["bio"],
-                    "profile_image_url": profile["profile_image_url"],
-                    "niches": json.loads(profile["niches"]) if isinstance(profile["niches"], str) else (profile["niches"] or []),
-                    "social_handles": json.loads(profile["social_handles"]) if isinstance(profile["social_handles"], str) else (profile["social_handles"] or {}),
-                    "audience_demographics": json.loads(profile["audience_demographics"]) if isinstance(profile["audience_demographics"], str) else (profile["audience_demographics"] or {}),
-                    "metrics": json.loads(profile["metrics"]) if isinstance(profile["metrics"], str) else (profile["metrics"] or {}),
-                    "is_verified": profile["is_verified"],
-                    "is_public": profile["is_public"],
-                    "email": current_user.email,
-                    "created_at": profile["created_at"].isoformat()
-                } if profile else None
-            }
-
-        elif current_user.role == "agency":
-            membership = await conn.fetchrow(
-                """
-                SELECT am.id, am.agency_id, am.user_id, am.role as member_role,
-                       am.title, am.is_active, am.invited_at, am.joined_at,
-                       a.name as agency_name, a.slug, a.agency_type, a.description,
-                       a.logo_url, a.website_url, a.is_verified, a.contact_email,
-                       a.industries, a.created_at
-                FROM agency_members am
-                JOIN agencies a ON am.agency_id = a.id
-                WHERE am.user_id = $1 AND am.is_active = true
-                """,
-                current_user.id
-            )
-            return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
-                "profile": {
-                    "id": str(membership["agency_id"]),
-                    "user_id": str(membership["user_id"]),
-                    "agency_name": membership["agency_name"],
-                    "slug": membership["slug"],
-                    "agency_type": membership["agency_type"],
-                    "description": membership["description"],
-                    "logo_url": membership["logo_url"],
-                    "website_url": membership["website_url"],
-                    "is_verified": membership["is_verified"],
-                    "contact_email": membership["contact_email"],
-                    "industries": json.loads(membership["industries"]) if isinstance(membership["industries"], str) else (membership["industries"] or []),
-                    "member_role": membership["member_role"],
-                    "email": current_user.email,
-                    "created_at": membership["created_at"].isoformat()
-                } if membership else None
             }
 
     return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role}, "profile": None}

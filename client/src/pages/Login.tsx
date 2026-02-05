@@ -19,14 +19,8 @@ export function Login() {
     switch (role) {
       case 'candidate':
         return '/app/jobs';
-      case 'creator':
-        return '/app/gumfit';
-      case 'agency':
-        return '/app/gumfit/agency';
       case 'employee':
         return '/app/portal';
-      case 'gumfit_admin':
-        return '/app/gumfit';
       case 'admin':
       case 'client':
       default:

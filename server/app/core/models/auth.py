@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr
 from decimal import Decimal
 
-UserRole = Literal["admin", "client", "candidate", "employee", "creator", "agency", "gumfit_admin"]
+UserRole = Literal["admin", "client", "candidate", "employee"]
 
 
 class UserBase(BaseModel):
@@ -83,25 +83,6 @@ class EmployeeRegister(BaseModel):
     start_date: Optional[datetime] = None
 
 
-class CreatorRegister(BaseModel):
-    email: EmailStr
-    password: str
-    display_name: str
-    bio: Optional[str] = None
-    niches: Optional[list[str]] = None
-    social_handles: Optional[dict] = None  # {"youtube": "handle", "tiktok": "handle", ...}
-
-
-class AgencyRegister(BaseModel):
-    email: EmailStr
-    password: str
-    agency_name: str
-    agency_type: str  # talent, brand, hybrid
-    description: Optional[str] = None
-    website_url: Optional[str] = None
-    industries: Optional[list[str]] = None
-
-
 class BusinessRegister(BaseModel):
     """
     Unified business registration - creates company + first client/admin user.
@@ -167,44 +148,11 @@ class EmployeeProfile(BaseModel):
     created_at: datetime
 
 
-class CreatorProfile(BaseModel):
-    id: UUID
-    user_id: UUID
-    display_name: str
-    bio: Optional[str]
-    profile_image_url: Optional[str]
-    niches: list[str]
-    social_handles: dict
-    audience_demographics: dict
-    metrics: dict
-    is_verified: bool
-    is_public: bool
-    email: str
-    created_at: datetime
-
-
-class AgencyProfile(BaseModel):
-    id: UUID
-    user_id: UUID  # Owner's user_id
-    agency_name: str
-    slug: str
-    agency_type: str
-    description: Optional[str]
-    logo_url: Optional[str]
-    website_url: Optional[str]
-    is_verified: bool
-    contact_email: Optional[str]
-    industries: list[str]
-    member_role: str  # The current user's role in the agency
-    email: str
-    created_at: datetime
-
-
 class CurrentUser(BaseModel):
     id: UUID
     email: str
     role: UserRole
-    profile: Optional[AdminProfile | ClientProfile | CandidateProfile | EmployeeProfile | CreatorProfile | AgencyProfile] = None
+    profile: Optional[AdminProfile | ClientProfile | CandidateProfile | EmployeeProfile] = None
     beta_features: dict = {}
     interview_prep_tokens: int = 0
     allowed_interview_roles: list[str] = []

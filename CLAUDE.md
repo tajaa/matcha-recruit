@@ -2,11 +2,10 @@
 
 ## What This Is
 
-AI-powered recruiting and HR platform. Three domains:
+AI-powered recruiting and HR platform. Two domains:
 
 - **Matcha** — Recruiting (candidates, interviews, matching, offer letters) and HR ops (employees, onboarding, PTO, experience analytics)
 - **Core** — Auth, admin, compliance monitoring, AI chat, policies, leads agent
-- **Gummfit** — Creator agency management (separate domain)
 
 ## Stack
 
@@ -42,38 +41,30 @@ server/
 │   │   ├── models/
 │   │   ├── routes/
 │   │   └── services/
-│   ├── matcha/                     # Recruiting + HR domain
-│   │   ├── models/
-│   │   ├── routes/
-│   │   ├── services/
-│   │   └── workers/
-│   └── gummfit/                    # Creator agency domain
+│   └── matcha/                     # Recruiting + HR domain
 │       ├── models/
 │       ├── routes/
-│       └── services/
+│       ├── services/
+│       └── workers/
 ├── tests/
 └── alembic/
 ```
 
 ## User Roles
 
-Seven roles defined in `app/core/models/auth.py`:
+Four roles defined in `app/core/models/auth.py`:
 
-| Role           | Description                                                               |
-| -------------- | ------------------------------------------------------------------------- |
-| `admin`        | Platform admin, full access                                               |
-| `client`       | Business user (linked to a company) — this is what "business admin" means |
-| `candidate`    | Job seeker                                                                |
-| `employee`     | Company employee (HR portal)                                              |
-| `creator`      | Gummfit creator                                                           |
-| `agency`       | Gummfit agency                                                            |
-| `gumfit_admin` | Gummfit platform admin                                                    |
+| Role       | Description                                                               |
+| ---------- | ------------------------------------------------------------------------- |
+| `admin`    | Platform admin, full access                                               |
+| `client`   | Business user (linked to a company) — this is what "business admin" means |
+| `candidate`| Job seeker                                                                |
+| `employee` | Company employee (HR portal)                                              |
 
-**Auth dependencies** are split across three files:
+**Auth dependencies** are split across two files:
 
 - `app/core/dependencies.py` — `require_admin`, `require_candidate`
 - `app/matcha/dependencies.py` — `require_client`, `require_employee`, `require_admin_or_client`
-- `app/gummfit/dependencies.py` — `require_creator`, `require_agency`, etc.
 
 **Company approval flow**: Business registers → `status='pending'` → admin approves → features enabled. Note: `status IS NULL` is treated as approved for legacy rows.
 

@@ -3,7 +3,6 @@ DEPRECATED: Routes have been reorganized into domains.
 
 - Core routes: server/app/core/routes/
 - Matcha (HR/Recruiting) routes: server/app/matcha/routes/
-- Gummfit (Creator Agency) routes: server/app/gummfit/routes/
 
 These re-exports are provided for backward compatibility.
 """
@@ -43,15 +42,6 @@ from ..matcha.routes import (
     public_jobs_router,
 )
 
-# Gummfit routes
-from ..gummfit.routes import (
-    creators_router,
-    agencies_router,
-    deals_router,
-    campaigns_router,
-    gumfit_router,
-)
-
 __all__ = [
     # Core
     "auth_router",
@@ -82,10 +72,4 @@ __all__ = [
     "ir_incidents_router",
     "job_search_router",
     "public_jobs_router",
-    # Gummfit
-    "creators_router",
-    "agencies_router",
-    "deals_router",
-    "campaigns_router",
-    "gumfit_router",
 ]

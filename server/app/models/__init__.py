@@ -3,7 +3,6 @@ DEPRECATED: Models have been reorganized into domains.
 
 - Core models: server/app/core/models/
 - Matcha (HR/Recruiting) models: server/app/matcha/models/
-- Gummfit (Creator Agency) models: server/app/gummfit/models/
 
 These re-exports are provided for backward compatibility.
 """
