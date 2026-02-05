@@ -1,6 +1,6 @@
 import { useRef, lazy, Suspense, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
+import { motion, useScroll, useTransform } from "framer-motion";
 import {
   ArrowUpRight,
   Terminal,
@@ -49,6 +49,55 @@ const LOCAL_JURISDICTIONS = [
   "Seattle Local",
 ];
 
+const TypewriterBadge = ({ text }: { text: string }) => {
+  const [displayText, setDisplayText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    
+    const type = () => {
+      const fullText = text;
+      if (!isDeleting) {
+        setDisplayText(fullText.substring(0, displayText.length + 1));
+        if (displayText === fullText) {
+          timeout = setTimeout(() => setIsDeleting(true), 2000);
+        } else {
+          timeout = setTimeout(type, 50);
+        }
+      } else {
+        setDisplayText(fullText.substring(0, displayText.length - 1));
+        if (displayText === "") {
+          setIsDeleting(false);
+          // The parent component handles the text change
+        } else {
+          timeout = setTimeout(type, 30);
+        }
+      }
+    };
+
+    timeout = setTimeout(type, isDeleting ? 30 : 50);
+    return () => clearTimeout(timeout);
+  }, [displayText, isDeleting, text]);
+
+  // Reset when text changes from parent
+  useEffect(() => {
+    setIsDeleting(false);
+    setDisplayText("");
+  }, [text]);
+
+  return (
+    <span className="inline-flex items-center">
+      {displayText}
+      <motion.span
+        animate={{ opacity: [1, 0] }}
+        transition={{ duration: 0.5, repeat: Infinity, ease: "linear" }}
+        className="w-1 h-3 bg-emerald-400 ml-0.5"
+      />
+    </span>
+  );
+};
+
 export function Landing() {
   const containerRef = useRef<HTMLDivElement>(null);
   const complianceSectionRef = useRef<HTMLDivElement>(null);
@@ -57,7 +106,7 @@ export function Landing() {
   useEffect(() => {
     const timer = setInterval(() => {
       setJurisdictionIndex((prev) => (prev + 1) % LOCAL_JURISDICTIONS.length);
-    }, 3000);
+    }, 5000);
     return () => clearInterval(timer);
   }, []);
 
@@ -326,23 +375,20 @@ export function Landing() {
                         <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
                           {row.label}
                         </span>
-                        <div className="relative flex justify-end min-w-[140px]">
-                          <AnimatePresence mode="wait">
-                            <motion.span
-                              key={row.badge}
-                              initial={{ opacity: 0, y: 5 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -5 }}
-                              transition={{ duration: 0.3 }}
-                              className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${
-                                row.color === "emerald"
-                                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                                  : "bg-blue-500/15 text-blue-400 border-blue-500/30"
-                              }`}
-                            >
-                              {row.badge}
-                            </motion.span>
-                          </AnimatePresence>
+                        <div className="relative flex justify-end min-w-[160px]">
+                          <span
+                            className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider whitespace-nowrap flex items-center min-h-[22px] ${
+                              row.color === "emerald"
+                                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                : "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                            }`}
+                          >
+                            {row.isDynamic ? (
+                              <TypewriterBadge text={row.badge} />
+                            ) : (
+                              row.badge
+                            )}
+                          </span>
                         </div>
                       </div>
                     ))}
