@@ -192,7 +192,7 @@ export function Landing() {
                 className="group flex items-center gap-4 border-b border-white pb-1 hover:pb-2 transition-all"
               >
                 <span className="text-sm font-mono uppercase tracking-widest">
-                  Start Trial
+                  Get Started
                 </span>
                 <ArrowUpRight className="w-4 h-4 group-hover:-translate-y-1 group-hover:translate-x-1 transition-transform" />
               </Link>
@@ -584,7 +584,7 @@ export function Landing() {
         <div className="max-w-[1800px] mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-12">
           {[
             { label: "Uptime", value: "99.99%" },
-            { label: "Security", value: "SOC2" },
+            { label: "Reliability", value: "High" },
             { label: "Deploy", value: "< 5min" },
             { label: "Support", value: "24/7" },
           ].map((stat, i) => (
