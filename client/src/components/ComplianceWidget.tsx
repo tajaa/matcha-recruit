@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 export function ComplianceWidget() {
     const { data: summary, isLoading, error } = useQuery({
         queryKey: ['compliance-summary'],
-        queryFn: complianceAPI.getSummary,
+        queryFn: () => complianceAPI.getSummary(),
     });
 
     if (isLoading) {

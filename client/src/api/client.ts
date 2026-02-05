@@ -2060,7 +2060,7 @@ export const aiChat = {
 // Combined API object for convenient imports
 export const api = {
   auth,
-  authExtended,
+
   companies,
   interviews,
   candidates,

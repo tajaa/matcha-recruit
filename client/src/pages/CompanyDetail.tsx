@@ -6,7 +6,7 @@ import { complianceAPI } from '../api/compliance';
 import type { BusinessLocation, LocationCreate, JurisdictionOption } from '../api/compliance';
 import { useAuth } from '../context/AuthContext';
 import type { Company, Interview, MatchResult, Position } from '../types';
-import { MapPin, Plus, Edit2, Trash2, X, Shield } from 'lucide-react';
+import { MapPin, Plus, Edit2, Trash2, Shield } from 'lucide-react';
 
 const US_STATES = [
   { value: 'AL', label: 'Alabama' }, { value: 'AK', label: 'Alaska' },
