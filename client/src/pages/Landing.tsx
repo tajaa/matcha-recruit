@@ -164,7 +164,12 @@ export function Landing() {
 
         <div className="max-w-[1800px] mx-auto grid lg:grid-cols-2 gap-24 items-center relative z-10">
           <div className="space-y-12">
-            <div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.8 }}
+            >
               <h2 className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.9] mb-8">
                 KNOW EXACTLY <br />
                 WHICH LAW APPLIES <br />
@@ -175,7 +180,7 @@ export function Landing() {
                 — and tells you which one governs each requirement at each
                 location.
               </p>
-            </div>
+            </motion.div>
 
             <div className="space-y-8">
               {[
@@ -192,7 +197,14 @@ export function Landing() {
                   desc: "New state law? County ordinance update? Upcoming legislation? You get alerts with sources and confidence scores.",
                 },
               ].map((point, i) => (
-                <div key={i} className="flex gap-6">
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: -20 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5, delay: 0.4 + i * 0.1 }}
+                  className="flex gap-6"
+                >
                   <div className="text-zinc-600 font-mono text-sm mt-1">
                     0{i + 1}
                   </div>
@@ -204,7 +216,7 @@ export function Landing() {
                       {point.desc}
                     </p>
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>
@@ -214,90 +226,129 @@ export function Landing() {
             <div className="space-y-6 relative z-10">
               {/* San Francisco Card */}
               <motion.div
-                initial={{ x: 20, opacity: 0 }}
-                whileInView={{ x: 0, opacity: 1 }}
+                initial={{ x: 40, y: 20, opacity: 0, rotate: 2 }}
+                whileInView={{ x: 0, y: 0, opacity: 1, rotate: 0 }}
                 viewport={{ once: true }}
-                className="bg-zinc-900 border border-white/10 p-6 shadow-2xl"
+                transition={{ duration: 0.8, type: "spring", bounce: 0.4 }}
+                className="bg-zinc-900 border border-white/10 p-6 shadow-2xl relative z-20"
               >
-                <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
-                  <div className="flex items-center gap-3">
-                    <MapPin className="w-4 h-4 text-zinc-500" />
-                    <span className="text-xs font-mono uppercase tracking-widest">
-                      San Francisco, CA
-                    </span>
-                  </div>
-                  <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[10px] font-mono uppercase">
-                    Active
-                  </div>
-                </div>
-
-                <div className="space-y-px bg-white/5 border border-white/5">
-                  {[
-                    {
-                      label: "Minimum Wage",
-                      badge: "San Francisco Local",
-                      color: "emerald",
-                    },
-                    { label: "Sick Leave", badge: "California", color: "blue" },
-                    { label: "Overtime", badge: "California", color: "blue" },
-                    {
-                      label: "Meal Breaks",
-                      badge: "California",
-                      color: "blue",
-                    },
-                  ].map((row, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between p-4 bg-zinc-950"
-                    >
-                      <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                        {row.label}
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${
-                          row.color === "emerald"
-                            ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                            : "bg-blue-500/15 text-blue-400 border-blue-500/30"
-                        }`}
-                      >
-                        {row.badge}
+                <motion.div
+                  animate={{ y: [0, -5, 0] }}
+                  transition={{
+                    duration: 4,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
+                    <div className="flex items-center gap-3">
+                      <MapPin className="w-4 h-4 text-zinc-500" />
+                      <span className="text-xs font-mono uppercase tracking-widest">
+                        San Francisco, CA
                       </span>
                     </div>
-                  ))}
-                </div>
+                    <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[10px] font-mono uppercase">
+                      Active
+                    </div>
+                  </div>
+
+                  <div className="space-y-px bg-white/5 border border-white/5">
+                    {[
+                      {
+                        label: "Minimum Wage",
+                        badge: "San Francisco Local",
+                        color: "emerald",
+                      },
+                      {
+                        label: "Sick Leave",
+                        badge: "California",
+                        color: "blue",
+                      },
+                      { label: "Overtime", badge: "California", color: "blue" },
+                      {
+                        label: "Meal Breaks",
+                        badge: "California",
+                        color: "blue",
+                      },
+                    ].map((row, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between p-4 bg-zinc-950"
+                      >
+                        <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                          {row.label}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${
+                            row.color === "emerald"
+                              ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                              : "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                          }`}
+                        >
+                          {row.badge}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
               </motion.div>
 
               {/* Del Mar Card */}
               <motion.div
-                initial={{ x: 40, opacity: 0 }}
-                whileInView={{ x: 20, opacity: 0.6 }}
+                initial={{ x: 60, y: 40, opacity: 0, rotate: -2 }}
+                whileInView={{ x: 20, y: 0, opacity: 0.6, rotate: 0 }}
                 viewport={{ once: true }}
-                transition={{ delay: 0.2 }}
+                transition={{
+                  duration: 0.8,
+                  delay: 0.2,
+                  type: "spring",
+                  bounce: 0.4,
+                }}
                 className="bg-zinc-900 border border-white/10 p-6 shadow-2xl scale-95 origin-right"
               >
-                <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
-                  <div className="flex items-center gap-3">
-                    <MapPin className="w-4 h-4 text-zinc-500" />
-                    <span className="text-xs font-mono uppercase tracking-widest">
-                      Del Mar, CA
-                    </span>
+                <motion.div
+                  animate={{ y: [0, 5, 0] }}
+                  transition={{
+                    duration: 5,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
+                    <div className="flex items-center gap-3">
+                      <MapPin className="w-4 h-4 text-zinc-500" />
+                      <span className="text-xs font-mono uppercase tracking-widest">
+                        Del Mar, CA
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-px bg-white/5 border border-white/5">
-                  <div className="flex items-center justify-between p-4 bg-zinc-950">
-                    <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                      Minimum Wage
-                    </span>
-                    <span className="bg-blue-500/15 text-blue-400 border-blue-500/30 px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider">
-                      San Diego County
-                    </span>
+                  <div className="space-y-px bg-white/5 border border-white/5">
+                    <div className="flex items-center justify-between p-4 bg-zinc-950">
+                      <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                        Minimum Wage
+                      </span>
+                      <span className="bg-blue-500/15 text-blue-400 border-blue-500/30 px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider">
+                        San Diego County
+                      </span>
+                    </div>
                   </div>
-                </div>
+                </motion.div>
               </motion.div>
             </div>
 
             {/* Background elements */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-white/5 blur-3xl rounded-full -z-10" />
+            <motion.div
+              animate={{
+                scale: [1, 1.2, 1],
+                opacity: [0.05, 0.1, 0.05],
+              }}
+              transition={{
+                duration: 8,
+                repeat: Infinity,
+                ease: "easeInOut",
+              }}
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-white/5 blur-3xl rounded-full -z-10"
+            />
           </div>
         </div>
       </section>
