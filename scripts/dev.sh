@@ -119,14 +119,35 @@ tmux split-window -t "$SESSION_NAME:dev" -v -c "$PROJECT_ROOT/client" \
 # Even out the panes
 tmux select-layout -t "$SESSION_NAME:dev" even-vertical
 
-# Select the first pane (backend)
+# Create a second window for Gummfit services
+tmux new-window -t "$SESSION_NAME" -n "gumfit" -c "$PROJECT_ROOT/gummfit-agency/server" \
+    "source venv/bin/activate && GUMMFIT_PORT=8003 python run.py; echo -e '\n${RED}GumFit backend exited. Press Enter to close.${NC}'; read"
+
+# Small delay
+sleep 0.5
+
+# Split for Gummfit frontend
+tmux split-window -t "$SESSION_NAME:gumfit" -v -c "$PROJECT_ROOT/gummfit-agency/client" \
+    "npm run dev; echo -e '\n${RED}GumFit frontend exited. Press Enter to close.${NC}'; read"
+
+# Even out gumfit panes
+tmux select-layout -t "$SESSION_NAME:gumfit" even-vertical
+
+# Select the first window (matcha services)
+tmux select-window -t "$SESSION_NAME:dev"
 tmux select-pane -t "$SESSION_NAME:dev.0"
 
 echo -e "${GREEN}Development environment started!${NC}"
 echo ""
-echo -e "${YELLOW}Services:${NC}"
+echo -e "${YELLOW}Matcha Services:${NC}"
 echo -e "  - Backend:  http://localhost:8001"
 echo -e "  - Frontend: http://localhost:5174"
+echo ""
+echo -e "${YELLOW}GumFit Services:${NC}"
+echo -e "  - Backend:  http://localhost:8003 (gumfit-agency/server)"
+echo -e "  - Frontend: http://localhost:5175 (gumfit-agency/client)"
+echo ""
+echo -e "${YELLOW}Shared Services:${NC}"
 echo -e "  - Postgres: localhost:5432"
 echo -e "  - Redis:    localhost:6380"
 echo ""

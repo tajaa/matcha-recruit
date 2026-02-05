@@ -12,12 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 
 from ...database import get_connection
-from ...core.dependencies import get_current_user
+from ...dependencies import get_current_user
 from ..dependencies import (
     require_creator,
     require_creator_record,
 )
-from ...core.models.auth import CurrentUser
+from ...models.auth import CurrentUser
 from ..models.creator import (
     CreatorCreate,
     CreatorUpdate,
@@ -37,7 +37,7 @@ from ..models.creator import (
     RevenueOverview,
     MonthlyRevenue,
 )
-from ...core.services.storage import get_storage
+from ...services.storage import get_storage
 
 router = APIRouter()
 

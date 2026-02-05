@@ -22,6 +22,8 @@ readonly NC='\033[0m' # No Color
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly BACKEND_DIR="${SCRIPT_DIR}/server"
 readonly FRONTEND_DIR="${SCRIPT_DIR}/client"
+readonly GUMMFIT_BACKEND_DIR="${SCRIPT_DIR}/gummfit-agency/server"
+readonly GUMMFIT_FRONTEND_DIR="${SCRIPT_DIR}/gummfit-agency/client"
 
 # Default values
 PUSH_TO_ECR=true
@@ -30,6 +32,8 @@ PLATFORM="linux/arm64"
 NO_CACHE=false
 BUILD_BACKEND=true
 BUILD_FRONTEND=true
+BUILD_GUMMFIT_BACKEND=false
+BUILD_GUMMFIT_FRONTEND=false
 
 ################################################################################
 # Helper Functions
@@ -65,22 +69,28 @@ Usage: $0 [OPTIONS]
 Build and push Docker images for Matcha-Recruit backend and frontend.
 
 OPTIONS:
-    --no-push          Build images locally without pushing to ECR
-    --no-cache         Do not use cache when building the image
-    --deploy           Trigger deployment after pushing (sets deploy flag)
-    --platform ARCH    Target platform (default: linux/arm64)
-    --backend-only     Build only the backend image
-    --frontend-only    Build only the frontend image
-    -h, --help         Show this help message
+    --no-push              Build images locally without pushing to ECR
+    --no-cache             Do not use cache when building the image
+    --deploy               Trigger deployment after pushing (sets deploy flag)
+    --platform ARCH        Target platform (default: linux/arm64)
+    --backend-only         Build only the matcha backend image
+    --frontend-only        Build only the matcha frontend image
+    --gummfit-backend      Also build the gummfit backend image
+    --gummfit-frontend     Also build the gummfit frontend image
+    --gummfit              Build both gummfit images (backend + frontend)
+    --all                  Build all images (matcha + gummfit)
+    -h, --help             Show this help message
 
 ENVIRONMENT VARIABLES (required):
-    AWS_ACCOUNT_ID     AWS account ID for ECR (auto-detected if not set)
-    AWS_REGION         AWS region (default: us-west-1)
-    ECR_BACKEND_REPO   ECR repository name for backend (default: matcha-backend)
-    ECR_FRONTEND_REPO  ECR repository name for frontend (default: matcha-frontend)
+    AWS_ACCOUNT_ID             AWS account ID for ECR (auto-detected if not set)
+    AWS_REGION                 AWS region (default: us-west-1)
+    ECR_BACKEND_REPO           ECR repository name for matcha backend (default: matcha-backend)
+    ECR_FRONTEND_REPO          ECR repository name for matcha frontend (default: matcha-frontend)
+    ECR_GUMMFIT_BACKEND_REPO   ECR repository name for gummfit backend (default: gummfit-backend)
+    ECR_GUMMFIT_FRONTEND_REPO  ECR repository name for gummfit frontend (default: gummfit-frontend)
 
 EXAMPLES:
-    # Build and push to ECR
+    # Build and push matcha to ECR (default)
     $0
 
     # Build locally without pushing
@@ -89,11 +99,17 @@ EXAMPLES:
     # Build, push, and trigger deployment
     $0 --deploy
 
-    # Build only the backend
+    # Build only the matcha backend
     $0 --backend-only
 
-    # Build only the frontend without pushing
-    $0 --no-push --frontend-only
+    # Build all services (matcha + gummfit)
+    $0 --all
+
+    # Build only gummfit services
+    $0 --gummfit
+
+    # Build gummfit backend alongside matcha
+    $0 --gummfit-backend
 EOF
 }
 
@@ -119,6 +135,26 @@ parse_args() {
                 ;;
             --frontend-only)
                 BUILD_BACKEND=false
+                shift
+                ;;
+            --gummfit-backend)
+                BUILD_GUMMFIT_BACKEND=true
+                shift
+                ;;
+            --gummfit-frontend)
+                BUILD_GUMMFIT_FRONTEND=true
+                shift
+                ;;
+            --gummfit)
+                BUILD_GUMMFIT_BACKEND=true
+                BUILD_GUMMFIT_FRONTEND=true
+                shift
+                ;;
+            --all)
+                BUILD_BACKEND=true
+                BUILD_FRONTEND=true
+                BUILD_GUMMFIT_BACKEND=true
+                BUILD_GUMMFIT_FRONTEND=true
                 shift
                 ;;
             --platform)
@@ -176,6 +212,8 @@ validate_env() {
     export AWS_REGION="${AWS_REGION:-us-west-1}"
     export ECR_BACKEND_REPO="${ECR_BACKEND_REPO:-matcha-backend}"
     export ECR_FRONTEND_REPO="${ECR_FRONTEND_REPO:-matcha-frontend}"
+    export ECR_GUMMFIT_BACKEND_REPO="${ECR_GUMMFIT_BACKEND_REPO:-gummfit-backend}"
+    export ECR_GUMMFIT_FRONTEND_REPO="${ECR_GUMMFIT_FRONTEND_REPO:-gummfit-frontend}"
 
     # Auto-fetch AWS Account ID if not set
     if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
@@ -194,9 +232,17 @@ validate_env() {
     # Construct ECR URIs
     export BACKEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_BACKEND_REPO}"
     export FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_FRONTEND_REPO}"
+    export GUMMFIT_BACKEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMFIT_BACKEND_REPO}"
+    export GUMMFIT_FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMFIT_FRONTEND_REPO}"
 
     log_info "Backend ECR URI: ${BACKEND_ECR_URI}"
     log_info "Frontend ECR URI: ${FRONTEND_ECR_URI}"
+    if [ "$BUILD_GUMMFIT_BACKEND" = true ]; then
+        log_info "GumFit Backend ECR URI: ${GUMMFIT_BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
+        log_info "GumFit Frontend ECR URI: ${GUMMFIT_FRONTEND_ECR_URI}"
+    fi
 
     log_success "Environment validation complete"
 }
@@ -338,6 +384,24 @@ build_frontend() {
         "${FRONTEND_ECR_URI}"
 }
 
+# Build gummfit backend
+build_gummfit_backend() {
+    build_image \
+        "GumFit Backend" \
+        "${GUMMFIT_BACKEND_DIR}/Dockerfile" \
+        "${GUMMFIT_BACKEND_DIR}" \
+        "${GUMMFIT_BACKEND_ECR_URI}"
+}
+
+# Build gummfit frontend
+build_gummfit_frontend() {
+    build_image \
+        "GumFit Frontend" \
+        "${GUMMFIT_FRONTEND_DIR}/Dockerfile" \
+        "${GUMMFIT_FRONTEND_DIR}" \
+        "${GUMMFIT_FRONTEND_ECR_URI}"
+}
+
 # Main execution
 main() {
     log_section "Matcha-Recruit Build & Push Script"
@@ -372,6 +436,18 @@ main() {
         log_warning "Skipping frontend build (--backend-only)"
     fi
 
+    if [ "$BUILD_GUMMFIT_BACKEND" = true ]; then
+        build_gummfit_backend &
+        pids+=($!)
+        services+=("GumFit Backend")
+    fi
+
+    if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
+        build_gummfit_frontend &
+        pids+=($!)
+        services+=("GumFit Frontend")
+    fi
+
     # Wait for all builds to complete
     local failed=false
     for i in "${!pids[@]}"; do
@@ -393,6 +469,12 @@ main() {
     if [ "$BUILD_FRONTEND" = true ]; then
         push_image "Frontend" "${FRONTEND_ECR_URI}"
     fi
+    if [ "$BUILD_GUMMFIT_BACKEND" = true ]; then
+        push_image "GumFit Backend" "${GUMMFIT_BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
+        push_image "GumFit Frontend" "${GUMMFIT_FRONTEND_ECR_URI}"
+    fi
 
     # Deployment trigger
     if [ "$TRIGGER_DEPLOY" = true ]; then
@@ -408,6 +490,12 @@ main() {
     fi
     if [ "$BUILD_FRONTEND" = true ]; then
         log_info "Frontend: ${FRONTEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_GUMMFIT_BACKEND" = true ]; then
+        log_info "GumFit Backend: ${GUMMFIT_BACKEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
+        log_info "GumFit Frontend: ${GUMMFIT_FRONTEND_ECR_URI}:latest"
     fi
 }
 

@@ -12,13 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ...database import get_connection
-from ...core.dependencies import get_current_user
+from ...dependencies import get_current_user
 from ..dependencies import (
     require_agency,
     require_agency_membership,
     require_agency_admin,
 )
-from ...core.models.auth import CurrentUser
+from ...models.auth import CurrentUser
 from ..models.agency import (
     AgencyCreate,
     AgencyUpdate,

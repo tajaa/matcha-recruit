@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 
 from ...database import get_connection
-from ...core.services.storage import get_storage
+from ...services.storage import get_storage
 from ..dependencies import require_gumfit_admin
 from ..models.asset import (
     GumfitAssetResponse,

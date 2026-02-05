@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Query
 from pydantic import BaseModel, EmailStr
 
 from ...database import get_connection
-from ...core.models.auth import CurrentUser
+from ...models.auth import CurrentUser
 from ..dependencies import require_gumfit_admin
 
 router = APIRouter()

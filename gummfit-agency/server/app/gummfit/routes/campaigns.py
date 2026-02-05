@@ -14,13 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
 from ...database import get_connection
-from ...core.dependencies import get_current_user
+from ...dependencies import get_current_user
 from ..dependencies import (
     require_creator_record,
     require_agency_membership,
     require_agency_admin,
 )
-from ...core.models.auth import CurrentUser
+from ...models.auth import CurrentUser
 from ..models.campaigns import (
     CampaignCreate,
     CampaignUpdate,

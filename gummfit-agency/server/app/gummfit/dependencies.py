@@ -3,7 +3,7 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, status
 
-from ..core.dependencies import get_current_user, require_roles
+from ..dependencies import get_current_user, require_roles
 from ..database import get_connection
 
 # Gummfit role dependencies
