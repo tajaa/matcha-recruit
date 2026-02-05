@@ -66,6 +66,7 @@ class BusinessLocation(BaseModel):
     auto_check_interval_days: int = 7
     next_auto_check: Optional[datetime] = None
     last_compliance_check: Optional[datetime] = None
+    has_local_ordinance: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
 

@@ -1,3 +1,5 @@
+import asyncio
+
 from app.core.services import compliance_service as cs
 
 
@@ -303,3 +305,86 @@ def test_normalize_category():
     assert cs._normalize_category("  Pay Frequency  ") == "pay_frequency"
     assert cs._normalize_category(None) is None
 
+
+class _FakeConn:
+    def __init__(self, preemption_rows):
+        self._preemption_rows = preemption_rows
+
+    async def fetch(self, query: str, *args):
+        if "FROM state_preemption_rules" in query:
+            return self._preemption_rows
+        return []
+
+
+def test_filter_with_preemption_preempted_keeps_state():
+    requirements = [
+        {
+            "category": "minimum_wage",
+            "jurisdiction_level": "state",
+            "jurisdiction_name": "California",
+            "title": "California Minimum Wage",
+            "current_value": "$16.90",
+        },
+        {
+            "category": "minimum_wage",
+            "jurisdiction_level": "city",
+            "jurisdiction_name": "West Hollywood",
+            "title": "City of West Hollywood Minimum Wage",
+            "current_value": "$20.25",
+        },
+    ]
+    conn = _FakeConn([{"category": "minimum_wage", "allows_local_override": False}])
+
+    filtered = asyncio.run(cs._filter_with_preemption(conn, requirements, "CA"))
+    titles = {req["title"] for req in filtered}
+
+    assert "California Minimum Wage" in titles
+    assert "City of West Hollywood Minimum Wage" not in titles
+
+
+def test_filter_with_preemption_min_wage_uses_most_beneficial():
+    requirements = [
+        {
+            "category": "minimum_wage",
+            "jurisdiction_level": "state",
+            "jurisdiction_name": "Colorado",
+            "title": "Colorado Minimum Wage",
+            "current_value": "$20.00",
+        },
+        {
+            "category": "minimum_wage",
+            "jurisdiction_level": "city",
+            "jurisdiction_name": "Boulder",
+            "title": "Boulder Minimum Wage",
+            "current_value": "$16.82",
+        },
+    ]
+    conn = _FakeConn([{"category": "minimum_wage", "allows_local_override": True}])
+
+    filtered = asyncio.run(cs._filter_with_preemption(conn, requirements, "CO"))
+    assert len(filtered) == 1
+    assert filtered[0]["jurisdiction_level"] == "state"
+    assert filtered[0]["title"] == "Colorado Minimum Wage"
+
+
+def test_filter_with_preemption_non_wage_prefers_local_when_allowed():
+    requirements = [
+        {
+            "category": "overtime",
+            "jurisdiction_level": "state",
+            "jurisdiction_name": "California",
+            "title": "California Overtime",
+        },
+        {
+            "category": "overtime",
+            "jurisdiction_level": "city",
+            "jurisdiction_name": "San Francisco",
+            "title": "San Francisco Overtime",
+        },
+    ]
+    conn = _FakeConn([{"category": "overtime", "allows_local_override": True}])
+
+    filtered = asyncio.run(cs._filter_with_preemption(conn, requirements, "CA"))
+    assert len(filtered) == 1
+    assert filtered[0]["jurisdiction_level"] == "city"
+    assert filtered[0]["title"] == "San Francisco Overtime"

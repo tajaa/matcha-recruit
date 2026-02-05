@@ -134,6 +134,7 @@ async def get_locations_endpoint(
             "next_auto_check": loc.next_auto_check.isoformat() if loc.next_auto_check else None,
             "last_compliance_check": loc.last_compliance_check.isoformat() if loc.last_compliance_check else None,
             "created_at": loc.created_at.isoformat(),
+            "has_local_ordinance": loc.has_local_ordinance,
             "requirements_count": counts["requirements_count"],
             "unread_alerts_count": counts["unread_alerts_count"],
         })
@@ -176,6 +177,7 @@ async def get_location_endpoint(
         "next_auto_check": location.next_auto_check.isoformat() if location.next_auto_check else None,
         "last_compliance_check": location.last_compliance_check.isoformat() if location.last_compliance_check else None,
         "created_at": location.created_at.isoformat(),
+        "has_local_ordinance": location.has_local_ordinance,
         "requirements_count": counts["requirements_count"],
         "unread_alerts_count": counts["unread_alerts_count"],
     }

@@ -100,6 +100,17 @@ def _normalize_jurisdiction_name(name: Optional[str]) -> str:
     return s
 
 
+_VARCHAR_100_FIELDS = ("jurisdiction_name", "current_value", "source_name")
+
+
+def _clamp_varchar_fields(req: dict) -> dict:
+    for field in _VARCHAR_100_FIELDS:
+        val = req.get(field)
+        if val and len(val) > 100:
+            req[field] = val[:100]
+    return req
+
+
 def _normalize_category(category: Optional[str]) -> Optional[str]:
     if not category:
         return category
@@ -455,6 +466,20 @@ async def _get_or_create_jurisdiction(conn, city: str, state: str, county: Optio
     return city_id
 
 
+async def _lookup_has_local_ordinance(conn, city: str, state: str) -> Optional[bool]:
+    """Check jurisdiction_reference for whether a city has its own local ordinance."""
+    try:
+        ref = await conn.fetchrow(
+            "SELECT has_local_ordinance FROM jurisdiction_reference WHERE city = $1 AND state = $2",
+            city.lower().strip(), state.upper().strip(),
+        )
+        result = ref["has_local_ordinance"] if ref else None
+        print(f"[Compliance] has_local_ordinance lookup: city={city!r}, state={state!r} → {result}")
+        return result
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        return None
+
+
 async def _is_jurisdiction_fresh(conn, jurisdiction_id: UUID, threshold_days: int) -> bool:
     """Check if jurisdiction was verified recently enough to skip Gemini."""
     row = await conn.fetchrow(
@@ -501,6 +526,50 @@ def _jurisdiction_row_to_dict(jr: dict) -> dict:
         "effective_date": jr["effective_date"].isoformat() if jr.get("effective_date") else None,
         "expiration_date": jr["expiration_date"].isoformat() if jr.get("expiration_date") else None,
     }
+
+
+async def _try_load_county_requirements(
+    conn, city_jurisdiction_id: UUID, threshold_days: int
+) -> Optional[List[Dict]]:
+    """Walk up parent_id to the county jurisdiction and load cached reqs if fresh."""
+    row = await conn.fetchrow(
+        "SELECT parent_id FROM jurisdictions WHERE id = $1", city_jurisdiction_id
+    )
+    if not row or not row["parent_id"]:
+        return None
+    county_id = row["parent_id"]
+
+    # Verify it's actually a county (not state)
+    county_row = await conn.fetchrow(
+        "SELECT city FROM jurisdictions WHERE id = $1", county_id
+    )
+    if not county_row or not county_row["city"] or not county_row["city"].startswith("_county_"):
+        return None
+
+    if not await _is_jurisdiction_fresh(conn, county_id, threshold_days):
+        return None
+
+    j_reqs = await _load_jurisdiction_requirements(conn, county_id)
+    if not j_reqs:
+        return None
+
+    print(f"[Compliance] Reusing county jurisdiction data ({len(j_reqs)} reqs) for city jurisdiction {city_jurisdiction_id}")
+    return [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+
+
+async def _get_county_jurisdiction_id(conn, city_jurisdiction_id: UUID) -> Optional[UUID]:
+    """Get the county jurisdiction ID from parent_id chain."""
+    row = await conn.fetchrow(
+        "SELECT parent_id FROM jurisdictions WHERE id = $1", city_jurisdiction_id
+    )
+    if not row or not row["parent_id"]:
+        return None
+    county_row = await conn.fetchrow(
+        "SELECT id, city FROM jurisdictions WHERE id = $1", row["parent_id"]
+    )
+    if county_row and county_row["city"] and county_row["city"].startswith("_county_"):
+        return county_row["id"]
+    return None
 
 
 async def _upsert_jurisdiction_requirements(conn, jurisdiction_id: UUID, reqs: List[Dict]):
@@ -1401,12 +1470,36 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             jurisdiction_id, location_id,
         )
 
+        has_local_ordinance = await _lookup_has_local_ordinance(conn, data.city, data.state)
+
         # Check if jurisdiction already has requirements in the repository
         j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
         has_repository_data = len(j_reqs) > 0
 
+        # Try county data for cities without local ordinance
+        req_dicts = None
         if has_repository_data:
             req_dicts = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+        else:
+            if has_local_ordinance is False:
+                county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, 7)
+                if county_reqs:
+                    req_dicts = county_reqs
+                    has_repository_data = True
+
+        if req_dicts:
+            # Normalize and filter (with preemption awareness) before cloning.
+            # This keeps create-location behavior consistent with the main
+            # compliance check pipeline.
+            if has_local_ordinance is False:
+                req_dicts = [r for r in req_dicts if r.get("jurisdiction_level") != "city"]
+            for req in req_dicts:
+                req["category"] = _normalize_category(req.get("category")) or req.get("category")
+            req_dicts = await _filter_with_preemption(conn, req_dicts, data.state)
+            for req in req_dicts:
+                _clamp_varchar_fields(req)
+
+        if has_repository_data and req_dicts:
 
             # Clone requirements to location — no alerts for initial clone
             await _sync_requirements_to_location(
@@ -1441,6 +1534,10 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
                 location_id,
             )
+        else:
+            # No usable cached requirements after filtering; ensure the caller
+            # triggers an initial Gemini check.
+            has_repository_data = False
 
         row = await conn.fetchrow("SELECT * FROM business_locations WHERE id = $1", location_id)
         location = BusinessLocation(**dict(row))
@@ -1481,6 +1578,9 @@ async def run_compliance_check_stream(
                     jurisdiction_id, location_id,
                 )
 
+            # Look up whether this city has its own local ordinance
+            has_local_ordinance = await _lookup_has_local_ordinance(conn, location.city, location.state)
+
             # ============================================================
             # TIER 1: Check for fresh structured data from authoritative sources
             # ============================================================
@@ -1512,9 +1612,21 @@ async def run_compliance_check_stream(
                 used_repository = True
 
             # ============================================================
+            # TIER 2.5: County data reuse for no-local-ordinance cities
+            # ============================================================
+            if not used_repository and has_local_ordinance is False:
+                county_reqs = await _try_load_county_requirements(
+                    conn, jurisdiction_id, location.auto_check_interval_days or 7
+                )
+                if county_reqs:
+                    yield {"type": "repository", "message": f"Using {location.county or 'county'} data for {location.city}..."}
+                    requirements = county_reqs
+                    used_repository = True
+
+            # ============================================================
             # TIER 3: Research with Gemini (stale or missing data)
             # ============================================================
-            else:
+            if not used_repository:
                 # Stale or missing — call Gemini
                 # First, get known sources for this jurisdiction (or discover them)
                 known_sources = await get_known_sources(conn, jurisdiction_id)
@@ -1550,6 +1662,15 @@ async def run_compliance_check_stream(
                     preemption_rules = {}
 
                 yield {"type": "researching", "message": f"Researching requirements for {location_name}..."}
+
+                # Inform the client when a city has no local ordinance
+                if has_local_ordinance is False:
+                    parent = f"{location.county} County / " if location.county else ""
+                    yield {
+                        "type": "jurisdiction_info",
+                        "message": f"{location.city} does not have its own local ordinances. Using {parent}{location.state} rules.",
+                    }
+
                 research_queue = asyncio.Queue()
                 def _on_research_retry(attempt: int, error: str):
                     research_queue.put_nowait({"type": "retrying", "message": f"Retrying research (attempt {attempt + 1})..."})
@@ -1559,6 +1680,7 @@ async def run_compliance_check_stream(
                         source_context=source_context,
                         corrections_context=corrections_context,
                         preemption_rules=preemption_rules,
+                        has_local_ordinance=has_local_ordinance,
                         on_retry=_on_research_retry,
                     )
                 )
@@ -1585,16 +1707,43 @@ async def run_compliance_check_stream(
                 yield {"type": "completed", "location": location_name, "new": 0, "updated": 0, "alerts": 0}
                 return
 
+            # Post-filter: strip city-level results for cities with no local ordinance
+            if has_local_ordinance is False:
+                before = len(requirements)
+                requirements = [r for r in requirements if r.get("jurisdiction_level") != "city"]
+                stripped = before - len(requirements)
+                if stripped:
+                    print(f"[Compliance] Stripped {stripped} city-level req(s) for {location.city} (no local ordinance)")
+                # Annotate remaining reqs with inheritance note
+                parent = f"{location.county} County / " if location.county else ""
+                note = (
+                    f" [Note: {location.city} does not have its own local ordinance; "
+                    f"this requirement applies via {parent}{location.state} state law.]"
+                )
+                for r in requirements:
+                    desc = r.get("description") or ""
+                    if note not in desc:
+                        r["description"] = desc + note
+
             # Normalize and filter (with preemption awareness)
             for req in requirements:
                 req["category"] = _normalize_category(req.get("category")) or req.get("category")
             requirements = await _filter_with_preemption(conn, requirements, location.state)
+            for req in requirements:
+                _clamp_varchar_fields(req)
 
             yield {"type": "processing", "message": f"Processing {len(requirements)} requirements..."}
 
             # If Gemini was called, contribute results to jurisdiction repository
             if not used_repository:
                 await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
+
+                # Also write to county jurisdiction so other cities in same county can reuse
+                if has_local_ordinance is False:
+                    county_jid = await _get_county_jurisdiction_id(conn, jurisdiction_id)
+                    if county_jid:
+                        await _upsert_jurisdiction_requirements(conn, county_jid, requirements)
+                        print(f"[Compliance] Also cached to county jurisdiction {county_jid}")
 
                 # Learn from successful research: record any new sources seen
                 for req in requirements:
@@ -1806,11 +1955,31 @@ async def get_location_counts(location_id: UUID) -> dict:
     """Get requirements count and unread alerts count for a location."""
     from ...database import get_connection
     async with get_connection() as conn:
+        loc = await conn.fetchrow(
+            """SELECT bl.state, jr.has_local_ordinance
+               FROM business_locations bl
+               LEFT JOIN jurisdiction_reference jr
+                 ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
+               WHERE bl.id = $1""",
+            location_id,
+        )
+        state = (loc["state"] if loc else None) or ""
+        has_local_ordinance = loc["has_local_ordinance"] if loc else None
+
         rows = await conn.fetch(
             "SELECT category, jurisdiction_level, title, jurisdiction_name, rate_type FROM compliance_requirements WHERE location_id = $1",
             location_id,
         )
-        filtered = _filter_by_jurisdiction_priority([dict(r) for r in rows])
+        req_dicts = [dict(r) for r in rows]
+        if has_local_ordinance is False:
+            req_dicts = [r for r in req_dicts if r.get("jurisdiction_level") != "city"]
+        for r in req_dicts:
+            r["category"] = _normalize_category(r.get("category")) or r.get("category")
+        filtered = (
+            await _filter_with_preemption(conn, req_dicts, state)
+            if state
+            else _filter_by_jurisdiction_priority(req_dicts)
+        )
         unread_alerts_count = await conn.fetchval(
             "SELECT COUNT(*) FROM compliance_alerts WHERE location_id = $1 AND status = 'unread'",
             location_id,
@@ -1825,7 +1994,12 @@ async def get_locations(company_id: UUID) -> List[BusinessLocation]:
     from ...database import get_connection
     async with get_connection() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM business_locations WHERE company_id = $1 ORDER BY created_at DESC",
+            """SELECT bl.*, jr.has_local_ordinance
+               FROM business_locations bl
+               LEFT JOIN jurisdiction_reference jr
+                 ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
+               WHERE bl.company_id = $1
+               ORDER BY bl.created_at DESC""",
             company_id,
         )
         return [BusinessLocation(**dict(row)) for row in rows]
@@ -1835,7 +2009,11 @@ async def get_location(location_id: UUID, company_id: UUID) -> Optional[Business
     from ...database import get_connection
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM business_locations WHERE id = $1 AND company_id = $2",
+            """SELECT bl.*, jr.has_local_ordinance
+               FROM business_locations bl
+               LEFT JOIN jurisdiction_reference jr
+                 ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
+               WHERE bl.id = $1 AND bl.company_id = $2""",
             location_id,
             company_id,
         )
@@ -1909,6 +2087,19 @@ async def delete_location(location_id: UUID, company_id: UUID) -> bool:
 async def get_location_requirements(location_id: UUID, company_id: UUID, category: Optional[str] = None) -> List[RequirementResponse]:
     from ...database import get_connection
     async with get_connection() as conn:
+        loc = await conn.fetchrow(
+            """SELECT bl.state, jr.has_local_ordinance
+               FROM business_locations bl
+               LEFT JOIN jurisdiction_reference jr
+                 ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
+               WHERE bl.id = $1 AND bl.company_id = $2""",
+            location_id, company_id,
+        )
+        if not loc:
+            return []
+        state = loc["state"]
+        has_local_ordinance = loc["has_local_ordinance"]
+
         query = """
             SELECT r.* FROM compliance_requirements r
             JOIN business_locations l ON r.location_id = l.id
@@ -1924,7 +2115,11 @@ async def get_location_requirements(location_id: UUID, company_id: UUID, categor
 
         rows = await conn.fetch(query, *params)
         row_dicts = [dict(row) for row in rows]
-        filtered = _filter_by_jurisdiction_priority(row_dicts)
+        if has_local_ordinance is False:
+            row_dicts = [r for r in row_dicts if r.get("jurisdiction_level") != "city"]
+        for r in row_dicts:
+            r["category"] = _normalize_category(r.get("category")) or r.get("category")
+        filtered = await _filter_with_preemption(conn, row_dicts, state)
         return [
             RequirementResponse(
                 id=str(row["id"]),
@@ -1934,7 +2129,7 @@ async def get_location_requirements(location_id: UUID, company_id: UUID, categor
                 title=row["title"],
                 description=row["description"],
                 current_value=row["current_value"],
-                numeric_value=float(row["numeric_value"]) if row["numeric_value"] else None,
+                numeric_value=float(row["numeric_value"]) if row.get("numeric_value") is not None else None,
                 source_url=row["source_url"],
                 source_name=row["source_name"],
                 effective_date=row["effective_date"].isoformat() if row["effective_date"] else None,
@@ -2216,7 +2411,11 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
     from ...database import get_connection
     async with get_connection() as conn:
         locations = await conn.fetch(
-            "SELECT * FROM business_locations WHERE company_id = $1",
+            """SELECT bl.*, jr.has_local_ordinance
+               FROM business_locations bl
+               LEFT JOIN jurisdiction_reference jr
+                 ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
+               WHERE bl.company_id = $1""",
             company_id,
         )
 
@@ -2234,7 +2433,12 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
                 "SELECT * FROM compliance_requirements WHERE location_id = $1",
                 loc["id"],
             )
-            filtered_reqs = _filter_by_jurisdiction_priority([dict(r) for r in reqs])
+            req_dicts = [dict(r) for r in reqs]
+            if loc.get("has_local_ordinance") is False:
+                req_dicts = [r for r in req_dicts if r.get("jurisdiction_level") != "city"]
+            for r in req_dicts:
+                r["category"] = _normalize_category(r.get("category")) or r.get("category")
+            filtered_reqs = await _filter_with_preemption(conn, req_dicts, loc["state"])
             total_requirements += len(filtered_reqs)
 
             for req in filtered_reqs:
@@ -2445,6 +2649,9 @@ async def run_compliance_check_background(
                     jurisdiction_id, location_id,
                 )
 
+            # Look up whether this city has its own local ordinance
+            has_local_ordinance = await _lookup_has_local_ordinance(conn, location.city, location.state)
+
             # TIER 1: Check for fresh structured data from authoritative sources
             from .structured_data import StructuredDataService
             structured_service = StructuredDataService()
@@ -2467,7 +2674,16 @@ async def run_compliance_check_background(
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
                 used_repository = True
-            else:
+
+            # TIER 2.5: County data reuse for no-local-ordinance cities
+            if not used_repository and has_local_ordinance is False:
+                county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, threshold)
+                if county_reqs:
+                    requirements = county_reqs
+                    used_repository = True
+
+            # TIER 3: Research with Gemini (stale or missing data)
+            if not used_repository:
                 # Get known sources for this jurisdiction (or discover them)
                 known_sources = await get_known_sources(conn, jurisdiction_id)
 
@@ -2505,6 +2721,7 @@ async def run_compliance_check_background(
                     source_context=source_context,
                     corrections_context=corrections_context,
                     preemption_rules=preemption_rules,
+                    has_local_ordinance=has_local_ordinance,
                 )
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
@@ -2524,13 +2741,40 @@ async def run_compliance_check_background(
                 await _complete_check_log(conn, log_id, 0, 0, 0)
                 return {"new": 0, "updated": 0, "alerts": 0}
 
+            # Post-filter: strip city-level results for cities with no local ordinance
+            if has_local_ordinance is False:
+                before = len(requirements)
+                requirements = [r for r in requirements if r.get("jurisdiction_level") != "city"]
+                stripped = before - len(requirements)
+                if stripped:
+                    print(f"[Compliance] Stripped {stripped} city-level req(s) for {location.city} (no local ordinance)")
+                # Annotate remaining reqs with inheritance note
+                parent = f"{location.county} County / " if location.county else ""
+                note = (
+                    f" [Note: {location.city} does not have its own local ordinance; "
+                    f"this requirement applies via {parent}{location.state} state law.]"
+                )
+                for r in requirements:
+                    desc = r.get("description") or ""
+                    if note not in desc:
+                        r["description"] = desc + note
+
             for req in requirements:
                 req["category"] = _normalize_category(req.get("category")) or req.get("category")
             requirements = await _filter_with_preemption(conn, requirements, location.state)
+            for req in requirements:
+                _clamp_varchar_fields(req)
 
             # Contribute to repository after Gemini call
             if not used_repository:
                 await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
+
+                # Also write to county jurisdiction so other cities in same county can reuse
+                if has_local_ordinance is False:
+                    county_jid = await _get_county_jurisdiction_id(conn, jurisdiction_id)
+                    if county_jid:
+                        await _upsert_jurisdiction_requirements(conn, county_jid, requirements)
+                        print(f"[Compliance] Also cached to county jurisdiction {county_jid}")
 
                 # Learn from successful research: record any new sources seen
                 for req in requirements:

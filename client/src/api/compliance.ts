@@ -13,6 +13,7 @@ export interface BusinessLocation {
     next_auto_check: string | null;
     last_compliance_check: string | null;
     created_at: string;
+    has_local_ordinance: boolean | null;
     requirements_count: number;
     unread_alerts_count: number;
 }

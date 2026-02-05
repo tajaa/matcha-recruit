@@ -138,27 +138,33 @@ def _build_category_prompt(
 
     category_instructions = {
         "minimum_wage": """Research MINIMUM WAGE requirements.
-Return SEPARATE requirements for each rate type that exists:
-- "general" - standard minimum wage (ALWAYS include)
+Always include the STATE baseline minimum wage.
+If a county/city minimum wage ordinance exists (and is allowed), also include the local override.
+Return SEPARATE requirements for each rate type that exists at each applicable level:
+- "general" - standard minimum wage (ALWAYS include for state baseline)
 - "tipped" - if tip credits allowed
 - "hotel", "fast_food", "healthcare" - if special rates exist
 - "large_employer" / "small_employer" - if rates differ by size
-Use the most local jurisdiction (city > county > state) for each rate type.""",
+Provide numeric_value for rates (e.g., 16.9) when possible.""",
 
         "overtime": """Research OVERTIME requirements.
-Return ONLY the single most local jurisdiction's overtime rules (city > county > state).
+Always include the STATE baseline overtime rules.
+If a county/city overtime ordinance exists (and is allowed), also include the local override.
 Include daily/weekly overtime thresholds and multipliers.""",
 
         "sick_leave": """Research PAID SICK LEAVE requirements.
-Return ONLY the single most local jurisdiction's sick leave rules.
+Always include the STATE baseline sick leave rules.
+If a county/city sick leave ordinance exists (and is allowed), also include the local override.
 Include accrual rate, cap, and usage rules.""",
 
         "meal_breaks": """Research MEAL AND REST BREAK requirements.
-Return ONLY the single most local jurisdiction's break rules.
+Always include the STATE baseline meal/rest break rules.
+If a county/city ordinance exists (and is allowed), also include the local override.
 Include timing, duration, and waiver conditions.""",
 
         "pay_frequency": """Research PAY FREQUENCY requirements.
-Return ONLY the single most local jurisdiction's pay frequency rules.
+Always include the STATE baseline pay frequency rules.
+If a county/city ordinance exists (and is allowed), also include the local override.
 Include required pay periods and final pay rules.""",
     }
 
@@ -330,6 +336,7 @@ class GeminiComplianceService:
         source_context: str = "",
         corrections_context: str = "",
         preemption_rules: Optional[Dict[str, bool]] = None,
+        has_local_ordinance: Optional[bool] = None,
         on_retry: Optional[Callable[[int, str], Any]] = None,
     ) -> List[Dict]:
         """Research compliance using parallel category-specific calls.
@@ -357,14 +364,28 @@ class GeminiComplianceService:
         def _preemption_context_for(cat: str) -> str:
             allows = preemption_map.get(cat)
             if allows is None:
+                if has_local_ordinance is False:
+                    return (
+                        f"\nIMPORTANT: {city} does NOT have its own local "
+                        f"{cat.replace('_', ' ')} ordinance. Do NOT fabricate city-level rules. "
+                        f"Return ONLY state-level (and county-level if applicable) requirements."
+                    )
                 return ""
             state_name = state  # 2-letter code
             if allows:
-                return (
-                    f"\nIMPORTANT: {state_name} allows local jurisdictions to set their own "
-                    f"{cat.replace('_', ' ')} rules. Check if {city} has its own local ordinance. "
-                    f"Always include the state baseline AND any local override if one exists."
-                )
+                if has_local_ordinance is False:
+                    return (
+                        f"\nIMPORTANT: {state_name} allows local jurisdictions to set their own "
+                        f"{cat.replace('_', ' ')} rules. However, {city} does NOT have its own local "
+                        f"{cat.replace('_', ' ')} ordinance. Do NOT fabricate city-level rules. "
+                        f"Return ONLY state-level (and county-level if applicable) requirements."
+                    )
+                else:
+                    return (
+                        f"\nIMPORTANT: {state_name} allows local jurisdictions to set their own "
+                        f"{cat.replace('_', ' ')} rules. Check if {city} has its own local ordinance. "
+                        f"Always include the state baseline AND any local override if one exists."
+                    )
             else:
                 return (
                     f"\nIMPORTANT: {state_name} PREEMPTS local {cat.replace('_', ' ')} ordinances. "
@@ -429,6 +450,7 @@ class GeminiComplianceService:
         source_context: str = "",
         corrections_context: str = "",
         preemption_rules: Optional[Dict[str, bool]] = None,
+        has_local_ordinance: Optional[bool] = None,
         on_retry: Optional[Callable[[int, str], Any]] = None,
     ) -> List[Dict]:
         """Research compliance requirements for a location (uses parallel calls)."""
@@ -438,7 +460,9 @@ class GeminiComplianceService:
 
         return await self.research_location_compliance_parallel(
             city, state, county, source_context, corrections_context,
-            preemption_rules=preemption_rules, on_retry=on_retry,
+            preemption_rules=preemption_rules,
+            has_local_ordinance=has_local_ordinance,
+            on_retry=on_retry,
         )
 
     async def discover_jurisdiction_sources(

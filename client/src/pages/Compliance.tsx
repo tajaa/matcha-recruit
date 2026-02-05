@@ -10,7 +10,7 @@ import {
     MapPin, Plus, Trash2, Edit2, X,
     ChevronDown, ChevronRight, AlertTriangle, Bell, CheckCircle,
     ExternalLink, Building2, Loader2, Clock, Calendar, Shield,
-    History, Eye, Zap
+    History, Eye, Zap, Info
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -212,6 +212,21 @@ export function Compliance() {
             county: location.county || '',
             zipcode: location.zipcode
         });
+    };
+
+    const getCategoryJurisdiction = (reqs: ComplianceRequirement[]) => {
+        const hasCityLevel = reqs.some(r => r.jurisdiction_level === 'city');
+        if (hasCityLevel) {
+            const cityReq = reqs.find(r => r.jurisdiction_level === 'city');
+            return { label: `${cityReq?.jurisdiction_name} Local`, type: 'local' as const };
+        }
+        const hasCountyLevel = reqs.some(r => r.jurisdiction_level === 'county');
+        if (hasCountyLevel) {
+            const countyReq = reqs.find(r => r.jurisdiction_level === 'county');
+            return { label: countyReq?.jurisdiction_name ?? 'County', type: 'county' as const };
+        }
+        const stateReq = reqs.find(r => r.jurisdiction_level === 'state');
+        return { label: stateReq?.jurisdiction_name ?? 'State', type: 'state' as const };
     };
 
     const getSeverityStyles = (severity: string) => {
@@ -460,7 +475,9 @@ export function Compliance() {
                                     <div className="px-6 py-3 space-y-1.5 max-h-40 overflow-y-auto">
                                     {checkMessages.map((msg, i) => (
                                         <div key={i} className="flex items-center gap-2 text-xs font-mono">
-                                            {msg.type === 'error' ? (
+                                            {msg.type === 'jurisdiction_info' ? (
+                                                <Info size={12} className="text-blue-400 flex-shrink-0" />
+                                            ) : msg.type === 'error' ? (
                                                 <X size={12} className="text-red-400 flex-shrink-0" />
                                             ) : msg.type === 'completed' ? (
                                                 <CheckCircle size={12} className="text-emerald-400 flex-shrink-0" />
@@ -485,6 +502,7 @@ export function Compliance() {
                                                 </span>
                                             )}
                                             <span className={
+                                                msg.type === 'jurisdiction_info' ? 'text-blue-300' :
                                                 msg.type === 'error' ? 'text-red-400' :
                                                 msg.type === 'completed' ? 'text-emerald-400' :
                                                 msg.type === 'result' && msg.status === 'new' ? 'text-emerald-300' :
@@ -551,6 +569,16 @@ export function Compliance() {
                                     Log
                                 </button>
                             </div>
+
+                            {selectedLocation?.has_local_ordinance === false && (
+                                <div className="mx-6 mt-4 px-4 py-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3">
+                                    <Info size={14} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                                    <p className="text-xs text-blue-300 leading-relaxed">
+                                        <span className="font-semibold">{selectedLocation.city}</span> does not have its own local labor ordinances.
+                                        All requirements shown are from {selectedLocation.county ? `${selectedLocation.county} County / ` : ''}{selectedLocation.state} state law.
+                                    </p>
+                                </div>
+                            )}
 
                             <div className="p-6 flex-1 bg-zinc-950 overflow-y-auto">
                                 {activeTab === 'upcoming' ? (
@@ -718,6 +746,18 @@ export function Compliance() {
                                                             <span className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-400 text-[10px] rounded-full font-mono">
                                                                 {reqs.length}
                                                             </span>
+                                                            {(() => {
+                                                                const source = getCategoryJurisdiction(reqs);
+                                                                return (
+                                                                    <span className={`px-1.5 py-0.5 text-[10px] rounded border font-bold uppercase tracking-wider ${
+                                                                        source.type === 'local'
+                                                                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                                                                            : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                                                                    }`}>
+                                                                        {source.label}
+                                                                    </span>
+                                                                );
+                                                            })()}
                                                         </div>
                                                         {expandedCategories.has(category) ? (
                                                             <ChevronDown size={16} className="text-zinc-500" />
