@@ -1,12 +1,13 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from uuid import UUID
 
 from ...matcha.dependencies import require_admin_or_client, get_client_company_id
+from ...database import get_connection
 from ..models.auth import CurrentUser
 from ..models.compliance import (
     LocationCreate,
@@ -39,12 +40,26 @@ from ..services.compliance_service import (
 router = APIRouter()
 
 
+async def resolve_company_id(current_user, company_id_override: str | None) -> UUID | None:
+    """Resolve company ID, allowing admins to override via query param."""
+    if current_user.role == "admin" and company_id_override:
+        try:
+            cid = UUID(company_id_override)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid company_id")
+        async with get_connection() as conn:
+            exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1)", cid)
+        if not exists:
+            raise HTTPException(status_code=404, detail="Company not found")
+        return cid
+    return await get_client_company_id(current_user)
+
+
 @router.get("/jurisdictions")
 async def list_jurisdictions(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List jurisdictions that have requirement data in the repository."""
-    from ...database import get_connection
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
@@ -74,9 +89,10 @@ async def list_jurisdictions(
 async def create_location_endpoint(
     data: LocationCreate,
     background_tasks: BackgroundTasks,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
 
@@ -103,9 +119,10 @@ async def create_location_endpoint(
 @router.post("/locations/{location_id}/check")
 async def check_location_compliance_endpoint(
     location_id: str,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -138,9 +155,10 @@ async def check_location_compliance_endpoint(
 
 @router.get("/locations", response_model=List[dict])
 async def get_locations_endpoint(
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         return []
 
@@ -175,9 +193,10 @@ async def get_locations_endpoint(
 @router.get("/locations/{location_id}", response_model=dict)
 async def get_location_endpoint(
     location_id: str,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -218,9 +237,10 @@ async def get_location_endpoint(
 async def update_location_endpoint(
     location_id: str,
     data: LocationUpdate,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -251,9 +271,10 @@ async def update_location_endpoint(
 @router.delete("/locations/{location_id}")
 async def delete_location_endpoint(
     location_id: str,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -273,9 +294,10 @@ async def delete_location_endpoint(
 async def get_location_requirements_endpoint(
     location_id: str,
     category: Optional[str] = None,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -295,9 +317,10 @@ async def get_location_requirements_endpoint(
 async def get_check_log_endpoint(
     location_id: str,
     limit: int = 20,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -312,9 +335,10 @@ async def get_check_log_endpoint(
 @router.get("/locations/{location_id}/upcoming-legislation", response_model=List[UpcomingLegislationResponse])
 async def get_upcoming_legislation_endpoint(
     location_id: str,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -331,9 +355,10 @@ async def get_alerts_endpoint(
     status: Optional[str] = None,
     severity: Optional[str] = None,
     limit: int = 50,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -343,9 +368,10 @@ async def get_alerts_endpoint(
 @router.put("/alerts/{alert_id}/read")
 async def mark_alert_read_endpoint(
     alert_id: str,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -372,9 +398,10 @@ class DismissAlertRequest(BaseModel):
 async def dismiss_alert_endpoint(
     alert_id: str,
     data: Optional[DismissAlertRequest] = None,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -403,9 +430,10 @@ async def dismiss_alert_endpoint(
 
 @router.get("/summary", response_model=ComplianceSummary)
 async def get_compliance_summary_endpoint(
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -427,13 +455,14 @@ class VerificationFeedbackRequest(BaseModel):
 async def record_verification_feedback_endpoint(
     alert_id: str,
     data: VerificationFeedbackRequest,
+    company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Record admin feedback on whether a verification prediction was correct.
 
     This data is used to calibrate confidence thresholds and improve accuracy.
     """
-    company_id = await get_client_company_id(current_user)
+    company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 

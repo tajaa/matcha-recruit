@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { BusinessLocation, ComplianceRequirement, LocationCreate, JurisdictionOption } from '../api/compliance';
 import {
@@ -6,6 +6,7 @@ import {
     COMPLIANCE_CATEGORY_LABELS,
     JURISDICTION_LEVEL_LABELS
 } from '../api/compliance';
+import { adminOverview } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import {
     MapPin, Plus, Trash2, Edit2, X,
@@ -78,50 +79,75 @@ const emptyFormData: LocationFormData = {
 export function Compliance() {
     const { user } = useAuth();
     const isClient = user?.role === 'client';
+    const isAdmin = user?.role === 'admin';
     const queryClient = useQueryClient();
     const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+    const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
     const [jurisdictionSearch, setJurisdictionSearch] = useState('');
     const [showAddModal, setShowAddModal] = useState(false);
     const [editingLocation, setEditingLocation] = useState<BusinessLocation | null>(null);
     const [formData, setFormData] = useState<LocationFormData>(emptyFormData);
+    const [useManualEntry, setUseManualEntry] = useState(false);
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
     const [activeTab, setActiveTab] = useState<'requirements' | 'alerts' | 'upcoming' | 'history'>('requirements');
     const [checkInProgress, setCheckInProgress] = useState(false);
     const [checkMessages, setCheckMessages] = useState<{ type: string; status?: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
     const [expandedAlertSources, setExpandedAlertSources] = useState<Set<string>>(new Set());
 
-    const { data: locations, isLoading: loadingLocations } = useQuery({
-        queryKey: ['compliance-locations'],
-        queryFn: complianceAPI.getLocations
+    const { data: companies } = useQuery({
+        queryKey: ['admin-overview'],
+        queryFn: () => adminOverview.get(),
+        enabled: isAdmin,
     });
 
+    useEffect(() => {
+        if (isAdmin && companies?.companies?.length && !selectedCompanyId) {
+            setSelectedCompanyId(companies.companies[0].id);
+        }
+    }, [isAdmin, companies, selectedCompanyId]);
+
+    const companyId = isAdmin ? selectedCompanyId ?? undefined : undefined;
+
+    const { data: locations, isLoading: loadingLocations } = useQuery({
+        queryKey: ['compliance-locations', companyId],
+        queryFn: () => complianceAPI.getLocations(companyId),
+        enabled: !isAdmin || !!companyId,
+    });
+
+    useEffect(() => {
+        setSelectedLocationId(null);
+    }, [companyId]);
+
     const { data: requirements, isLoading: loadingRequirements } = useQuery({
-        queryKey: ['compliance-requirements', selectedLocationId],
-        queryFn: () => selectedLocationId ? complianceAPI.getRequirements(selectedLocationId) : Promise.resolve([]),
+        queryKey: ['compliance-requirements', selectedLocationId, companyId],
+        queryFn: () => selectedLocationId ? complianceAPI.getRequirements(selectedLocationId, undefined, companyId) : Promise.resolve([]),
         enabled: !!selectedLocationId
     });
 
     const { data: alerts, isLoading: loadingAlerts } = useQuery({
-        queryKey: ['compliance-alerts'],
-        queryFn: () => complianceAPI.getAlerts()
+        queryKey: ['compliance-alerts', companyId],
+        queryFn: () => complianceAPI.getAlerts(undefined, companyId),
+        enabled: !isAdmin || !!companyId,
     });
 
     const { data: upcomingLegislation } = useQuery({
-        queryKey: ['compliance-upcoming', selectedLocationId],
-        queryFn: () => selectedLocationId ? complianceAPI.getUpcomingLegislation(selectedLocationId) : Promise.resolve([]),
+        queryKey: ['compliance-upcoming', selectedLocationId, companyId],
+        queryFn: () => selectedLocationId ? complianceAPI.getUpcomingLegislation(selectedLocationId, companyId) : Promise.resolve([]),
         enabled: !!selectedLocationId
     });
 
     const { data: checkLog } = useQuery({
-        queryKey: ['compliance-check-log', selectedLocationId],
-        queryFn: () => selectedLocationId ? complianceAPI.getCheckLog(selectedLocationId, 10) : Promise.resolve([]),
+        queryKey: ['compliance-check-log', selectedLocationId, companyId],
+        queryFn: () => selectedLocationId ? complianceAPI.getCheckLog(selectedLocationId, 10, companyId) : Promise.resolve([]),
         enabled: !!selectedLocationId
     });
+
+    const showJurisdictionPicker = (isClient || isAdmin) && !editingLocation && !useManualEntry;
 
     const { data: jurisdictions } = useQuery({
         queryKey: ['compliance-jurisdictions'],
         queryFn: complianceAPI.getJurisdictions,
-        enabled: isClient,
+        enabled: isClient || isAdmin,
     });
 
     const jurisdictionsByState = useMemo(() => {
@@ -154,29 +180,30 @@ export function Compliance() {
     const makeJurisdictionKey = (j: JurisdictionOption) => `${j.city}|${j.state}|${j.county || ''}`;
 
     const createLocationMutation = useMutation({
-        mutationFn: (data: LocationCreate) => complianceAPI.createLocation(data),
+        mutationFn: (data: LocationCreate) => complianceAPI.createLocation(data, companyId),
         onSuccess: (newLocation) => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-locations'] });
+            queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
             queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
             setShowAddModal(false);
             setFormData(emptyFormData);
+            setUseManualEntry(false);
             setSelectedLocationId(newLocation.id);
         }
     });
 
     const updateLocationMutation = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: LocationCreate }) => complianceAPI.updateLocation(id, data),
+        mutationFn: ({ id, data }: { id: string; data: LocationCreate }) => complianceAPI.updateLocation(id, data, companyId),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-locations'] });
+            queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
             setEditingLocation(null);
             setFormData(emptyFormData);
         }
     });
 
     const deleteLocationMutation = useMutation({
-        mutationFn: (id: string) => complianceAPI.deleteLocation(id),
+        mutationFn: (id: string) => complianceAPI.deleteLocation(id, companyId),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-locations'] });
+            queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
             queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
             if (selectedLocationId === deleteLocationMutation.variables) {
                 setSelectedLocationId(null);
@@ -185,17 +212,17 @@ export function Compliance() {
     });
 
     const markAlertReadMutation = useMutation({
-        mutationFn: (id: string) => complianceAPI.markAlertRead(id),
+        mutationFn: (id: string) => complianceAPI.markAlertRead(id, companyId),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-alerts'] });
+            queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
             queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
         }
     });
 
     const dismissAlertMutation = useMutation({
-        mutationFn: (id: string) => complianceAPI.dismissAlert(id),
+        mutationFn: (id: string) => complianceAPI.dismissAlert(id, companyId),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-alerts'] });
+            queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
             queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
         }
     });
@@ -226,7 +253,7 @@ export function Compliance() {
     const handleSubmitLocation = (e: React.FormEvent) => {
         e.preventDefault();
         if (!formData.city || !formData.state) return;
-        if (!isClient && !formData.zipcode) return;
+        if (!isClient && !isAdmin && !formData.zipcode) return;
 
         const data: LocationCreate = {
             name: formData.name || undefined,
@@ -317,11 +344,24 @@ export function Compliance() {
     return (
         <div className="max-w-7xl mx-auto space-y-8">
             <div className="flex items-center justify-between border-b border-white/10 pb-8">
-                <div>
-                    <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Compliance</h1>
-                    <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
-                        Monitor labor laws, tax rates, and posting requirements
-                    </p>
+                <div className="flex items-center gap-6">
+                    <div>
+                        <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Compliance</h1>
+                        <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+                            Monitor labor laws, tax rates, and posting requirements
+                        </p>
+                    </div>
+                    {isAdmin && companies?.companies && companies.companies.length > 0 && (
+                        <select
+                            value={selectedCompanyId || ''}
+                            onChange={e => setSelectedCompanyId(e.target.value)}
+                            className="px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-white/20 transition-colors min-w-[200px]"
+                        >
+                            {companies.companies.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                    )}
                 </div>
                 <button
                     onClick={() => {
@@ -461,7 +501,7 @@ export function Compliance() {
                                         setCheckInProgress(true);
                                         setCheckMessages([]);
                                         try {
-                                            const response = await complianceAPI.checkCompliance(selectedLocationId);
+                                            const response = await complianceAPI.checkCompliance(selectedLocationId, companyId);
                                             const reader = response.body?.getReader();
                                             if (!reader) throw new Error('No response body');
                                             const decoder = new TextDecoder();
@@ -483,9 +523,9 @@ export function Compliance() {
                                                     } catch { /* skip malformed */ }
                                                 }
                                             }
-                                            queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId] });
-                                            queryClient.invalidateQueries({ queryKey: ['compliance-alerts'] });
-                                            queryClient.invalidateQueries({ queryKey: ['compliance-locations'] });
+                                            queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId, companyId] });
+                                            queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
+                                            queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
                                             queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
                                         } catch (error) {
                                             console.error('Compliance check failed:', error);
@@ -1053,6 +1093,7 @@ export function Compliance() {
                             setEditingLocation(null);
                             setFormData(emptyFormData);
                             setJurisdictionSearch('');
+                            setUseManualEntry(false);
                         }}
                     >
                         <motion.div
@@ -1072,6 +1113,7 @@ export function Compliance() {
                                         setEditingLocation(null);
                                         setFormData(emptyFormData);
                                         setJurisdictionSearch('');
+                                        setUseManualEntry(false);
                                     }}
                                     className="p-1 text-zinc-500 hover:text-white transition-colors"
                                 >
@@ -1093,11 +1135,20 @@ export function Compliance() {
                                     />
                                 </div>
 
-                                {isClient && !editingLocation ? (
+                                {showJurisdictionPicker ? (
                                     <div>
-                                        <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                            Jurisdiction <span className="text-red-500">*</span>
-                                        </label>
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <label className="block text-[10px] tracking-wider uppercase text-zinc-500">
+                                                Jurisdiction <span className="text-red-500">*</span>
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => { setUseManualEntry(true); setFormData(prev => ({ ...prev, jurisdictionKey: '' })); }}
+                                                className="text-[10px] text-zinc-600 hover:text-zinc-400 uppercase tracking-wider transition-colors"
+                                            >
+                                                Enter manually
+                                            </button>
+                                        </div>
                                         <input
                                             type="text"
                                             value={jurisdictionSearch}
@@ -1163,6 +1214,15 @@ export function Compliance() {
                                     </div>
                                 ) : (
                                     <>
+                                        {(isClient || isAdmin) && !editingLocation && useManualEntry && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { setUseManualEntry(false); setFormData(emptyFormData); }}
+                                                className="text-[10px] text-zinc-600 hover:text-zinc-400 uppercase tracking-wider transition-colors"
+                                            >
+                                                Use jurisdiction picker
+                                            </button>
+                                        )}
                                         <div>
                                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
                                                 Street Address (optional)
@@ -1225,13 +1285,13 @@ export function Compliance() {
                                             </div>
                                             <div>
                                                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                                    ZIP Code {!isClient && <span className="text-red-500">*</span>}
+                                                    ZIP Code {!isClient && !isAdmin && <span className="text-red-500">*</span>}
                                                 </label>
                                                 <input
                                                     type="text"
                                                     value={formData.zipcode}
                                                     onChange={e => setFormData(prev => ({ ...prev, zipcode: e.target.value }))}
-                                                    required={!isClient}
+                                                    required={!isClient && !isAdmin}
                                                     placeholder="94105"
                                                     maxLength={10}
                                                     className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
@@ -1249,6 +1309,7 @@ export function Compliance() {
                                             setEditingLocation(null);
                                             setFormData(emptyFormData);
                                             setJurisdictionSearch('');
+                                            setUseManualEntry(false);
                                         }}
                                         className="flex-1 px-4 py-2 bg-transparent border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded text-xs font-bold uppercase tracking-wider transition-colors"
                                     >
@@ -1256,7 +1317,7 @@ export function Compliance() {
                                     </button>
                                     <button
                                         type="submit"
-                                        disabled={createLocationMutation.isPending || updateLocationMutation.isPending || (isClient && !editingLocation && !formData.jurisdictionKey)}
+                                        disabled={createLocationMutation.isPending || updateLocationMutation.isPending || (showJurisdictionPicker && !formData.jurisdictionKey)}
                                         className="flex-1 px-4 py-2 bg-white hover:bg-zinc-200 text-black rounded text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
                                     >
                                         {createLocationMutation.isPending || updateLocationMutation.isPending

@@ -145,6 +145,11 @@ export interface ComplianceSummary {
 
 import { getAccessToken } from './client';
 
+function companyParam(url: string, companyId?: string): string {
+    if (!companyId) return url;
+    return url.includes('?') ? `${url}&company_id=${companyId}` : `${url}?company_id=${companyId}`;
+}
+
 export const complianceAPI = {
     async getJurisdictions(): Promise<JurisdictionOption[]> {
         const response = await fetch('/api/compliance/jurisdictions', {
@@ -156,8 +161,8 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async getLocations(): Promise<BusinessLocation[]> {
-        const response = await fetch('/api/compliance/locations', {
+    async getLocations(companyId?: string): Promise<BusinessLocation[]> {
+        const response = await fetch(companyParam('/api/compliance/locations', companyId), {
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
             },
@@ -166,8 +171,8 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async getLocation(locationId: string): Promise<BusinessLocation> {
-        const response = await fetch(`/api/compliance/locations/${locationId}`, {
+    async getLocation(locationId: string, companyId?: string): Promise<BusinessLocation> {
+        const response = await fetch(companyParam(`/api/compliance/locations/${locationId}`, companyId), {
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
             },
@@ -176,8 +181,8 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async createLocation(data: LocationCreate): Promise<BusinessLocation> {
-        const response = await fetch('/api/compliance/locations', {
+    async createLocation(data: LocationCreate, companyId?: string): Promise<BusinessLocation> {
+        const response = await fetch(companyParam('/api/compliance/locations', companyId), {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
@@ -189,8 +194,8 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async updateLocation(locationId: string, data: LocationUpdate): Promise<BusinessLocation> {
-        const response = await fetch(`/api/compliance/locations/${locationId}`, {
+    async updateLocation(locationId: string, data: LocationUpdate, companyId?: string): Promise<BusinessLocation> {
+        const response = await fetch(companyParam(`/api/compliance/locations/${locationId}`, companyId), {
             method: 'PUT',
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
@@ -202,8 +207,8 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async deleteLocation(locationId: string): Promise<void> {
-        const response = await fetch(`/api/compliance/locations/${locationId}`, {
+    async deleteLocation(locationId: string, companyId?: string): Promise<void> {
+        const response = await fetch(companyParam(`/api/compliance/locations/${locationId}`, companyId), {
             method: 'DELETE',
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
@@ -212,9 +217,10 @@ export const complianceAPI = {
         if (!response.ok) throw new Error('Failed to delete location');
     },
 
-    async getRequirements(locationId: string, category?: string): Promise<ComplianceRequirement[]> {
-        const params = category ? `?category=${category}` : '';
-        const response = await fetch(`/api/compliance/locations/${locationId}/requirements${params}`, {
+    async getRequirements(locationId: string, category?: string, companyId?: string): Promise<ComplianceRequirement[]> {
+        let url = `/api/compliance/locations/${locationId}/requirements`;
+        if (category) url += `?category=${category}`;
+        const response = await fetch(companyParam(url, companyId), {
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
             },
@@ -223,14 +229,14 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async getAlerts(params?: { status?: string; severity?: string; limit?: number }): Promise<ComplianceAlert[]> {
+    async getAlerts(params?: { status?: string; severity?: string; limit?: number }, companyId?: string): Promise<ComplianceAlert[]> {
         const searchParams = new URLSearchParams();
         if (params?.status) searchParams.set('status', params.status);
         if (params?.severity) searchParams.set('severity', params.severity);
         if (params?.limit) searchParams.set('limit', params.limit.toString());
         const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
 
-        const response = await fetch(`/api/compliance/alerts${query}`, {
+        const response = await fetch(companyParam(`/api/compliance/alerts${query}`, companyId), {
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
             },
@@ -239,8 +245,8 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async markAlertRead(alertId: string): Promise<void> {
-        const response = await fetch(`/api/compliance/alerts/${alertId}/read`, {
+    async markAlertRead(alertId: string, companyId?: string): Promise<void> {
+        const response = await fetch(companyParam(`/api/compliance/alerts/${alertId}/read`, companyId), {
             method: 'PUT',
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
@@ -249,8 +255,8 @@ export const complianceAPI = {
         if (!response.ok) throw new Error('Failed to mark alert as read');
     },
 
-    async dismissAlert(alertId: string): Promise<void> {
-        const response = await fetch(`/api/compliance/alerts/${alertId}/dismiss`, {
+    async dismissAlert(alertId: string, companyId?: string): Promise<void> {
+        const response = await fetch(companyParam(`/api/compliance/alerts/${alertId}/dismiss`, companyId), {
             method: 'PUT',
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
@@ -259,8 +265,8 @@ export const complianceAPI = {
         if (!response.ok) throw new Error('Failed to dismiss alert');
     },
 
-    async getSummary(): Promise<ComplianceSummary> {
-        const response = await fetch('/api/compliance/summary', {
+    async getSummary(companyId?: string): Promise<ComplianceSummary> {
+        const response = await fetch(companyParam('/api/compliance/summary', companyId), {
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
             },
@@ -269,8 +275,8 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async checkCompliance(locationId: string): Promise<Response> {
-        const response = await fetch(`/api/compliance/locations/${locationId}/check`, {
+    async checkCompliance(locationId: string, companyId?: string): Promise<Response> {
+        const response = await fetch(companyParam(`/api/compliance/locations/${locationId}/check`, companyId), {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
@@ -280,9 +286,10 @@ export const complianceAPI = {
         return response;
     },
 
-    async getCheckLog(locationId: string, limit?: number): Promise<CheckLogEntry[]> {
-        const params = limit ? `?limit=${limit}` : '';
-        const response = await fetch(`/api/compliance/locations/${locationId}/check-log${params}`, {
+    async getCheckLog(locationId: string, limit?: number, companyId?: string): Promise<CheckLogEntry[]> {
+        let url = `/api/compliance/locations/${locationId}/check-log`;
+        if (limit) url += `?limit=${limit}`;
+        const response = await fetch(companyParam(url, companyId), {
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
             },
@@ -291,8 +298,8 @@ export const complianceAPI = {
         return response.json();
     },
 
-    async getUpcomingLegislation(locationId: string): Promise<UpcomingLegislation[]> {
-        const response = await fetch(`/api/compliance/locations/${locationId}/upcoming-legislation`, {
+    async getUpcomingLegislation(locationId: string, companyId?: string): Promise<UpcomingLegislation[]> {
+        const response = await fetch(companyParam(`/api/compliance/locations/${locationId}/upcoming-legislation`, companyId), {
             headers: {
                 'Authorization': `Bearer ${getAccessToken()}`,
             },
