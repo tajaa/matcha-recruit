@@ -158,7 +158,11 @@ export function Landing() {
 
       {/* COMPLIANCE SECTION */}
       <section className="py-32 px-6 border-b border-white/5 bg-zinc-950 relative overflow-hidden">
-        <div className="max-w-[1800px] mx-auto grid lg:grid-cols-2 gap-24 items-center">
+        {/* Texture Overlay */}
+        <div className="absolute inset-0 bg-noise opacity-[0.15] mix-blend-soft-light pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-zinc-950/50 to-zinc-950 pointer-events-none" />
+
+        <div className="max-w-[1800px] mx-auto grid lg:grid-cols-2 gap-24 items-center relative z-10">
           <div className="space-y-12">
             <div>
               <h2 className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.9] mb-8">
