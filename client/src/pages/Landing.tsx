@@ -8,6 +8,7 @@ import {
   FileText,
   Users,
   Cpu,
+  MapPin,
 } from "lucide-react";
 
 // Lazy load 3D component
@@ -151,6 +152,148 @@ export function Landing() {
                 <div>&gt; Compliance Verified (99.9%)</div>
               </div>
             </motion.div>
+          </div>
+        </div>
+      </section>
+
+      {/* COMPLIANCE SECTION */}
+      <section className="py-32 px-6 border-b border-white/5 bg-zinc-950 relative overflow-hidden">
+        <div className="max-w-[1800px] mx-auto grid lg:grid-cols-2 gap-24 items-center">
+          <div className="space-y-12">
+            <div>
+              <h2 className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.9] mb-8">
+                KNOW EXACTLY <br />
+                WHICH LAW APPLIES <br />
+                <span className="text-zinc-500">— AT EVERY LOCATION</span>
+              </h2>
+              <p className="text-zinc-400 text-xl leading-relaxed max-w-xl font-light">
+                Matcha monitors labor laws across city, county, and state levels
+                — and tells you which one governs each requirement at each
+                location.
+              </p>
+            </div>
+
+            <div className="space-y-8">
+              {[
+                {
+                  title: "Knows when cities defer to county or state",
+                  desc: "Del Mar doesn't have its own minimum wage. Matcha knows that and shows you San Diego County's rules, not a hallucinated city ordinance.",
+                },
+                {
+                  title: "Picks the rule that actually applies",
+                  desc: "When state and city both set a minimum wage, Matcha applies the one that's most beneficial to the employee.",
+                },
+                {
+                  title: "Monitors for changes across every level",
+                  desc: "New state law? County ordinance update? Upcoming legislation? You get alerts with sources and confidence scores.",
+                },
+              ].map((point, i) => (
+                <div key={i} className="flex gap-6">
+                  <div className="text-zinc-600 font-mono text-sm mt-1">
+                    0{i + 1}
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="font-bold text-white uppercase tracking-tight">
+                      {point.title}
+                    </h4>
+                    <p className="text-sm text-zinc-500 leading-relaxed max-w-md">
+                      {point.desc}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="relative">
+            {/* Mock UI */}
+            <div className="space-y-6 relative z-10">
+              {/* San Francisco Card */}
+              <motion.div
+                initial={{ x: 20, opacity: 0 }}
+                whileInView={{ x: 0, opacity: 1 }}
+                viewport={{ once: true }}
+                className="bg-zinc-900 border border-white/10 p-6 shadow-2xl"
+              >
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
+                  <div className="flex items-center gap-3">
+                    <MapPin className="w-4 h-4 text-zinc-500" />
+                    <span className="text-xs font-mono uppercase tracking-widest">
+                      San Francisco, CA
+                    </span>
+                  </div>
+                  <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[10px] font-mono uppercase">
+                    Active
+                  </div>
+                </div>
+
+                <div className="space-y-px bg-white/5 border border-white/5">
+                  {[
+                    {
+                      label: "Minimum Wage",
+                      badge: "San Francisco Local",
+                      color: "emerald",
+                    },
+                    { label: "Sick Leave", badge: "California", color: "blue" },
+                    { label: "Overtime", badge: "California", color: "blue" },
+                    {
+                      label: "Meal Breaks",
+                      badge: "California",
+                      color: "blue",
+                    },
+                  ].map((row, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between p-4 bg-zinc-950"
+                    >
+                      <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                        {row.label}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${
+                          row.color === "emerald"
+                            ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                            : "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                        }`}
+                      >
+                        {row.badge}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+
+              {/* Del Mar Card */}
+              <motion.div
+                initial={{ x: 40, opacity: 0 }}
+                whileInView={{ x: 20, opacity: 0.6 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.2 }}
+                className="bg-zinc-900 border border-white/10 p-6 shadow-2xl scale-95 origin-right"
+              >
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
+                  <div className="flex items-center gap-3">
+                    <MapPin className="w-4 h-4 text-zinc-500" />
+                    <span className="text-xs font-mono uppercase tracking-widest">
+                      Del Mar, CA
+                    </span>
+                  </div>
+                </div>
+                <div className="space-y-px bg-white/5 border border-white/5">
+                  <div className="flex items-center justify-between p-4 bg-zinc-950">
+                    <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                      Minimum Wage
+                    </span>
+                    <span className="bg-blue-500/15 text-blue-400 border-blue-500/30 px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider">
+                      San Diego County
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+
+            {/* Background elements */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-white/5 blur-3xl rounded-full -z-10" />
           </div>
         </div>
       </section>
