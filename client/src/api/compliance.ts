@@ -146,7 +146,7 @@ export interface ComplianceSummary {
 import { getAccessToken } from './client';
 
 function companyParam(url: string, companyId?: string): string {
-    if (!companyId) return url;
+    if (!companyId || typeof companyId !== 'string') return url;
     return url.includes('?') ? `${url}&company_id=${companyId}` : `${url}?company_id=${companyId}`;
 }
 
