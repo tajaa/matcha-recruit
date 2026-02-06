@@ -11,34 +11,83 @@ interface PTOSummary {
   upcoming_time_off: number;
 }
 
+interface PendingIncident {
+  id: string;
+  incident_number: string;
+  title: string;
+  severity: string;
+}
+
+interface ActivityItem {
+  action: string;
+  timestamp: string;
+  type: string;
+}
+
+interface DashboardStats {
+  active_policies: number;
+  pending_signatures: number;
+  total_employees: number;
+  compliance_rate: number;
+  pending_incidents: PendingIncident[];
+  recent_activity: ActivityItem[];
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const [ptoSummary, setPtoSummary] = useState<PTOSummary | null>(null);
+  const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
 
   useEffect(() => {
-    const fetchPtoSummary = async () => {
-      try {
-        const token = getAccessToken();
-        const response = await fetch(`${API_BASE}/employees/pto/summary`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setPtoSummary(data);
-        }
-      } catch (err) {
-        console.error('Failed to fetch PTO summary:', err);
-      }
-    };
-    fetchPtoSummary();
+    const token = getAccessToken();
+    const headers = { Authorization: `Bearer ${token}` };
+
+    fetch(`${API_BASE}/employees/pto/summary`, { headers })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => data && setPtoSummary(data))
+      .catch(err => console.error('Failed to fetch PTO summary:', err));
+
+    fetch(`${API_BASE}/dashboard/stats`, { headers })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => data && setDashStats(data))
+      .catch(err => console.error('Failed to fetch dashboard stats:', err));
   }, []);
 
   const stats = [
-    { label: 'Active Policies', value: '14', change: '+2 this week', icon: FileText, color: 'text-emerald-500' },
-    { label: 'Pending Signatures', value: '5', change: 'Action required', icon: Clock, color: 'text-amber-500' },
-    { label: 'Total Employees', value: '148', change: '+12% vs last month', icon: Users, color: 'text-white' },
-    { label: 'Compliance Rate', value: '98%', change: 'Top 1% in industry', icon: CheckCircle2, color: 'text-emerald-500' },
+    {
+      label: 'Active Policies',
+      value: dashStats ? String(dashStats.active_policies) : '-',
+      change: dashStats?.active_policies === 0 ? 'No policies yet' : 'Active',
+      icon: FileText,
+      color: 'text-emerald-500',
+    },
+    {
+      label: 'Pending Signatures',
+      value: dashStats ? String(dashStats.pending_signatures) : '-',
+      change: dashStats?.pending_signatures === 0 ? 'All signed' : 'Action required',
+      icon: Clock,
+      color: 'text-amber-500',
+    },
+    {
+      label: 'Total Employees',
+      value: dashStats ? String(dashStats.total_employees) : '-',
+      change: dashStats?.total_employees === 0 ? 'No employees yet' : 'Active',
+      icon: Users,
+      color: 'text-white',
+    },
+    {
+      label: 'Compliance Rate',
+      value: dashStats ? `${dashStats.compliance_rate}%` : '-',
+      change: dashStats?.compliance_rate === 0 ? 'No data yet' : 'Current',
+      icon: CheckCircle2,
+      color: 'text-emerald-500',
+    },
   ];
+
+  const complianceRate = dashStats?.compliance_rate ?? 0;
+  // SVG circle: radius 88, circumference ~553
+  const circumference = 2 * Math.PI * 88;
+  const strokeOffset = circumference - (complianceRate / 100) * circumference;
 
   return (
     <>
@@ -57,13 +106,13 @@ export function Dashboard() {
           </h1>
         </div>
         <div className="flex gap-4">
-          <button 
+          <button
             onClick={() => navigate('/app/matcha/policies/new')}
             className="px-6 py-3 border border-white/20 hover:bg-white hover:text-black text-xs font-mono uppercase tracking-widest transition-all"
           >
             New Policy
           </button>
-          <button 
+          <button
             onClick={() => navigate('/app/matcha/offer-letters')}
             className="px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-mono uppercase tracking-widest transition-all font-bold"
           >
@@ -79,7 +128,7 @@ export function Dashboard() {
             <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 group-hover:scale-110 transition-all duration-500">
                <stat.icon className="w-24 h-24 text-white" strokeWidth={0.5} />
             </div>
-            
+
             <div className="relative z-10">
               <div className="flex items-center gap-3 mb-6">
                  <div className={`p-2 rounded bg-white/5 ${stat.color}`}>
@@ -87,7 +136,7 @@ export function Dashboard() {
                  </div>
                  <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold">{stat.label}</span>
               </div>
-              
+
               <div className="text-4xl font-light text-white mb-2 tabular-nums tracking-tight">{stat.value}</div>
               <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-400 uppercase">
                  <span className="w-1 h-1 bg-zinc-600 rounded-full" />
@@ -100,7 +149,7 @@ export function Dashboard() {
 
       {/* Dashboard Widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
+
         {/* Activity Feed */}
         <div className="lg:col-span-2 border border-white/10 bg-zinc-900/30">
           <div className="p-6 border-b border-white/10 flex justify-between items-center">
@@ -108,37 +157,47 @@ export function Dashboard() {
             <Activity className="w-4 h-4 text-zinc-500" />
           </div>
           <div className="divide-y divide-white/5">
-            {[
-              { action: 'Sarah Miller signed Remote Work Policy', time: '14:02', date: 'TODAY', type: 'success' },
-              { action: 'Offer letter generated for Alex Chen (Engineering)', time: '11:30', date: 'TODAY', type: 'neutral' },
-              { action: 'Incident Report #IR-092 flagged for review', time: '09:15', date: 'TODAY', type: 'warning' },
-              { action: 'James Wilson viewed Code of Conduct', time: '16:45', date: 'YESTERDAY', type: 'neutral' },
-              { action: 'New compliance requirements updated', time: '09:00', date: 'YESTERDAY', type: 'neutral' },
-            ].map((item, i) => (
-              <div key={i} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors group">
-                <div className="flex items-center gap-4">
-                  <div className={`font-mono text-[10px] text-zinc-500 w-16`}>
-                     {item.time}
+            {dashStats && dashStats.recent_activity.length > 0 ? (
+              dashStats.recent_activity.map((item, i) => {
+                const ts = new Date(item.timestamp);
+                const timeStr = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                const isToday = new Date().toDateString() === ts.toDateString();
+                const dateLabel = isToday ? 'TODAY' : ts.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase();
+                return (
+                  <div key={i} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors group">
+                    <div className="flex items-center gap-4">
+                      <div className="font-mono text-[10px] text-zinc-500 w-16">
+                         {timeStr}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className={`w-1.5 h-1.5 rounded-full ${
+                            item.type === 'success' ? 'bg-emerald-500' :
+                            item.type === 'warning' ? 'bg-amber-500 animate-pulse' : 'bg-zinc-600'
+                        }`} />
+                        <span className="text-sm text-zinc-300 group-hover:text-white transition-colors">{item.action}</span>
+                      </div>
+                    </div>
+                    <div className="hidden sm:block text-[9px] font-mono text-zinc-600 uppercase tracking-widest border border-white/5 px-2 py-1 rounded">
+                       {dateLabel}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className={`w-1.5 h-1.5 rounded-full ${
-                        item.type === 'success' ? 'bg-emerald-500' : 
-                        item.type === 'warning' ? 'bg-amber-500 animate-pulse' : 'bg-zinc-600'
-                    }`} />
-                    <span className="text-sm text-zinc-300 group-hover:text-white transition-colors">{item.action}</span>
-                  </div>
-                </div>
-                <div className="hidden sm:block text-[9px] font-mono text-zinc-600 uppercase tracking-widest border border-white/5 px-2 py-1 rounded">
-                   {item.date}
-                </div>
+                );
+              })
+            ) : (
+              <div className="p-8 text-center">
+                <Activity className="w-8 h-8 text-zinc-700 mx-auto mb-3" />
+                <p className="text-sm text-zinc-500">No recent activity</p>
+                <p className="text-[10px] text-zinc-600 mt-1">Activity will appear here as your team uses the platform</p>
               </div>
-            ))}
+            )}
           </div>
-          <div className="p-4 border-t border-white/10 bg-white/5">
-             <button className="w-full text-center text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors">
-                View Full Log
-             </button>
-          </div>
+          {dashStats && dashStats.recent_activity.length > 0 && (
+            <div className="p-4 border-t border-white/10 bg-white/5">
+               <button className="w-full text-center text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors">
+                  View Full Log
+               </button>
+            </div>
+          )}
         </div>
 
         {/* Action / Compliance Column */}
@@ -146,44 +205,43 @@ export function Dashboard() {
            {/* Compliance Widget */}
            <div className="border border-white/10 bg-zinc-900/30 p-6 relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-[50px] pointer-events-none" />
-              
+
               <div className="flex items-center justify-between mb-8">
                  <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Compliance Health</h2>
                  <ShieldAlert className="w-4 h-4 text-emerald-500" />
               </div>
 
               <div className="relative w-48 h-48 mx-auto mb-8">
-                 {/* CSS Radial Progress Hack or simple SVG */}
                  <svg className="w-full h-full transform -rotate-90">
                     <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-zinc-800" />
-                    <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" strokeDasharray="552" strokeDashoffset="27" className="text-emerald-500" />
+                    <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent"
+                      strokeDasharray={circumference}
+                      strokeDashoffset={strokeOffset}
+                      className="text-emerald-500 transition-all duration-1000"
+                    />
                  </svg>
                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-4xl font-light text-white">95%</span>
-                    <span className="text-[9px] uppercase tracking-widest text-zinc-500 mt-1">Secure</span>
+                    <span className="text-4xl font-light text-white">{complianceRate > 0 ? `${complianceRate}%` : '--'}</span>
+                    <span className="text-[9px] uppercase tracking-widest text-zinc-500 mt-1">{complianceRate > 0 ? 'Compliant' : 'No data'}</span>
                  </div>
               </div>
 
-              <div className="space-y-3">
-                 <div className="flex justify-between text-xs text-zinc-400">
-                    <span>Policy Ack.</span>
-                    <span className="text-white">98%</span>
-                 </div>
-                 <div className="w-full bg-zinc-800 h-1 rounded-full overflow-hidden">
-                    <div className="bg-emerald-500 h-full w-[98%]" />
-                 </div>
-                 
-                 <div className="flex justify-between text-xs text-zinc-400 mt-2">
-                    <span>Training Completion</span>
-                    <span className="text-white">92%</span>
-                 </div>
-                 <div className="w-full bg-zinc-800 h-1 rounded-full overflow-hidden">
-                    <div className="bg-emerald-500 h-full w-[92%]" />
-                 </div>
-              </div>
+              {dashStats && dashStats.active_policies > 0 ? (
+                <div className="space-y-3">
+                   <div className="flex justify-between text-xs text-zinc-400">
+                      <span>Policy Signatures</span>
+                      <span className="text-white">{complianceRate}%</span>
+                   </div>
+                   <div className="w-full bg-zinc-800 h-1 rounded-full overflow-hidden">
+                      <div className="bg-emerald-500 h-full transition-all duration-1000" style={{ width: `${complianceRate}%` }} />
+                   </div>
+                </div>
+              ) : (
+                <p className="text-[10px] text-zinc-600 text-center">Create policies and send for signature to track compliance</p>
+              )}
            </div>
 
-           {/* Quick Action */}
+           {/* Pending Actions */}
            <div className="border border-white/10 bg-zinc-900/30 p-6">
               <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em] mb-4">Pending Actions</h2>
               <div className="space-y-3">
@@ -200,14 +258,26 @@ export function Dashboard() {
                       <ArrowUpRight className="w-4 h-4 text-amber-500 ml-auto" />
                    </div>
                  )}
-                 <div className="p-3 bg-amber-500/10 border border-amber-500/20 flex items-start gap-3">
-                    <div className="mt-1 w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                    <div>
-                       <div className="text-xs text-amber-200 font-medium mb-1">Review Incident Report</div>
-                       <div className="text-[10px] text-amber-500/70">IR-092 • High Priority</div>
-                    </div>
-                    <ArrowUpRight className="w-4 h-4 text-amber-500 ml-auto" />
-                 </div>
+                 {dashStats?.pending_incidents.map((incident) => (
+                   <div
+                     key={incident.id}
+                     onClick={() => navigate(`/app/ir/incidents/${incident.id}`)}
+                     className="p-3 bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 cursor-pointer hover:bg-amber-500/20 transition-colors"
+                   >
+                      <div className="mt-1 w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      <div className="flex-1">
+                         <div className="text-xs text-amber-200 font-medium mb-1">{incident.title}</div>
+                         <div className="text-[10px] text-amber-500/70">{incident.incident_number} &bull; {incident.severity.charAt(0).toUpperCase() + incident.severity.slice(1)} Priority</div>
+                      </div>
+                      <ArrowUpRight className="w-4 h-4 text-amber-500 ml-auto" />
+                   </div>
+                 ))}
+                 {(!ptoSummary || ptoSummary.pending_count === 0) && (!dashStats || dashStats.pending_incidents.length === 0) && (
+                   <div className="p-4 text-center">
+                     <CheckCircle2 className="w-6 h-6 text-zinc-700 mx-auto mb-2" />
+                     <p className="text-[10px] text-zinc-500 uppercase tracking-wider">All caught up</p>
+                   </div>
+                 )}
               </div>
            </div>
 
