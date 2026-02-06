@@ -177,9 +177,9 @@ export function PosterOrders() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       {/* Header */}
-      <div className="flex items-end justify-between border-b border-white/10 pb-8">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 border-b border-white/10 pb-6 md:pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Compliance Posters</h1>
+          <h1 className="text-2xl md:text-4xl font-bold tracking-tighter text-white uppercase">Compliance Posters</h1>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
             Generated poster PDFs and print order management
           </p>
@@ -193,10 +193,10 @@ export function PosterOrders() {
             <button
               onClick={handleGenerateAll}
               disabled={generatingAll}
-              className="flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-wider bg-white text-black border border-white hover:bg-zinc-200 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-2 px-3 md:px-4 py-2 text-[10px] font-bold uppercase tracking-wider bg-white text-black border border-white hover:bg-zinc-200 disabled:opacity-50 transition-colors"
             >
               <RefreshCw size={12} className={generatingAll ? 'animate-spin' : ''} />
-              {generatingAll ? 'Generating...' : 'Generate Missing'}
+              {generatingAll ? 'Generating...' : 'Generate'}
             </button>
           )}
         </div>
@@ -267,83 +267,135 @@ export function PosterOrders() {
           </div>
         ) : (
           <div className="border border-white/10 bg-zinc-900/30">
-            {/* Table header */}
-            <div className="grid grid-cols-[1fr_120px_80px_160px_100px_80px] border-b border-white/10 bg-zinc-950">
-              <div className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Jurisdiction</div>
-              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Categories</div>
-              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Reqs</div>
-              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Generated</div>
-              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Status</div>
-              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Actions</div>
-            </div>
-            {/* Rows */}
-            {templates.map(tpl => (
-              <div key={tpl.id} className="grid grid-cols-[1fr_120px_80px_160px_100px_80px] border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950 items-center">
-                {/* Jurisdiction */}
-                <div className="px-6 py-3 flex items-center gap-3">
-                  <div className="w-8 h-8 bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
-                    <MapPin size={14} className="text-zinc-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-white truncate">
-                      {tpl.jurisdiction_name || tpl.title}
-                    </div>
-                    <div className="text-[10px] text-zinc-500 font-mono">
-                      v{tpl.version}
-                    </div>
-                  </div>
-                </div>
-                {/* Categories */}
-                <div className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {tpl.categories_included?.map(cat => (
-                      <span key={cat} className="text-[8px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-400 uppercase tracking-wider font-mono">
-                        {CATEGORY_LABELS[cat] || cat}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                {/* Req count */}
-                <div className="px-4 py-3 text-center">
-                  <span className="text-sm font-mono text-white">{tpl.requirement_count}</span>
-                </div>
-                {/* Generated date */}
-                <div className="px-4 py-3">
-                  {tpl.pdf_generated_at && (
-                    <div className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
-                      <Calendar size={10} />
-                      {new Date(tpl.pdf_generated_at).toLocaleDateString()}
-                    </div>
-                  )}
-                </div>
-                {/* Status */}
-                <div className="px-4 py-3 text-center">
-                  <span className={`inline-flex items-center px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold ${TEMPLATE_STATUS_CONFIG[tpl.status] || 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'}`}>
-                    {tpl.status}
-                  </span>
-                </div>
-                {/* Actions */}
-                <div className="px-4 py-3 flex items-center justify-center gap-1">
-                  {tpl.pdf_url && (
-                    <button
-                      onClick={() => downloadPdf(tpl.pdf_url!, tpl.jurisdiction_name || tpl.title)}
-                      className="p-1.5 text-zinc-500 hover:text-white transition-colors"
-                      title="Download PDF"
-                    >
-                      <Download size={14} />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleRegenerate(tpl.jurisdiction_id)}
-                    disabled={generatingId === tpl.jurisdiction_id}
-                    className="p-1.5 text-zinc-500 hover:text-white transition-colors disabled:opacity-50"
-                    title="Regenerate"
-                  >
-                    <RefreshCw size={14} className={generatingId === tpl.jurisdiction_id ? 'animate-spin' : ''} />
-                  </button>
-                </div>
+            {/* Desktop table */}
+            <div className="hidden md:block">
+              <div className="grid grid-cols-[1fr_120px_80px_160px_100px_80px] border-b border-white/10 bg-zinc-950">
+                <div className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Jurisdiction</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Categories</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Reqs</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Generated</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Status</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Actions</div>
               </div>
-            ))}
+              {templates.map(tpl => (
+                <div key={tpl.id} className="grid grid-cols-[1fr_120px_80px_160px_100px_80px] border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950 items-center">
+                  <div className="px-6 py-3 flex items-center gap-3">
+                    <div className="w-8 h-8 bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                      <MapPin size={14} className="text-zinc-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-white truncate">{tpl.jurisdiction_name || tpl.title}</div>
+                      <div className="text-[10px] text-zinc-500 font-mono">v{tpl.version}</div>
+                    </div>
+                  </div>
+                  <div className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {tpl.categories_included?.map(cat => (
+                        <span key={cat} className="text-[8px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-400 uppercase tracking-wider font-mono">
+                          {CATEGORY_LABELS[cat] || cat}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="px-4 py-3 text-center">
+                    <span className="text-sm font-mono text-white">{tpl.requirement_count}</span>
+                  </div>
+                  <div className="px-4 py-3">
+                    {tpl.pdf_generated_at && (
+                      <div className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
+                        <Calendar size={10} />
+                        {new Date(tpl.pdf_generated_at).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+                  <div className="px-4 py-3 text-center">
+                    <span className={`inline-flex items-center px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold ${TEMPLATE_STATUS_CONFIG[tpl.status] || 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'}`}>
+                      {tpl.status}
+                    </span>
+                  </div>
+                  <div className="px-4 py-3 flex items-center justify-center gap-1">
+                    {tpl.pdf_url && (
+                      <button
+                        onClick={() => downloadPdf(tpl.pdf_url!, tpl.jurisdiction_name || tpl.title)}
+                        className="p-1.5 text-zinc-500 hover:text-white transition-colors"
+                        title="Download PDF"
+                      >
+                        <Download size={14} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleRegenerate(tpl.jurisdiction_id)}
+                      disabled={generatingId === tpl.jurisdiction_id}
+                      className="p-1.5 text-zinc-500 hover:text-white transition-colors disabled:opacity-50"
+                      title="Regenerate"
+                    >
+                      <RefreshCw size={14} className={generatingId === tpl.jurisdiction_id ? 'animate-spin' : ''} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Mobile card layout */}
+            <div className="md:hidden divide-y divide-white/5">
+              {templates.map(tpl => (
+                <div key={tpl.id} className="p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                        <MapPin size={14} className="text-zinc-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-white truncate">{tpl.jurisdiction_name || tpl.title}</div>
+                        <div className="text-[10px] text-zinc-500 font-mono">v{tpl.version}</div>
+                      </div>
+                    </div>
+                    <span className={`inline-flex items-center px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold shrink-0 ${TEMPLATE_STATUS_CONFIG[tpl.status] || 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'}`}>
+                      {tpl.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 text-[10px] font-mono text-zinc-500">
+                      <span>{tpl.requirement_count} reqs</span>
+                      {tpl.pdf_generated_at && (
+                        <span className="flex items-center gap-1">
+                          <Calendar size={10} />
+                          {new Date(tpl.pdf_generated_at).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {tpl.pdf_url && (
+                        <button
+                          onClick={() => downloadPdf(tpl.pdf_url!, tpl.jurisdiction_name || tpl.title)}
+                          className="p-2 text-zinc-500 hover:text-white transition-colors"
+                          title="Download PDF"
+                        >
+                          <Download size={16} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleRegenerate(tpl.jurisdiction_id)}
+                        disabled={generatingId === tpl.jurisdiction_id}
+                        className="p-2 text-zinc-500 hover:text-white transition-colors disabled:opacity-50"
+                        title="Regenerate"
+                      >
+                        <RefreshCw size={16} className={generatingId === tpl.jurisdiction_id ? 'animate-spin' : ''} />
+                      </button>
+                    </div>
+                  </div>
+                  {tpl.categories_included && tpl.categories_included.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {tpl.categories_included.map(cat => (
+                        <span key={cat} className="text-[8px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-400 uppercase tracking-wider font-mono">
+                          {CATEGORY_LABELS[cat] || cat}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )
       )}
@@ -387,8 +439,8 @@ export function PosterOrders() {
             </div>
           ) : (
             <div className="border border-white/10 bg-zinc-900/30">
-              {/* Table header */}
-              <div className="grid grid-cols-[100px_1fr_120px_80px_100px_120px_40px] border-b border-white/10 bg-zinc-950">
+              {/* Desktop table header */}
+              <div className="hidden md:grid grid-cols-[100px_1fr_120px_80px_100px_120px_40px] border-b border-white/10 bg-zinc-950">
                 <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</div>
                 <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Company / Location</div>
                 <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Requested By</div>
@@ -399,9 +451,10 @@ export function PosterOrders() {
               </div>
               {orders.map(order => (
                 <div key={order.id}>
+                  {/* Desktop row */}
                   <button
                     onClick={() => toggleExpand(order)}
-                    className="w-full grid grid-cols-[100px_1fr_120px_80px_100px_120px_40px] border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950 items-center text-left"
+                    className="w-full hidden md:grid grid-cols-[100px_1fr_120px_80px_100px_120px_40px] border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950 items-center text-left"
                   >
                     <div className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold ${STATUS_CONFIG[order.status].color}`}>
@@ -437,6 +490,38 @@ export function PosterOrders() {
                         ? <ChevronUp size={14} className="text-zinc-500" />
                         : <ChevronDown size={14} className="text-zinc-500" />
                       }
+                    </div>
+                  </button>
+
+                  {/* Mobile row */}
+                  <button
+                    onClick={() => toggleExpand(order)}
+                    className="w-full md:hidden p-4 border-b border-white/5 hover:bg-white/5 transition-colors text-left space-y-2 active:bg-white/10"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold ${STATUS_CONFIG[order.status].color}`}>
+                        {STATUS_CONFIG[order.status].icon}
+                        {order.status}
+                      </span>
+                      <div className="flex items-center gap-3 text-[10px] font-mono text-zinc-500">
+                        <span>{order.items.length} items</span>
+                        {order.quote_amount != null && <span className="text-white">${order.quote_amount.toFixed(2)}</span>}
+                        {expandedId === order.id
+                          ? <ChevronUp size={14} className="text-zinc-500" />
+                          : <ChevronDown size={14} className="text-zinc-500" />
+                        }
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-white truncate">{order.company_name}</div>
+                      <div className="text-[10px] text-zinc-500 font-mono truncate">
+                        {order.location_city}, {order.location_state}
+                        {order.location_name && ` \u2014 ${order.location_name}`}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
+                      {order.requested_by_email && <span className="truncate">{order.requested_by_email}</span>}
+                      {order.created_at && <span>{new Date(order.created_at).toLocaleDateString()}</span>}
                     </div>
                   </button>
 

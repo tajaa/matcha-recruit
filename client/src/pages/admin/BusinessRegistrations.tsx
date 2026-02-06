@@ -187,9 +187,9 @@ export function BusinessRegistrations() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       {/* Header */}
-      <div className="flex justify-between items-end border-b border-white/10 pb-8">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 border-b border-white/10 pb-6 md:pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Business Registrations</h1>
+          <h1 className="text-2xl md:text-4xl font-bold tracking-tighter text-white uppercase">Business Registrations</h1>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
             Review and approve new business accounts
           </p>
@@ -210,12 +210,12 @@ export function BusinessRegistrations() {
       )}
 
       {/* Filters */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {(['pending', 'approved', 'rejected', 'all'] as const).map((status) => (
           <button
             key={status}
             onClick={() => setStatusFilter(status)}
-            className={`px-4 py-2 text-xs uppercase tracking-wider font-bold border transition-colors ${
+            className={`px-3 md:px-4 py-2 text-xs uppercase tracking-wider font-bold border transition-colors ${
               statusFilter === status
                 ? 'bg-white text-black border-white'
                 : 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
@@ -237,136 +237,197 @@ export function BusinessRegistrations() {
             No {statusFilter !== 'all' ? statusFilter : ''} registrations found
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-white/10 bg-zinc-950">
-                  <th className="text-left px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-                    Company
-                  </th>
-                  <th className="text-left px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-                    Owner
-                  </th>
-                  <th className="text-center px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-                    Status
-                  </th>
-                  <th className="text-left px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-                    Registered
-                  </th>
-                  <th className="text-right px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {registrations.map((registration) => (
-                  <tr
-                    key={registration.id}
-                    className="border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950"
-                  >
-                    {/* Company Info */}
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-zinc-800 border border-zinc-700 flex items-center justify-center">
-                          <Building2 size={18} className="text-zinc-400" />
-                        </div>
-                        <div>
-                          <div className="text-sm text-white font-bold">
-                            {registration.company_name}
-                          </div>
-                          <div className="flex items-center gap-3 mt-1">
-                            {registration.industry && (
-                              <span className="text-[10px] text-zinc-500 font-mono">
-                                {registration.industry}
-                              </span>
-                            )}
-                            {registration.company_size && (
-                              <span className="text-[10px] text-zinc-600 font-mono">
-                                {registration.company_size}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Owner Info */}
-                    <td className="px-4 py-4">
-                      <div className="space-y-1">
-                        <div className="text-sm text-white">{registration.owner_name}</div>
-                        <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-mono">
-                          <Mail size={10} />
-                          {registration.owner_email}
-                        </div>
-                        {registration.owner_phone && (
-                          <div className="flex items-center gap-1 text-[10px] text-zinc-600 font-mono">
-                            <Phone size={10} />
-                            {registration.owner_phone}
-                          </div>
-                        )}
-                        {registration.owner_job_title && (
-                          <div className="flex items-center gap-1 text-[10px] text-zinc-600 font-mono">
-                            <Briefcase size={10} />
-                            {registration.owner_job_title}
-                          </div>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* Status */}
-                    <td className="px-4 py-4 text-center">
-                      <div className="space-y-2">
-                        {getStatusBadge(registration.status)}
-                        {registration.status === 'rejected' && registration.rejection_reason && (
-                          <div className="text-[10px] text-red-400/70 max-w-[200px] truncate" title={registration.rejection_reason}>
-                            {registration.rejection_reason}
-                          </div>
-                        )}
-                        {registration.status === 'approved' && registration.approved_at && (
-                          <div className="text-[10px] text-zinc-600">
-                            {formatDate(registration.approved_at)}
-                          </div>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* Registered Date */}
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
-                        <Calendar size={12} />
-                        {formatDate(registration.created_at)}
-                      </div>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="px-6 py-4 text-right">
-                      {registration.status === 'pending' && (
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() => handleApprove(registration)}
-                            disabled={processing}
-                            className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 px-3 py-1.5 text-[10px] uppercase tracking-wider"
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => openRejectModal(registration)}
-                            disabled={processing}
-                            className="bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 px-3 py-1.5 text-[10px] uppercase tracking-wider"
-                          >
-                            Reject
-                          </Button>
-                        </div>
-                      )}
-                    </td>
+          <>
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-white/10 bg-zinc-950">
+                    <th className="text-left px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                      Company
+                    </th>
+                    <th className="text-left px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                      Owner
+                    </th>
+                    <th className="text-center px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                      Status
+                    </th>
+                    <th className="text-left px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                      Registered
+                    </th>
+                    <th className="text-right px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {registrations.map((registration) => (
+                    <tr
+                      key={registration.id}
+                      className="border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950"
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                            <Building2 size={18} className="text-zinc-400" />
+                          </div>
+                          <div>
+                            <div className="text-sm text-white font-bold">{registration.company_name}</div>
+                            <div className="flex items-center gap-3 mt-1">
+                              {registration.industry && (
+                                <span className="text-[10px] text-zinc-500 font-mono">{registration.industry}</span>
+                              )}
+                              {registration.company_size && (
+                                <span className="text-[10px] text-zinc-600 font-mono">{registration.company_size}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="space-y-1">
+                          <div className="text-sm text-white">{registration.owner_name}</div>
+                          <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-mono">
+                            <Mail size={10} />
+                            {registration.owner_email}
+                          </div>
+                          {registration.owner_phone && (
+                            <div className="flex items-center gap-1 text-[10px] text-zinc-600 font-mono">
+                              <Phone size={10} />
+                              {registration.owner_phone}
+                            </div>
+                          )}
+                          {registration.owner_job_title && (
+                            <div className="flex items-center gap-1 text-[10px] text-zinc-600 font-mono">
+                              <Briefcase size={10} />
+                              {registration.owner_job_title}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <div className="space-y-2">
+                          {getStatusBadge(registration.status)}
+                          {registration.status === 'rejected' && registration.rejection_reason && (
+                            <div className="text-[10px] text-red-400/70 max-w-[200px] truncate" title={registration.rejection_reason}>
+                              {registration.rejection_reason}
+                            </div>
+                          )}
+                          {registration.status === 'approved' && registration.approved_at && (
+                            <div className="text-[10px] text-zinc-600">{formatDate(registration.approved_at)}</div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
+                          <Calendar size={12} />
+                          {formatDate(registration.created_at)}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        {registration.status === 'pending' && (
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handleApprove(registration)}
+                              disabled={processing}
+                              className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 px-3 py-1.5 text-[10px] uppercase tracking-wider"
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => openRejectModal(registration)}
+                              disabled={processing}
+                              className="bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 px-3 py-1.5 text-[10px] uppercase tracking-wider"
+                            >
+                              Reject
+                            </Button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile card layout */}
+            <div className="md:hidden divide-y divide-white/5">
+              {registrations.map((registration) => (
+                <div key={registration.id} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                        <Building2 size={14} className="text-zinc-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm text-white font-bold truncate">{registration.company_name}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {registration.industry && (
+                            <span className="text-[10px] text-zinc-500 font-mono">{registration.industry}</span>
+                          )}
+                          {registration.company_size && (
+                            <span className="text-[10px] text-zinc-600 font-mono">{registration.company_size}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {getStatusBadge(registration.status)}
+                  </div>
+
+                  <div className="space-y-1 pl-11">
+                    <div className="text-sm text-white">{registration.owner_name}</div>
+                    <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-mono">
+                      <Mail size={10} />
+                      <span className="truncate">{registration.owner_email}</span>
+                    </div>
+                    {registration.owner_phone && (
+                      <div className="flex items-center gap-1 text-[10px] text-zinc-600 font-mono">
+                        <Phone size={10} />
+                        {registration.owner_phone}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pl-11">
+                    <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-mono">
+                      <Calendar size={10} />
+                      {formatDate(registration.created_at)}
+                    </div>
+                    {registration.status === 'pending' && (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => handleApprove(registration)}
+                          disabled={processing}
+                          className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 px-3 py-1.5 text-[10px] uppercase tracking-wider"
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => openRejectModal(registration)}
+                          disabled={processing}
+                          className="bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 px-3 py-1.5 text-[10px] uppercase tracking-wider"
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {registration.status === 'rejected' && registration.rejection_reason && (
+                    <div className="text-[10px] text-red-400/70 pl-11 truncate" title={registration.rejection_reason}>
+                      {registration.rejection_reason}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 

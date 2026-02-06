@@ -144,9 +144,9 @@ export function Schedulers() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       {/* Header */}
-      <div className="flex justify-between items-end border-b border-white/10 pb-8">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 border-b border-white/10 pb-6 md:pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Schedulers</h1>
+          <h1 className="text-2xl md:text-4xl font-bold tracking-tighter text-white uppercase">Schedulers</h1>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
             Control automated background jobs
           </p>
@@ -154,7 +154,7 @@ export function Schedulers() {
         <button
           onClick={fetchData}
           disabled={loading}
-          className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
+          className="self-start sm:self-auto px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
         >
           Refresh
         </button>
@@ -200,12 +200,12 @@ export function Schedulers() {
             </div>
             {schedulers.map((sched) => (
               <div key={sched.task_key} className="bg-zinc-900/50 border border-white/10">
-                <div className="p-6">
-                  <div className="flex items-start justify-between gap-4">
+                <div className="p-4 md:p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
                     {/* Left: Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-bold text-white tracking-tight">{sched.display_name}</h3>
+                        <h3 className="text-base md:text-lg font-bold text-white tracking-tight">{sched.display_name}</h3>
                         <span className={`text-[9px] px-2 py-0.5 uppercase tracking-wider font-bold border ${
                           sched.enabled
                             ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
@@ -218,8 +218,7 @@ export function Schedulers() {
                     </div>
 
                     {/* Right: Controls */}
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      {/* Toggle */}
+                    <div className="flex items-center gap-3 shrink-0">
                       <button
                         onClick={() => handleToggle(sched.task_key, sched.enabled)}
                         disabled={toggling === sched.task_key}
@@ -231,8 +230,6 @@ export function Schedulers() {
                           sched.enabled ? 'translate-x-5' : 'translate-x-0.5'
                         }`} />
                       </button>
-
-                      {/* Run Now */}
                       <button
                         onClick={() => handleTrigger(sched.task_key)}
                         disabled={triggering === sched.task_key}
@@ -338,80 +335,83 @@ export function Schedulers() {
                       {expanded && (
                         <div className="border-t border-white/5">
                           {company.locations.map((loc) => (
-                            <div key={loc.id} className="px-4 py-3 pl-10 flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-white/5 last:border-b-0 hover:bg-white/[0.02]">
-                              {/* Location info */}
-                              <div className="min-w-[180px] flex-1">
-                                <div className="text-xs text-zinc-300 font-mono">{loc.name}</div>
-                                {(loc.city || loc.state) && (
-                                  <div className="text-[10px] text-zinc-600 font-mono">
-                                    {[loc.city, loc.state].filter(Boolean).join(', ')}
-                                  </div>
-                                )}
-                              </div>
+                            <div key={loc.id} className="px-4 py-3 pl-6 md:pl-10 border-b border-white/5 last:border-b-0 hover:bg-white/[0.02]">
+                              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-6 gap-y-2">
+                                {/* Location info */}
+                                <div className="min-w-[140px] sm:min-w-[180px] flex-1">
+                                  <div className="text-xs text-zinc-300 font-mono">{loc.name}</div>
+                                  {(loc.city || loc.state) && (
+                                    <div className="text-[10px] text-zinc-600 font-mono">
+                                      {[loc.city, loc.state].filter(Boolean).join(', ')}
+                                    </div>
+                                  )}
+                                </div>
 
-                              {/* Toggle */}
-                              <div className="flex items-center gap-2">
-                                <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Auto-check</span>
-                                <button
-                                  onClick={() => handleLocationUpdate(loc.id, company.company_id, { auto_check_enabled: !loc.auto_check_enabled })}
-                                  disabled={updatingLocation === loc.id}
-                                  className={`relative w-10 h-5 rounded-full transition-colors ${
-                                    loc.auto_check_enabled ? 'bg-emerald-600' : 'bg-zinc-700'
-                                  } ${updatingLocation === loc.id ? 'opacity-50' : ''}`}
-                                >
-                                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                                    loc.auto_check_enabled ? 'translate-x-5' : 'translate-x-0.5'
-                                  }`} />
-                                </button>
-                              </div>
-
-                              {/* Interval */}
-                              <div className="flex items-center gap-2">
-                                <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Interval</span>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  max={90}
-                                  value={loc.auto_check_interval_days}
-                                  onChange={(e) => {
-                                    const val = parseInt(e.target.value, 10);
-                                    if (!isNaN(val) && val >= 1 && val <= 90) {
-                                      handleLocationUpdate(loc.id, company.company_id, { auto_check_interval_days: val });
-                                    }
-                                  }}
-                                  disabled={updatingLocation === loc.id}
-                                  className="w-14 px-2 py-1 text-xs font-mono text-white bg-zinc-800 border border-zinc-700 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
-                                />
-                                <span className="text-[9px] text-zinc-600 font-mono">days</span>
-                              </div>
-
-                              {/* Next auto-check */}
-                              <div>
-                                <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Next check</div>
-                                <div className="text-xs text-zinc-400 font-mono">{formatFuture(loc.next_auto_check)}</div>
-                                <div className="flex gap-1 mt-1">
-                                  {[2, 5].map(m => (
+                                <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                                  {/* Toggle */}
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Auto</span>
                                     <button
-                                      key={m}
-                                      onClick={() => handleLocationUpdate(loc.id, company.company_id, { next_auto_check_minutes: m })}
+                                      onClick={() => handleLocationUpdate(loc.id, company.company_id, { auto_check_enabled: !loc.auto_check_enabled })}
                                       disabled={updatingLocation === loc.id}
-                                      className="px-1.5 py-0.5 text-[9px] font-mono text-amber-400 border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+                                      className={`relative w-10 h-5 rounded-full transition-colors ${
+                                        loc.auto_check_enabled ? 'bg-emerald-600' : 'bg-zinc-700'
+                                      } ${updatingLocation === loc.id ? 'opacity-50' : ''}`}
                                     >
-                                      {m}m
+                                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                                        loc.auto_check_enabled ? 'translate-x-5' : 'translate-x-0.5'
+                                      }`} />
                                     </button>
-                                  ))}
+                                  </div>
+
+                                  {/* Interval */}
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={90}
+                                      value={loc.auto_check_interval_days}
+                                      onChange={(e) => {
+                                        const val = parseInt(e.target.value, 10);
+                                        if (!isNaN(val) && val >= 1 && val <= 90) {
+                                          handleLocationUpdate(loc.id, company.company_id, { auto_check_interval_days: val });
+                                        }
+                                      }}
+                                      disabled={updatingLocation === loc.id}
+                                      className="w-14 px-2 py-1 text-xs font-mono text-white bg-zinc-800 border border-zinc-700 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+                                    />
+                                    <span className="text-[9px] text-zinc-600 font-mono">days</span>
+                                  </div>
+
+                                  {/* Next auto-check */}
+                                  <div>
+                                    <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Next</div>
+                                    <div className="text-xs text-zinc-400 font-mono">{formatFuture(loc.next_auto_check)}</div>
+                                    <div className="flex gap-1 mt-1">
+                                      {[2, 5].map(m => (
+                                        <button
+                                          key={m}
+                                          onClick={() => handleLocationUpdate(loc.id, company.company_id, { next_auto_check_minutes: m })}
+                                          disabled={updatingLocation === loc.id}
+                                          className="px-1.5 py-0.5 text-[9px] font-mono text-amber-400 border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+                                        >
+                                          {m}m
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {/* Last check */}
+                                  <div>
+                                    <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Last</div>
+                                    <div className="text-xs text-zinc-400 font-mono">{formatRelative(loc.last_compliance_check)}</div>
+                                  </div>
+
+                                  {updatingLocation === loc.id && (
+                                    <span className="text-[9px] text-zinc-500 animate-pulse font-mono">Saving...</span>
+                                  )}
                                 </div>
                               </div>
-
-                              {/* Last check */}
-                              <div>
-                                <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Last check</div>
-                                <div className="text-xs text-zinc-400 font-mono">{formatRelative(loc.last_compliance_check)}</div>
-                              </div>
-
-                              {updatingLocation === loc.id && (
-                                <span className="text-[9px] text-zinc-500 animate-pulse font-mono">Saving...</span>
-                              )}
                             </div>
                           ))}
                         </div>
@@ -429,45 +429,74 @@ export function Schedulers() {
               <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">
                 Recent Activity
               </div>
-              <div className="border border-white/10 bg-zinc-900/30 overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-white/10 bg-zinc-950">
-                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Location</th>
-                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Type</th>
-                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</th>
-                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Started</th>
-                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Duration</th>
-                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">New</th>
-                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Updated</th>
-                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Alerts</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stats.recent_logs.map((log: SchedulerLogEntry) => (
-                      <tr key={log.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                        <td className="px-4 py-3 text-xs text-zinc-300 font-mono">{log.location_name || log.location_id.slice(0, 8)}</td>
-                        <td className="px-4 py-3">
-                          <span className="text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-400 bg-zinc-800 border border-zinc-700">
-                            {log.check_type}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${statusColor(log.status)}`}>
-                            {log.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono">{formatRelative(log.started_at)}</td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">
-                          {log.duration_seconds != null ? `${Math.round(log.duration_seconds)}s` : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.new_count}</td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.updated_count}</td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.alert_count}</td>
+              <div className="border border-white/10 bg-zinc-900/30">
+                {/* Desktop table */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-white/10 bg-zinc-950">
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Location</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Type</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Started</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Duration</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">New</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Updated</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Alerts</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {stats.recent_logs.map((log: SchedulerLogEntry) => (
+                        <tr key={log.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                          <td className="px-4 py-3 text-xs text-zinc-300 font-mono">{log.location_name || log.location_id.slice(0, 8)}</td>
+                          <td className="px-4 py-3">
+                            <span className="text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-400 bg-zinc-800 border border-zinc-700">
+                              {log.check_type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${statusColor(log.status)}`}>
+                              {log.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono">{formatRelative(log.started_at)}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">
+                            {log.duration_seconds != null ? `${Math.round(log.duration_seconds)}s` : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.new_count}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.updated_count}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.alert_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile card layout */}
+                <div className="md:hidden divide-y divide-white/5">
+                  {stats.recent_logs.map((log: SchedulerLogEntry) => (
+                    <div key={log.id} className="p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-zinc-300 font-mono truncate">{log.location_name || log.location_id.slice(0, 8)}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border shrink-0 ${statusColor(log.status)}`}>
+                          {log.status}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
+                        <span className="text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-400 bg-zinc-800 border border-zinc-700">
+                          {log.check_type}
+                        </span>
+                        <span>{formatRelative(log.started_at)}</span>
+                        {log.duration_seconds != null && <span>{Math.round(log.duration_seconds)}s</span>}
+                      </div>
+                      <div className="flex items-center gap-4 text-[10px] font-mono">
+                        <span className="text-emerald-400">{log.new_count} new</span>
+                        <span className="text-amber-400">{log.updated_count} updated</span>
+                        <span className="text-zinc-500">{log.alert_count} alerts</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}

@@ -497,9 +497,9 @@ export function Jurisdictions() {
         }
       `}</style>
       {/* Header */}
-      <div className="flex justify-between items-end border-b border-white/10 pb-8">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 border-b border-white/10 pb-6 md:pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Jurisdictions</h1>
+          <h1 className="text-2xl md:text-4xl font-bold tracking-tighter text-white uppercase">Jurisdictions</h1>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
             Compliance repository by city &amp; state
           </p>
@@ -507,14 +507,14 @@ export function Jurisdictions() {
         <div className="flex gap-2">
           <button
             onClick={() => setShowCreateForm(v => !v)}
-            className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-white bg-white/10 border border-zinc-600 hover:bg-white/20 hover:border-zinc-400 transition-colors"
+            className="px-3 md:px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-white bg-white/10 border border-zinc-600 hover:bg-white/20 hover:border-zinc-400 transition-colors"
           >
-            {showCreateForm ? 'Cancel' : '+ Add Jurisdiction'}
+            {showCreateForm ? 'Cancel' : '+ Add'}
           </button>
           <button
             onClick={fetchData}
             disabled={loading}
-            className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
+            className="px-3 md:px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
           >
             Refresh
           </button>
@@ -627,11 +627,11 @@ export function Jurisdictions() {
             </div>
             {schedulers.map((sched) => (
               <div key={sched.task_key} className="bg-zinc-900/50 border border-white/10">
-                <div className="p-6">
-                  <div className="flex items-start justify-between gap-4">
+                <div className="p-4 md:p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-bold text-white tracking-tight">{sched.display_name}</h3>
+                        <h3 className="text-base md:text-lg font-bold text-white tracking-tight">{sched.display_name}</h3>
                         <span className={`text-[9px] px-2 py-0.5 uppercase tracking-wider font-bold border ${
                           sched.enabled
                             ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
@@ -642,7 +642,7 @@ export function Jurisdictions() {
                       </div>
                       <p className="text-xs text-zinc-500 font-mono leading-relaxed">{sched.description}</p>
                     </div>
-                    <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="flex items-center gap-3 shrink-0">
                       <button
                         onClick={() => handleToggle(sched.task_key, sched.enabled)}
                         disabled={toggling === sched.task_key}
@@ -683,28 +683,36 @@ export function Jurisdictions() {
                     <div key={j.id} className="relative">
                       <button
                         onClick={() => handleExpand(j.id)}
-                        className="w-full flex items-center justify-between px-4 py-3 pr-28 hover:bg-white/5 transition-colors text-left"
+                        className="w-full px-4 py-3 pr-4 md:pr-28 hover:bg-white/5 transition-colors text-left"
                       >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className={`text-[10px] font-mono transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                          <span className={`text-[10px] font-mono transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
                           <span className="text-sm text-white font-medium">
                             {j.city}, {j.state}
                           </span>
                           {j.county && (
-                            <span className="text-[9px] text-zinc-600 font-mono">({j.county} County)</span>
+                            <span className="text-[9px] text-zinc-600 font-mono hidden sm:inline">({j.county} County)</span>
                           )}
                           {j.parent_id && j.parent_city && (
-                            <span className="text-[8px] px-1.5 py-0.5 font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            <span className="text-[8px] px-1.5 py-0.5 font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20 hidden sm:inline">
                               child of {j.parent_city}, {j.parent_state}
                             </span>
                           )}
                           {j.children_count > 0 && (
-                            <span className="text-[8px] px-1.5 py-0.5 font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            <span className="text-[8px] px-1.5 py-0.5 font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 hidden sm:inline">
                               {j.children_count} {j.children_count === 1 ? 'child' : 'children'}
                             </span>
                           )}
+                          <span className={`text-[9px] px-2 py-0.5 uppercase tracking-wider font-bold border ml-auto md:hidden shrink-0 ${
+                            j.requirement_count > 0
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              : 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30'
+                          }`}>
+                            {j.requirement_count > 0 ? `${j.requirement_count} reqs` : 'Empty'}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-4 flex-shrink-0">
+                        {/* Desktop stats row */}
+                        <div className="hidden md:flex items-center gap-4 mt-0 absolute right-28 top-1/2 -translate-y-1/2">
                           <div className="text-right">
                             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Reqs</div>
                             <div className="text-xs text-zinc-300 font-mono font-bold">{j.requirement_count}</div>
@@ -731,11 +739,11 @@ export function Jurisdictions() {
                         </div>
                       </button>
                       {/* Research button — outside the expand toggle */}
-                      <div className="absolute top-2 right-4 z-10">
+                      <div className="absolute top-2 right-2 md:right-4 z-10">
                         <button
                           onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
                           disabled={checkingId !== null}
-                          className={`group relative px-3 py-1.5 text-[9px] tracking-[0.12em] uppercase font-mono border bg-zinc-900 transition-all duration-300 overflow-hidden ${
+                          className={`group relative px-2 md:px-3 py-1.5 text-[9px] tracking-[0.12em] uppercase font-mono border bg-zinc-900 transition-all duration-300 overflow-hidden ${
                             checkingId === j.id
                               ? 'text-blue-300 border-blue-500/40'
                               : 'text-zinc-400 border-zinc-700 hover:text-white hover:border-zinc-400 disabled:opacity-30'
@@ -748,7 +756,8 @@ export function Jurisdictions() {
                             {checkingId === j.id ? (
                               <>
                                 <svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>
-                                Researching
+                                <span className="hidden sm:inline">Researching</span>
+                                <span className="sm:hidden">...</span>
                               </>
                             ) : 'Research'}
                           </span>
@@ -925,45 +934,74 @@ export function Jurisdictions() {
               <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">
                 Recent Activity
               </div>
-              <div className="border border-white/10 bg-zinc-900/30 overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-white/10 bg-zinc-950">
-                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Location</th>
-                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Type</th>
-                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</th>
-                      <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Started</th>
-                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Duration</th>
-                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">New</th>
-                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Updated</th>
-                      <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Alerts</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stats.recent_logs.map((log: SchedulerLogEntry) => (
-                      <tr key={log.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                        <td className="px-4 py-3 text-xs text-zinc-300 font-mono">{log.location_name || log.location_id.slice(0, 8)}</td>
-                        <td className="px-4 py-3">
-                          <span className="text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-400 bg-zinc-800 border border-zinc-700">
-                            {log.check_type}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${statusColor(log.status)}`}>
-                            {log.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono">{formatRelative(log.started_at)}</td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">
-                          {log.duration_seconds != null ? `${Math.round(log.duration_seconds)}s` : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.new_count}</td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.updated_count}</td>
-                        <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.alert_count}</td>
+              <div className="border border-white/10 bg-zinc-900/30">
+                {/* Desktop table */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-white/10 bg-zinc-950">
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Location</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Type</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Started</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Duration</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">New</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Updated</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Alerts</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {stats.recent_logs.map((log: SchedulerLogEntry) => (
+                        <tr key={log.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                          <td className="px-4 py-3 text-xs text-zinc-300 font-mono">{log.location_name || log.location_id.slice(0, 8)}</td>
+                          <td className="px-4 py-3">
+                            <span className="text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-400 bg-zinc-800 border border-zinc-700">
+                              {log.check_type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${statusColor(log.status)}`}>
+                              {log.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono">{formatRelative(log.started_at)}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">
+                            {log.duration_seconds != null ? `${Math.round(log.duration_seconds)}s` : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.new_count}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.updated_count}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.alert_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile card layout */}
+                <div className="md:hidden divide-y divide-white/5">
+                  {stats.recent_logs.map((log: SchedulerLogEntry) => (
+                    <div key={log.id} className="p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-zinc-300 font-mono truncate">{log.location_name || log.location_id.slice(0, 8)}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border shrink-0 ${statusColor(log.status)}`}>
+                          {log.status}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
+                        <span className="text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-400 bg-zinc-800 border border-zinc-700">
+                          {log.check_type}
+                        </span>
+                        <span>{formatRelative(log.started_at)}</span>
+                        {log.duration_seconds != null && <span>{Math.round(log.duration_seconds)}s</span>}
+                      </div>
+                      <div className="flex items-center gap-4 text-[10px] font-mono">
+                        <span className="text-emerald-400">{log.new_count} new</span>
+                        <span className="text-amber-400">{log.updated_count} updated</span>
+                        <span className="text-zinc-500">{log.alert_count} alerts</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
