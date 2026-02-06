@@ -512,7 +512,7 @@ async def update_incident(
             raise HTTPException(status_code=400, detail="No fields to update")
 
         updates.append(f"updated_at = ${param_idx}")
-        params.append(datetime.now(timezone.utc))
+        params.append(datetime.now(timezone.utc).replace(tzinfo=None))
         param_idx += 1
 
         params.append(str(incident_id))

@@ -84,7 +84,7 @@ class StorageService:
             with open(local_path, "wb") as f:
                 f.write(file_bytes)
 
-            return local_path
+            return f"/uploads/resumes/{unique_id}{ext}"
 
     async def download_file(self, path: str) -> bytes:
         """Download a file from storage.
@@ -121,7 +121,12 @@ class StorageService:
             except ClientError as e:
                 raise RuntimeError(f"Failed to download from S3: {e}")
         else:
-            # Local file
+            # Local file — resolve URL-style path to filesystem
+            if path.startswith("/uploads/"):
+                path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    path.lstrip("/"),
+                )
             with open(path, "rb") as f:
                 return f.read()
 
@@ -156,7 +161,12 @@ class StorageService:
             except ClientError:
                 return False
         else:
-            # Local file
+            # Local file — resolve URL-style path to filesystem
+            if path.startswith("/uploads/"):
+                path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    path.lstrip("/"),
+                )
             if os.path.exists(path):
                 os.unlink(path)
                 return True
