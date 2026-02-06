@@ -25,7 +25,7 @@ interface NavSection {
 // Organized navigation sections
 const navSections: NavSection[] = [
   {
-    title: 'Recruiting',
+    title: 'Core',
     roles: ['admin', 'client'],
     items: [
       {
