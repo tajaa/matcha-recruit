@@ -25,7 +25,7 @@ import {
 import { api } from '../api/client';
 
 interface UserProfile {
-  id: number;
+  id: string;
   email: string;
   full_name: string;
   role: string;
