@@ -2196,6 +2196,24 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_rate_limits_service ON api_rate_limits(service_name)
         """)
 
+        # Business invitations (admin-generated invite links for auto-approved registration)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS business_invitations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                token VARCHAR(64) NOT NULL UNIQUE,
+                created_by UUID NOT NULL REFERENCES users(id),
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                used_by_company_id UUID REFERENCES companies(id),
+                expires_at TIMESTAMP NOT NULL,
+                used_at TIMESTAMP,
+                note TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_business_invitations_token ON business_invitations(token)
+        """)
+
         # Create default chat rooms if none exist
         room_exists = await conn.fetchval("SELECT COUNT(*) FROM chat_rooms")
         if room_exists == 0:

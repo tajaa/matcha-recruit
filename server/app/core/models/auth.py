@@ -100,6 +100,9 @@ class BusinessRegister(BaseModel):
     phone: Optional[str] = None
     job_title: Optional[str] = None
 
+    # Optional invite token for auto-approval
+    invite_token: Optional[str] = None
+
 
 # Profile models
 class AdminProfile(BaseModel):

@@ -212,16 +212,45 @@ async def register_client(request: ClientRegister):
         )
 
 
+@router.get("/business-invite/{token}")
+async def validate_business_invite(token: str):
+    """Validate a business invite token (public, no auth required)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, status, expires_at, note
+            FROM business_invitations
+            WHERE token = $1
+            """,
+            token,
+        )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Invite not found or invalid")
+
+        if row["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"Invite is no longer valid (status: {row['status']})")
+
+        if row["expires_at"] < datetime.utcnow():
+            raise HTTPException(status_code=400, detail="Invite has expired")
+
+        return {
+            "valid": True,
+            "expires_at": row["expires_at"].isoformat(),
+            "note": row["note"],
+        }
+
+
 @router.post("/register/business")
 async def register_business(request: BusinessRegister):
     """
     Register a new business with first admin/client user.
     This creates:
-    1. A new company with status='pending' (requires admin approval)
+    1. A new company (status='approved' if invite token provided, else 'pending')
     2. A client user linked to that company
     3. Returns auth tokens for immediate login
 
-    The business will need admin approval before accessing full features.
+    If no invite_token, the business will need admin approval before accessing full features.
     """
     from ..services.email import get_email_service
 
@@ -232,12 +261,30 @@ async def register_business(request: BusinessRegister):
             if existing:
                 raise HTTPException(status_code=400, detail="Email already registered")
 
-            # Step 1: Create company with pending status and default features
+            # Validate and atomically reserve invite token if provided
+            invitation = None
+            if request.invite_token:
+                invitation = await conn.fetchrow(
+                    """UPDATE business_invitations
+                       SET status = 'used', used_at = NOW()
+                       WHERE token = $1 AND status = 'pending' AND expires_at > NOW()
+                       RETURNING id""",
+                    request.invite_token,
+                )
+                if not invitation:
+                    raise HTTPException(status_code=400, detail="Invalid, expired, or already-used invite link")
+
+            # Determine company status based on invite
+            company_status = "approved" if invitation else "pending"
+
+            # Step 1: Create company
             company = await conn.fetchrow(
-                """INSERT INTO companies (name, industry, size, status, enabled_features)
-                   VALUES ($1, $2, $3, 'pending', '{"offer_letters": true}'::jsonb)
+                """INSERT INTO companies (name, industry, size, status, approved_at, enabled_features)
+                   VALUES ($1, $2, $3, $4, $5, '{"offer_letters": true}'::jsonb)
                    RETURNING id, name""",
-                request.company_name, request.industry, request.company_size
+                request.company_name, request.industry, request.company_size,
+                company_status,
+                datetime.utcnow() if invitation else None,
             )
             company_id = company["id"]
 
@@ -263,18 +310,32 @@ async def register_business(request: BusinessRegister):
                 user["id"], company_id
             )
 
+            # Step 5: Link invitation to the new company
+            if invitation:
+                await conn.execute(
+                    "UPDATE business_invitations SET used_by_company_id = $1 WHERE id = $2",
+                    company_id, invitation["id"],
+                )
+
             # Generate tokens
             settings = get_settings()
             access_token = create_access_token(user["id"], user["email"], user["role"])
             refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
 
-            # Send pending registration email
+            # Send appropriate email
             email_service = get_email_service()
-            await email_service.send_business_registration_pending_email(
-                to_email=user["email"],
-                to_name=request.name,
-                company_name=request.company_name
-            )
+            if invitation:
+                await email_service.send_business_approved_email(
+                    to_email=user["email"],
+                    to_name=request.name,
+                    company_name=request.company_name
+                )
+            else:
+                await email_service.send_business_registration_pending_email(
+                    to_email=user["email"],
+                    to_name=request.name,
+                    company_name=request.company_name
+                )
 
             return {
                 "access_token": access_token,
@@ -288,8 +349,12 @@ async def register_business(request: BusinessRegister):
                     "created_at": user["created_at"].isoformat() if user["created_at"] else None,
                     "last_login": None
                 },
-                "company_status": "pending",
-                "message": "Your business registration is pending approval. You will be notified once it's reviewed."
+                "company_status": company_status,
+                "message": (
+                    "Welcome! Your business account is approved and ready to use."
+                    if invitation else
+                    "Your business registration is pending approval. You will be notified once it's reviewed."
+                ),
             }
 
 

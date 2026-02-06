@@ -3,7 +3,8 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
@@ -22,6 +23,7 @@ from ..services.compliance_service import (
     _jurisdiction_row_to_dict,
 )
 from ..services.rate_limiter import get_rate_limiter
+from ...config import get_settings
 
 router = APIRouter()
 
@@ -347,6 +349,124 @@ async def reject_business_registration(
         )
 
         return {"status": "rejected", "message": f"Business '{company['name']}' has been rejected"}
+
+
+# =============================================================================
+# Business Invite Links
+# =============================================================================
+
+class CreateBusinessInviteRequest(BaseModel):
+    note: Optional[str] = None
+    expires_days: int = Field(default=7, ge=1, le=90)
+
+
+class BusinessInviteResponse(BaseModel):
+    id: UUID
+    token: str
+    invite_url: str
+    status: str
+    note: Optional[str]
+    created_by_email: str
+    used_by_company_name: Optional[str]
+    expires_at: datetime
+    used_at: Optional[datetime]
+    created_at: datetime
+
+
+@router.post("/business-invites", dependencies=[Depends(require_admin)])
+async def create_business_invite(
+    request: CreateBusinessInviteRequest = CreateBusinessInviteRequest(),
+    current_user=Depends(require_admin),
+):
+    """Generate a new business invite link. Businesses registering with this link are auto-approved."""
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(days=request.expires_days)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO business_invitations (token, created_by, expires_at, note)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, token, status, expires_at, created_at
+            """,
+            token, current_user.id, expires_at, request.note,
+        )
+
+        base_url = get_settings().app_base_url.rstrip("/")
+        invite_url = f"{base_url}/register/invite/{token}"
+
+        return {
+            "id": str(row["id"]),
+            "token": row["token"],
+            "invite_url": invite_url,
+            "status": row["status"],
+            "note": request.note,
+            "expires_at": row["expires_at"].isoformat(),
+            "created_at": row["created_at"].isoformat(),
+        }
+
+
+@router.get("/business-invites", dependencies=[Depends(require_admin)])
+async def list_business_invites():
+    """List all business invite links."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                bi.id, bi.token, bi.status, bi.note,
+                bi.expires_at, bi.used_at, bi.created_at,
+                u.email as created_by_email,
+                c.name as used_by_company_name
+            FROM business_invitations bi
+            JOIN users u ON bi.created_by = u.id
+            LEFT JOIN companies c ON bi.used_by_company_id = c.id
+            ORDER BY bi.created_at DESC
+            """
+        )
+
+        invites = []
+        for row in rows:
+            # Auto-expire if past expiry
+            row_status = row["status"]
+            if row_status == "pending" and row["expires_at"] < datetime.utcnow():
+                row_status = "expired"
+
+            invites.append({
+                "id": str(row["id"]),
+                "token": row["token"],
+                "invite_url": f"{get_settings().app_base_url.rstrip('/')}/register/invite/{row['token']}",
+                "status": row_status,
+                "note": row["note"],
+                "created_by_email": row["created_by_email"],
+                "used_by_company_name": row["used_by_company_name"],
+                "expires_at": row["expires_at"].isoformat(),
+                "used_at": row["used_at"].isoformat() if row["used_at"] else None,
+                "created_at": row["created_at"].isoformat(),
+            })
+
+        return {"invites": invites, "total": len(invites)}
+
+
+@router.delete("/business-invites/{invite_id}", dependencies=[Depends(require_admin)])
+async def cancel_business_invite(invite_id: UUID):
+    """Cancel a pending business invite link."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, status FROM business_invitations WHERE id = $1",
+            invite_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Invite not found")
+
+        if row["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"Cannot cancel invite with status '{row['status']}'")
+
+        await conn.execute(
+            "UPDATE business_invitations SET status = 'cancelled' WHERE id = $1",
+            invite_id,
+        )
+
+        return {"status": "cancelled", "message": "Invite link has been cancelled"}
 
 
 # =============================================================================

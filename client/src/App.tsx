@@ -7,6 +7,7 @@ import { Layout, ProtectedRoute } from './components';
 import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+const RegisterInvite = lazy(() => import('./pages/RegisterInvite'));
 import { Unauthorized } from './pages/Unauthorized';
 import { ForCandidates } from './pages/ForCandidates';
 import { WorkWithUs } from './pages/WorkWithUs';
@@ -119,6 +120,7 @@ function App() {
               <Route path="/work-with-us" element={<WorkWithUs />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/register/invite/:token" element={<RegisterInvite />} />
               <Route path="/onboarding/resume" element={<ResumeOnboarding />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
 

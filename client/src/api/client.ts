@@ -1435,6 +1435,30 @@ export const adminBusinessRegistrations = {
     }),
 };
 
+// Admin Business Invites API
+import type { BusinessInvite } from '../types';
+
+export const adminBusinessInvites = {
+  create: (note?: string, expiresDays?: number): Promise<BusinessInvite> =>
+    request<BusinessInvite>('/admin/business-invites', {
+      method: 'POST',
+      body: JSON.stringify({ note, expires_days: expiresDays }),
+    }),
+
+  list: (): Promise<{ invites: BusinessInvite[]; total: number }> =>
+    request<{ invites: BusinessInvite[]; total: number }>('/admin/business-invites'),
+
+  cancel: (inviteId: string): Promise<{ status: string; message: string }> =>
+    request<{ status: string; message: string }>(`/admin/business-invites/${inviteId}`, {
+      method: 'DELETE',
+    }),
+};
+
+export const businessInviteApi = {
+  validate: (token: string): Promise<{ valid: boolean; expires_at: string; note: string | null }> =>
+    request<{ valid: boolean; expires_at: string; note: string | null }>(`/auth/business-invite/${token}`),
+};
+
 // Company Features (Admin)
 export const adminCompanyFeatures = {
   list: (): Promise<CompanyWithFeatures[]> =>

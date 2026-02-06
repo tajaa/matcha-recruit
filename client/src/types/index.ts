@@ -470,6 +470,20 @@ export interface BusinessRegister {
   name: string;
   phone?: string;
   job_title?: string;
+  invite_token?: string;
+}
+
+export interface BusinessInvite {
+  id: string;
+  token: string;
+  invite_url: string;
+  status: string;
+  note: string | null;
+  created_by_email: string;
+  used_by_company_name: string | null;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
 }
 
 export interface AdminProfile {

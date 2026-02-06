@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button, Modal } from '../../components';
-import { adminBusinessRegistrations } from '../../api/client';
-import type { BusinessRegistration, BusinessRegistrationStatus } from '../../types';
-import { Building2, Mail, Phone, Briefcase, Calendar, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { adminBusinessRegistrations, adminBusinessInvites } from '../../api/client';
+import type { BusinessRegistration, BusinessRegistrationStatus, BusinessInvite } from '../../types';
+import { Building2, Mail, Phone, Briefcase, Calendar, CheckCircle, XCircle, Clock, Link2, Copy, Plus, Trash2 } from 'lucide-react';
 
 export function BusinessRegistrations() {
   const [registrations, setRegistrations] = useState<BusinessRegistration[]>([]);
@@ -15,6 +15,13 @@ export function BusinessRegistrations() {
   const [rejectReason, setRejectReason] = useState('');
   const [selectedRegistration, setSelectedRegistration] = useState<BusinessRegistration | null>(null);
   const [processing, setProcessing] = useState(false);
+
+  // Invite state
+  const [invites, setInvites] = useState<BusinessInvite[]>([]);
+  const [inviteNote, setInviteNote] = useState('');
+  const [generatingInvite, setGeneratingInvite] = useState(false);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [showInvites, setShowInvites] = useState(false);
 
   const fetchRegistrations = useCallback(async () => {
     try {
@@ -91,6 +98,52 @@ export function BusinessRegistrations() {
     } finally {
       setProcessing(false);
     }
+  };
+
+  const fetchInvites = useCallback(async () => {
+    try {
+      const data = await adminBusinessInvites.list();
+      setInvites(data.invites);
+    } catch (err) {
+      console.error('Failed to fetch invites:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showInvites) fetchInvites();
+  }, [showInvites, fetchInvites]);
+
+  const handleGenerateInvite = async () => {
+    try {
+      setGeneratingInvite(true);
+      const invite = await adminBusinessInvites.create(inviteNote || undefined);
+      setInvites(prev => [invite, ...prev]);
+      setInviteNote('');
+      // Auto-copy the URL
+      await navigator.clipboard.writeText(invite.invite_url);
+      setCopiedToken(invite.token);
+      setTimeout(() => setCopiedToken(null), 3000);
+    } catch (err) {
+      console.error('Failed to generate invite:', err);
+      setError('Failed to generate invite link');
+    } finally {
+      setGeneratingInvite(false);
+    }
+  };
+
+  const handleCancelInvite = async (inviteId: string) => {
+    try {
+      await adminBusinessInvites.cancel(inviteId);
+      setInvites(prev => prev.map(i => i.id === inviteId ? { ...i, status: 'cancelled' } : i));
+    } catch (err) {
+      console.error('Failed to cancel invite:', err);
+    }
+  };
+
+  const copyInviteUrl = async (invite: BusinessInvite) => {
+    await navigator.clipboard.writeText(invite.invite_url);
+    setCopiedToken(invite.token);
+    setTimeout(() => setCopiedToken(null), 3000);
   };
 
   const formatDate = (dateStr: string | null) => {
@@ -365,6 +418,186 @@ export function BusinessRegistrations() {
           </div>
         </div>
       </Modal>
+
+      {/* Invite Links Section */}
+      <div className="border-t border-white/10 pt-8">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-3 mb-6">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tighter text-white uppercase">Invite Links</h2>
+            <p className="text-xs text-zinc-500 mt-1 font-mono tracking-wide uppercase">
+              Generate invite URLs for auto-approved registration
+            </p>
+          </div>
+          <button
+            onClick={() => setShowInvites(!showInvites)}
+            className="self-start sm:self-auto px-4 py-2 text-xs uppercase tracking-wider font-bold border border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300 transition-colors"
+          >
+            {showInvites ? 'Hide' : 'Show'}
+          </button>
+        </div>
+
+        {showInvites && (
+          <div className="space-y-4">
+            {/* Generate invite */}
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+              <div className="flex-1">
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
+                  Note <span className="text-zinc-600 font-normal normal-case">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={inviteNote}
+                  onChange={(e) => setInviteNote(e.target.value)}
+                  placeholder="e.g. For Acme Corp onboarding"
+                  className="w-full bg-zinc-950 border border-zinc-800 text-white text-sm px-3 py-2 focus:outline-none focus:border-zinc-600"
+                />
+              </div>
+              <button
+                onClick={handleGenerateInvite}
+                disabled={generatingInvite}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-white text-black text-xs uppercase tracking-wider font-bold hover:bg-zinc-200 disabled:opacity-50 transition-colors whitespace-nowrap"
+              >
+                <Plus size={14} />
+                {generatingInvite ? 'Generating...' : 'Generate Link'}
+              </button>
+            </div>
+
+            {/* Invites list — card layout for mobile, table for desktop */}
+            {invites.length > 0 && (
+              <>
+                {/* Desktop table */}
+                <div className="hidden md:block border border-white/10 bg-zinc-900/30">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-white/10 bg-zinc-950">
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Link</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Note</th>
+                        <th className="text-center px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Used By</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Expires</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invites.map((invite) => (
+                        <tr key={invite.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <Link2 size={12} className="text-zinc-500 shrink-0" />
+                              <span className="text-xs text-zinc-400 font-mono truncate max-w-[180px]">
+                                .../{invite.token.slice(0, 12)}...
+                              </span>
+                              <button
+                                onClick={() => copyInviteUrl(invite)}
+                                className="text-zinc-500 hover:text-white transition-colors"
+                                title="Copy invite URL"
+                              >
+                                {copiedToken === invite.token ? (
+                                  <CheckCircle size={14} className="text-emerald-400" />
+                                ) : (
+                                  <Copy size={14} />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-zinc-400 max-w-[150px] truncate">
+                            {invite.note || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex items-center px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold border ${
+                              invite.status === 'pending' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                              invite.status === 'used' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                              invite.status === 'expired' ? 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20' :
+                              'bg-red-500/10 text-red-400 border-red-500/20'
+                            }`}>
+                              {invite.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-zinc-400">
+                            {invite.used_by_company_name || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-zinc-500 font-mono">
+                            {formatDate(invite.expires_at)}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {invite.status === 'pending' && (
+                              <button
+                                onClick={() => handleCancelInvite(invite.id)}
+                                className="text-zinc-500 hover:text-red-400 transition-colors"
+                                title="Cancel invite"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile card layout */}
+                <div className="md:hidden space-y-3">
+                  {invites.map((invite) => (
+                    <div key={invite.id} className="border border-white/10 bg-zinc-900/30 p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className={`inline-flex items-center px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold border ${
+                          invite.status === 'pending' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                          invite.status === 'used' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                          invite.status === 'expired' ? 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20' :
+                          'bg-red-500/10 text-red-400 border-red-500/20'
+                        }`}>
+                          {invite.status}
+                        </span>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => copyInviteUrl(invite)}
+                            className="text-zinc-500 hover:text-white transition-colors p-1"
+                            title="Copy invite URL"
+                          >
+                            {copiedToken === invite.token ? (
+                              <CheckCircle size={16} className="text-emerald-400" />
+                            ) : (
+                              <Copy size={16} />
+                            )}
+                          </button>
+                          {invite.status === 'pending' && (
+                            <button
+                              onClick={() => handleCancelInvite(invite.id)}
+                              className="text-zinc-500 hover:text-red-400 transition-colors p-1"
+                              title="Cancel invite"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Link2 size={12} className="text-zinc-500 shrink-0" />
+                        <span className="text-xs text-zinc-400 font-mono truncate">
+                          .../{invite.token.slice(0, 16)}...
+                        </span>
+                      </div>
+
+                      {invite.note && (
+                        <p className="text-xs text-zinc-400 truncate">{invite.note}</p>
+                      )}
+
+                      <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+                        <span>Expires {formatDate(invite.expires_at)}</span>
+                        {invite.used_by_company_name && (
+                          <span className="text-zinc-400">{invite.used_by_company_name}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
