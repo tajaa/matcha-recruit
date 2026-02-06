@@ -28,7 +28,6 @@ ALLOWED_UPDATE_COLUMNS = {
     "benefits_wellness", "benefits_pto_vacation", "benefits_pto_sick",
     "benefits_holidays", "benefits_other",
     "contingency_background_check", "contingency_credit_check", "contingency_drug_screening",
-    "company_logo_url",
 }
 
 

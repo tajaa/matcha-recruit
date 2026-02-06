@@ -103,7 +103,8 @@ export function OfferLetters() {
 
       // Upload logo if there's a new file
       if (logoFile) {
-        await offerLettersApi.uploadLogo(savedOffer.id, logoFile);
+        const { url } = await offerLettersApi.uploadLogo(savedOffer.id, logoFile);
+        setFormData(prev => ({ ...prev, company_logo_url: url }));
       }
 
       await loadOfferLetters();
