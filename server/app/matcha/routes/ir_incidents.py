@@ -8,16 +8,17 @@ Incident Report management for HR departments:
 """
 
 import json
+import logging
 import secrets
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request, Query
 
 from ...database import get_connection
 from ...core.dependencies import require_admin
-from ..dependencies import require_admin_or_client
+from ..dependencies import require_admin_or_client, get_client_company_id
 from ...config import get_settings
 from ...core.services.storage import get_storage
 from ..models.ir_incident import (
@@ -42,7 +43,12 @@ from ..models.ir_incident import (
     Witness,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# Valid analysis types
+ANALYSIS_TYPES = Literal["categorization", "severity", "root_cause", "recommendations", "similar"]
 
 
 # ===========================================
@@ -82,6 +88,43 @@ async def log_audit(
     )
 
 
+def _company_filter(is_admin: bool, param_idx: int) -> str:
+    """Build a company_id filter clause for SQL queries."""
+    if is_admin:
+        return f"(i.company_id = ${param_idx} OR i.company_id IS NULL)"
+    return f"i.company_id = ${param_idx}"
+
+
+async def _get_incident_with_company_check(conn, incident_id: UUID, current_user, columns: str = "*"):
+    """Fetch an incident row after verifying company ownership. Raises 404 if not found."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    is_admin = current_user.role == "admin"
+    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    row = await conn.fetchrow(
+        f"SELECT {columns} FROM ir_incidents WHERE id = $1 AND {company_clause}",
+        str(incident_id),
+        company_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return row
+
+
+def _safe_json_loads(value, default=None):
+    """Safely parse JSON from a database value."""
+    if value is None:
+        return default if default is not None else {}
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(f"Failed to parse JSON: {e}")
+        return default if default is not None else {}
+
+
 def parse_witnesses(witnesses_json) -> list[Witness]:
     """Parse witnesses from JSONB."""
     if not witnesses_json:
@@ -90,7 +133,8 @@ def parse_witnesses(witnesses_json) -> list[Witness]:
         if isinstance(witnesses_json, str):
             witnesses_json = json.loads(witnesses_json)
         return [Witness(**w) for w in witnesses_json]
-    except:
+    except (json.JSONDecodeError, TypeError, ValueError, KeyError) as e:
+        logger.warning(f"Failed to parse witnesses: {e}")
         return []
 
 
@@ -111,7 +155,7 @@ def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:
         reported_at=row["reported_at"],
         assigned_to=row["assigned_to"],
         witnesses=parse_witnesses(row.get("witnesses")),
-        category_data=json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else (row.get("category_data") or {}),
+        category_data=_safe_json_loads(row.get("category_data"), {}),
         root_cause=row["root_cause"],
         corrective_actions=row["corrective_actions"],
         document_count=document_count,
@@ -233,11 +277,16 @@ async def list_incidents(
     current_user=Depends(require_admin_or_client),
 ):
     """List incidents with filters."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return IRIncidentListResponse(incidents=[], total=0)
+    is_admin = current_user.role == "admin"
+
     async with get_connection() as conn:
-        # Build dynamic query
-        conditions = []
-        params = []
-        param_idx = 1
+        # Build dynamic query — always scope by company
+        conditions = [_company_filter(is_admin, 1)]
+        params = [company_id]
+        param_idx = 2
 
         if status:
             conditions.append(f"i.status = ${param_idx}")
@@ -312,9 +361,15 @@ async def get_incident(
     current_user=Depends(require_admin_or_client),
 ):
     """Get a single incident by ID."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    is_admin = current_user.role == "admin"
+    company_clause = _company_filter(is_admin, 2)
+
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """
+            f"""
             SELECT i.*, COUNT(d.id) as document_count,
                    c.name as company_name,
                    bl.name as location_name,
@@ -324,10 +379,11 @@ async def get_incident(
             LEFT JOIN ir_incident_documents d ON i.id = d.incident_id
             LEFT JOIN companies c ON i.company_id = c.id
             LEFT JOIN business_locations bl ON i.location_id = bl.id
-            WHERE i.id = $1
+            WHERE i.id = $1 AND {company_clause}
             GROUP BY i.id, c.name, bl.name, bl.city, bl.state
             """,
             str(incident_id),
+            company_id,
         )
 
         if not row:
@@ -344,11 +400,18 @@ async def update_incident(
     current_user=Depends(require_admin_or_client),
 ):
     """Update an incident report."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    is_admin = current_user.role == "admin"
+    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+
     async with get_connection() as conn:
-        # Check exists
+        # Check exists and belongs to company
         existing = await conn.fetchrow(
-            "SELECT id, status FROM ir_incidents WHERE id = $1",
+            f"SELECT id, status FROM ir_incidents WHERE id = $1 AND {company_clause}",
             str(incident_id),
+            company_id,
         )
         if not existing:
             raise HTTPException(status_code=404, detail="Incident not found")
@@ -521,19 +584,27 @@ async def delete_incident(
     current_user=Depends(require_admin_or_client),
 ):
     """Delete an incident and all related data."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    is_admin = current_user.role == "admin"
+    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+
     async with get_connection() as conn:
-        # Check exists
+        # Check exists and belongs to company
         row = await conn.fetchrow(
-            "SELECT id, incident_number, title FROM ir_incidents WHERE id = $1",
+            f"SELECT id, incident_number, title FROM ir_incidents WHERE id = $1 AND {company_clause}",
             str(incident_id),
+            company_id,
         )
         if not row:
             raise HTTPException(status_code=404, detail="Incident not found")
 
         # Delete (cascade will handle documents, analysis, etc.)
         await conn.execute(
-            "DELETE FROM ir_incidents WHERE id = $1",
+            f"DELETE FROM ir_incidents WHERE id = $1 AND {company_clause}",
             str(incident_id),
+            company_id,
         )
 
         # Log audit
@@ -564,11 +635,18 @@ async def upload_document(
     current_user=Depends(require_admin_or_client),
 ):
     """Upload a document to an incident."""
-    # Validate incident exists
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    is_admin = current_user.role == "admin"
+    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+
+    # Validate incident exists and belongs to company
     async with get_connection() as conn:
         incident = await conn.fetchrow(
-            "SELECT id FROM ir_incidents WHERE id = $1",
+            f"SELECT id FROM ir_incidents WHERE id = $1 AND {company_clause}",
             str(incident_id),
+            company_id,
         )
         if not incident:
             raise HTTPException(status_code=404, detail="Incident not found")
@@ -595,7 +673,8 @@ async def upload_document(
     try:
         storage.upload_file(content, file_path, file.content_type)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
+        logger.error(f"Failed to upload IR document for incident {incident_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload file. Please try again.")
 
     # Save to database
     async with get_connection() as conn:
@@ -649,11 +728,18 @@ async def list_documents(
     current_user=Depends(require_admin_or_client),
 ):
     """List all documents for an incident."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    is_admin = current_user.role == "admin"
+    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+
     async with get_connection() as conn:
-        # Verify incident exists
+        # Verify incident exists and belongs to company
         incident = await conn.fetchrow(
-            "SELECT id FROM ir_incidents WHERE id = $1",
+            f"SELECT id FROM ir_incidents WHERE id = $1 AND {company_clause}",
             str(incident_id),
+            company_id,
         )
         if not incident:
             raise HTTPException(status_code=404, detail="Incident not found")
@@ -690,11 +776,21 @@ async def delete_document(
     current_user=Depends(require_admin_or_client),
 ):
     """Delete a document from an incident."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    is_admin = current_user.role == "admin"
+    company_clause = "(i.company_id = $3 OR i.company_id IS NULL)" if is_admin else "i.company_id = $3"
+
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id, filename, file_path FROM ir_incident_documents WHERE id = $1 AND incident_id = $2",
+            f"""SELECT d.id, d.filename, d.file_path
+                FROM ir_incident_documents d
+                JOIN ir_incidents i ON d.incident_id = i.id
+                WHERE d.id = $1 AND d.incident_id = $2 AND {company_clause}""",
             str(document_id),
             str(incident_id),
+            company_id,
         )
         if not row:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -736,42 +832,50 @@ async def get_analytics_summary(
     current_user=Depends(require_admin_or_client),
 ):
     """Get summary analytics for the dashboard."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return AnalyticsSummary(total_incidents=0, by_status={}, by_type={}, by_severity={}, recent_count=0, avg_resolution_days=None)
+    is_admin = current_user.role == "admin"
+    co_filter = "(company_id = $1 OR company_id IS NULL)" if is_admin else "company_id = $1"
+
     async with get_connection() as conn:
         # Total incidents
-        total = await conn.fetchval("SELECT COUNT(*) FROM ir_incidents")
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM ir_incidents WHERE {co_filter}", company_id)
 
         # By status
         status_rows = await conn.fetch(
-            "SELECT status, COUNT(*) as count FROM ir_incidents GROUP BY status"
+            f"SELECT status, COUNT(*) as count FROM ir_incidents WHERE {co_filter} GROUP BY status", company_id
         )
         by_status = {row["status"]: row["count"] for row in status_rows}
 
         # By type
         type_rows = await conn.fetch(
-            "SELECT incident_type, COUNT(*) as count FROM ir_incidents GROUP BY incident_type"
+            f"SELECT incident_type, COUNT(*) as count FROM ir_incidents WHERE {co_filter} GROUP BY incident_type", company_id
         )
         by_type = {row["incident_type"]: row["count"] for row in type_rows}
 
         # By severity
         severity_rows = await conn.fetch(
-            "SELECT severity, COUNT(*) as count FROM ir_incidents GROUP BY severity"
+            f"SELECT severity, COUNT(*) as count FROM ir_incidents WHERE {co_filter} GROUP BY severity", company_id
         )
         by_severity = {row["severity"]: row["count"] for row in severity_rows}
 
         # Recent (last 30 days)
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
         recent_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM ir_incidents WHERE occurred_at >= $1",
+            f"SELECT COUNT(*) FROM ir_incidents WHERE {co_filter} AND occurred_at >= $2",
+            company_id,
             thirty_days_ago,
         )
 
         # Average resolution time (days) for resolved/closed incidents
         avg_resolution = await conn.fetchval(
-            """
+            f"""
             SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - occurred_at)) / 86400)
             FROM ir_incidents
-            WHERE resolved_at IS NOT NULL
-            """
+            WHERE {co_filter} AND resolved_at IS NOT NULL
+            """,
+            company_id,
         )
 
         return AnalyticsSummary(
@@ -791,15 +895,18 @@ async def get_analytics_trends(
     current_user=Depends(require_admin_or_client),
 ):
     """Get incident trends over time."""
-    async with get_connection() as conn:
-        start_date = datetime.utcnow() - timedelta(days=days)
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return TrendsAnalysis(data=[], period=period, start_date="", end_date="")
+    is_admin = current_user.role == "admin"
+    co_filter = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
 
-        if period == "daily":
-            date_trunc = "day"
-        elif period == "weekly":
-            date_trunc = "week"
-        else:
-            date_trunc = "month"
+    # Map validated period to SQL DATE_TRUNC argument (never from user input)
+    trunc_map = {"daily": "day", "weekly": "week", "monthly": "month"}
+    date_trunc = trunc_map[period]
+
+    async with get_connection() as conn:
+        start_date = datetime.now(timezone.utc) - timedelta(days=days)
 
         rows = await conn.fetch(
             f"""
@@ -808,11 +915,12 @@ async def get_analytics_trends(
                 COUNT(*) as count,
                 incident_type
             FROM ir_incidents
-            WHERE occurred_at >= $1
+            WHERE {co_filter} AND occurred_at >= $1
             GROUP BY period_start, incident_type
             ORDER BY period_start
             """,
             start_date,
+            company_id,
         )
 
         # Aggregate by period
@@ -843,9 +951,15 @@ async def get_analytics_locations(
     current_user=Depends(require_admin_or_client),
 ):
     """Get incident hotspots by location."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return LocationAnalysis(hotspots=[], total_locations=0)
+    is_admin = current_user.role == "admin"
+    co_filter = "(company_id = $1 OR company_id IS NULL)" if is_admin else "company_id = $1"
+
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """
+            f"""
             SELECT
                 location,
                 COUNT(*) as count,
@@ -857,10 +971,11 @@ async def get_analytics_locations(
                     ELSE 1
                 END) as severity_score
             FROM ir_incidents
-            WHERE location IS NOT NULL AND location != ''
+            WHERE {co_filter} AND location IS NOT NULL AND location != ''
             GROUP BY location, incident_type
             ORDER BY count DESC
-            """
+            """,
+            company_id,
         )
 
         # Aggregate by location
@@ -904,11 +1019,18 @@ async def get_audit_log(
     current_user=Depends(require_admin_or_client),
 ):
     """Get the audit log for an incident."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    is_admin = current_user.role == "admin"
+    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+
     async with get_connection() as conn:
-        # Verify incident exists
+        # Verify incident exists and belongs to company
         incident = await conn.fetchrow(
-            "SELECT id FROM ir_incidents WHERE id = $1",
+            f"SELECT id FROM ir_incidents WHERE id = $1 AND {company_clause}",
             str(incident_id),
+            company_id,
         )
         if not incident:
             raise HTTPException(status_code=404, detail="Incident not found")
@@ -962,12 +1084,10 @@ async def analyze_categorization(
     from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, title, description, location, reported_by_name FROM ir_incidents WHERE id = $1",
-            str(incident_id),
+        row = await _get_incident_with_company_check(
+            conn, incident_id, current_user,
+            columns="id, title, description, location, reported_by_name",
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="Incident not found")
 
         # Check for cached analysis
         cached = await conn.fetchrow(
@@ -980,7 +1100,7 @@ async def analyze_categorization(
         )
 
         if cached:
-            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+            result = _safe_json_loads(cached["analysis_data"])
             return CategorizationAnalysis(
                 suggested_type=result["suggested_type"],
                 confidence=result["confidence"],
@@ -1000,7 +1120,7 @@ async def analyze_categorization(
         except IRAnalysisError as e:
             # Gemini failed - try to return stale cache if available
             if cached:
-                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                result = _safe_json_loads(cached["analysis_data"])
                 return CategorizationAnalysis(
                     suggested_type=result["suggested_type"],
                     confidence=result["confidence"],
@@ -1009,7 +1129,8 @@ async def analyze_categorization(
                     from_cache=True,
                     cache_reason=str(e),
                 )
-            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
+            logger.error(f"AI analysis failed for incident {incident_id}: {e}")
+            raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
 
         # Cache the result
         await conn.execute(
@@ -1051,12 +1172,7 @@ async def analyze_severity(
     from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM ir_incidents WHERE id = $1",
-            str(incident_id),
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Incident not found")
+        row = await _get_incident_with_company_check(conn, incident_id, current_user)
 
         # Check for cached analysis
         cached = await conn.fetchrow(
@@ -1069,7 +1185,7 @@ async def analyze_severity(
         )
 
         if cached:
-            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+            result = _safe_json_loads(cached["analysis_data"])
             return SeverityAnalysis(
                 suggested_severity=result["suggested_severity"],
                 factors=result["factors"],
@@ -1092,7 +1208,7 @@ async def analyze_severity(
         except IRAnalysisError as e:
             # Gemini failed - try to return stale cache if available
             if cached:
-                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                result = _safe_json_loads(cached["analysis_data"])
                 return SeverityAnalysis(
                     suggested_severity=result["suggested_severity"],
                     factors=result["factors"],
@@ -1101,7 +1217,8 @@ async def analyze_severity(
                     from_cache=True,
                     cache_reason=str(e),
                 )
-            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
+            logger.error(f"AI analysis failed for incident {incident_id}: {e}")
+            raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
 
         # Cache the result
         await conn.execute(
@@ -1143,12 +1260,7 @@ async def analyze_root_cause(
     from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM ir_incidents WHERE id = $1",
-            str(incident_id),
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Incident not found")
+        row = await _get_incident_with_company_check(conn, incident_id, current_user)
 
         # Check for cached analysis
         cached = await conn.fetchrow(
@@ -1161,7 +1273,7 @@ async def analyze_root_cause(
         )
 
         if cached:
-            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+            result = _safe_json_loads(cached["analysis_data"])
             return RootCauseAnalysis(
                 primary_cause=result["primary_cause"],
                 contributing_factors=result["contributing_factors"],
@@ -1188,7 +1300,7 @@ async def analyze_root_cause(
         except IRAnalysisError as e:
             # Gemini failed - try to return stale cache if available
             if cached:
-                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                result = _safe_json_loads(cached["analysis_data"])
                 return RootCauseAnalysis(
                     primary_cause=result["primary_cause"],
                     contributing_factors=result["contributing_factors"],
@@ -1198,7 +1310,8 @@ async def analyze_root_cause(
                     from_cache=True,
                     cache_reason=str(e),
                 )
-            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
+            logger.error(f"AI analysis failed for incident {incident_id}: {e}")
+            raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
 
         # Cache the result
         await conn.execute(
@@ -1242,12 +1355,7 @@ async def analyze_recommendations(
     from ..models.ir_incident import RecommendationItem
 
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM ir_incidents WHERE id = $1",
-            str(incident_id),
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Incident not found")
+        row = await _get_incident_with_company_check(conn, incident_id, current_user)
 
         # Fetch company context
         company_name = None
@@ -1290,7 +1398,7 @@ async def analyze_recommendations(
         )
 
         if cached:
-            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+            result = _safe_json_loads(cached["analysis_data"])
             return RecommendationsAnalysis(
                 recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
                 summary=result["summary"],
@@ -1316,7 +1424,7 @@ async def analyze_recommendations(
         except IRAnalysisError as e:
             # Gemini failed - try to return stale cache if available
             if cached:
-                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                result = _safe_json_loads(cached["analysis_data"])
                 return RecommendationsAnalysis(
                     recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
                     summary=result["summary"],
@@ -1324,7 +1432,8 @@ async def analyze_recommendations(
                     from_cache=True,
                     cache_reason=str(e),
                 )
-            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
+            logger.error(f"AI analysis failed for incident {incident_id}: {e}")
+            raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
 
         # Cache the result
         await conn.execute(
@@ -1366,12 +1475,7 @@ async def analyze_similar_incidents(
     from ..models.ir_incident import SimilarIncident
 
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM ir_incidents WHERE id = $1",
-            str(incident_id),
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Incident not found")
+        row = await _get_incident_with_company_check(conn, incident_id, current_user)
 
         # Check for cached analysis
         cached = await conn.fetchrow(
@@ -1384,7 +1488,7 @@ async def analyze_similar_incidents(
         )
 
         if cached:
-            result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+            result = _safe_json_loads(cached["analysis_data"])
             similar_incidents = []
             for s in result.get("similar_incidents", []):
                 try:
@@ -1445,7 +1549,7 @@ async def analyze_similar_incidents(
         except IRAnalysisError as e:
             # Gemini failed - try to return stale cache if available
             if cached:
-                result = json.loads(cached["analysis_data"]) if isinstance(cached["analysis_data"], str) else cached["analysis_data"]
+                result = _safe_json_loads(cached["analysis_data"])
                 similar_incidents = []
                 for s in result.get("similar_incidents", []):
                     try:
@@ -1466,7 +1570,8 @@ async def analyze_similar_incidents(
                     from_cache=True,
                     cache_reason=str(e),
                 )
-            raise HTTPException(status_code=503, detail=f"Analysis unavailable: {e}")
+            logger.error(f"AI analysis failed for incident {incident_id}: {e}")
+            raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
 
         # Cache the result
         await conn.execute(
@@ -1514,23 +1619,14 @@ async def analyze_similar_incidents(
 @router.delete("/{incident_id}/analyze/{analysis_type}")
 async def clear_analysis_cache(
     incident_id: UUID,
-    analysis_type: str,
+    analysis_type: ANALYSIS_TYPES,
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
     """Clear cached analysis to force re-analysis."""
-    valid_types = ["categorization", "severity", "root_cause", "recommendations", "similar"]
-    if analysis_type not in valid_types:
-        raise HTTPException(status_code=400, detail=f"Invalid analysis type. Must be one of: {valid_types}")
-
     async with get_connection() as conn:
-        # Verify incident exists
-        incident = await conn.fetchrow(
-            "SELECT id FROM ir_incidents WHERE id = $1",
-            str(incident_id),
-        )
-        if not incident:
-            raise HTTPException(status_code=404, detail="Incident not found")
+        # Verify incident exists and belongs to company
+        await _get_incident_with_company_check(conn, incident_id, current_user, columns="id")
 
         # Delete cached analysis
         await conn.execute(
