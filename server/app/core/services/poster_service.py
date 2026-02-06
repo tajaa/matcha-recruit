@@ -23,120 +23,314 @@ def _safe(val: Optional[str]) -> str:
     return escape(str(val)) if val else ""
 
 
+CATEGORY_DISPLAY = {
+    "posting_requirements": {"label": "POSTING REQUIREMENTS", "color": "#1a3a6b"},
+    "minimum_wage": {"label": "MINIMUM WAGE", "color": "#1a5c2e"},
+    "overtime": {"label": "OVERTIME", "color": "#7c2d12"},
+    "sick_leave": {"label": "SICK LEAVE", "color": "#4a1d6b"},
+    "workers_comp": {"label": "WORKERS' COMPENSATION", "color": "#8b1a1a"},
+}
+
+# Category ordering for consistent layout
+_CATEGORY_ORDER = [
+    "minimum_wage",
+    "overtime",
+    "sick_leave",
+    "workers_comp",
+    "posting_requirements",
+]
+
+
 def _generate_poster_html(
     jurisdiction_name: str,
     state: str,
     requirements: list[dict],
 ) -> str:
-    """Build HTML for a compliance poster from jurisdiction requirements."""
-    sections_html = ""
-    for req in requirements:
-        title = _safe(req.get("title", ""))
-        value = _safe(req.get("current_value", ""))
-        description = _safe(req.get("description", ""))
-        effective = req.get("effective_date")
-        effective_str = ""
-        if effective:
-            if isinstance(effective, str):
-                effective_str = effective
-            else:
-                effective_str = effective.strftime("%B %d, %Y")
+    """Build HTML for a compliance poster modeled after real DOL workplace posters.
 
-        sections_html += f"""
-        <div class="section">
-            <div class="section-title">{title}</div>
-            {f'<div class="section-value">{value}</div>' if value else ''}
-            {f'<div class="section-desc">{description}</div>' if description else ''}
-            {f'<div class="section-effective">Effective: {_safe(effective_str)}</div>' if effective_str else ''}
-        </div>
-        """
+    Produces a dense, high-contrast, official-looking document designed to be
+    printed on letter-size paper, laminated, and posted in a breakroom.
+    """
+    # Group requirements by category
+    grouped: dict[str, list[dict]] = {}
+    for req in requirements:
+        cat = req.get("category", "other")
+        grouped.setdefault(cat, []).append(req)
+
+    # Build category panels in a stable order
+    panels: list[str] = []
+    ordered_cats = [c for c in _CATEGORY_ORDER if c in grouped]
+    ordered_cats += [c for c in grouped if c not in _CATEGORY_ORDER]
+
+    for cat in ordered_cats:
+        reqs = grouped[cat]
+        display = CATEGORY_DISPLAY.get(
+            cat, {"label": cat.upper().replace("_", " "), "color": "#333"}
+        )
+        color = display["color"]
+        label = display["label"]
+
+        items_html = ""
+        for i, req in enumerate(reqs):
+            title = _safe(req.get("title", ""))
+            value = _safe(req.get("current_value", ""))
+            description = _safe(req.get("description", ""))
+            effective = req.get("effective_date")
+            effective_str = ""
+            if effective:
+                if isinstance(effective, str):
+                    effective_str = effective
+                else:
+                    effective_str = effective.strftime("%B %d, %Y")
+
+            separator = '<hr class="item-rule">' if i > 0 else ""
+
+            # Short values (<=20 chars) go big beside the title;
+            # longer values get a full-width block below the title
+            is_short_value = value and len(value) <= 20
+            if is_short_value:
+                value_html = f'<div class="item-value">{value}</div>'
+                items_html += f"""{separator}<div class="item">
+<div class="item-row">
+<div class="item-text">
+<div class="item-title">{title}</div>
+{f'<div class="item-desc">{description}</div>' if description else ''}
+{f'<div class="item-effective">Effective {_safe(effective_str)}</div>' if effective_str else ''}
+</div>
+{value_html}
+</div>
+</div>"""
+            else:
+                value_block = f'<div class="item-value-full">{value}</div>' if value else ""
+                items_html += f"""{separator}<div class="item">
+<div class="item-title">{title}</div>
+{value_block}
+{f'<div class="item-desc">{description}</div>' if description else ''}
+{f'<div class="item-effective">Effective {_safe(effective_str)}</div>' if effective_str else ''}
+</div>"""
+
+        panels.append(f"""<div class="panel" style="border-left-color: {color};">
+<div class="panel-header" style="background: {color};">{label}</div>
+<div class="panel-body">{items_html}</div>
+</div>""")
+
+    # Use two-column layout if 3+ panels
+    use_columns = len(panels) >= 3
+    if use_columns:
+        sections_html = '<div class="grid">' + "".join(panels) + "</div>"
+    else:
+        sections_html = "".join(panels)
 
     gen_date = datetime.utcnow().strftime("%B %d, %Y")
+    req_count = sum(len(v) for v in grouped.values())
 
     return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-    @page {{
-        size: letter;
-        margin: 0.75in;
-    }}
-    body {{
-        font-family: Arial, Helvetica, sans-serif;
-        font-size: 11pt;
-        color: #1a1a1a;
-        line-height: 1.4;
-    }}
-    .header {{
-        text-align: center;
-        border: 3px solid #1a1a1a;
-        padding: 16px;
-        margin-bottom: 24px;
-    }}
-    .header h1 {{
-        font-size: 22pt;
-        margin: 0 0 4px 0;
-        letter-spacing: 2px;
-    }}
-    .header h2 {{
-        font-size: 14pt;
-        margin: 0;
-        font-weight: normal;
-        color: #444;
-    }}
-    .section {{
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        padding: 12px 16px;
-        margin-bottom: 12px;
-        page-break-inside: avoid;
-    }}
-    .section-title {{
-        font-size: 12pt;
-        font-weight: bold;
-        color: #1a1a1a;
-        margin-bottom: 4px;
-        border-bottom: 1px solid #eee;
-        padding-bottom: 4px;
-    }}
-    .section-value {{
-        font-size: 14pt;
-        font-weight: bold;
-        color: #2d6a4f;
-        margin: 6px 0;
-    }}
-    .section-desc {{
-        font-size: 10pt;
-        color: #444;
-        margin: 4px 0;
-    }}
-    .section-effective {{
-        font-size: 9pt;
-        color: #666;
-        font-style: italic;
-        margin-top: 4px;
-    }}
-    .footer {{
-        text-align: center;
-        font-size: 8pt;
-        color: #888;
-        margin-top: 24px;
-        border-top: 1px solid #ddd;
-        padding-top: 8px;
-    }}
+@page {{
+    size: letter;
+    margin: 0;
+}}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 8.5pt;
+    color: #000;
+    line-height: 1.3;
+    background: #fff;
+}}
+.page {{
+    width: 8.5in;
+    min-height: 11in;
+    padding: 0;
+    position: relative;
+}}
+
+/* ── TOP BANNER ── */
+.banner {{
+    background: #000;
+    color: #fff;
+    padding: 16px 28px 14px;
+    border-bottom: 4px solid #c00;
+}}
+.banner h1 {{
+    font-size: 20pt;
+    font-weight: 900;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    margin: 0 0 2px;
+}}
+.banner-sub {{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}}
+.banner-jurisdiction {{
+    font-size: 11pt;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}}
+.banner-meta {{
+    font-size: 7.5pt;
+    color: #aaa;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}}
+
+/* ── BODY ── */
+.body {{
+    padding: 12px 20px 8px;
+}}
+
+/* ── GRID ── */
+.grid {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}}
+.grid .panel {{
+    width: calc(50% - 5px);
+    flex-shrink: 0;
+}}
+
+/* ── PANELS ── */
+.panel {{
+    border: 1.5px solid #000;
+    border-left: 5px solid #333;
+    margin-bottom: 10px;
+    page-break-inside: avoid;
+}}
+.panel-header {{
+    color: #fff;
+    font-size: 7.5pt;
+    font-weight: 900;
+    letter-spacing: 2.5px;
+    padding: 4px 10px;
+    text-transform: uppercase;
+}}
+.panel-body {{
+    padding: 6px 10px 8px;
+}}
+
+/* ── ITEMS ── */
+.item-rule {{
+    border: none;
+    border-top: 1px solid #ccc;
+    margin: 5px 0;
+}}
+.item-row {{
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}}
+.item-text {{
+    flex: 1;
+    min-width: 0;
+}}
+.item-title {{
+    font-size: 8.5pt;
+    font-weight: 800;
+    color: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 1px;
+}}
+.item-value {{
+    font-size: 16pt;
+    font-weight: 900;
+    color: #000;
+    white-space: nowrap;
+    line-height: 1.1;
+    letter-spacing: -0.5px;
+    flex-shrink: 0;
+    padding-top: 0;
+}}
+.item-value-full {{
+    font-size: 13pt;
+    font-weight: 900;
+    color: #000;
+    line-height: 1.15;
+    letter-spacing: -0.3px;
+    margin: 2px 0 3px;
+}}
+.item-desc {{
+    font-size: 7.5pt;
+    color: #222;
+    line-height: 1.35;
+    margin-top: 1px;
+}}
+.item-effective {{
+    font-size: 6.5pt;
+    color: #555;
+    margin-top: 2px;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}}
+
+/* ── FOOTER ── */
+.footer {{
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #000;
+    color: #fff;
+    padding: 8px 20px;
+}}
+.footer-notice {{
+    font-size: 7.5pt;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    text-align: center;
+    margin-bottom: 4px;
+}}
+.footer-fine {{
+    display: flex;
+    justify-content: space-between;
+    font-size: 6pt;
+    color: #999;
+    line-height: 1.4;
+}}
+.footer-fine-left {{
+    max-width: 70%;
+}}
+.footer-fine-right {{
+    text-align: right;
+    white-space: nowrap;
+}}
 </style>
 </head>
 <body>
-    <div class="header">
-        <h1>NOTICE TO EMPLOYEES</h1>
-        <h2>{_safe(jurisdiction_name)}, {_safe(state)}</h2>
-    </div>
-    {sections_html}
-    <div class="footer">
-        This poster was generated on {gen_date} based on current requirements.
-        Employers are responsible for verifying accuracy and maintaining up-to-date postings.
-    </div>
+<div class="page">
+
+<div class="banner">
+<h1>Your Rights Under the Law</h1>
+<div class="banner-sub">
+<div class="banner-jurisdiction">{_safe(jurisdiction_name)}, {_safe(state)}</div>
+<div class="banner-meta">{req_count} requirement{"s" if req_count != 1 else ""}</div>
+</div>
+</div>
+
+<div class="body">
+{sections_html}
+</div>
+
+<div class="footer">
+<div class="footer-notice">This notice must be posted where employees can readily see it</div>
+<div class="footer-fine">
+<div class="footer-fine-left">
+This document is for informational purposes only and does not constitute legal advice.
+Employers must verify accuracy with applicable regulatory agencies and maintain current postings.
+</div>
+<div class="footer-fine-right">Generated {gen_date}</div>
+</div>
+</div>
+
+</div>
 </body>
 </html>"""
 
