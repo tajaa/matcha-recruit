@@ -453,7 +453,7 @@ async def update_incident(
             # Set resolved_at if status is resolved or closed
             if incident.status in ("resolved", "closed") and existing["status"] not in ("resolved", "closed"):
                 updates.append(f"resolved_at = ${param_idx}")
-                params.append(datetime.now(timezone.utc))
+                params.append(datetime.now(timezone.utc).replace(tzinfo=None))
                 param_idx += 1
 
         if incident.occurred_at is not None:
