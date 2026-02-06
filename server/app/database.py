@@ -145,6 +145,7 @@ async def init_db():
                 approved_by UUID REFERENCES users(id),
                 rejection_reason TEXT,
                 ir_guidance_blurb TEXT,
+                logo_url TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
@@ -167,6 +168,9 @@ async def init_db():
                 END IF;
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'owner_id') THEN
                     ALTER TABLE companies ADD COLUMN owner_id UUID REFERENCES users(id);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'logo_url') THEN
+                    ALTER TABLE companies ADD COLUMN logo_url TEXT;
                 END IF;
             END $$;
         """)

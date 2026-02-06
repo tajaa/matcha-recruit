@@ -70,6 +70,8 @@ export default function Employees() {
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [sendInvitationsOnUpload, setSendInvitationsOnUpload] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
+  const [bulkInviting, setBulkInviting] = useState(false);
+  const [bulkInviteResult, setBulkInviteResult] = useState<{ sent: number; failed: number } | null>(null);
 
   const fetchEmployees = async () => {
     try {
@@ -1008,11 +1010,80 @@ export default function Employees() {
                     </div>
                   )}
 
+                  {/* Send Invitations button — shown when auto-send was off and employees were created */}
+                  {!sendInvitationsOnUpload && uploadResult.created > 0 && uploadResult.employee_ids?.length > 0 && (
+                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded">
+                      {bulkInviteResult ? (
+                        <div className="flex items-center gap-3">
+                          <CheckCircle className="text-emerald-400" size={18} />
+                          <div>
+                            <p className="text-sm text-white font-medium">
+                              {bulkInviteResult.sent} invitation{bulkInviteResult.sent !== 1 ? 's' : ''} sent
+                            </p>
+                            {bulkInviteResult.failed > 0 && (
+                              <p className="text-xs text-red-400 mt-1">
+                                {bulkInviteResult.failed} failed to send
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-white font-medium">Send invitation emails?</p>
+                            <p className="text-xs text-zinc-500 mt-1">
+                              Invite {uploadResult.created} new employee{uploadResult.created !== 1 ? 's' : ''} to set up their portal accounts
+                            </p>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              setBulkInviting(true);
+                              try {
+                                const token = getAccessToken();
+                                const res = await fetch(`${API_BASE}/employees/bulk-invite`, {
+                                  method: 'POST',
+                                  headers: {
+                                    Authorization: `Bearer ${token}`,
+                                    'Content-Type': 'application/json',
+                                  },
+                                  body: JSON.stringify(uploadResult.employee_ids),
+                                });
+                                if (res.ok) {
+                                  const data = await res.json();
+                                  setBulkInviteResult({ sent: data.sent, failed: data.failed });
+                                }
+                              } catch (err) {
+                                console.error('Bulk invite failed:', err);
+                              } finally {
+                                setBulkInviting(false);
+                              }
+                            }}
+                            disabled={bulkInviting}
+                            className="flex items-center gap-2 px-4 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 shrink-0"
+                          >
+                            {bulkInviting ? (
+                              <>
+                                <span className="w-3 h-3 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                                Sending...
+                              </>
+                            ) : (
+                              <>
+                                <Mail size={14} />
+                                Send Invitations
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <button
                     onClick={() => {
                       setShowBulkUploadModal(false);
                       setUploadFile(null);
                       setUploadResult(null);
+                      setBulkInviteResult(null);
                     }}
                     className="w-full px-4 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
                   >

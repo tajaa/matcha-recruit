@@ -51,6 +51,7 @@ const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
 const Jurisdictions = lazy(() => import('./pages/admin/Jurisdictions'));
 const PosterOrders = lazy(() => import('./pages/admin/PosterOrders'));
 const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
+const CompanyProfile = lazy(() => import('./pages/CompanyProfile'));
 const BulkImport = lazy(() => import('./pages/BulkImport'));
 
 // Employee Management (Admin)
@@ -182,6 +183,16 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Company Profile (business admin) */}
+              <Route
+                path="matcha/company"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <CompanyProfile />
                   </ProtectedRoute>
                 }
               />

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar } from 'lucide-react';
+import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus } from 'lucide-react';
 import { getAccessToken } from '../api/client';
 import { OnboardingWizard } from '../components/OnboardingWizard';
 
@@ -146,6 +146,49 @@ export function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* Quick Setup — shown for new businesses with no employees and no policies */}
+      {dashStats && dashStats.total_employees === 0 && dashStats.active_policies === 0 && (
+        <div className="border border-white/10 bg-zinc-900/30 p-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 rounded bg-emerald-500/10">
+              <Activity className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-white uppercase tracking-[0.15em]">Quick Setup</h2>
+              <p className="text-xs text-zinc-500 mt-0.5">Get started by setting up your company</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <button
+              onClick={() => navigate('/app/matcha/company')}
+              className="flex items-center gap-4 p-5 border border-white/10 hover:border-white/30 hover:bg-white/5 transition-all group text-left"
+            >
+              <div className="p-2.5 bg-white/5 group-hover:bg-white/10 transition-colors">
+                <Building className="w-5 h-5 text-zinc-400 group-hover:text-white transition-colors" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm text-white font-medium group-hover:text-white transition-colors">Company Profile</div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mt-1">Set up your company info & logo</div>
+              </div>
+              <ArrowUpRight className="w-4 h-4 text-zinc-600 group-hover:text-white transition-colors" />
+            </button>
+            <button
+              onClick={() => navigate('/app/matcha/employees')}
+              className="flex items-center gap-4 p-5 border border-white/10 hover:border-white/30 hover:bg-white/5 transition-all group text-left"
+            >
+              <div className="p-2.5 bg-white/5 group-hover:bg-white/10 transition-colors">
+                <UserPlus className="w-5 h-5 text-zinc-400 group-hover:text-white transition-colors" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm text-white font-medium group-hover:text-white transition-colors">Add Employees</div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mt-1">Import your team via CSV or add manually</div>
+              </div>
+              <ArrowUpRight className="w-4 h-4 text-zinc-600 group-hover:text-white transition-colors" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Dashboard Widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

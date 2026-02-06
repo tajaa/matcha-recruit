@@ -25,6 +25,7 @@ class Company(BaseModel):
     industry: Optional[str] = None
     size: Optional[str] = None
     ir_guidance_blurb: Optional[str] = None
+    logo_url: Optional[str] = None
     created_at: datetime
 
 
@@ -41,6 +42,7 @@ class CompanyResponse(BaseModel):
     industry: Optional[str] = None
     size: Optional[str] = None
     ir_guidance_blurb: Optional[str] = None
+    logo_url: Optional[str] = None
     created_at: datetime
     culture_profile: Optional[dict[str, Any]] = None
     interview_count: int = 0
