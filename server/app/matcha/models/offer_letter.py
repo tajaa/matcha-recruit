@@ -1,13 +1,22 @@
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class OfferLetterStatus(str, Enum):
+    DRAFT = "draft"
+    SENT = "sent"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
 
 
 class OfferLetterBase(BaseModel):
-    candidate_name: str
-    position_title: str
+    candidate_name: str = Field(..., min_length=1, max_length=255)
+    position_title: str = Field(..., min_length=1, max_length=255)
     company_name: str
     company_id: Optional[UUID] = None
     salary: Optional[str] = None
@@ -46,10 +55,10 @@ class OfferLetterCreate(OfferLetterBase):
 
 
 class OfferLetterUpdate(BaseModel):
-    candidate_name: Optional[str] = None
-    position_title: Optional[str] = None
+    candidate_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    position_title: Optional[str] = Field(None, min_length=1, max_length=255)
     company_name: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[OfferLetterStatus] = None
     salary: Optional[str] = None
     bonus: Optional[str] = None
     stock_options: Optional[str] = None
@@ -83,7 +92,7 @@ class OfferLetterUpdate(BaseModel):
 
 class OfferLetter(OfferLetterBase):
     id: UUID
-    status: str
+    status: OfferLetterStatus
     created_at: datetime
     updated_at: datetime
     sent_at: Optional[datetime] = None

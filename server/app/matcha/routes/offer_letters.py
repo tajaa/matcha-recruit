@@ -1,6 +1,8 @@
+import html
 import logging
 from io import BytesIO
 from typing import List
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, File, UploadFile
@@ -15,6 +17,19 @@ from ...core.services.storage import get_storage
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Explicit allowlist of columns that can be updated via PATCH
+ALLOWED_UPDATE_COLUMNS = {
+    "candidate_name", "position_title", "company_name", "status",
+    "salary", "bonus", "stock_options", "start_date", "employment_type",
+    "location", "benefits", "manager_name", "manager_title", "expiration_date",
+    "benefits_medical", "benefits_medical_coverage", "benefits_medical_waiting_days",
+    "benefits_dental", "benefits_vision", "benefits_401k", "benefits_401k_match",
+    "benefits_wellness", "benefits_pto_vacation", "benefits_pto_sick",
+    "benefits_holidays", "benefits_other",
+    "contingency_background_check", "contingency_credit_check", "contingency_drug_screening",
+    "company_logo_url",
+}
 
 
 @router.get("", response_model=List[OfferLetter])
@@ -166,8 +181,11 @@ async def update_offer_letter(
         if not exists:
             raise HTTPException(status_code=404, detail="Offer letter not found")
 
-        # Build query dynamically
-        update_data = update.dict(exclude_unset=True)
+        # Build query dynamically (only allow whitelisted columns)
+        update_data = {
+            k: v for k, v in update.dict(exclude_unset=True).items()
+            if k in ALLOWED_UPDATE_COLUMNS
+        }
         if not update_data:
             row = await conn.fetchrow(
                 f"SELECT * FROM offer_letters WHERE id = $1 AND {company_filter}",
@@ -275,6 +293,11 @@ def _generate_contingencies_text(offer: dict) -> str:
     return base
 
 
+def _safe(value: str | None, default: str = "") -> str:
+    """HTML-escape a string value for safe embedding in templates."""
+    return html.escape(str(value)) if value else default
+
+
 def _generate_offer_letter_html(offer: dict) -> str:
     """Generate HTML for the offer letter PDF."""
     # Format dates
@@ -282,9 +305,21 @@ def _generate_offer_letter_html(offer: dict) -> str:
     start_date = offer["start_date"].strftime("%B %d, %Y") if offer.get("start_date") else "TBD"
     expiration_date = offer["expiration_date"].strftime("%B %d, %Y") if offer.get("expiration_date") else None
 
-    # Generate benefits and contingencies text
-    benefits_text = _generate_benefits_text(offer)
-    contingencies_text = _generate_contingencies_text(offer)
+    # Generate benefits and contingencies text (already plain text, escape for HTML)
+    benefits_text = _safe(_generate_benefits_text(offer))
+    contingencies_text = _safe(_generate_contingencies_text(offer))
+
+    # Escape all user-provided fields
+    company_name = _safe(offer.get("company_name"))
+    candidate_name = _safe(offer.get("candidate_name"))
+    position_title = _safe(offer.get("position_title"))
+    manager_name = _safe(offer.get("manager_name"), "the Hiring Manager")
+    manager_title = _safe(offer.get("manager_title"))
+    salary = _safe(offer.get("salary"), "TBD")
+    bonus = _safe(offer.get("bonus"), "N/A")
+    stock_options = _safe(offer.get("stock_options"), "N/A")
+    employment_type = _safe(offer.get("employment_type"), "Full-Time Exempt")
+    location = _safe(offer.get("location"), "Remote")
 
     # Accept-by clause
     accept_by_clause = ""
@@ -296,10 +331,11 @@ def _generate_offer_letter_html(offer: dict) -> str:
         </p>
         """
 
-    # Logo section
+    # Logo section — sanitize URL
     logo_html = ""
     if offer.get("company_logo_url"):
-        logo_html = f'<img src="{offer["company_logo_url"]}" alt="Company Logo" style="max-height: 60px; max-width: 200px;" />'
+        safe_url = quote(offer["company_logo_url"], safe=":/?#[]@!$&'()*+,;=")
+        logo_html = f'<img src="{safe_url}" alt="Company Logo" style="max-height: 60px; max-width: 200px;" />'
 
     html = f"""
     <!DOCTYPE html>
@@ -416,7 +452,7 @@ def _generate_offer_letter_html(offer: dict) -> str:
         <div class="header">
             <div>
                 {logo_html}
-                <div class="company-name">{offer.get('company_name', '')}</div>
+                <div class="company-name">{company_name}</div>
                 <div class="subtitle">Official Offer of Employment</div>
             </div>
             <div class="date-block">
@@ -425,16 +461,16 @@ def _generate_offer_letter_html(offer: dict) -> str:
             </div>
         </div>
 
-        <p>Dear <strong>{offer.get('candidate_name', '')}</strong>,</p>
+        <p>Dear <strong>{candidate_name}</strong>,</p>
 
         <p>
-            We are pleased to offer you the position of <strong>{offer.get('position_title', '')}</strong>
-            at <strong>{offer.get('company_name', '')}</strong>. We were very impressed with your background
+            We are pleased to offer you the position of <strong>{position_title}</strong>
+            at <strong>{company_name}</strong>. We were very impressed with your background
             and believe your skills and experience will be a valuable addition to our team.
         </p>
 
         <p>
-            Should you accept this offer, you will report to <strong>{offer.get('manager_name', 'the Hiring Manager')}</strong>{f", {offer.get('manager_title')}" if offer.get('manager_title') else ""}.
+            Should you accept this offer, you will report to <strong>{manager_name}</strong>{f", {manager_title}" if offer.get('manager_title') else ""}.
         </p>
 
         <div class="terms-grid">
@@ -442,7 +478,7 @@ def _generate_offer_letter_html(offer: dict) -> str:
             <div class="terms-row">
                 <div class="terms-item">
                     <div class="terms-label">Annual Salary</div>
-                    <div class="terms-value">{offer.get('salary', 'TBD')}</div>
+                    <div class="terms-value">{salary}</div>
                 </div>
                 <div class="terms-item">
                     <div class="terms-label">Start Date</div>
@@ -452,21 +488,21 @@ def _generate_offer_letter_html(offer: dict) -> str:
             <div class="terms-row">
                 <div class="terms-item">
                     <div class="terms-label">Bonus Potential</div>
-                    <div class="terms-value">{offer.get('bonus', 'N/A')}</div>
+                    <div class="terms-value">{bonus}</div>
                 </div>
                 <div class="terms-item">
                     <div class="terms-label">Equity / Options</div>
-                    <div class="terms-value">{offer.get('stock_options', 'N/A')}</div>
+                    <div class="terms-value">{stock_options}</div>
                 </div>
             </div>
             <div class="terms-row">
                 <div class="terms-item">
                     <div class="terms-label">Employment Type</div>
-                    <div class="terms-value">{offer.get('employment_type', 'Full-Time Exempt')}</div>
+                    <div class="terms-value">{employment_type}</div>
                 </div>
                 <div class="terms-item">
                     <div class="terms-label">Location</div>
-                    <div class="terms-value">{offer.get('location', 'Remote')}</div>
+                    <div class="terms-value">{location}</div>
                 </div>
             </div>
         </div>
@@ -493,12 +529,12 @@ def _generate_offer_letter_html(offer: dict) -> str:
         <div class="signature-section">
             <div class="signature-block">
                 <div class="signature-line"></div>
-                <div class="signature-name">{offer.get('manager_name', 'Hiring Manager')}</div>
+                <div class="signature-name">{manager_name}</div>
                 <div class="signature-title">Authorized Signature</div>
             </div>
             <div class="signature-block">
                 <div class="signature-line"></div>
-                <div class="signature-name">{offer.get('candidate_name', '')}</div>
+                <div class="signature-name">{candidate_name}</div>
                 <div class="signature-title">Candidate Acceptance</div>
             </div>
         </div>
@@ -547,7 +583,7 @@ async def download_offer_letter_pdf(
             BytesIO(pdf_bytes),
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f'attachment; filename="offer-letter-{offer["candidate_name"].replace(" ", "-")}.pdf"'
+                "Content-Disposition": f'attachment; filename="offer-letter-{(offer.get("candidate_name") or "draft").replace(" ", "-")}.pdf"'
             }
         )
     except ImportError as e:
@@ -558,11 +594,10 @@ async def download_offer_letter_pdf(
             detail="PDF generation not available. WeasyPrint library is not installed."
         )
     except Exception as e:
-        # Other PDF generation errors
-        logger.error(f"Failed to generate PDF: {e}")
+        logger.error(f"Failed to generate PDF for offer {offer_id}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to generate PDF: {str(e)}"
+            detail="Failed to generate PDF. Please try again or contact support."
         )
 
 
@@ -606,7 +641,8 @@ async def upload_offer_logo(
                 content_type=file.content_type
             )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to upload logo: {str(e)}")
+            logger.error(f"Failed to upload logo for offer {offer_id}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to upload logo. Please try again.")
 
         # Update offer letter with logo URL
         logo_filter = "(company_id = $3 OR company_id IS NULL)" if is_admin else "company_id = $3"
