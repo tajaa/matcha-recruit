@@ -50,6 +50,7 @@ const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrat
 const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
 const Jurisdictions = lazy(() => import('./pages/admin/Jurisdictions'));
 const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
+const BulkImport = lazy(() => import('./pages/BulkImport'));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -434,6 +435,15 @@ function App() {
               />
 
 
+
+              <Route
+                path="import"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <BulkImport />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Interview Prep Routes */}
               <Route
