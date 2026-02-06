@@ -24,11 +24,11 @@ def _safe(val: Optional[str]) -> str:
 
 
 CATEGORY_DISPLAY = {
-    "posting_requirements": {"label": "POSTING REQUIREMENTS", "color": "#1a3a6b"},
-    "minimum_wage": {"label": "MINIMUM WAGE", "color": "#1a5c2e"},
-    "overtime": {"label": "OVERTIME", "color": "#7c2d12"},
-    "sick_leave": {"label": "SICK LEAVE", "color": "#4a1d6b"},
-    "workers_comp": {"label": "WORKERS' COMPENSATION", "color": "#8b1a1a"},
+    "minimum_wage": {"label": "Minimum Wage", "color": "#166534"},
+    "overtime": {"label": "Overtime", "color": "#9a3412"},
+    "sick_leave": {"label": "Sick Leave", "color": "#4338ca"},
+    "workers_comp": {"label": "Workers\u2019 Compensation", "color": "#9f1239"},
+    "posting_requirements": {"label": "Posting Requirements", "color": "#475569"},
 }
 
 # Category ordering for consistent layout
@@ -46,10 +46,10 @@ def _generate_poster_html(
     state: str,
     requirements: list[dict],
 ) -> str:
-    """Build HTML for a compliance poster modeled after real DOL workplace posters.
+    """Build HTML for a clean, professional compliance poster.
 
-    Produces a dense, high-contrast, official-looking document designed to be
-    printed on letter-size paper, laminated, and posted in a breakroom.
+    Single-column layout with navy banner, muted category accents, and
+    normal-flow footer. Designed for letter-size print.
     """
     # Group requirements by category
     grouped: dict[str, list[dict]] = {}
@@ -65,7 +65,7 @@ def _generate_poster_html(
     for cat in ordered_cats:
         reqs = grouped[cat]
         display = CATEGORY_DISPLAY.get(
-            cat, {"label": cat.upper().replace("_", " "), "color": "#333"}
+            cat, {"label": cat.replace("_", " ").title(), "color": "#475569"}
         )
         color = display["color"]
         label = display["label"]
@@ -85,7 +85,7 @@ def _generate_poster_html(
 
             separator = '<hr class="item-rule">' if i > 0 else ""
 
-            # Short values (<=20 chars) go big beside the title;
+            # Short values (<=20 chars) go inline beside the title;
             # longer values get a full-width block below the title
             is_short_value = value and len(value) <= 20
             if is_short_value:
@@ -109,21 +109,17 @@ def _generate_poster_html(
 {f'<div class="item-effective">Effective {_safe(effective_str)}</div>' if effective_str else ''}
 </div>"""
 
-        panels.append(f"""<div class="panel" style="border-left-color: {color};">
-<div class="panel-header" style="background: {color};">{label}</div>
+        panels.append(f"""<div class="panel" style="border-top-color: {color};">
+<div class="panel-label" style="color: {color};">{label}</div>
 <div class="panel-body">{items_html}</div>
 </div>""")
 
-    # Use two-column layout if 3+ panels
-    use_columns = len(panels) >= 3
-    if use_columns:
-        sections_html = '<div class="grid">' + "".join(panels) + "</div>"
-    else:
-        sections_html = "".join(panels)
+    sections_html = "".join(panels)
 
     gen_date = datetime.utcnow().strftime("%B %d, %Y")
     req_count = sum(len(v) for v in grouped.values())
 
+    # jurisdiction_name already includes state (e.g. "West Hollywood, CA")
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -136,135 +132,119 @@ def _generate_poster_html(
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{
     font-family: Helvetica, Arial, sans-serif;
-    font-size: 8.5pt;
-    color: #000;
-    line-height: 1.3;
+    font-size: 9pt;
+    color: #1e293b;
+    line-height: 1.4;
     background: #fff;
 }}
 .page {{
     width: 8.5in;
     min-height: 11in;
-    padding: 0;
-    position: relative;
+    display: flex;
+    flex-direction: column;
 }}
 
-/* ── TOP BANNER ── */
+/* ── BANNER ── */
 .banner {{
-    background: #000;
+    background: #162447;
     color: #fff;
-    padding: 16px 28px 14px;
-    border-bottom: 4px solid #c00;
+    padding: 20px 32px 16px;
+    border-bottom: 2px solid #d97706;
 }}
-.banner h1 {{
-    font-size: 20pt;
-    font-weight: 900;
-    letter-spacing: 2.5px;
+.banner-label {{
+    font-size: 7pt;
+    font-weight: 600;
+    letter-spacing: 3px;
     text-transform: uppercase;
-    margin: 0 0 2px;
+    color: #94a3b8;
+    margin-bottom: 4px;
 }}
-.banner-sub {{
+.banner-main {{
     display: flex;
     justify-content: space-between;
     align-items: baseline;
 }}
 .banner-jurisdiction {{
-    font-size: 11pt;
+    font-size: 19pt;
     font-weight: 700;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
 }}
-.banner-meta {{
-    font-size: 7.5pt;
-    color: #aaa;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+.banner-count {{
+    font-size: 8pt;
+    color: #94a3b8;
+    letter-spacing: 0.5px;
 }}
 
 /* ── BODY ── */
 .body {{
-    padding: 12px 20px 8px;
-}}
-
-/* ── GRID ── */
-.grid {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}}
-.grid .panel {{
-    width: calc(50% - 5px);
-    flex-shrink: 0;
+    padding: 16px 32px 12px;
+    flex: 1;
 }}
 
 /* ── PANELS ── */
 .panel {{
-    border: 1.5px solid #000;
-    border-left: 5px solid #333;
-    margin-bottom: 10px;
+    border: 1px solid #d1d5db;
+    border-top: 3px solid #475569;
+    margin-bottom: 12px;
     page-break-inside: avoid;
 }}
-.panel-header {{
-    color: #fff;
-    font-size: 7.5pt;
-    font-weight: 900;
-    letter-spacing: 2.5px;
-    padding: 4px 10px;
+.panel-label {{
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
+    padding: 8px 14px 0;
 }}
 .panel-body {{
-    padding: 6px 10px 8px;
+    padding: 6px 14px 10px;
 }}
 
 /* ── ITEMS ── */
 .item-rule {{
     border: none;
-    border-top: 1px solid #ccc;
-    margin: 5px 0;
+    border-top: 1px solid #e5e7eb;
+    margin: 6px 0;
 }}
 .item-row {{
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 8px;
+    gap: 12px;
 }}
 .item-text {{
     flex: 1;
     min-width: 0;
 }}
 .item-title {{
-    font-size: 8.5pt;
-    font-weight: 800;
-    color: #000;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
+    font-size: 9pt;
+    font-weight: 700;
+    color: #1e293b;
     margin-bottom: 1px;
 }}
 .item-value {{
-    font-size: 16pt;
-    font-weight: 900;
-    color: #000;
+    font-size: 14pt;
+    font-weight: 800;
+    color: #0f172a;
     white-space: nowrap;
     line-height: 1.1;
-    letter-spacing: -0.5px;
     flex-shrink: 0;
-    padding-top: 0;
 }}
 .item-value-full {{
-    font-size: 13pt;
-    font-weight: 900;
-    color: #000;
-    line-height: 1.15;
-    letter-spacing: -0.3px;
+    font-size: 12pt;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.2;
     margin: 2px 0 3px;
 }}
 .item-desc {{
     font-size: 7.5pt;
-    color: #222;
-    line-height: 1.35;
-    margin-top: 1px;
+    color: #475569;
+    line-height: 1.4;
+    margin-top: 2px;
 }}
 .item-effective {{
     font-size: 6.5pt;
-    color: #555;
+    color: #64748b;
     margin-top: 2px;
     letter-spacing: 0.3px;
     text-transform: uppercase;
@@ -272,19 +252,16 @@ body {{
 
 /* ── FOOTER ── */
 .footer {{
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: #000;
-    color: #fff;
-    padding: 8px 20px;
+    border-top: 1px solid #d1d5db;
+    background: #f8fafc;
+    padding: 10px 32px;
 }}
 .footer-notice {{
-    font-size: 7.5pt;
-    font-weight: 900;
+    font-size: 7pt;
+    font-weight: 600;
     letter-spacing: 1.5px;
     text-transform: uppercase;
+    color: #475569;
     text-align: center;
     margin-bottom: 4px;
 }}
@@ -292,7 +269,7 @@ body {{
     display: flex;
     justify-content: space-between;
     font-size: 6pt;
-    color: #999;
+    color: #94a3b8;
     line-height: 1.4;
 }}
 .footer-fine-left {{
@@ -308,10 +285,10 @@ body {{
 <div class="page">
 
 <div class="banner">
-<h1>Your Rights Under the Law</h1>
-<div class="banner-sub">
-<div class="banner-jurisdiction">{_safe(jurisdiction_name)}, {_safe(state)}</div>
-<div class="banner-meta">{req_count} requirement{"s" if req_count != 1 else ""}</div>
+<div class="banner-label">Official Workplace Posting</div>
+<div class="banner-main">
+<div class="banner-jurisdiction">{_safe(jurisdiction_name)}</div>
+<div class="banner-count">{req_count} requirement{"s" if req_count != 1 else ""}</div>
 </div>
 </div>
 
