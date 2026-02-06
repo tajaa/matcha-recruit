@@ -1,46 +1,43 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../api/client';
 import type { PosterTemplate, PosterOrder, PosterOrderStatus } from '../../types';
-import { Package, Truck, CheckCircle, Clock, XCircle, ChevronDown, ChevronUp, FileText, Download, RefreshCw } from 'lucide-react';
+import { Package, Truck, CheckCircle, Clock, XCircle, ChevronDown, ChevronUp, FileText, Download, RefreshCw, MapPin, Calendar, Hash } from 'lucide-react';
 
-const STATUS_COLORS: Record<PosterOrderStatus, string> = {
-  requested: 'bg-blue-100 text-blue-700',
-  quoted: 'bg-amber-100 text-amber-700',
-  processing: 'bg-purple-100 text-purple-700',
-  shipped: 'bg-cyan-100 text-cyan-700',
-  delivered: 'bg-green-100 text-green-700',
-  cancelled: 'bg-zinc-100 text-zinc-500',
+const STATUS_CONFIG: Record<PosterOrderStatus, { color: string; icon: React.ReactNode }> = {
+  requested: { color: 'bg-blue-500/10 text-blue-400 border border-blue-500/20', icon: <Clock size={10} /> },
+  quoted: { color: 'bg-amber-500/10 text-amber-400 border border-amber-500/20', icon: <Package size={10} /> },
+  processing: { color: 'bg-purple-500/10 text-purple-400 border border-purple-500/20', icon: <Package size={10} /> },
+  shipped: { color: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20', icon: <Truck size={10} /> },
+  delivered: { color: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20', icon: <CheckCircle size={10} /> },
+  cancelled: { color: 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20', icon: <XCircle size={10} /> },
 };
 
-const STATUS_ICONS: Record<PosterOrderStatus, React.ReactNode> = {
-  requested: <Clock className="w-3.5 h-3.5" />,
-  quoted: <Package className="w-3.5 h-3.5" />,
-  processing: <Package className="w-3.5 h-3.5" />,
-  shipped: <Truck className="w-3.5 h-3.5" />,
-  delivered: <CheckCircle className="w-3.5 h-3.5" />,
-  cancelled: <XCircle className="w-3.5 h-3.5" />,
-};
-
-const TEMPLATE_STATUS_COLORS: Record<string, string> = {
-  generated: 'bg-green-100 text-green-700',
-  pending: 'bg-amber-100 text-amber-700',
-  failed: 'bg-red-100 text-red-700',
+const TEMPLATE_STATUS_CONFIG: Record<string, string> = {
+  generated: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
+  pending: 'bg-amber-500/10 text-amber-400 border border-amber-500/20',
+  failed: 'bg-red-500/10 text-red-400 border border-red-500/20',
 };
 
 const ALL_STATUSES: PosterOrderStatus[] = ['requested', 'quoted', 'processing', 'shipped', 'delivered', 'cancelled'];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  posting_requirements: 'Posting',
+  minimum_wage: 'Min Wage',
+  overtime: 'Overtime',
+  sick_leave: 'Sick Leave',
+  workers_comp: 'Workers Comp',
+};
 
 type Tab = 'templates' | 'orders';
 
 export function PosterOrders() {
   const [tab, setTab] = useState<Tab>('templates');
 
-  // Templates state
   const [templates, setTemplates] = useState<PosterTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [generatingAll, setGeneratingAll] = useState(false);
 
-  // Orders state
   const [orders, setOrders] = useState<PosterOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +117,23 @@ export function PosterOrders() {
     }
   };
 
+  const downloadPdf = async (url: string, name: string) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${name.replace(/[^a-zA-Z0-9]+/g, '_')}_poster.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(url, '_blank');
+    }
+  };
+
   const toggleExpand = (order: PosterOrder) => {
     if (expandedId === order.id) {
       setExpandedId(null);
@@ -158,128 +172,174 @@ export function PosterOrders() {
     }
   };
 
+  const generatedCount = templates.filter(t => t.status === 'generated').length;
+
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-7xl mx-auto space-y-8">
+      {/* Header */}
+      <div className="flex items-end justify-between border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-900">Compliance Posters</h1>
-          <p className="text-sm text-zinc-500 mt-1">Generated poster PDFs and print order management</p>
+          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Compliance Posters</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+            Generated poster PDFs and print order management
+          </p>
         </div>
-        {tab === 'templates' && (
-          <button
-            onClick={handleGenerateAll}
-            disabled={generatingAll}
-            className="px-4 py-2 text-sm font-medium bg-matcha-600 text-white rounded-lg hover:bg-matcha-700 disabled:opacity-50 transition-colors flex items-center gap-2"
-          >
-            <RefreshCw className={`w-4 h-4 ${generatingAll ? 'animate-spin' : ''}`} />
-            {generatingAll ? 'Generating...' : 'Generate All Missing'}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800">
+            <FileText size={14} className="text-zinc-400" />
+            <span className="text-xs font-mono text-zinc-400">{generatedCount} posters</span>
+          </div>
+          {tab === 'templates' && (
+            <button
+              onClick={handleGenerateAll}
+              disabled={generatingAll}
+              className="flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-wider bg-white text-black border border-white hover:bg-zinc-200 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw size={12} className={generatingAll ? 'animate-spin' : ''} />
+              {generatingAll ? 'Generating...' : 'Generate Missing'}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Tab switcher */}
-      <div className="flex gap-1 mb-5 border-b border-zinc-200">
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-zinc-900/50 border border-white/10 p-4">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Templates</div>
+          <div className="text-2xl font-bold font-mono text-white">{templates.length}</div>
+        </div>
+        <div className="bg-zinc-900/50 border border-white/10 p-4">
+          <div className="text-[10px] text-emerald-500 uppercase tracking-widest font-mono font-bold mb-2">Generated</div>
+          <div className="text-2xl font-bold font-mono text-emerald-400">{generatedCount}</div>
+        </div>
+        <div className="bg-zinc-900/50 border border-white/10 p-4">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Orders</div>
+          <div className="text-2xl font-bold font-mono text-white">{orders.length}</div>
+        </div>
+        <div className="bg-zinc-900/50 border border-white/10 p-4">
+          <div className="text-[10px] text-amber-500 uppercase tracking-widest font-mono font-bold mb-2">Pending</div>
+          <div className="text-2xl font-bold font-mono text-amber-400">
+            {orders.filter(o => o.status === 'requested' || o.status === 'quoted').length}
+          </div>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-0 border-b border-white/5">
         <button
           onClick={() => setTab('templates')}
-          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+          className={`px-4 py-2.5 text-[10px] uppercase tracking-[0.15em] font-mono font-bold transition-colors border-b-2 -mb-px ${
             tab === 'templates'
-              ? 'border-zinc-900 text-zinc-900'
-              : 'border-transparent text-zinc-500 hover:text-zinc-700'
+              ? 'border-white text-white'
+              : 'border-transparent text-zinc-600 hover:text-zinc-400'
           }`}
         >
-          Poster Templates ({templates.length})
+          Poster Templates
         </button>
         <button
           onClick={() => setTab('orders')}
-          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+          className={`px-4 py-2.5 text-[10px] uppercase tracking-[0.15em] font-mono font-bold transition-colors border-b-2 -mb-px ${
             tab === 'orders'
-              ? 'border-zinc-900 text-zinc-900'
-              : 'border-transparent text-zinc-500 hover:text-zinc-700'
+              ? 'border-white text-white'
+              : 'border-transparent text-zinc-600 hover:text-zinc-400'
           }`}
         >
-          Print Orders ({orders.length})
+          Print Orders
         </button>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">
+        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 underline">dismiss</button>
+          <button onClick={() => setError(null)} className="ml-3 text-red-500 hover:text-red-300 underline text-xs uppercase tracking-wider">dismiss</button>
         </div>
       )}
 
       {/* Templates tab */}
       {tab === 'templates' && (
         templatesLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse" />
+          <div className="flex items-center justify-center py-24">
+            <span className="text-zinc-600 font-mono text-sm uppercase tracking-wider animate-pulse">Loading templates...</span>
           </div>
         ) : templates.length === 0 ? (
-          <div className="text-center py-12 text-zinc-400 text-sm">
-            No poster templates yet. Templates are generated automatically when jurisdictions have requirement data.
+          <div className="text-center py-24 text-zinc-500 font-mono text-sm uppercase tracking-wider">
+            No poster templates yet
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="border border-white/10 bg-zinc-900/30">
+            {/* Table header */}
+            <div className="grid grid-cols-[1fr_120px_80px_160px_100px_80px] border-b border-white/10 bg-zinc-950">
+              <div className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Jurisdiction</div>
+              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Categories</div>
+              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Reqs</div>
+              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Generated</div>
+              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Status</div>
+              <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Actions</div>
+            </div>
+            {/* Rows */}
             {templates.map(tpl => (
-              <div key={tpl.id} className="border border-zinc-200 rounded-lg bg-white px-4 py-3 flex items-center justify-between">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded bg-zinc-100 flex items-center justify-center shrink-0">
-                    <FileText className="w-4 h-4 text-zinc-500" />
+              <div key={tpl.id} className="grid grid-cols-[1fr_120px_80px_160px_100px_80px] border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950 items-center">
+                {/* Jurisdiction */}
+                <div className="px-6 py-3 flex items-center gap-3">
+                  <div className="w-8 h-8 bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                    <MapPin size={14} className="text-zinc-400" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-zinc-900 truncate">
+                    <div className="text-sm font-medium text-white truncate">
                       {tpl.jurisdiction_name || tpl.title}
                     </div>
-                    <div className="text-xs text-zinc-500">
-                      v{tpl.version} &middot; {tpl.requirement_count} requirements
-                      {tpl.categories_included && (
-                        <span className="text-zinc-400 ml-1">
-                          ({tpl.categories_included.join(', ')})
-                        </span>
-                      )}
-                      {tpl.pdf_generated_at && (
-                        <span className="text-zinc-400 ml-2">
-                          Generated {new Date(tpl.pdf_generated_at).toLocaleDateString()}
-                        </span>
-                      )}
+                    <div className="text-[10px] text-zinc-500 font-mono">
+                      v{tpl.version}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${TEMPLATE_STATUS_COLORS[tpl.status] || 'bg-zinc-100 text-zinc-500'}`}>
+                {/* Categories */}
+                <div className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {tpl.categories_included?.map(cat => (
+                      <span key={cat} className="text-[8px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-400 uppercase tracking-wider font-mono">
+                        {CATEGORY_LABELS[cat] || cat}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                {/* Req count */}
+                <div className="px-4 py-3 text-center">
+                  <span className="text-sm font-mono text-white">{tpl.requirement_count}</span>
+                </div>
+                {/* Generated date */}
+                <div className="px-4 py-3">
+                  {tpl.pdf_generated_at && (
+                    <div className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
+                      <Calendar size={10} />
+                      {new Date(tpl.pdf_generated_at).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+                {/* Status */}
+                <div className="px-4 py-3 text-center">
+                  <span className={`inline-flex items-center px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold ${TEMPLATE_STATUS_CONFIG[tpl.status] || 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'}`}>
                     {tpl.status}
                   </span>
+                </div>
+                {/* Actions */}
+                <div className="px-4 py-3 flex items-center justify-center gap-1">
                   {tpl.pdf_url && (
                     <button
-                      onClick={async () => {
-                        try {
-                          const res = await fetch(tpl.pdf_url!);
-                          const blob = await res.blob();
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = `${(tpl.jurisdiction_name || tpl.title).replace(/[^a-zA-Z0-9]+/g, '_')}_poster.pdf`;
-                          document.body.appendChild(a);
-                          a.click();
-                          a.remove();
-                          URL.revokeObjectURL(url);
-                        } catch {
-                          window.open(tpl.pdf_url!, '_blank');
-                        }
-                      }}
-                      className="p-1.5 text-zinc-400 hover:text-zinc-700 transition-colors"
+                      onClick={() => downloadPdf(tpl.pdf_url!, tpl.jurisdiction_name || tpl.title)}
+                      className="p-1.5 text-zinc-500 hover:text-white transition-colors"
                       title="Download PDF"
                     >
-                      <Download className="w-4 h-4" />
+                      <Download size={14} />
                     </button>
                   )}
                   <button
                     onClick={() => handleRegenerate(tpl.jurisdiction_id)}
                     disabled={generatingId === tpl.jurisdiction_id}
-                    className="p-1.5 text-zinc-400 hover:text-zinc-700 transition-colors disabled:opacity-50"
+                    className="p-1.5 text-zinc-500 hover:text-white transition-colors disabled:opacity-50"
                     title="Regenerate"
                   >
-                    <RefreshCw className={`w-4 h-4 ${generatingId === tpl.jurisdiction_id ? 'animate-spin' : ''}`} />
+                    <RefreshCw size={14} className={generatingId === tpl.jurisdiction_id ? 'animate-spin' : ''} />
                   </button>
                 </div>
               </div>
@@ -291,13 +351,13 @@ export function PosterOrders() {
       {/* Orders tab */}
       {tab === 'orders' && (
         <>
-          <div className="flex gap-2 mb-4 flex-wrap">
+          <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => setStatusFilter('all')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
+              className={`px-4 py-2 text-xs uppercase tracking-wider font-bold border transition-colors ${
                 statusFilter === 'all'
-                  ? 'bg-zinc-900 text-white'
-                  : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                  ? 'bg-white text-black border-white'
+                  : 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
               }`}
             >
               All
@@ -306,10 +366,10 @@ export function PosterOrders() {
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors capitalize ${
+                className={`px-4 py-2 text-xs uppercase tracking-wider font-bold border transition-colors ${
                   statusFilter === s
-                    ? 'bg-zinc-900 text-white'
-                    : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                    ? 'bg-white text-black border-white'
+                    : 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
                 }`}
               >
                 {s}
@@ -318,102 +378,117 @@ export function PosterOrders() {
           </div>
 
           {ordersLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse" />
+            <div className="flex items-center justify-center py-24">
+              <span className="text-zinc-600 font-mono text-sm uppercase tracking-wider animate-pulse">Loading orders...</span>
             </div>
           ) : orders.length === 0 ? (
-            <div className="text-center py-12 text-zinc-400 text-sm">
+            <div className="text-center py-24 text-zinc-500 font-mono text-sm uppercase tracking-wider">
               No poster orders yet
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="border border-white/10 bg-zinc-900/30">
+              {/* Table header */}
+              <div className="grid grid-cols-[100px_1fr_120px_80px_100px_120px_40px] border-b border-white/10 bg-zinc-950">
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Company / Location</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Requested By</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">Items</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-right">Quote</div>
+                <div className="px-4 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Date</div>
+                <div className="px-4 py-4"></div>
+              </div>
               {orders.map(order => (
-                <div key={order.id} className="border border-zinc-200 rounded-lg bg-white">
+                <div key={order.id}>
                   <button
                     onClick={() => toggleExpand(order)}
-                    className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-zinc-50 transition-colors"
+                    className="w-full grid grid-cols-[100px_1fr_120px_80px_100px_120px_40px] border-b border-white/5 hover:bg-white/5 transition-colors bg-zinc-950 items-center text-left"
                   >
-                    <div className="flex items-center gap-4 min-w-0">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[order.status]}`}>
-                        {STATUS_ICONS[order.status]}
+                    <div className="px-4 py-3">
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold ${STATUS_CONFIG[order.status].color}`}>
+                        {STATUS_CONFIG[order.status].icon}
                         {order.status}
                       </span>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-zinc-900 truncate">
-                          {order.company_name}
-                        </div>
-                        <div className="text-xs text-zinc-500 truncate">
-                          {order.location_city}, {order.location_state}
-                          {order.location_name && ` (${order.location_name})`}
-                        </div>
+                    </div>
+                    <div className="px-4 py-3 min-w-0">
+                      <div className="text-sm font-medium text-white truncate">{order.company_name}</div>
+                      <div className="text-[10px] text-zinc-500 font-mono truncate">
+                        {order.location_city}, {order.location_state}
+                        {order.location_name && ` \u2014 ${order.location_name}`}
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 shrink-0">
-                      <div className="text-right">
-                        <div className="text-xs text-zinc-500">
-                          {order.items.length} item{order.items.length !== 1 ? 's' : ''}
-                        </div>
-                        {order.quote_amount != null && (
-                          <div className="text-xs font-medium text-zinc-700">
-                            ${order.quote_amount.toFixed(2)}
-                          </div>
-                        )}
-                      </div>
-                      <div className="text-xs text-zinc-400">
+                    <div className="px-4 py-3">
+                      <span className="text-xs text-zinc-400 font-mono truncate block">{order.requested_by_email || '\u2014'}</span>
+                    </div>
+                    <div className="px-4 py-3 text-center">
+                      <span className="text-sm font-mono text-white">{order.items.length}</span>
+                    </div>
+                    <div className="px-4 py-3 text-right">
+                      <span className="text-sm font-mono text-white">
+                        {order.quote_amount != null ? `$${order.quote_amount.toFixed(2)}` : '\u2014'}
+                      </span>
+                    </div>
+                    <div className="px-4 py-3">
+                      <span className="text-xs text-zinc-400 font-mono">
                         {order.created_at ? new Date(order.created_at).toLocaleDateString() : ''}
-                      </div>
-                      {expandedId === order.id ? (
-                        <ChevronUp className="w-4 h-4 text-zinc-400" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4 text-zinc-400" />
-                      )}
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex justify-center">
+                      {expandedId === order.id
+                        ? <ChevronUp size={14} className="text-zinc-500" />
+                        : <ChevronDown size={14} className="text-zinc-500" />
+                      }
                     </div>
                   </button>
 
                   {expandedId === order.id && (
-                    <div className="px-4 pb-4 border-t border-zinc-100 pt-3 space-y-4">
+                    <div className="border-t border-white/5 bg-zinc-950/50 px-6 py-5 space-y-5">
+                      {/* Items */}
                       <div>
-                        <div className="text-xs font-medium text-zinc-500 mb-1">Items</div>
+                        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Order Items</div>
                         <div className="space-y-1">
                           {order.items.map(item => (
-                            <div key={item.id} className="flex justify-between text-sm">
-                              <span className="text-zinc-700">{item.template_title || item.jurisdiction_name}</span>
-                              <span className="text-zinc-500">x{item.quantity}</span>
+                            <div key={item.id} className="flex justify-between text-sm py-1 border-b border-white/5 last:border-0">
+                              <span className="text-zinc-300 font-mono">{item.template_title || item.jurisdiction_name}</span>
+                              <span className="text-zinc-500 font-mono flex items-center gap-1"><Hash size={10} />{item.quantity}</span>
                             </div>
                           ))}
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                      {/* Details grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div>
-                          <span className="text-zinc-500">Requested by</span>
-                          <div className="text-zinc-800 font-medium">{order.requested_by_email || '\u2014'}</div>
-                        </div>
-                        <div>
-                          <span className="text-zinc-500">Ship to</span>
-                          <div className="text-zinc-800 font-medium">{order.shipping_address || '\u2014'}</div>
+                          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-1">Ship To</div>
+                          <div className="text-sm text-zinc-300 font-mono">{order.shipping_address || '\u2014'}</div>
                         </div>
                         {order.tracking_number && (
                           <div>
-                            <span className="text-zinc-500">Tracking</span>
-                            <div className="text-zinc-800 font-medium">{order.tracking_number}</div>
+                            <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-1">Tracking</div>
+                            <div className="text-sm text-zinc-300 font-mono">{order.tracking_number}</div>
                           </div>
                         )}
                         {order.shipped_at && (
                           <div>
-                            <span className="text-zinc-500">Shipped</span>
-                            <div className="text-zinc-800 font-medium">{new Date(order.shipped_at).toLocaleDateString()}</div>
+                            <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-1">Shipped</div>
+                            <div className="text-sm text-zinc-300 font-mono">{new Date(order.shipped_at).toLocaleDateString()}</div>
+                          </div>
+                        )}
+                        {order.delivered_at && (
+                          <div>
+                            <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-1">Delivered</div>
+                            <div className="text-sm text-zinc-300 font-mono">{new Date(order.delivered_at).toLocaleDateString()}</div>
                           </div>
                         )}
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {/* Edit form */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-white/5">
                         <div>
-                          <label className="block text-xs font-medium text-zinc-500 mb-1">Status</label>
+                          <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Status</label>
                           <select
                             value={editStatus}
                             onChange={e => setEditStatus(e.target.value as PosterOrderStatus)}
-                            className="w-full text-sm border border-zinc-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-matcha-500"
+                            className="w-full text-sm bg-zinc-950 border border-zinc-800 text-white px-3 py-2 font-mono focus:outline-none focus:border-zinc-600"
                           >
                             {ALL_STATUSES.map(s => (
                               <option key={s} value={s}>{s}</option>
@@ -421,34 +496,34 @@ export function PosterOrders() {
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-zinc-500 mb-1">Quote ($)</label>
+                          <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Quote ($)</label>
                           <input
                             type="number"
                             step="0.01"
                             value={editQuote}
                             onChange={e => setEditQuote(e.target.value)}
                             placeholder="0.00"
-                            className="w-full text-sm border border-zinc-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-matcha-500"
+                            className="w-full text-sm bg-zinc-950 border border-zinc-800 text-white px-3 py-2 font-mono focus:outline-none focus:border-zinc-600"
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-zinc-500 mb-1">Tracking Number</label>
+                          <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Tracking Number</label>
                           <input
                             type="text"
                             value={editTracking}
                             onChange={e => setEditTracking(e.target.value)}
                             placeholder="e.g. 1Z999AA..."
-                            className="w-full text-sm border border-zinc-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-matcha-500"
+                            className="w-full text-sm bg-zinc-950 border border-zinc-800 text-white px-3 py-2 font-mono focus:outline-none focus:border-zinc-600"
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-zinc-500 mb-1">Admin Notes</label>
+                          <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Admin Notes</label>
                           <input
                             type="text"
                             value={editNotes}
                             onChange={e => setEditNotes(e.target.value)}
                             placeholder="Internal notes..."
-                            className="w-full text-sm border border-zinc-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-matcha-500"
+                            className="w-full text-sm bg-zinc-950 border border-zinc-800 text-white px-3 py-2 font-mono focus:outline-none focus:border-zinc-600"
                           />
                         </div>
                       </div>
@@ -457,7 +532,7 @@ export function PosterOrders() {
                         <button
                           onClick={() => handleSave(order.id)}
                           disabled={saving}
-                          className="px-4 py-1.5 text-sm font-medium bg-matcha-600 text-white rounded hover:bg-matcha-700 disabled:opacity-50 transition-colors"
+                          className="px-5 py-2 text-[10px] font-bold uppercase tracking-wider bg-white text-black border border-white hover:bg-zinc-200 disabled:opacity-50 transition-colors"
                         >
                           {saving ? 'Saving...' : 'Save Changes'}
                         </button>

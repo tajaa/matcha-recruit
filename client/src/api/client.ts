@@ -110,7 +110,6 @@ import type {
     BlogCommentCreate,
     CommentStatus,
   // Poster types
-  PosterTemplate,
   PosterTemplateListResponse,
   PosterOrder,
   PosterOrderListResponse,
