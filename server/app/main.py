@@ -76,7 +76,7 @@ app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])
 
 
 # Serve locally-uploaded files (logos, resumes, etc.) when S3 is not configured
-_uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
+_uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(_uploads_dir, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=_uploads_dir), name="uploads")
 
