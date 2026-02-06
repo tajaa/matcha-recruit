@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Request
 
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
@@ -28,6 +28,7 @@ from ..models.er_case import (
     ERCaseUpdate,
     ERCaseResponse,
     ERCaseListResponse,
+    ERCaseStatus,
     ERDocumentResponse,
     ERDocumentUploadResponse,
     TimelineAnalysis,
@@ -46,6 +47,8 @@ from ..models.er_case import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 
 
 # ===========================================
@@ -165,7 +168,7 @@ async def create_case(
 
 @router.get("", response_model=ERCaseListResponse)
 async def list_cases(
-    status: Optional[str] = None,
+    status: Optional[ERCaseStatus] = None,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List ER cases scoped to the user's company."""
@@ -458,6 +461,12 @@ async def upload_document(
     file_bytes = await file.read()
     file_size = len(file_bytes)
 
+    if file_size > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
+        )
+
     # Upload to storage
     storage = get_storage()
     file_path = await storage.upload_file(
@@ -535,7 +544,7 @@ async def upload_document(
                     """UPDATE er_case_documents
                        SET processing_status = 'failed', processing_error = $1
                        WHERE id = $2""",
-                    str(sync_error),
+                    "Document processing failed",
                     row["id"],
                 )
                 # Refresh document data after failure
@@ -735,13 +744,13 @@ async def reprocess_document(
                     """UPDATE er_case_documents
                        SET processing_status = 'failed', processing_error = $1
                        WHERE id = $2""",
-                    str(sync_error),
+                    "Document reprocessing failed",
                     doc_id,
                 )
             return TaskStatusResponse(
                 task_id=None,
                 status="failed",
-                message=f"Reprocessing failed: {str(sync_error)}",
+                message="Reprocessing failed",
             )
 
 
@@ -795,10 +804,10 @@ async def reprocess_all_documents(
                 logger.error(f"Failed to reprocess document {doc_id}: {e}", exc_info=True)
                 await conn.execute(
                     "UPDATE er_case_documents SET processing_status = 'failed', processing_error = $1 WHERE id = $2",
-                    str(e),
+                    "Document processing failed",
                     doc_id,
                 )
-                results.append({"id": str(doc_id), "filename": doc["filename"], "status": "failed", "error": str(e)})
+                results.append({"id": str(doc_id), "filename": doc["filename"], "status": "failed"})
 
         await log_audit(
             conn,
@@ -933,7 +942,7 @@ async def generate_timeline(
             )
         except Exception as sync_error:
             logger.error(f"Timeline analysis failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Timeline analysis failed: {str(sync_error)}")
+            raise HTTPException(status_code=500, detail="Timeline analysis failed")
 
 
 @router.get("/{case_id}/analysis/timeline")
@@ -1044,7 +1053,7 @@ async def generate_discrepancies(
             )
         except Exception as sync_error:
             logger.error(f"Discrepancy analysis failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Discrepancy analysis failed: {str(sync_error)}")
+            raise HTTPException(status_code=500, detail="Discrepancy analysis failed")
 
 
 @router.get("/{case_id}/analysis/discrepancies")
@@ -1158,7 +1167,7 @@ async def run_policy_check(
             )
         except Exception as sync_error:
             logger.error(f"Policy check failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Policy check failed: {str(sync_error)}")
+            raise HTTPException(status_code=500, detail="Policy check failed")
 
 
 @router.get("/{case_id}/analysis/policy-check")
@@ -1322,7 +1331,7 @@ async def generate_summary_report(
             )
         except Exception as sync_error:
             logger.error(f"Summary report generation failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Summary report generation failed: {str(sync_error)}")
+            raise HTTPException(status_code=500, detail="Summary report generation failed")
 
 
 @router.post("/{case_id}/reports/determination", response_model=TaskStatusResponse)
@@ -1405,7 +1414,7 @@ async def generate_determination_letter(
             )
         except Exception as sync_error:
             logger.error(f"Determination letter generation failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Determination letter generation failed: {str(sync_error)}")
+            raise HTTPException(status_code=500, detail="Determination letter generation failed")
 
 
 @router.get("/{case_id}/reports/{report_type}")
@@ -1441,11 +1450,19 @@ async def get_report(
         if not row:
             raise HTTPException(status_code=404, detail=f"{report_type.title()} report not found.")
 
+        analysis_data = row["analysis_data"]
+        if isinstance(analysis_data, str):
+            analysis_data = json.loads(analysis_data)
+
+        source_docs = row["source_documents"]
+        if isinstance(source_docs, str):
+            source_docs = json.loads(source_docs)
+
         return {
             "report_type": report_type,
-            "content": row["analysis_data"].get("content", ""),
+            "content": analysis_data.get("content", ""),
             "generated_at": row["generated_at"],
-            "source_documents": row["source_documents"],
+            "source_documents": source_docs,
         }
 
 
@@ -1456,8 +1473,8 @@ async def get_report(
 @router.get("/{case_id}/audit-log", response_model=AuditLogResponse)
 async def get_audit_log(
     case_id: UUID,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get audit log for a case."""

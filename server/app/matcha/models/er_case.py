@@ -23,13 +23,13 @@ ViolationSeverity = Literal["major", "minor"]
 class ERCaseCreate(BaseModel):
     """Request model for creating a new ER case."""
     title: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: Optional[str] = Field(None, max_length=5000)
 
 
 class ERCaseUpdate(BaseModel):
     """Request model for updating an ER case."""
     title: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: Optional[str] = Field(None, max_length=5000)
     status: Optional[ERCaseStatus] = None
     assigned_to: Optional[UUID] = None
 
@@ -226,7 +226,7 @@ class ReportResponse(BaseModel):
 
 class TaskStatusResponse(BaseModel):
     """Response for async task status."""
-    task_id: str
+    task_id: Optional[str] = None
     status: str
     message: str
 
