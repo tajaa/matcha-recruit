@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
-import { HelpCircle, X } from 'lucide-react';
+import { HelpCircle, X, ChevronDown } from 'lucide-react';
 import { PendingApproval } from './PendingApproval';
 
 interface NavItem {
@@ -135,7 +135,7 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: 'Employee Experience',
+    title: 'Employee XP',
     roles: ['admin', 'client'],
     items: [
       {
@@ -427,6 +427,18 @@ export function Layout() {
   const navigate = useNavigate();
   const { user, profile, logout, hasRole, hasBetaFeature, hasFeature } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
+    () => new Set(navSections.map(s => s.title))
+  );
+
+  const toggleSection = (title: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(title)) next.delete(title);
+      else next.add(title);
+      return next;
+    });
+  };
 
   // Check if client user's company is pending or rejected
   if (user?.role === 'client' && profile) {
@@ -487,7 +499,7 @@ export function Layout() {
             to={item.path}
             className={`flex-1 flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
                 ? 'text-white bg-zinc-800 border-l-2 border-white'
-                : 'text-zinc-500 hover:text-zinc-300 border-l-2 border-transparent hover:border-zinc-700'
+                : 'text-zinc-300 hover:text-white border-l-2 border-transparent hover:border-zinc-700'
               }`}
           >
             {item.icon}
@@ -552,16 +564,23 @@ export function Layout() {
               .map((section) => {
                 const visibleItems = section.items.filter(canSeeItem);
                 if (visibleItems.length === 0) return null;
+                const isCollapsed = collapsedSections.has(section.title);
                 return (
                   <div key={section.title}>
-                    <div className="px-3 mb-3 text-[9px] tracking-[0.2em] uppercase text-zinc-600 font-bold">
+                    <button
+                      onClick={() => toggleSection(section.title)}
+                      className="w-full flex items-center justify-between px-3 mb-1 text-[9px] tracking-[0.2em] uppercase text-zinc-300 font-bold hover:text-white transition-colors"
+                    >
                       {section.title}
-                    </div>
-                    <div className="space-y-1">
-                      {visibleItems.map((item) => (
-                        <NavLink key={item.path} item={item} />
-                      ))}
-                    </div>
+                      <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isCollapsed ? '-rotate-90' : ''}`} />
+                    </button>
+                    {!isCollapsed && (
+                      <div className="space-y-1 mt-1">
+                        {visibleItems.map((item) => (
+                          <NavLink key={item.path} item={item} />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
