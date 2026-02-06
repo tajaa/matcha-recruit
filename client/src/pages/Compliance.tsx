@@ -6,7 +6,8 @@ import {
     COMPLIANCE_CATEGORY_LABELS,
     JURISDICTION_LEVEL_LABELS
 } from '../api/compliance';
-import { adminOverview } from '../api/client';
+import { adminOverview, api } from '../api/client';
+import type { AvailablePoster, PosterOrder } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
     MapPin, Plus, Trash2, Edit2, X,
@@ -89,10 +90,14 @@ export function Compliance() {
     const [formData, setFormData] = useState<LocationFormData>(emptyFormData);
     const [useManualEntry, setUseManualEntry] = useState(false);
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-    const [activeTab, setActiveTab] = useState<'requirements' | 'alerts' | 'upcoming' | 'history'>('requirements');
+    const [activeTab, setActiveTab] = useState<'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters'>('requirements');
     const [checkInProgress, setCheckInProgress] = useState(false);
     const [checkMessages, setCheckMessages] = useState<{ type: string; status?: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
     const [expandedAlertSources, setExpandedAlertSources] = useState<Set<string>>(new Set());
+    const [availablePosters, setAvailablePosters] = useState<AvailablePoster[]>([]);
+    const [posterOrders, setPosterOrders] = useState<PosterOrder[]>([]);
+    const [postersLoading, setPostersLoading] = useState(false);
+    const [posterOrderLoading, setPosterOrderLoading] = useState<string | null>(null);
 
     const { data: companies } = useQuery({
         queryKey: ['admin-overview'],
@@ -117,6 +122,27 @@ export function Compliance() {
     useEffect(() => {
         setSelectedLocationId(null);
     }, [companyId]);
+
+    // Load poster data when tab becomes active
+    useEffect(() => {
+        if (activeTab !== 'posters') return;
+        const loadPosters = async () => {
+            setPostersLoading(true);
+            try {
+                const [postersData, ordersData] = await Promise.all([
+                    api.posters.getAvailable(),
+                    api.posters.listOrders(),
+                ]);
+                setAvailablePosters(postersData);
+                setPosterOrders(ordersData.orders);
+            } catch (err) {
+                console.error('Failed to load posters:', err);
+            } finally {
+                setPostersLoading(false);
+            }
+        };
+        loadPosters();
+    }, [activeTab]);
 
     const { data: requirements, isLoading: loadingRequirements } = useQuery({
         queryKey: ['compliance-requirements', selectedLocationId, companyId],
@@ -653,6 +679,17 @@ export function Compliance() {
                                     <History size={12} />
                                     Log
                                 </button>
+                                <button
+                                    onClick={() => setActiveTab('posters')}
+                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
+                                        activeTab === 'posters'
+                                            ? 'text-white border-b-2 border-white bg-zinc-900'
+                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
+                                    }`}
+                                >
+                                    <Shield size={12} />
+                                    Posters
+                                </button>
                             </div>
 
                             {selectedLocation?.has_local_ordinance === false && (
@@ -666,7 +703,153 @@ export function Compliance() {
                             )}
 
                             <div className="p-6 flex-1 bg-zinc-950 overflow-y-auto">
-                                {activeTab === 'upcoming' ? (
+                                {activeTab === 'posters' ? (
+                                    postersLoading ? (
+                                        <div className="space-y-4">
+                                            {[1, 2, 3].map(i => (
+                                                <div key={i} className="h-16 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-6">
+                                            {/* Available posters by location */}
+                                            <div>
+                                                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3">Available Posters</h3>
+                                                {availablePosters.length === 0 ? (
+                                                    <p className="text-zinc-500 text-sm">No poster templates available for your locations yet.</p>
+                                                ) : (
+                                                    <div className="space-y-2">
+                                                        {availablePosters.map(poster => (
+                                                            <div key={poster.location_id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex items-center justify-between">
+                                                                <div>
+                                                                    <div className="text-sm font-medium text-white">
+                                                                        {poster.location_city}, {poster.location_state}
+                                                                        {poster.location_name && <span className="text-zinc-500 ml-1">({poster.location_name})</span>}
+                                                                    </div>
+                                                                    {poster.template_title && (
+                                                                        <div className="text-xs text-zinc-400 mt-1">
+                                                                            {poster.template_title}
+                                                                            {poster.template_version && <span className="text-zinc-600 ml-1">v{poster.template_version}</span>}
+                                                                            {poster.categories_included && (
+                                                                                <span className="text-zinc-600 ml-2">
+                                                                                    ({poster.categories_included.join(', ')})
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    {poster.template_status === 'generated' && poster.template_id && (
+                                                                        <>
+                                                                            <button
+                                                                                onClick={async () => {
+                                                                                    try {
+                                                                                        const data = await api.posters.getPreview(poster.template_id!);
+                                                                                        window.open(data.pdf_url, '_blank');
+                                                                                    } catch (err) {
+                                                                                        console.error('Preview failed:', err);
+                                                                                    }
+                                                                                }}
+                                                                                className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded transition-colors"
+                                                                            >
+                                                                                Preview PDF
+                                                                            </button>
+                                                                            {!poster.has_active_order && (
+                                                                                <button
+                                                                                    disabled={posterOrderLoading === poster.location_id}
+                                                                                    onClick={async () => {
+                                                                                        setPosterOrderLoading(poster.location_id);
+                                                                                        try {
+                                                                                            await api.posters.createOrder({
+                                                                                                location_id: poster.location_id,
+                                                                                                template_ids: [poster.template_id!],
+                                                                                            });
+                                                                                            // Refresh poster data
+                                                                                            const [p, o] = await Promise.all([
+                                                                                                api.posters.getAvailable(),
+                                                                                                api.posters.listOrders(),
+                                                                                            ]);
+                                                                                            setAvailablePosters(p);
+                                                                                            setPosterOrders(o.orders);
+                                                                                        } catch (err) {
+                                                                                            console.error('Order failed:', err);
+                                                                                        } finally {
+                                                                                            setPosterOrderLoading(null);
+                                                                                        }
+                                                                                    }}
+                                                                                    className="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded transition-colors disabled:opacity-50"
+                                                                                >
+                                                                                    {posterOrderLoading === poster.location_id ? 'Ordering...' : 'Order Poster'}
+                                                                                </button>
+                                                                            )}
+                                                                            {poster.has_active_order && (
+                                                                                <span className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-400 rounded-full border border-blue-500/30">
+                                                                                    Order Active
+                                                                                </span>
+                                                                            )}
+                                                                        </>
+                                                                    )}
+                                                                    {poster.template_status === 'pending' && (
+                                                                        <span className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-400 rounded-full border border-amber-500/30">
+                                                                            Pending
+                                                                        </span>
+                                                                    )}
+                                                                    {!poster.template_id && (
+                                                                        <span className="text-xs text-zinc-600">No poster available</span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Order history */}
+                                            {posterOrders.length > 0 && (
+                                                <div>
+                                                    <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3">Order History</h3>
+                                                    <div className="space-y-2">
+                                                        {posterOrders.map(order => (
+                                                            <div key={order.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+                                                                <div className="flex items-center justify-between">
+                                                                    <div>
+                                                                        <div className="text-sm text-white">
+                                                                            {order.location_city}, {order.location_state}
+                                                                            {order.location_name && <span className="text-zinc-500 ml-1">({order.location_name})</span>}
+                                                                        </div>
+                                                                        <div className="text-xs text-zinc-500 mt-1">
+                                                                            {order.items.map(i => i.template_title || i.jurisdiction_name).join(', ')}
+                                                                            {' \u00b7 '}{order.created_at ? new Date(order.created_at).toLocaleDateString() : ''}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border ${
+                                                                            order.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                                                                            order.status === 'shipped' ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' :
+                                                                            order.status === 'cancelled' ? 'bg-zinc-700 text-zinc-400 border-zinc-600' :
+                                                                            'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                                                                        }`}>
+                                                                            {order.status}
+                                                                        </span>
+                                                                        {order.tracking_number && (
+                                                                            <span className="text-xs text-zinc-500">#{order.tracking_number}</span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                {order.quote_amount != null && (
+                                                                    <div className="text-xs text-zinc-500 mt-2">Quote: ${order.quote_amount.toFixed(2)}</div>
+                                                                )}
+                                                                {order.admin_notes && (
+                                                                    <div className="text-xs text-zinc-500 mt-1 italic">Note: {order.admin_notes}</div>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                ) : activeTab === 'upcoming' ? (
                                     !upcomingLegislation || upcomingLegislation.length === 0 ? (
                                         <div className="text-center py-12">
                                             <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">

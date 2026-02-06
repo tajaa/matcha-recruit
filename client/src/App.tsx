@@ -49,6 +49,7 @@ const AdminOverview = lazy(() => import('./pages/admin/AdminOverview'));
 const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
 const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
 const Jurisdictions = lazy(() => import('./pages/admin/Jurisdictions'));
+const PosterOrders = lazy(() => import('./pages/admin/PosterOrders'));
 const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
 const BulkImport = lazy(() => import('./pages/BulkImport'));
 
@@ -406,6 +407,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <Jurisdictions />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="admin/poster-orders"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <PosterOrders />
                   </ProtectedRoute>
                 }
               />

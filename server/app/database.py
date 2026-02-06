@@ -2111,6 +2111,70 @@ async def init_db():
         """)
 
         # ===========================================
+        # Compliance Poster Tables
+        # ===========================================
+
+        # Poster templates — one per jurisdiction, auto-generated PDF
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS poster_templates (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                jurisdiction_id UUID NOT NULL REFERENCES jurisdictions(id) ON DELETE CASCADE UNIQUE,
+                title VARCHAR(500) NOT NULL,
+                description TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                pdf_url TEXT,
+                pdf_generated_at TIMESTAMP,
+                categories_included TEXT[],
+                requirement_count INTEGER DEFAULT 0,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'generated', 'failed')),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        # Poster orders — company requests for printed posters
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS poster_orders (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                location_id UUID NOT NULL REFERENCES business_locations(id) ON DELETE CASCADE,
+                status VARCHAR(20) NOT NULL DEFAULT 'requested'
+                    CHECK (status IN ('requested', 'quoted', 'processing', 'shipped', 'delivered', 'cancelled')),
+                requested_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                admin_notes TEXT,
+                quote_amount NUMERIC(10, 2),
+                shipping_address TEXT,
+                tracking_number VARCHAR(100),
+                shipped_at TIMESTAMP,
+                delivered_at TIMESTAMP,
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_poster_orders_company_id ON poster_orders(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_poster_orders_status ON poster_orders(status)
+        """)
+
+        # Poster order items — links orders to templates
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS poster_order_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                order_id UUID NOT NULL REFERENCES poster_orders(id) ON DELETE CASCADE,
+                template_id UUID NOT NULL REFERENCES poster_templates(id) ON DELETE CASCADE,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_poster_order_items_order_id ON poster_order_items(order_id)
+        """)
+
+        # ===========================================
         # API Rate Limits Table (for Gemini rate limiting)
         # ===========================================
         await conn.execute("""

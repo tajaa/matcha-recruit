@@ -109,6 +109,14 @@ import type {
     BlogComment,
     BlogCommentCreate,
     CommentStatus,
+  // Poster types
+  PosterTemplate,
+  PosterTemplateListResponse,
+  PosterOrder,
+  PosterOrderListResponse,
+  PosterOrderCreate,
+  PosterOrderUpdate,
+  AvailablePoster,
   } from '../types';
 import type {
   Lead,
@@ -2057,6 +2065,59 @@ export const aiChat = {
     request<void>(`/chat/ai/conversations/${id}`, { method: 'DELETE' }),
 };
 
+// --- Poster Management ---
+
+const adminPosters = {
+  listTemplates: () =>
+    request<PosterTemplateListResponse>('/admin/posters/templates'),
+
+  generateTemplate: (jurisdictionId: string) =>
+    request<{ status: string; template_id?: string; pdf_url?: string; version?: number }>(
+      `/admin/posters/templates/${jurisdictionId}`,
+      { method: 'POST' }
+    ),
+
+  listOrders: (status?: string) => {
+    const params = status ? `?status=${status}` : '';
+    return request<PosterOrderListResponse>(`/admin/posters/orders${params}`);
+  },
+
+  getOrder: (orderId: string) =>
+    request<PosterOrder>(`/admin/posters/orders/${orderId}`),
+
+  updateOrder: (orderId: string, data: PosterOrderUpdate) =>
+    request<{ status: string; order_id: string }>(`/admin/posters/orders/${orderId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  generateAll: () =>
+    request<{ generated: number; failed: number; total_missing: number }>(
+      '/admin/posters/generate-all',
+      { method: 'POST' }
+    ),
+};
+
+const posters = {
+  getAvailable: () =>
+    request<AvailablePoster[]>('/compliance/posters/available'),
+
+  createOrder: (data: PosterOrderCreate) =>
+    request<{ id: string; status: string; created_at: string; message: string }>(
+      '/compliance/posters/orders',
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
+
+  listOrders: () =>
+    request<PosterOrderListResponse>('/compliance/posters/orders'),
+
+  getOrder: (orderId: string) =>
+    request<PosterOrder>(`/compliance/posters/orders/${orderId}`),
+
+  getPreview: (templateId: string) =>
+    request<{ pdf_url: string; title: string }>(`/compliance/posters/preview/${templateId}`),
+};
+
 // Combined API object for convenient imports
 export const api = {
   auth,
@@ -2086,4 +2147,6 @@ export const api = {
   offerLetters,
   leadsAgent,
   aiChat,
+  adminPosters,
+  posters,
 };

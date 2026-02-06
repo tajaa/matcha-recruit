@@ -1708,3 +1708,95 @@ export interface BusinessRegistrationListResponse {
   registrations: BusinessRegistration[];
   total: number;
 }
+
+// Poster types
+export type PosterTemplateStatus = 'pending' | 'generated' | 'failed';
+export type PosterOrderStatus = 'requested' | 'quoted' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+
+export interface PosterTemplate {
+  id: string;
+  jurisdiction_id: string;
+  title: string;
+  description: string | null;
+  version: number;
+  pdf_url: string | null;
+  pdf_generated_at: string | null;
+  categories_included: string[] | null;
+  requirement_count: number;
+  status: PosterTemplateStatus;
+  jurisdiction_name: string | null;
+  state: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PosterTemplateListResponse {
+  templates: PosterTemplate[];
+  total: number;
+}
+
+export interface PosterOrderItem {
+  id: string;
+  template_id: string;
+  quantity: number;
+  template_title: string | null;
+  jurisdiction_name: string | null;
+}
+
+export interface PosterOrder {
+  id: string;
+  company_id: string;
+  location_id: string;
+  status: PosterOrderStatus;
+  requested_by: string | null;
+  admin_notes: string | null;
+  quote_amount: number | null;
+  shipping_address: string | null;
+  tracking_number: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string | null;
+  updated_at: string | null;
+  company_name: string | null;
+  location_name: string | null;
+  location_city: string | null;
+  location_state: string | null;
+  requested_by_email: string | null;
+  items: PosterOrderItem[];
+}
+
+export interface PosterOrderListResponse {
+  orders: PosterOrder[];
+  total: number;
+}
+
+export interface AvailablePoster {
+  location_id: string;
+  location_name: string | null;
+  location_city: string;
+  location_state: string;
+  jurisdiction_id: string | null;
+  template_id: string | null;
+  template_title: string | null;
+  template_status: PosterTemplateStatus | null;
+  template_version: number | null;
+  pdf_url: string | null;
+  pdf_generated_at: string | null;
+  categories_included: string[] | null;
+  has_active_order: boolean;
+}
+
+export interface PosterOrderCreate {
+  location_id: string;
+  template_ids: string[];
+  quantity?: number;
+  shipping_address?: string;
+}
+
+export interface PosterOrderUpdate {
+  status?: PosterOrderStatus;
+  admin_notes?: string;
+  quote_amount?: number;
+  tracking_number?: string;
+}

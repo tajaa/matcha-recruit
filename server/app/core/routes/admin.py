@@ -951,6 +951,20 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                         except Exception as e:
                             logger.error("Failed to sync location %s: %s", loc['id'], e)
 
+                # Check if poster template needs regeneration
+                try:
+                    from ..services.poster_service import check_and_regenerate_poster, create_poster_update_alerts
+                    poster_result = await check_and_regenerate_poster(conn, jurisdiction_id)
+                    if poster_result and poster_result.get("status") == "generated":
+                        poster_ver = poster_result.get("version", "?")
+                        yield f"data: {json.dumps({'type': 'poster_updated', 'message': f'Poster PDF regenerated (v{poster_ver})'})}\n\n"
+                        alert_count = await create_poster_update_alerts(conn, jurisdiction_id)
+                        if alert_count:
+                            total_alerts += alert_count
+                            yield f"data: {json.dumps({'type': 'poster_alerts', 'message': f'Notified {alert_count} company(s) about poster update'})}\n\n"
+                except Exception as e:
+                    logger.error("Poster regeneration check failed: %s", e)
+
                 yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': total_updated, 'alerts': total_alerts})}\n\n"
         except Exception as e:
             logger.error("Jurisdiction check failed for %s: %s", jurisdiction_id, e, exc_info=True)
@@ -1249,3 +1263,275 @@ async def update_scheduler_location(location_id: UUID, request: LocationSchedule
             "auto_check_interval_days": row["auto_check_interval_days"],
             "next_auto_check": row["next_auto_check"].isoformat() if row["next_auto_check"] else None,
         }
+
+
+# ===========================================
+# Admin Poster Management
+# ===========================================
+
+def _fmt_dt(dt) -> Optional[str]:
+    return dt.isoformat() if dt else None
+
+
+@router.get("/posters/templates", dependencies=[Depends(require_admin)])
+async def list_poster_templates():
+    """List all poster templates with jurisdiction info."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT pt.*, j.city, j.state, j.county
+            FROM poster_templates pt
+            JOIN jurisdictions j ON pt.jurisdiction_id = j.id
+            ORDER BY j.state, j.city
+            """
+        )
+        templates = []
+        for r in rows:
+            j_name = f"{r['city']}, {r['state']}"
+            if r["county"]:
+                j_name = f"{r['city']}, {r['county']} County, {r['state']}"
+            templates.append({
+                "id": str(r["id"]),
+                "jurisdiction_id": str(r["jurisdiction_id"]),
+                "title": r["title"],
+                "description": r["description"],
+                "version": r["version"],
+                "pdf_url": r["pdf_url"],
+                "pdf_generated_at": _fmt_dt(r["pdf_generated_at"]),
+                "categories_included": r["categories_included"],
+                "requirement_count": r["requirement_count"],
+                "status": r["status"],
+                "jurisdiction_name": j_name,
+                "state": r["state"],
+                "created_at": _fmt_dt(r["created_at"]),
+                "updated_at": _fmt_dt(r["updated_at"]),
+            })
+        return {"templates": templates, "total": len(templates)}
+
+
+@router.post("/posters/templates/{jurisdiction_id}", dependencies=[Depends(require_admin)])
+async def generate_poster_template(jurisdiction_id: UUID):
+    """Generate or regenerate a compliance poster PDF for a jurisdiction."""
+    from ..services.poster_service import generate_poster_pdf
+
+    async with get_connection() as conn:
+        j = await conn.fetchrow("SELECT id FROM jurisdictions WHERE id = $1", jurisdiction_id)
+        if not j:
+            raise HTTPException(status_code=404, detail="Jurisdiction not found")
+
+        result = await generate_poster_pdf(conn, jurisdiction_id)
+        return result
+
+
+@router.post("/posters/generate-all", dependencies=[Depends(require_admin)])
+async def generate_all_missing_posters():
+    """Generate poster templates for all jurisdictions that have poster-worthy
+    requirement data but no template yet."""
+    from ..services.poster_service import generate_all_missing_posters as _generate_all
+
+    async with get_connection() as conn:
+        result = await _generate_all(conn)
+        return result
+
+
+@router.get("/posters/orders", dependencies=[Depends(require_admin)])
+async def list_poster_orders(
+    status_filter: Optional[str] = Query(None, alias="status"),
+):
+    """List all poster orders with optional status filter."""
+    async with get_connection() as conn:
+        query = """
+            SELECT po.*,
+                   comp.name AS company_name,
+                   bl.name AS location_name, bl.city AS location_city, bl.state AS location_state,
+                   u.email AS requested_by_email
+            FROM poster_orders po
+            JOIN companies comp ON po.company_id = comp.id
+            JOIN business_locations bl ON po.location_id = bl.id
+            LEFT JOIN users u ON po.requested_by = u.id
+        """
+        params = []
+        if status_filter:
+            query += " WHERE po.status = $1"
+            params.append(status_filter)
+        query += " ORDER BY po.created_at DESC"
+
+        rows = await conn.fetch(query, *params)
+
+        orders = []
+        for r in rows:
+            # Fetch items for this order
+            items = await conn.fetch(
+                """
+                SELECT poi.*, pt.title AS template_title,
+                       j.city || ', ' || j.state AS jurisdiction_name
+                FROM poster_order_items poi
+                JOIN poster_templates pt ON poi.template_id = pt.id
+                JOIN jurisdictions j ON pt.jurisdiction_id = j.id
+                WHERE poi.order_id = $1
+                """,
+                r["id"],
+            )
+            orders.append({
+                "id": str(r["id"]),
+                "company_id": str(r["company_id"]),
+                "location_id": str(r["location_id"]),
+                "status": r["status"],
+                "requested_by": str(r["requested_by"]) if r["requested_by"] else None,
+                "admin_notes": r["admin_notes"],
+                "quote_amount": float(r["quote_amount"]) if r["quote_amount"] else None,
+                "shipping_address": r["shipping_address"],
+                "tracking_number": r["tracking_number"],
+                "shipped_at": _fmt_dt(r["shipped_at"]),
+                "delivered_at": _fmt_dt(r["delivered_at"]),
+                "metadata": r["metadata"],
+                "created_at": _fmt_dt(r["created_at"]),
+                "updated_at": _fmt_dt(r["updated_at"]),
+                "company_name": r["company_name"],
+                "location_name": r["location_name"],
+                "location_city": r["location_city"],
+                "location_state": r["location_state"],
+                "requested_by_email": r["requested_by_email"],
+                "items": [
+                    {
+                        "id": str(i["id"]),
+                        "template_id": str(i["template_id"]),
+                        "quantity": i["quantity"],
+                        "template_title": i["template_title"],
+                        "jurisdiction_name": i["jurisdiction_name"],
+                    }
+                    for i in items
+                ],
+            })
+        return {"orders": orders, "total": len(orders)}
+
+
+@router.get("/posters/orders/{order_id}", dependencies=[Depends(require_admin)])
+async def get_poster_order(order_id: UUID):
+    """Get poster order detail."""
+    async with get_connection() as conn:
+        r = await conn.fetchrow(
+            """
+            SELECT po.*,
+                   comp.name AS company_name,
+                   bl.name AS location_name, bl.city AS location_city, bl.state AS location_state,
+                   u.email AS requested_by_email
+            FROM poster_orders po
+            JOIN companies comp ON po.company_id = comp.id
+            JOIN business_locations bl ON po.location_id = bl.id
+            LEFT JOIN users u ON po.requested_by = u.id
+            WHERE po.id = $1
+            """,
+            order_id,
+        )
+        if not r:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        items = await conn.fetch(
+            """
+            SELECT poi.*, pt.title AS template_title,
+                   j.city || ', ' || j.state AS jurisdiction_name
+            FROM poster_order_items poi
+            JOIN poster_templates pt ON poi.template_id = pt.id
+            JOIN jurisdictions j ON pt.jurisdiction_id = j.id
+            WHERE poi.order_id = $1
+            """,
+            order_id,
+        )
+        return {
+            "id": str(r["id"]),
+            "company_id": str(r["company_id"]),
+            "location_id": str(r["location_id"]),
+            "status": r["status"],
+            "requested_by": str(r["requested_by"]) if r["requested_by"] else None,
+            "admin_notes": r["admin_notes"],
+            "quote_amount": float(r["quote_amount"]) if r["quote_amount"] else None,
+            "shipping_address": r["shipping_address"],
+            "tracking_number": r["tracking_number"],
+            "shipped_at": _fmt_dt(r["shipped_at"]),
+            "delivered_at": _fmt_dt(r["delivered_at"]),
+            "metadata": r["metadata"],
+            "created_at": _fmt_dt(r["created_at"]),
+            "updated_at": _fmt_dt(r["updated_at"]),
+            "company_name": r["company_name"],
+            "location_name": r["location_name"],
+            "location_city": r["location_city"],
+            "location_state": r["location_state"],
+            "requested_by_email": r["requested_by_email"],
+            "items": [
+                {
+                    "id": str(i["id"]),
+                    "template_id": str(i["template_id"]),
+                    "quantity": i["quantity"],
+                    "template_title": i["template_title"],
+                    "jurisdiction_name": i["jurisdiction_name"],
+                }
+                for i in items
+            ],
+        }
+
+
+class PosterOrderUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    admin_notes: Optional[str] = None
+    quote_amount: Optional[float] = None
+    tracking_number: Optional[str] = None
+
+
+VALID_ORDER_STATUSES = {"requested", "quoted", "processing", "shipped", "delivered", "cancelled"}
+
+
+@router.patch("/posters/orders/{order_id}", dependencies=[Depends(require_admin)])
+async def update_poster_order(order_id: UUID, request: PosterOrderUpdateRequest):
+    """Update a poster order (status, notes, quote, tracking)."""
+    async with get_connection() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id, status FROM poster_orders WHERE id = $1", order_id,
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        updates = []
+        params = []
+        idx = 1
+
+        if request.status is not None:
+            if request.status not in VALID_ORDER_STATUSES:
+                raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
+            updates.append(f"status = ${idx}")
+            params.append(request.status)
+            idx += 1
+
+            # Auto-set timestamps
+            if request.status == "shipped":
+                updates.append(f"shipped_at = NOW()")
+            elif request.status == "delivered":
+                updates.append(f"delivered_at = NOW()")
+
+        if request.admin_notes is not None:
+            updates.append(f"admin_notes = ${idx}")
+            params.append(request.admin_notes)
+            idx += 1
+
+        if request.quote_amount is not None:
+            updates.append(f"quote_amount = ${idx}")
+            params.append(request.quote_amount)
+            idx += 1
+
+        if request.tracking_number is not None:
+            updates.append(f"tracking_number = ${idx}")
+            params.append(request.tracking_number)
+            idx += 1
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+
+        updates.append("updated_at = NOW()")
+        params.append(order_id)
+
+        await conn.execute(
+            f"UPDATE poster_orders SET {', '.join(updates)} WHERE id = ${idx}",
+            *params,
+        )
+
+        return {"status": "updated", "order_id": str(order_id)}
