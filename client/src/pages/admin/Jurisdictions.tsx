@@ -357,7 +357,10 @@ export function Jurisdictions() {
     setTriggering(taskKey);
     try {
       await adminSchedulers.trigger(taskKey);
-      setTimeout(fetchData, 2000);
+      setTimeout(() => {
+        setDetailCache({});
+        fetchData();
+      }, 2000);
     } catch {
       setError('Failed to trigger task');
     } finally {

@@ -2,13 +2,16 @@
 
 import asyncio
 import json
+import logging
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, Query, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from ...database import get_connection
 from ..dependencies import require_admin
@@ -431,9 +434,9 @@ class SchedulerUpdateRequest(BaseModel):
 
 class JurisdictionCreateRequest(BaseModel):
     """Request model for creating/upserting a jurisdiction."""
-    city: str
-    state: str
-    county: Optional[str] = None
+    city: str = Field(..., min_length=1, max_length=100)
+    state: str = Field(..., min_length=2, max_length=2)
+    county: Optional[str] = Field(None, max_length=100)
     parent_id: Optional[UUID] = None
 
 
@@ -442,6 +445,7 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
     """Create or upsert a jurisdiction. Idempotent on (city, state)."""
     city = request.city.lower().strip()
     state = request.state.upper().strip()[:2]
+    county = request.county.strip() if request.county else None
 
     if not city or not state:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="City and state are required")
@@ -472,7 +476,7 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
                     parent_id = COALESCE(EXCLUDED.parent_id, jurisdictions.parent_id),
                     county = COALESCE(EXCLUDED.county, jurisdictions.county)
                 RETURNING *
-            """, city, state, request.county, request.parent_id)
+            """, city, state, county, request.parent_id)
             await tr.commit()
         except Exception:
             await tr.rollback()
@@ -532,19 +536,26 @@ async def list_jurisdictions():
             ORDER BY j.state, j.city
         """)
 
+        # Batch-fetch all locations for all jurisdictions in one query (avoids N+1)
+        jurisdiction_ids = [row["id"] for row in rows]
+        all_locations = await conn.fetch("""
+            SELECT bl.id, bl.jurisdiction_id, bl.name, bl.city, bl.state, bl.company_id,
+                   c.name AS company_name, bl.auto_check_enabled, bl.auto_check_interval_days,
+                   bl.next_auto_check, bl.last_compliance_check
+            FROM business_locations bl
+            JOIN companies c ON c.id = bl.company_id
+            WHERE bl.jurisdiction_id = ANY($1::uuid[]) AND bl.is_active = true
+            ORDER BY c.name, bl.name
+        """, jurisdiction_ids)
+
+        # Group locations by jurisdiction_id
+        locations_by_jid: dict[UUID, list] = {}
+        for loc in all_locations:
+            locations_by_jid.setdefault(loc["jurisdiction_id"], []).append(loc)
+
         jurisdictions = []
         for row in rows:
-            # Get linked locations for this jurisdiction
-            locations = await conn.fetch("""
-                SELECT bl.id, bl.name, bl.city, bl.state, bl.company_id, c.name AS company_name,
-                       bl.auto_check_enabled, bl.auto_check_interval_days,
-                       bl.next_auto_check, bl.last_compliance_check
-                FROM business_locations bl
-                JOIN companies c ON c.id = bl.company_id
-                WHERE bl.jurisdiction_id = $1 AND bl.is_active = true
-                ORDER BY c.name, bl.name
-            """, row["id"])
-
+            locations = locations_by_jid.get(row["id"], [])
             jurisdictions.append({
                 "id": str(row["id"]),
                 "city": row["city"],
@@ -787,7 +798,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                     if j_reqs:
                         requirements = [_jurisdiction_row_to_dict(dict(r)) for r in j_reqs]
                         used_repository = True
-                        print(f"[Admin] Falling back to stale repository data ({len(requirements)} cached requirements)")
+                        logger.warning("Falling back to stale repository data (%d cached requirements)", len(requirements))
                         yield f"data: {json.dumps({'type': 'fallback', 'message': 'Using cached data (live research unavailable)'})}\n\n"
 
                 if not requirements:
@@ -833,7 +844,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                     if leg_count > 0:
                         yield f"data: {json.dumps({'type': 'legislation', 'message': f'Found {leg_count} upcoming legislative change(s)'})}\n\n"
                 except Exception as e:
-                    print(f"[Admin] Jurisdiction legislation scan error: {e}")
+                    logger.error("Jurisdiction legislation scan error: %s", e)
 
                 # Sync to all company locations linked to this jurisdiction
                 linked_locations = await conn.fetch(
@@ -894,7 +905,7 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                                             verification.confidence,
                                         )
                                     except Exception as e:
-                                        print(f"[Admin] Verification failed: {e}")
+                                        logger.error("Verification failed: %s", e)
                                         verification = VerificationResult(
                                             confirmed=False, confidence=0.0, sources=[],
                                             explanation="Verification unavailable",
@@ -931,18 +942,19 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                                         metadata={"source": "jurisdiction_sync", "verification_explanation": verification.explanation, "unverified": True},
                                     )
                                 else:
-                                    print(f"[Admin] Low confidence ({confidence:.2f}) for change: {req.get('title')}, skipping alert")
+                                    logger.warning("Low confidence (%.2f) for change: %s, skipping alert", confidence, req.get('title'))
 
                             await conn.execute(
                                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
                                 loc["id"],
                             )
                         except Exception as e:
-                            print(f"[Admin] Failed to sync location {loc['id']}: {e}")
+                            logger.error("Failed to sync location %s: %s", loc['id'], e)
 
                 yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': total_updated, 'alerts': total_alerts})}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            logger.error("Jurisdiction check failed for %s: %s", jurisdiction_id, e, exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Jurisdiction check failed'})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
