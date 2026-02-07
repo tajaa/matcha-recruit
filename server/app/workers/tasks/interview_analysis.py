@@ -65,9 +65,16 @@ async def _analyze_interview(
         screening_analysis_data = await conv_analyzer.analyze_screening_interview(
             transcript=transcript,
         )
-    else:
-        # Culture/candidate interviews: extract culture data and generate conversation analysis
+    elif interview_type == "culture":
+        # Culture interviews: extract culture data and generate conversation analysis
         culture_data = await culture_analyzer.extract_culture_from_transcript(transcript)
+        conversation_analysis_data = await conv_analyzer.analyze_interview(
+            transcript=transcript,
+            interview_type=interview_type,
+            culture_profile=culture_profile,
+        )
+    else:
+        # Candidate interviews: generate conversation analysis only
         conversation_analysis_data = await conv_analyzer.analyze_interview(
             transcript=transcript,
             interview_type=interview_type,

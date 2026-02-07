@@ -722,7 +722,7 @@ async def aggregate_culture(company_id: UUID):
             """
             SELECT raw_culture_data
             FROM interviews
-            WHERE company_id = $1 AND status = 'completed' AND raw_culture_data IS NOT NULL
+            WHERE company_id = $1 AND interview_type = 'culture' AND status = 'completed' AND raw_culture_data IS NOT NULL
             """,
             company_id,
         )
@@ -770,7 +770,7 @@ async def aggregate_culture_async(company_id: UUID):
         count = await conn.fetchval(
             """
             SELECT COUNT(*) FROM interviews
-            WHERE company_id = $1 AND status = 'completed' AND raw_culture_data IS NOT NULL
+            WHERE company_id = $1 AND interview_type = 'culture' AND status = 'completed' AND raw_culture_data IS NOT NULL
             """,
             company_id,
         )

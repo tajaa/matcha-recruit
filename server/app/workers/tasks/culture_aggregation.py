@@ -32,7 +32,7 @@ async def _aggregate_culture(company_id: str) -> dict[str, Any]:
         rows = await conn.fetch(
             """
             SELECT raw_culture_data FROM interviews
-            WHERE company_id = $1 AND status = 'completed' AND raw_culture_data IS NOT NULL
+            WHERE company_id = $1 AND interview_type = 'culture' AND status = 'completed' AND raw_culture_data IS NOT NULL
             ORDER BY created_at DESC
             """,
             company_id,
