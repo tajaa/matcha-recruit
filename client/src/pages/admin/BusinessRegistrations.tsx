@@ -120,9 +120,13 @@ export function BusinessRegistrations() {
       setInvites(prev => [invite, ...prev]);
       setInviteNote('');
       // Auto-copy the URL
-      await navigator.clipboard.writeText(invite.invite_url);
-      setCopiedToken(invite.token);
-      setTimeout(() => setCopiedToken(null), 3000);
+      try {
+        await navigator.clipboard.writeText(invite.invite_url);
+        setCopiedToken(invite.token);
+        setTimeout(() => setCopiedToken(null), 3000);
+      } catch {
+        console.warn('Clipboard write failed — invite was created but URL was not copied');
+      }
     } catch (err) {
       console.error('Failed to generate invite:', err);
       setError('Failed to generate invite link');

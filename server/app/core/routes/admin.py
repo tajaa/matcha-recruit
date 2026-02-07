@@ -451,20 +451,20 @@ async def list_business_invites():
 async def cancel_business_invite(invite_id: UUID):
     """Cancel a pending business invite link."""
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, status FROM business_invitations WHERE id = $1",
+        result = await conn.execute(
+            "UPDATE business_invitations SET status = 'cancelled' WHERE id = $1 AND status = 'pending'",
             invite_id,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="Invite not found")
+        rows_affected = int(result.split()[-1])
 
-        if row["status"] != "pending":
+        if rows_affected == 0:
+            row = await conn.fetchrow(
+                "SELECT status FROM business_invitations WHERE id = $1",
+                invite_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Invite not found")
             raise HTTPException(status_code=400, detail=f"Cannot cancel invite with status '{row['status']}'")
-
-        await conn.execute(
-            "UPDATE business_invitations SET status = 'cancelled' WHERE id = $1",
-            invite_id,
-        )
 
         return {"status": "cancelled", "message": "Invite link has been cancelled"}
 
