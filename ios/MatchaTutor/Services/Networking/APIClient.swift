@@ -41,18 +41,15 @@ struct APIErrorResponse: Codable {
 final class APIClient {
     static let shared = APIClient()
 
-    #if DEBUG
-    private let baseURL = "http://localhost:8001/api"
-    #else
-    private let baseURL = "https://api.matcha.example.com/api" // Replace with production URL
-    #endif
-
+    private let baseURL: String
     private let session: URLSession
     private let tokenManager = TokenManager.shared
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
     private init() {
+        baseURL = APIClient.resolveAPIBaseURL()
+
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 60
@@ -60,6 +57,29 @@ final class APIClient {
 
         decoder = JSONDecoder()
         encoder = JSONEncoder()
+    }
+
+    private static func resolveAPIBaseURL() -> String {
+        if let configuredValue = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String {
+            let normalizedValue = normalizeBaseURL(configuredValue)
+            if !normalizedValue.isEmpty {
+                return normalizedValue
+            }
+        }
+
+        #if DEBUG
+        return "http://localhost:8001/api"
+        #else
+        return "https://hey-matcha.com/api"
+        #endif
+    }
+
+    private static func normalizeBaseURL(_ value: String) -> String {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedValue.isEmpty else {
+            return ""
+        }
+        return trimmedValue.hasSuffix("/") ? String(trimmedValue.dropLast()) : trimmedValue
     }
 
     // MARK: - Auth Endpoints

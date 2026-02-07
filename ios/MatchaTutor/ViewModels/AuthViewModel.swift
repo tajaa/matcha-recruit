@@ -45,9 +45,16 @@ final class AuthViewModel: ObservableObject {
         do {
             let response = try await apiClient.getCurrentUser()
             state = .authenticated(response.user)
+        } catch let error as APIError {
+            // Clear stored tokens only for explicit auth failures.
+            switch error {
+            case .unauthorized, .tokenRefreshFailed:
+                tokenManager.clearTokens()
+            default:
+                break
+            }
+            state = .unauthenticated
         } catch {
-            // Token invalid, clear and set unauthenticated
-            tokenManager.clearTokens()
             state = .unauthenticated
         }
     }

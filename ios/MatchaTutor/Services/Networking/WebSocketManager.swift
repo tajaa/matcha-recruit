@@ -22,17 +22,70 @@ final class WebSocketManager: NSObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession!
     private var debugAudioSendCount = 0
-
-    #if DEBUG
-    private let baseWSURL = "ws://localhost:8001/api/ws/interview"
-    #else
-    private let baseWSURL = "wss://api.matcha.example.com/api/ws/interview"
-    #endif
+    private let baseWSURL: String
 
     override init() {
+        baseWSURL = WebSocketManager.resolveWebSocketBaseURL()
         super.init()
         let config = URLSessionConfiguration.default
         session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+    }
+
+    private static func resolveWebSocketBaseURL() -> String {
+        if let configuredValue = Bundle.main.object(forInfoDictionaryKey: "WS_BASE_URL") as? String {
+            let normalizedValue = normalizeBaseURL(configuredValue)
+            if !normalizedValue.isEmpty {
+                return normalizedValue
+            }
+        }
+
+        let apiBaseURL = resolveAPIBaseURL()
+        if var components = URLComponents(string: apiBaseURL) {
+            switch components.scheme {
+            case "https":
+                components.scheme = "wss"
+            case "http":
+                components.scheme = "ws"
+            default:
+                break
+            }
+
+            let normalizedPath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+            components.path = "\(normalizedPath)/ws/interview"
+
+            if let resolvedURL = components.url?.absoluteString {
+                return resolvedURL
+            }
+        }
+
+        #if DEBUG
+        return "ws://localhost:8001/api/ws/interview"
+        #else
+        return "wss://hey-matcha.com/api/ws/interview"
+        #endif
+    }
+
+    private static func resolveAPIBaseURL() -> String {
+        if let configuredValue = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String {
+            let normalizedValue = normalizeBaseURL(configuredValue)
+            if !normalizedValue.isEmpty {
+                return normalizedValue
+            }
+        }
+
+        #if DEBUG
+        return "http://localhost:8001/api"
+        #else
+        return "https://hey-matcha.com/api"
+        #endif
+    }
+
+    private static func normalizeBaseURL(_ value: String) -> String {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedValue.isEmpty else {
+            return ""
+        }
+        return trimmedValue.hasSuffix("/") ? String(trimmedValue.dropLast()) : trimmedValue
     }
 
     // MARK: - Connection

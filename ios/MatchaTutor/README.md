@@ -90,7 +90,11 @@ MatchaTutor/
 The app connects to different backends based on build configuration:
 
 - **Debug**: `http://localhost:8001/api` (HTTP allowed for local development)
-- **Release**: `https://api.matcha.example.com/api` (Update in `APIClient.swift`)
+- **Release**: `https://hey-matcha.com/api`
+
+Optional runtime overrides via `Info.plist`:
+- `API_BASE_URL`: Override REST API base URL
+- `WS_BASE_URL`: Override WebSocket base URL (defaults to API host + `/ws/interview`)
 
 ### Audio Protocol
 
