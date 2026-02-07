@@ -471,7 +471,9 @@ async def upload_document(
     storage = get_storage()
     file_path = await storage.upload_file(
         file_bytes,
-        f"er-documents/{case_id}/{filename}",
+        filename,
+        prefix=f"er-documents/{case_id}",
+        content_type=file.content_type,
     )
 
     # Create document record
@@ -509,9 +511,9 @@ async def upload_document(
         task_id = None
         celery_available = False
         try:
-            from ..workers.tasks.er_document_processing import process_er_document
+            from app.workers.tasks.er_document_processing import process_er_document
             # Check if Celery broker AND workers are available
-            from ..workers.celery_app import celery_app
+            from app.workers.celery_app import celery_app
             ping_responses = celery_app.control.ping(timeout=1)
             if not ping_responses:
                 raise RuntimeError("No Celery workers responded to ping")
@@ -525,7 +527,7 @@ async def upload_document(
         # Fallback: process synchronously if Celery not available
         if not celery_available:
             try:
-                from ..workers.tasks.er_document_processing import _process_document
+                from app.workers.tasks.er_document_processing import _process_document
                 logger.info(f"Starting synchronous processing for document {row['id']}")
                 result = await _process_document(str(row["id"]), str(case_id))
                 logger.info(f"Document {row['id']} processed successfully: {result}")
@@ -715,8 +717,8 @@ async def reprocess_document(
 
     # Queue for processing
     try:
-        from ..workers.tasks.er_document_processing import process_er_document
-        from ..workers.celery_app import celery_app
+        from app.workers.tasks.er_document_processing import process_er_document
+        from app.workers.celery_app import celery_app
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
@@ -730,7 +732,7 @@ async def reprocess_document(
         logger.warning(f"Celery unavailable ({e}), processing synchronously")
         # Fallback to synchronous processing
         try:
-            from ..workers.tasks.er_document_processing import _process_document
+            from app.workers.tasks.er_document_processing import _process_document
             await _process_document(str(doc_id), str(case_id))
             return TaskStatusResponse(
                 task_id=None,
@@ -797,7 +799,7 @@ async def reprocess_all_documents(
                 await conn.execute("DELETE FROM er_evidence_chunks WHERE document_id = $1", doc_id)
 
                 # Process synchronously (most reliable)
-                from ..workers.tasks.er_document_processing import _process_document
+                from app.workers.tasks.er_document_processing import _process_document
                 await _process_document(str(doc_id), str(case_id))
                 results.append({"id": str(doc_id), "filename": doc["filename"], "status": "completed"})
             except Exception as e:
