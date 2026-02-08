@@ -160,6 +160,7 @@ function App() {
             {/* Redirects for old routes */}
             <Route path="/companies/:id" element={<CompanyRedirect />} />
             <Route path="/companies" element={<Navigate to="/app" replace />} />
+            <Route path="/offer-letter" element={<Navigate to="/app/matcha/offer-letters" replace />} />
 
             {/* Interview route (needs auth but outside layout) */}
             <Route

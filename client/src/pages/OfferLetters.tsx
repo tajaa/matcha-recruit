@@ -327,7 +327,7 @@ export function OfferLetters() {
         return (
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Compensation Package</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Annual Salary</label>
                 <input 
@@ -349,7 +349,7 @@ export function OfferLetters() {
                   onChange={(e) => setFormData({...formData, bonus: e.target.value})}
                 />
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Equity / Options</label>
                 <input 
                   type="text" 
@@ -359,7 +359,7 @@ export function OfferLetters() {
                   onChange={(e) => setFormData({...formData, stock_options: e.target.value})}
                 />
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Employment Type</label>
                 <select
                     className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
@@ -431,7 +431,7 @@ export function OfferLetters() {
                     <span className="text-sm text-zinc-200">Medical insurance offered</span>
                   </label>
                   {formData.benefits_medical && (
-                    <div className="mt-3 pl-6 grid grid-cols-2 gap-3">
+                    <div className="mt-3 pl-0 sm:pl-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[10px] uppercase text-zinc-500 mb-1">Employer Coverage %</label>
                         <input
@@ -462,7 +462,7 @@ export function OfferLetters() {
                 </div>
 
                 {/* Dental & Vision */}
-                <div className="flex gap-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -521,7 +521,7 @@ export function OfferLetters() {
                 </div>
 
                 {/* PTO */}
-                <div className="flex gap-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -617,21 +617,21 @@ export function OfferLetters() {
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Review Offer</h3>
             <div className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm space-y-3">
-              <div className="flex justify-between border-b border-zinc-800 pb-2">
+              <div className="flex flex-col gap-1 border-b border-zinc-800 pb-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-zinc-500">Candidate</span>
-                <span className="font-medium text-white">{formData.candidate_name}</span>
+                <span className="font-medium text-white sm:text-right">{formData.candidate_name}</span>
               </div>
-              <div className="flex justify-between border-b border-zinc-800 pb-2">
+              <div className="flex flex-col gap-1 border-b border-zinc-800 pb-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-zinc-500">Role</span>
-                <span className="font-medium text-white">{formData.position_title}</span>
+                <span className="font-medium text-white sm:text-right">{formData.position_title}</span>
               </div>
-              <div className="flex justify-between border-b border-zinc-800 pb-2">
+              <div className="flex flex-col gap-1 border-b border-zinc-800 pb-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-zinc-500">Salary</span>
-                <span className="font-medium text-white">{formData.salary}</span>
+                <span className="font-medium text-white sm:text-right">{formData.salary}</span>
               </div>
-              <div className="flex justify-between border-b border-zinc-800 pb-2">
+              <div className="flex flex-col gap-1 border-b border-zinc-800 pb-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-zinc-500">Start Date</span>
-                <span className="font-medium text-white">{formData.start_date ? new Date(formData.start_date).toLocaleDateString() : 'TBD'}</span>
+                <span className="font-medium text-white sm:text-right">{formData.start_date ? new Date(formData.start_date).toLocaleDateString() : 'TBD'}</span>
               </div>
               <div className="pt-2">
                 <p className="text-zinc-500 mb-1 text-xs uppercase tracking-wide">Benefits</p>
@@ -646,17 +646,17 @@ export function OfferLetters() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-6xl mx-auto w-full">
       {/* Header */}
-      <div className="flex justify-between items-start mb-12 border-b border-white/10 pb-8">
+      <div className="flex flex-col gap-4 mb-8 border-b border-white/10 pb-6 sm:flex-row sm:items-start sm:justify-between sm:mb-12 sm:pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Offer Letters</h1>
+          <h1 className="text-2xl sm:text-4xl font-bold tracking-tighter text-white uppercase">Offer Letters</h1>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Manage & Generate Candidate Offers</p>
         </div>
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <button
             onClick={() => setCreateMode(createMode ? null : 'select')} // Toggle selection mode
-            className="px-6 py-2 bg-white text-black text-xs font-bold hover:bg-zinc-200 uppercase tracking-wider transition-colors"
+            className="w-full sm:w-auto px-6 py-2 bg-white text-black text-xs font-bold hover:bg-zinc-200 uppercase tracking-wider transition-colors"
           >
             Create Offer
           </button>
@@ -665,7 +665,7 @@ export function OfferLetters() {
           {createMode === 'select' && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setCreateMode(null)} />
-              <div className="absolute right-0 top-full mt-2 w-48 bg-zinc-900 border border-zinc-700 shadow-xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+              <div className="absolute left-0 right-0 top-full mt-2 sm:left-auto sm:right-0 sm:w-48 bg-zinc-900 border border-zinc-700 shadow-xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                 <button 
                   onClick={() => setCreateMode('form')}
                   className="w-full text-left px-4 py-3 hover:bg-zinc-800 transition-colors border-b border-zinc-800"
@@ -701,65 +701,94 @@ export function OfferLetters() {
           </button>
         </div>
       ) : (
-        <div className="space-y-px bg-white/10 border border-white/10">
-           {/* List Header */}
-           <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950 border-b border-white/10">
-             <div className="w-8"></div>
-             <div className="flex-1">Candidate</div>
-             <div className="w-48">Position</div>
-             <div className="w-32">Status</div>
-             <div className="w-32 text-right">Created</div>
-             <div className="w-8"></div>
-           </div>
+        <>
+          <div className="md:hidden space-y-3">
+            {offerLetters.map((letter) => (
+              <button
+                key={letter.id}
+                type="button"
+                className="w-full text-left border border-white/10 bg-zinc-950 p-4 hover:bg-zinc-900 transition-colors"
+                onClick={() => setSelectedLetter(letter)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold text-white truncate">{letter.candidate_name}</h3>
+                    <p className="text-[10px] text-zinc-500 mt-0.5 truncate">{letter.company_name}</p>
+                  </div>
+                  <span className={`shrink-0 text-[10px] font-bold ${statusColors[letter.status] || 'text-zinc-500'} uppercase tracking-wider`}>
+                    {letter.status}
+                  </span>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <p className="text-xs text-zinc-400 truncate">{letter.position_title}</p>
+                  <span className="text-[10px] text-zinc-500 font-mono shrink-0">
+                    {new Date(letter.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
 
-          {offerLetters.map((letter) => (
-            <div 
-              key={letter.id} 
-              className="group flex items-center gap-4 py-4 px-4 cursor-pointer bg-zinc-950 hover:bg-zinc-900 transition-colors"
-              onClick={() => setSelectedLetter(letter)}
-            >
-              <div className="w-8 flex justify-center">
-                 <div className={`w-1.5 h-1.5 rounded-full ${statusDotColors[letter.status] || 'bg-zinc-700'}`} />
-              </div>
-              
-              <div className="flex-1">
-                 <h3 className="text-sm font-bold text-white group-hover:text-zinc-300">
-                   {letter.candidate_name}
-                 </h3>
-                 <p className="text-[10px] text-zinc-500 mt-0.5">{letter.company_name}</p>
-              </div>
+          <div className="hidden md:block space-y-px bg-white/10 border border-white/10">
+             {/* List Header */}
+             <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950 border-b border-white/10">
+               <div className="w-8"></div>
+               <div className="flex-1">Candidate</div>
+               <div className="w-48">Position</div>
+               <div className="w-32">Status</div>
+               <div className="w-32 text-right">Created</div>
+               <div className="w-8"></div>
+             </div>
 
-              <div className="w-48 text-xs text-zinc-400">
-                 {letter.position_title}
-              </div>
+            {offerLetters.map((letter) => (
+              <div 
+                key={letter.id} 
+                className="group flex items-center gap-4 py-4 px-4 cursor-pointer bg-zinc-950 hover:bg-zinc-900 transition-colors"
+                onClick={() => setSelectedLetter(letter)}
+              >
+                <div className="w-8 flex justify-center">
+                   <div className={`w-1.5 h-1.5 rounded-full ${statusDotColors[letter.status] || 'bg-zinc-700'}`} />
+                </div>
+                
+                <div className="flex-1">
+                   <h3 className="text-sm font-bold text-white group-hover:text-zinc-300">
+                     {letter.candidate_name}
+                   </h3>
+                   <p className="text-[10px] text-zinc-500 mt-0.5">{letter.company_name}</p>
+                </div>
 
-              <div className={`w-32 text-[10px] font-bold ${statusColors[letter.status] || 'text-zinc-500'} uppercase tracking-wider`}>
-                 {letter.status}
-              </div>
+                <div className="w-48 text-xs text-zinc-400">
+                   {letter.position_title}
+                </div>
 
-              <div className="w-32 text-right text-[10px] text-zinc-500 font-mono">
-                 {new Date(letter.created_at).toLocaleDateString()}
+                <div className={`w-32 text-[10px] font-bold ${statusColors[letter.status] || 'text-zinc-500'} uppercase tracking-wider`}>
+                   {letter.status}
+                </div>
+
+                <div className="w-32 text-right text-[10px] text-zinc-500 font-mono">
+                   {new Date(letter.created_at).toLocaleDateString()}
+                </div>
+                
+                <div className="w-8 flex justify-center text-zinc-600 group-hover:text-white">
+                   <ChevronRight className="w-4 h-4" />
+                </div>
               </div>
-              
-              <div className="w-8 flex justify-center text-zinc-600 group-hover:text-white">
-                 <ChevronRight className="w-4 h-4" />
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Create Modal (Form or Wizard) */}
       {(createMode === 'form' || createMode === 'wizard') && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <div className="w-full max-w-3xl max-h-[90vh] bg-zinc-950 border border-zinc-800 shadow-2xl flex flex-col">
-               <div className="flex items-center justify-between p-6 border-b border-white/10">
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-xl font-bold text-white uppercase tracking-tight">
+         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/80 backdrop-blur-sm p-2 sm:p-4">
+            <div className="w-full max-w-3xl h-[calc(100vh-1rem)] sm:h-auto sm:max-h-[90vh] bg-zinc-950 border border-zinc-800 shadow-2xl flex flex-col">
+               <div className="flex items-start justify-between gap-3 p-4 border-b border-white/10 sm:items-center sm:p-6">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    <h2 className="text-base sm:text-xl font-bold text-white uppercase tracking-tight">
                       {createMode === 'wizard' ? `Step ${wizardStep} of 5` : 'Create Offer Letter'}
                     </h2>
                     {createMode === 'wizard' && (
-                      <div className="flex gap-1 ml-4">
+                      <div className="flex gap-1 sm:ml-4">
                         {[1, 2, 3, 4, 5].map(step => (
                           <div 
                             key={step} 
@@ -774,11 +803,11 @@ export function OfferLetters() {
                   </button>
                </div>
                
-               <div className="flex-1 overflow-y-auto p-8">
+               <div className="flex-1 overflow-y-auto p-4 sm:p-8">
                 {createMode === 'wizard' ? (
                   renderWizardStep()
                 ) : (
-                  <form className="space-y-8" id="quick-form" onSubmit={handleCreate}>
+                  <form className="space-y-6 sm:space-y-8" id="quick-form" onSubmit={handleCreate}>
                       <div className="space-y-4">
                         <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Candidate & Role</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -912,7 +941,7 @@ export function OfferLetters() {
 
                       <div className="space-y-4">
                         <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Benefits Package</h3>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formData.benefits_medical || false} onChange={(e) => setFormData({...formData, benefits_medical: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Medical insurance</span>
@@ -943,7 +972,7 @@ export function OfferLetters() {
                           </label>
                         </div>
                         {formData.benefits_medical && (
-                          <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-zinc-800">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pl-0 sm:pl-4 border-l-2 border-zinc-800">
                             <div>
                               <label className="block text-[10px] uppercase text-zinc-500 mb-1">Medical Coverage %</label>
                               <input type="number" min="0" max="100" placeholder="e.g. 80" className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formData.benefits_medical_coverage || ''} onChange={(e) => setFormData({...formData, benefits_medical_coverage: e.target.value ? parseInt(e.target.value) : undefined})} />
@@ -974,7 +1003,7 @@ export function OfferLetters() {
                       <div className="space-y-4">
                         <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Contingencies</h3>
                         <p className="text-xs text-zinc-500">I-9 verification is always required</p>
-                        <div className="flex gap-6">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-6">
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formData.contingency_background_check || false} onChange={(e) => setFormData({...formData, contingency_background_check: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Background check</span>
@@ -995,12 +1024,12 @@ export function OfferLetters() {
                         <div>
                           <input type="file" ref={logoInputRef} accept="image/*" onChange={handleLogoChange} className="hidden" />
                           {logoPreview ? (
-                            <div className="flex items-center gap-4">
+                            <div className="flex flex-wrap items-center gap-4">
                               <img src={logoPreview} alt="Logo preview" className="h-12 max-w-[150px] object-contain" />
                               <button type="button" onClick={removeLogo} className="text-xs text-red-400 hover:text-red-300">Remove</button>
                             </div>
                           ) : (
-                            <button type="button" onClick={() => logoInputRef.current?.click()} className="flex items-center gap-2 px-4 py-2 border border-dashed border-zinc-700 text-sm text-zinc-400 hover:border-white hover:text-white transition-colors">
+                            <button type="button" onClick={() => logoInputRef.current?.click()} className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-zinc-700 text-sm text-zinc-400 hover:border-white hover:text-white transition-colors">
                               <Upload size={16} />
                               Upload company logo
                             </button>
@@ -1011,28 +1040,28 @@ export function OfferLetters() {
                 )}
                </div>
 
-               <div className="flex items-center justify-between p-6 border-t border-white/10 bg-zinc-900/50">
-                  <Button variant="secondary" type="button" onClick={resetCreation} className="bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">Cancel</Button>
+               <div className="flex flex-col gap-3 p-4 border-t border-white/10 bg-zinc-900/50 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                  <Button variant="secondary" type="button" onClick={resetCreation} className="w-full sm:w-auto bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">Cancel</Button>
                   
                   {createMode === 'wizard' ? (
-                    <div className="flex gap-2">
+                    <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
                       {wizardStep > 1 && (
-                        <Button variant="secondary" onClick={() => setWizardStep(wizardStep - 1)} className="bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">
+                        <Button variant="secondary" onClick={() => setWizardStep(wizardStep - 1)} className="w-full sm:w-auto bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">
                           <ArrowLeft size={14} className="mr-2" /> Back
                         </Button>
                       )}
                       {wizardStep < 5 ? (
-                        <Button onClick={() => setWizardStep(wizardStep + 1)} className="bg-white text-black hover:bg-zinc-200">
+                        <Button onClick={() => setWizardStep(wizardStep + 1)} className="w-full sm:w-auto bg-white text-black hover:bg-zinc-200">
                           Next <ArrowRight size={14} className="ml-2" />
                         </Button>
                       ) : (
-                        <Button onClick={() => handleCreate()} disabled={isSubmitting} className="bg-white text-black hover:bg-zinc-200">
+                        <Button onClick={() => handleCreate()} disabled={isSubmitting} className="w-full sm:w-auto bg-white text-black hover:bg-zinc-200">
                           {isSubmitting ? 'Generating...' : 'Generate Offer'} <Check size={14} className="ml-2" />
                         </Button>
                       )}
                     </div>
                   ) : (
-                    <Button type="submit" form="quick-form" disabled={isSubmitting} className="bg-white text-black hover:bg-zinc-200">
+                    <Button type="submit" form="quick-form" disabled={isSubmitting} className="w-full sm:w-auto bg-white text-black hover:bg-zinc-200">
                       {isSubmitting ? 'Generating...' : 'Generate Offer'}
                     </Button>
                   )}
@@ -1043,15 +1072,15 @@ export function OfferLetters() {
 
       {/* Detail Modal (Existing View Logic) */}
       {selectedLetter && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-4xl max-h-[90vh] flex flex-col bg-zinc-900 border border-zinc-800 shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/80 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-4xl h-[calc(100vh-1rem)] sm:h-auto sm:max-h-[90vh] flex flex-col bg-zinc-900 border border-zinc-800 shadow-2xl overflow-hidden">
              {/* Modal Header */}
-             <div className="p-6 border-b border-white/10 flex items-center justify-between bg-zinc-950/50">
+             <div className="p-4 sm:p-6 border-b border-white/10 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between bg-zinc-950/50">
                 <div>
                    <h2 className="text-xl font-bold text-white tracking-tight">Offer Details</h2>
-                   <p className="text-xs text-zinc-500 mt-1 font-mono uppercase tracking-wide">{selectedLetter.id}</p>
+                   <p className="text-xs text-zinc-500 mt-1 font-mono uppercase tracking-wide break-all">{selectedLetter.id}</p>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 sm:gap-4">
                    <span className={`px-2 py-1 text-[10px] uppercase tracking-wider font-bold ${statusColors[selectedLetter.status]} bg-zinc-950 border border-white/5`}>
                       {selectedLetter.status}
                    </span>
@@ -1065,8 +1094,8 @@ export function OfferLetters() {
              </div>
 
              {/* Modal Content */}
-             <div className="flex-1 overflow-y-auto p-8 bg-zinc-950">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+             <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-zinc-950">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
                    {/* Left Sidebar: Metadata */}
                    <div className="space-y-6">
                       <div>
@@ -1092,9 +1121,9 @@ export function OfferLetters() {
 
                    {/* Right Content: Preview */}
                    <div className="lg:col-span-2">
-                      <div className="bg-white text-zinc-900 font-serif p-12 shadow-sm min-h-[600px] text-[13px] leading-relaxed">
-                         <div className="space-y-8">
-                            <div className="flex justify-between items-start border-b border-zinc-100 pb-6">
+                      <div className="bg-white text-zinc-900 font-serif p-5 sm:p-12 shadow-sm min-h-[520px] sm:min-h-[600px] text-xs sm:text-[13px] leading-relaxed">
+                         <div className="space-y-6 sm:space-y-8">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start border-b border-zinc-100 pb-6">
                               <div>
                                 {selectedLetter.company_logo_url && (
                                   <img src={selectedLetter.company_logo_url} alt="Company logo" className="h-10 max-w-[150px] object-contain mb-2" />
@@ -1102,7 +1131,7 @@ export function OfferLetters() {
                                 <h3 className="font-bold text-lg tracking-tight mb-1">{selectedLetter.company_name}</h3>
                                 <p className="text-zinc-400 font-sans text-[10px] uppercase tracking-widest">Official Offer of Employment</p>
                               </div>
-                              <div className="text-right">
+                              <div className="sm:text-right">
                                   <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Date</p>
                                   <p className="font-bold">{new Date(selectedLetter.created_at).toLocaleDateString()}</p>
                               </div>
@@ -1122,9 +1151,9 @@ export function OfferLetters() {
                               </p>
 
                               {/* Terms Grid */}
-                              <div className="bg-zinc-50 p-6 rounded border border-zinc-100 space-y-4 font-sans mt-6 mb-6">
+                              <div className="bg-zinc-50 p-4 sm:p-6 rounded border border-zinc-100 space-y-4 font-sans mt-6 mb-6">
                                 <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 border-b border-zinc-200 pb-2">Compensation & Terms</h4>
-                                <div className="grid grid-cols-2 gap-y-6 gap-x-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-6 gap-x-4">
                                   <div>
                                     <p className="text-[10px] text-zinc-400 uppercase mb-1">Annual Salary</p>
                                     <p className="font-bold text-zinc-800 text-sm">{selectedLetter.salary || 'TBD'}</p>
@@ -1187,15 +1216,15 @@ export function OfferLetters() {
                             </div>
 
                             {/* Signature Section */}
-                            <div className="mt-16 pt-8 border-t border-zinc-100 flex justify-between items-end">
+                            <div className="mt-12 sm:mt-16 pt-6 sm:pt-8 border-t border-zinc-100 flex flex-col gap-8 sm:flex-row sm:justify-between sm:items-end">
                               <div>
-                                <div className="w-48 h-px bg-zinc-300 mb-2"></div>
+                                <div className="w-full sm:w-48 h-px bg-zinc-300 mb-2"></div>
                                 <p className="font-bold text-zinc-900">{selectedLetter.manager_name || 'Hiring Manager'}</p>
                                 <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest">Authorized Signature</p>
                               </div>
-                              <div className="text-right">
+                              <div className="sm:text-right">
                                   <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Candidate Acceptance</p>
-                                  <div className="w-48 h-10 border-b border-dashed border-zinc-300 mb-1"></div>
+                                  <div className="w-full sm:w-48 h-10 border-b border-dashed border-zinc-300 mb-1"></div>
                               </div>
                             </div>
                          </div>
