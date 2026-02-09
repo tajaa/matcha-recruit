@@ -165,7 +165,27 @@ export function PolicyDetail() {
     pending: 'text-amber-600 font-medium',
     signed: 'text-emerald-600 font-medium',
     declined: 'text-rose-600 font-medium',
-    expired: 'text-zinc-400 font-medium',
+    expired: 'text-zinc-500 font-medium',
+  };
+
+  const formatSignatureDate = (value: string) =>
+    new Date(value).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+  const getSignatureMeta = (sig: PolicySignature) => {
+    if (sig.status === 'signed') {
+      return sig.signed_at ? `Signed ${formatSignatureDate(sig.signed_at)}` : 'Signed';
+    }
+    if (sig.status === 'declined') {
+      return sig.signed_at ? `Declined ${formatSignatureDate(sig.signed_at)}` : 'Declined';
+    }
+    if (sig.status === 'expired') {
+      return `Expired ${formatSignatureDate(sig.expires_at)}`;
+    }
+    return `Expires ${formatSignatureDate(sig.expires_at)}`;
   };
 
   if (loading || !policy) {
@@ -189,7 +209,7 @@ export function PolicyDetail() {
           </button>
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-[10px] text-zinc-400 font-mono tracking-wide">POLICY</span>
+              <span className="text-[10px] text-zinc-500 font-mono tracking-wide">POLICY</span>
               <span className="text-[10px] uppercase tracking-wide font-medium text-zinc-500 bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200">
                 v{policy.version}
               </span>
@@ -200,7 +220,7 @@ export function PolicyDetail() {
         <div className="flex gap-3">
           <button
             onClick={handleDelete}
-            className="text-[10px] text-zinc-400 hover:text-red-600 uppercase tracking-wider font-medium px-3 py-2 transition-colors"
+            className="text-[10px] text-zinc-500 hover:text-red-600 uppercase tracking-wider font-medium px-3 py-2 transition-colors"
           >
             Delete
           </button>
@@ -309,7 +329,7 @@ export function PolicyDetail() {
               <div className="border-b border-zinc-200 pb-2">
                 <h2 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Policy Content</h2>
               </div>
-              <div className="py-8 text-center text-zinc-400 text-xs">
+              <div className="py-8 text-center text-zinc-500 text-xs">
                 No content or document uploaded.
               </div>
             </div>
@@ -324,22 +344,22 @@ export function PolicyDetail() {
             </div>
             <div className="space-y-4">
                <div>
-                  <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Company</label>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Company</label>
                   <p className="text-sm text-zinc-900">{policy.company_name}</p>
                </div>
                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Created</label>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Created</label>
                     <p className="text-xs text-zinc-600 font-mono">{new Date(policy.created_at).toLocaleDateString()}</p>
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Status</label>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Status</label>
                     <p className="text-xs text-zinc-900 font-medium uppercase tracking-wide">{policy.status}</p>
                   </div>
                </div>
                {policy.description && (
                  <div>
-                    <label className="text-[10px] text-zinc-400 uppercase tracking-widest block mb-1">Description</label>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Description</label>
                     <p className="text-xs text-zinc-500 leading-relaxed italic">{policy.description}</p>
                  </div>
                )}
@@ -350,12 +370,12 @@ export function PolicyDetail() {
           <div className="space-y-6">
             <div className="border-b border-zinc-200 pb-2 flex items-center justify-between">
                <h2 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Signatures</h2>
-               <div className="text-[10px] font-mono text-zinc-400">{signatures.length} TOTAL</div>
+               <div className="text-[10px] font-mono text-zinc-500">{signatures.length} TOTAL</div>
             </div>
             
             <div className="space-y-1 divide-y divide-zinc-100">
                {signatures.length === 0 ? (
-                 <div className="py-8 text-center text-zinc-400 text-xs">
+                 <div className="py-8 text-center text-zinc-500 text-xs">
                     No requests sent.
                  </div>
                ) : (
@@ -364,21 +384,21 @@ export function PolicyDetail() {
                       <div className="flex items-start justify-between mb-1">
                          <div className="min-w-0 flex-1">
                             <div className="text-sm font-medium text-zinc-900 truncate">{sig.signer_name}</div>
-                            <div className="text-[10px] text-zinc-500 font-mono truncate">{sig.signer_email}</div>
+                            <div className="text-[10px] text-zinc-600 font-mono truncate">{sig.signer_email}</div>
                          </div>
                          <span className={`text-[10px] uppercase tracking-wider ${sigStatusColors[sig.status as keyof typeof sigStatusColors] || 'text-zinc-500'}`}>
                             {sig.status}
                          </span>
                       </div>
-                      <div className="flex items-center justify-between mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                         <div className="text-[9px] text-zinc-400 uppercase tracking-wide">
-                            {sig.signed_at ? `Signed ${new Date(sig.signed_at).toLocaleDateString()}` : `Expires ${new Date(sig.expires_at).toLocaleDateString()}`}
+                      <div className="flex items-center justify-between mt-2">
+                         <div className="text-[9px] text-zinc-600 uppercase tracking-wide">
+                            {getSignatureMeta(sig)}
                          </div>
-                         <div className="flex gap-3">
+                         <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
                             {sig.status === 'pending' && (
                               <>
                                 <button onClick={() => handleResendSignature(sig.id)} className="text-[9px] text-zinc-500 hover:text-zinc-900 uppercase tracking-widest font-bold">Resend</button>
-                                <button onClick={() => handleCancelSignature(sig.id)} className="text-[9px] text-zinc-400 hover:text-rose-600 uppercase tracking-widest font-bold">Cancel</button>
+                                <button onClick={() => handleCancelSignature(sig.id)} className="text-[9px] text-zinc-500 hover:text-rose-600 uppercase tracking-widest font-bold">Cancel</button>
                               </>
                             )}
                          </div>
