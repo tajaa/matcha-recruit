@@ -34,6 +34,7 @@ Update EC2 deployments by pulling latest images and restarting containers.
 
 OPTIONS:
     --matcha         Update Matcha-Recruit (ports 8002/8082)
+    --gumm-local     Update gumm-local (ports 8004/8084)
     --oceaneca       Update Oceaneca/Drooli (ports 8001/8080)
     --all            Update all apps
     --status         Show status of all containers
@@ -41,8 +42,9 @@ OPTIONS:
 
 EXAMPLES:
     $0 --matcha          # Update only Matcha
+    $0 --gumm-local      # Update only gumm-local
     $0 --oceaneca        # Update only Oceaneca
-    $0 --all             # Update both apps
+    $0 --all             # Update all apps
     $0 --status          # Check container status
 EOF
 }
@@ -89,6 +91,15 @@ update_matcha() {
     ssh_cmd "docker restart matcha-worker 2>/dev/null || true"
 
     log_success "Matcha-Recruit updated!"
+}
+
+update_gumm_local() {
+    log_info "Updating gumm-local..."
+
+    # Recreate only gumm-local containers from shared docker-compose
+    ssh_cmd "cd ~/matcha && docker-compose pull gumm-local-backend gumm-local-frontend && docker-compose up -d --no-deps gumm-local-backend gumm-local-frontend"
+
+    log_success "gumm-local updated!"
 }
 
 update_oceaneca() {
@@ -140,6 +151,7 @@ cleanup() {
 
 # Parse arguments
 UPDATE_MATCHA=false
+UPDATE_GUMM_LOCAL=false
 UPDATE_OCEANECA=false
 SHOW_STATUS=false
 
@@ -154,12 +166,17 @@ while [[ $# -gt 0 ]]; do
             UPDATE_MATCHA=true
             shift
             ;;
+        --gumm-local)
+            UPDATE_GUMM_LOCAL=true
+            shift
+            ;;
         --oceaneca)
             UPDATE_OCEANECA=true
             shift
             ;;
         --all)
             UPDATE_MATCHA=true
+            UPDATE_GUMM_LOCAL=true
             UPDATE_OCEANECA=true
             shift
             ;;
@@ -185,8 +202,8 @@ if [ "$SHOW_STATUS" = true ]; then
     exit 0
 fi
 
-if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_OCEANECA" = false ]; then
-    log_error "No app specified. Use --matcha, --oceaneca, or --all"
+if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM_LOCAL" = false ] && [ "$UPDATE_OCEANECA" = false ]; then
+    log_error "No app specified. Use --matcha, --gumm-local, --oceaneca, or --all"
     exit 1
 fi
 
@@ -196,6 +213,10 @@ pre_cleanup
 
 if [ "$UPDATE_MATCHA" = true ]; then
     update_matcha
+fi
+
+if [ "$UPDATE_GUMM_LOCAL" = true ]; then
+    update_gumm_local
 fi
 
 if [ "$UPDATE_OCEANECA" = true ]; then

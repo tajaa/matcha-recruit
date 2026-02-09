@@ -24,6 +24,8 @@ readonly BACKEND_DIR="${SCRIPT_DIR}/server"
 readonly FRONTEND_DIR="${SCRIPT_DIR}/client"
 readonly GUMMFIT_BACKEND_DIR="${SCRIPT_DIR}/gummfit-agency/server"
 readonly GUMMFIT_FRONTEND_DIR="${SCRIPT_DIR}/gummfit-agency/client"
+readonly GUMMLOCAL_BACKEND_DIR="${SCRIPT_DIR}/gumm-local/server"
+readonly GUMMLOCAL_FRONTEND_DIR="${SCRIPT_DIR}/gumm-local/client"
 
 # Default values
 PUSH_TO_ECR=true
@@ -34,6 +36,8 @@ BUILD_BACKEND=true
 BUILD_FRONTEND=true
 BUILD_GUMMFIT_BACKEND=false
 BUILD_GUMMFIT_FRONTEND=false
+BUILD_GUMMLOCAL_BACKEND=false
+BUILD_GUMMLOCAL_FRONTEND=false
 
 ################################################################################
 # Helper Functions
@@ -78,7 +82,10 @@ OPTIONS:
     --gummfit-backend      Also build the gummfit backend image
     --gummfit-frontend     Also build the gummfit frontend image
     --gummfit              Build both gummfit images (backend + frontend)
-    --all                  Build all images (matcha + gummfit)
+    --gumm-local-backend   Also build the gumm-local backend image
+    --gumm-local-frontend  Also build the gumm-local frontend image
+    --gumm-local           Build both gumm-local images (backend + frontend)
+    --all                  Build all images (matcha + gummfit + gumm-local)
     -h, --help             Show this help message
 
 ENVIRONMENT VARIABLES (required):
@@ -88,6 +95,8 @@ ENVIRONMENT VARIABLES (required):
     ECR_FRONTEND_REPO          ECR repository name for matcha frontend (default: matcha-frontend)
     ECR_GUMMFIT_BACKEND_REPO   ECR repository name for gummfit backend (default: gummfit-backend)
     ECR_GUMMFIT_FRONTEND_REPO  ECR repository name for gummfit frontend (default: gummfit-frontend)
+    ECR_GUMMLOCAL_BACKEND_REPO ECR repository name for gumm-local backend (default: gumm-local-backend)
+    ECR_GUMMLOCAL_FRONTEND_REPO ECR repository name for gumm-local frontend (default: gumm-local-frontend)
 
 EXAMPLES:
     # Build and push matcha to ECR (default)
@@ -102,7 +111,7 @@ EXAMPLES:
     # Build only the matcha backend
     $0 --backend-only
 
-    # Build all services (matcha + gummfit)
+    # Build all services (matcha + gummfit + gumm-local)
     $0 --all
 
     # Build only gummfit services
@@ -110,6 +119,9 @@ EXAMPLES:
 
     # Build gummfit backend alongside matcha
     $0 --gummfit-backend
+
+    # Build only gumm-local services
+    $0 --gumm-local
 EOF
 }
 
@@ -130,10 +142,12 @@ parse_args() {
                 shift
                 ;;
             --backend-only)
+                BUILD_BACKEND=true
                 BUILD_FRONTEND=false
                 shift
                 ;;
             --frontend-only)
+                BUILD_FRONTEND=true
                 BUILD_BACKEND=false
                 shift
                 ;;
@@ -146,8 +160,25 @@ parse_args() {
                 shift
                 ;;
             --gummfit)
+                BUILD_BACKEND=false
+                BUILD_FRONTEND=false
                 BUILD_GUMMFIT_BACKEND=true
                 BUILD_GUMMFIT_FRONTEND=true
+                shift
+                ;;
+            --gumm-local-backend)
+                BUILD_GUMMLOCAL_BACKEND=true
+                shift
+                ;;
+            --gumm-local-frontend)
+                BUILD_GUMMLOCAL_FRONTEND=true
+                shift
+                ;;
+            --gumm-local)
+                BUILD_BACKEND=false
+                BUILD_FRONTEND=false
+                BUILD_GUMMLOCAL_BACKEND=true
+                BUILD_GUMMLOCAL_FRONTEND=true
                 shift
                 ;;
             --all)
@@ -155,6 +186,8 @@ parse_args() {
                 BUILD_FRONTEND=true
                 BUILD_GUMMFIT_BACKEND=true
                 BUILD_GUMMFIT_FRONTEND=true
+                BUILD_GUMMLOCAL_BACKEND=true
+                BUILD_GUMMLOCAL_FRONTEND=true
                 shift
                 ;;
             --platform)
@@ -214,6 +247,8 @@ validate_env() {
     export ECR_FRONTEND_REPO="${ECR_FRONTEND_REPO:-matcha-frontend}"
     export ECR_GUMMFIT_BACKEND_REPO="${ECR_GUMMFIT_BACKEND_REPO:-gummfit-backend}"
     export ECR_GUMMFIT_FRONTEND_REPO="${ECR_GUMMFIT_FRONTEND_REPO:-gummfit-frontend}"
+    export ECR_GUMMLOCAL_BACKEND_REPO="${ECR_GUMMLOCAL_BACKEND_REPO:-gumm-local-backend}"
+    export ECR_GUMMLOCAL_FRONTEND_REPO="${ECR_GUMMLOCAL_FRONTEND_REPO:-gumm-local-frontend}"
 
     # Auto-fetch AWS Account ID if not set
     if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
@@ -234,6 +269,8 @@ validate_env() {
     export FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_FRONTEND_REPO}"
     export GUMMFIT_BACKEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMFIT_BACKEND_REPO}"
     export GUMMFIT_FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMFIT_FRONTEND_REPO}"
+    export GUMMLOCAL_BACKEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMLOCAL_BACKEND_REPO}"
+    export GUMMLOCAL_FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMLOCAL_FRONTEND_REPO}"
 
     log_info "Backend ECR URI: ${BACKEND_ECR_URI}"
     log_info "Frontend ECR URI: ${FRONTEND_ECR_URI}"
@@ -242,6 +279,12 @@ validate_env() {
     fi
     if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
         log_info "GumFit Frontend ECR URI: ${GUMMFIT_FRONTEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMLOCAL_BACKEND" = true ]; then
+        log_info "gumm-local Backend ECR URI: ${GUMMLOCAL_BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
+        log_info "gumm-local Frontend ECR URI: ${GUMMLOCAL_FRONTEND_ECR_URI}"
     fi
 
     log_success "Environment validation complete"
@@ -402,6 +445,24 @@ build_gummfit_frontend() {
         "${GUMMFIT_FRONTEND_ECR_URI}"
 }
 
+# Build gumm-local backend
+build_gummlocal_backend() {
+    build_image \
+        "gumm-local Backend" \
+        "${GUMMLOCAL_BACKEND_DIR}/Dockerfile" \
+        "${GUMMLOCAL_BACKEND_DIR}" \
+        "${GUMMLOCAL_BACKEND_ECR_URI}"
+}
+
+# Build gumm-local frontend
+build_gummlocal_frontend() {
+    build_image \
+        "gumm-local Frontend" \
+        "${GUMMLOCAL_FRONTEND_DIR}/Dockerfile" \
+        "${GUMMLOCAL_FRONTEND_DIR}" \
+        "${GUMMLOCAL_FRONTEND_ECR_URI}"
+}
+
 # Main execution
 main() {
     log_section "Matcha-Recruit Build & Push Script"
@@ -448,6 +509,18 @@ main() {
         services+=("GumFit Frontend")
     fi
 
+    if [ "$BUILD_GUMMLOCAL_BACKEND" = true ]; then
+        build_gummlocal_backend &
+        pids+=($!)
+        services+=("gumm-local Backend")
+    fi
+
+    if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
+        build_gummlocal_frontend &
+        pids+=($!)
+        services+=("gumm-local Frontend")
+    fi
+
     # Wait for all builds to complete
     local failed=false
     for i in "${!pids[@]}"; do
@@ -475,6 +548,12 @@ main() {
     if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
         push_image "GumFit Frontend" "${GUMMFIT_FRONTEND_ECR_URI}"
     fi
+    if [ "$BUILD_GUMMLOCAL_BACKEND" = true ]; then
+        push_image "gumm-local Backend" "${GUMMLOCAL_BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
+        push_image "gumm-local Frontend" "${GUMMLOCAL_FRONTEND_ECR_URI}"
+    fi
 
     # Deployment trigger
     if [ "$TRIGGER_DEPLOY" = true ]; then
@@ -497,6 +576,12 @@ main() {
     if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
         log_info "GumFit Frontend: ${GUMMFIT_FRONTEND_ECR_URI}:latest"
     fi
+    if [ "$BUILD_GUMMLOCAL_BACKEND" = true ]; then
+        log_info "gumm-local Backend: ${GUMMLOCAL_BACKEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
+        log_info "gumm-local Frontend: ${GUMMLOCAL_FRONTEND_ECR_URI}:latest"
+    fi
 }
 
 ################################################################################
@@ -505,8 +590,13 @@ main() {
 
 parse_args "$@"
 
-if [ "$BUILD_BACKEND" = false ] && [ "$BUILD_FRONTEND" = false ]; then
-    log_error "--backend-only and --frontend-only cannot be used together"
+if [ "$BUILD_BACKEND" = false ] && \
+   [ "$BUILD_FRONTEND" = false ] && \
+   [ "$BUILD_GUMMFIT_BACKEND" = false ] && \
+   [ "$BUILD_GUMMFIT_FRONTEND" = false ] && \
+   [ "$BUILD_GUMMLOCAL_BACKEND" = false ] && \
+   [ "$BUILD_GUMMLOCAL_FRONTEND" = false ]; then
+    log_error "No build targets selected"
     exit 1
 fi
 

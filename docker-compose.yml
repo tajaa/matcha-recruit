@@ -195,6 +195,66 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # gumm-local Backend
+  gumm-local-backend:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/gumm-local-backend:latest
+    container_name: gumm-local-backend
+    ports:
+      - "8004:8004"
+    env_file:
+      - .env.backend
+    environment:
+      - GUMM_LOCAL_PORT=8004
+    restart: unless-stopped
+    networks:
+      - matcha-network
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # gumm-local Frontend
+  gumm-local-frontend:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/gumm-local-frontend:latest
+    container_name: gumm-local-frontend
+    ports:
+      - "8084:80"
+    environment:
+      - API_URL=${GUMM_LOCAL_API_URL:-http://localhost:8004}
+      - WS_URL=${GUMM_LOCAL_WS_URL:-ws://localhost:8004}
+    depends_on:
+      gumm-local-backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - matcha-network
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   matcha-network:
     driver: bridge

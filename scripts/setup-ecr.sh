@@ -18,6 +18,8 @@ readonly NC='\033[0m'
 AWS_REGION="${AWS_REGION:-us-west-1}"
 BACKEND_REPO="matcha-backend"
 FRONTEND_REPO="matcha-frontend"
+GUMM_LOCAL_BACKEND_REPO="gumm-local-backend"
+GUMM_LOCAL_FRONTEND_REPO="gumm-local-frontend"
 
 echo -e "${BLUE}[INFO]${NC} Setting up ECR repositories in region: ${AWS_REGION}"
 
@@ -38,6 +40,24 @@ aws ecr create-repository \
     --image-scanning-configuration scanOnPush=true \
     --encryption-configuration encryptionType=AES256 \
     2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Repository ${FRONTEND_REPO} already exists"
+
+# Create gumm-local backend repository
+echo -e "${BLUE}[INFO]${NC} Creating repository: ${GUMM_LOCAL_BACKEND_REPO}"
+aws ecr create-repository \
+    --repository-name "${GUMM_LOCAL_BACKEND_REPO}" \
+    --region "${AWS_REGION}" \
+    --image-scanning-configuration scanOnPush=true \
+    --encryption-configuration encryptionType=AES256 \
+    2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Repository ${GUMM_LOCAL_BACKEND_REPO} already exists"
+
+# Create gumm-local frontend repository
+echo -e "${BLUE}[INFO]${NC} Creating repository: ${GUMM_LOCAL_FRONTEND_REPO}"
+aws ecr create-repository \
+    --repository-name "${GUMM_LOCAL_FRONTEND_REPO}" \
+    --region "${AWS_REGION}" \
+    --image-scanning-configuration scanOnPush=true \
+    --encryption-configuration encryptionType=AES256 \
+    2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Repository ${GUMM_LOCAL_FRONTEND_REPO} already exists"
 
 # Set lifecycle policy to clean up old images (keep last 10)
 LIFECYCLE_POLICY='{
@@ -71,9 +91,25 @@ aws ecr put-lifecycle-policy \
     --lifecycle-policy-text "${LIFECYCLE_POLICY}" \
     2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Failed to set lifecycle policy for ${FRONTEND_REPO}"
 
+echo -e "${BLUE}[INFO]${NC} Setting lifecycle policy for ${GUMM_LOCAL_BACKEND_REPO}"
+aws ecr put-lifecycle-policy \
+    --repository-name "${GUMM_LOCAL_BACKEND_REPO}" \
+    --region "${AWS_REGION}" \
+    --lifecycle-policy-text "${LIFECYCLE_POLICY}" \
+    2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Failed to set lifecycle policy for ${GUMM_LOCAL_BACKEND_REPO}"
+
+echo -e "${BLUE}[INFO]${NC} Setting lifecycle policy for ${GUMM_LOCAL_FRONTEND_REPO}"
+aws ecr put-lifecycle-policy \
+    --repository-name "${GUMM_LOCAL_FRONTEND_REPO}" \
+    --region "${AWS_REGION}" \
+    --lifecycle-policy-text "${LIFECYCLE_POLICY}" \
+    2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Failed to set lifecycle policy for ${GUMM_LOCAL_FRONTEND_REPO}"
+
 # Get account ID
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 echo -e "\n${GREEN}[SUCCESS]${NC} ECR repositories created!"
 echo -e "${BLUE}[INFO]${NC} Backend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${BACKEND_REPO}"
 echo -e "${BLUE}[INFO]${NC} Frontend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${FRONTEND_REPO}"
+echo -e "${BLUE}[INFO]${NC} gumm-local Backend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${GUMM_LOCAL_BACKEND_REPO}"
+echo -e "${BLUE}[INFO]${NC} gumm-local Frontend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${GUMM_LOCAL_FRONTEND_REPO}"
