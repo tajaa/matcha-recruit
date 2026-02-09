@@ -1013,15 +1013,25 @@ async def get_active_enps_surveys(
         rows = await conn.fetch(
             """
             SELECT s.* FROM enps_surveys s
-            LEFT JOIN enps_responses r ON s.id = r.survey_id AND r.employee_id = $1
-            WHERE s.org_id = $2
+            WHERE s.org_id = $1
             AND s.status = 'active'
-            AND s.start_date <= $3
-            AND s.end_date >= $3
-            AND r.id IS NULL
+            AND s.start_date <= $2
+            AND s.end_date >= $2
+            AND NOT EXISTS (
+                SELECT 1
+                FROM enps_responses r
+                WHERE r.survey_id = s.id
+                AND r.employee_id = $3
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM enps_anonymous_response_guards g
+                WHERE g.survey_id = s.id
+                AND g.employee_id = $3
+            )
             ORDER BY s.start_date DESC
             """,
-            employee["id"], employee["org_id"], today
+            employee["org_id"], today, employee["id"]
         )
 
         return [ENPSSurveyResponse(**r) for r in rows]
@@ -1038,28 +1048,27 @@ async def submit_enps_response(
     from ..services.enps_analyzer import ENPSAnalyzer
 
     async with get_connection() as conn:
+        today = date.today()
+
         # Get survey
         survey = await conn.fetchrow(
-            "SELECT * FROM enps_surveys WHERE id = $1 AND status = 'active'",
-            survey_id
+            """
+            SELECT * FROM enps_surveys
+            WHERE id = $1
+            AND org_id = $2
+            AND status = 'active'
+            AND start_date <= $3
+            AND end_date >= $3
+            """,
+            survey_id,
+            employee["org_id"],
+            today,
         )
 
         if not survey:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Survey not found or is not active"
-            )
-
-        # Check if already responded
-        existing = await conn.fetchval(
-            "SELECT id FROM enps_responses WHERE survey_id = $1 AND employee_id = $2",
-            survey_id, employee["id"]
-        )
-
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You have already responded to this survey"
+                detail="Survey not found or is not active for your organization"
             )
 
         # Determine category
@@ -1083,17 +1092,50 @@ async def submit_enps_response(
                 print(f"[eNPS] Theme extraction failed: {e}")
                 # Continue without theme analysis
 
-        # Store response (employee_id NULL if anonymous)
-        employee_id = None if survey["is_anonymous"] else employee["id"]
+        # Store response:
+        # - Named surveys use employee_id on enps_responses unique constraint.
+        # - Anonymous surveys reserve a separate one-response guard, keeping
+        #   analytics rows unlinked from employee identity.
+        async with conn.transaction():
+            if survey["is_anonymous"]:
+                guard_id = await conn.fetchval(
+                    """
+                    INSERT INTO enps_anonymous_response_guards (survey_id, employee_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (survey_id, employee_id) DO NOTHING
+                    RETURNING id
+                    """,
+                    survey_id,
+                    employee["id"],
+                )
+                if not guard_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="You have already responded to this survey"
+                    )
+                response_employee_id = None
+            else:
+                response_employee_id = employee["id"]
 
-        await conn.execute(
-            """
-            INSERT INTO enps_responses (survey_id, employee_id, score, reason, category, sentiment_analysis)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            """,
-            survey_id, employee_id, submission.score, submission.reason, category,
-            json.dumps(sentiment_result) if sentiment_result else None
-        )
+            response_id = await conn.fetchval(
+                """
+                INSERT INTO enps_responses (survey_id, employee_id, score, reason, category, sentiment_analysis)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (survey_id, employee_id) DO NOTHING
+                RETURNING id
+                """,
+                survey_id,
+                response_employee_id,
+                submission.score,
+                submission.reason,
+                category,
+                json.dumps(sentiment_result) if sentiment_result else None
+            )
+            if not response_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="You have already responded to this survey"
+                )
 
         return {"message": "Response submitted successfully", "status": "submitted"}
 
