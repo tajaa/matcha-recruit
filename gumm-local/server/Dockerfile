@@ -23,6 +23,7 @@ COPY --from=dependencies /usr/local/lib/python3.12/site-packages /usr/local/lib/
 COPY --from=dependencies /usr/local/bin /usr/local/bin
 
 RUN groupadd -r gummlocal && useradd -r -g gummlocal gummlocal
+RUN mkdir -p /app/uploads/gumm-local
 
 COPY . .
 RUN python -m compileall -q -x "test" . || true

@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import load_settings
 from .database import close_pool, init_db, init_pool
@@ -15,6 +17,7 @@ async def lifespan(app: FastAPI):
     if not settings.database_url:
         raise RuntimeError("DATABASE_URL environment variable is required")
 
+    os.makedirs(settings.upload_dir, exist_ok=True)
     await init_pool(settings.database_url)
     await init_db()
     print("[gumm-local] Database initialized")
@@ -43,6 +46,7 @@ app.add_middleware(
 )
 
 app.include_router(local_router, prefix="/api", tags=["gumm-local"])
+app.mount("/media", StaticFiles(directory=settings.upload_dir), name="media")
 
 
 @app.get("/health")

@@ -205,6 +205,8 @@ services:
       - .env.backend
     environment:
       - GUMM_LOCAL_PORT=8004
+    volumes:
+      - gumm_local_uploads:/app/uploads
     restart: unless-stopped
     networks:
       - matcha-network
@@ -266,3 +268,5 @@ volumes:
     driver: local
   matcha_postgres_data:
     external: true
+  gumm_local_uploads:
+    driver: local

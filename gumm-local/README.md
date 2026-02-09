@@ -1,6 +1,6 @@
 # gumm-local
 
-Neighborhood loyalty hub for cafes to track regulars, run reward loops (for example, buy 9 get 10 free), and mark VIP locals.
+Neighborhood loyalty hub for cafes to register a business, onboard team members, manage regular rewards, and run local email campaigns.
 
 ## Stack
 
@@ -19,6 +19,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 export DATABASE_URL="postgresql://user:password@localhost:5432/matcha"
 export GUMM_LOCAL_PORT=8004
+export GUMM_LOCAL_JWT_SECRET_KEY="replace_with_a_long_secret"
 python run.py
 ```
 
@@ -34,14 +35,53 @@ Frontend runs on `http://localhost:5176` and proxies `/api` to backend `http://l
 
 ## Core API Endpoints
 
-- `GET /api/cafes` / `POST /api/cafes`
+All business routes are bearer-token protected after registration/login.
+
+### Auth and onboarding
+- `POST /api/auth/register-business`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+
+### Business admin
+- `GET /api/business/profile`
+- `PATCH /api/business/settings`
+- `GET /api/business/team`
+- `POST /api/business/team`
+- `GET /api/business/media`
+- `POST /api/business/media` (multipart upload for images/videos)
+- `PATCH /api/business/media/{media_id}`
+- `DELETE /api/business/media/{media_id}`
+
+### Cafes, rewards, and locals
+- `GET /api/cafes` / `POST /api/cafes` / `PATCH /api/cafes/{cafe_id}`
 - `GET /api/cafes/{cafe_id}/programs` / `POST /api/cafes/{cafe_id}/programs`
+- `PATCH /api/cafes/{cafe_id}/programs/{program_id}`
 - `GET /api/cafes/{cafe_id}/locals` / `POST /api/cafes/{cafe_id}/locals`
-- `PATCH /api/cafes/{cafe_id}/locals/{local_id}` (toggle VIP and update local details)
-- `POST /api/cafes/{cafe_id}/locals/{local_id}/visits` (stamp a visit)
-- `GET /api/cafes/{cafe_id}/locals/{local_id}/progress` (reward progress)
-- `POST /api/cafes/{cafe_id}/locals/{local_id}/redeem` (redeem available reward)
-- `GET /api/cafes/{cafe_id}/dashboard` (summary metrics)
+- `PATCH /api/cafes/{cafe_id}/locals/{local_id}`
+- `POST /api/cafes/{cafe_id}/locals/{local_id}/visits`
+- `GET /api/cafes/{cafe_id}/locals/{local_id}/progress`
+- `POST /api/cafes/{cafe_id}/locals/{local_id}/redeem`
+- `GET /api/cafes/{cafe_id}/dashboard`
+
+### Email campaigns
+- `GET /api/cafes/{cafe_id}/email-campaigns`
+- `POST /api/cafes/{cafe_id}/email-campaigns`
+
+If SMTP is not configured, campaigns are recorded as `simulated` deliveries.
+
+### Optional SMTP variables
+- `GUMM_LOCAL_SMTP_HOST`
+- `GUMM_LOCAL_SMTP_PORT` (default `587`)
+- `GUMM_LOCAL_SMTP_USERNAME`
+- `GUMM_LOCAL_SMTP_PASSWORD`
+- `GUMM_LOCAL_SMTP_USE_TLS` (default `true`)
+
+### Media upload variables
+- `GUMM_LOCAL_UPLOAD_DIR` (default `./uploads/gumm-local`)
+
+### Business profile media limits
+- Images: `jpg`, `jpeg`, `png`, `webp`, `gif` up to `10MB`
+- Videos: `mp4`, `webm`, `mov` up to `25MB`
 
 ## Docker + Deploy
 
