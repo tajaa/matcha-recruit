@@ -10,17 +10,19 @@ Incident Report management for HR departments:
 import json
 import logging
 import secrets
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request, Query
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request, Query, BackgroundTasks
 
 from ...database import get_connection
 from ...core.dependencies import require_admin
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ...config import get_settings
 from ...core.services.storage import get_storage
+from ...core.services.email import get_email_service
 from ..models.ir_incident import (
     IRIncidentCreate,
     IRIncidentUpdate,
@@ -93,6 +95,93 @@ def _company_filter(is_admin: bool, param_idx: int) -> str:
     if is_admin:
         return f"(i.company_id = ${param_idx} OR i.company_id IS NULL)"
     return f"i.company_id = ${param_idx}"
+
+
+async def _get_company_admin_contacts(company_id: str) -> tuple[str, list[dict[str, str]]]:
+    """Return company display name and company-admin/client email recipients."""
+    async with get_connection() as conn:
+        company_name = await conn.fetchval(
+            "SELECT name FROM companies WHERE id = $1",
+            company_id,
+        ) or "Your company"
+
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT
+                u.email,
+                COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
+            FROM clients c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.company_id = $1
+              AND u.is_active = true
+              AND u.email IS NOT NULL
+            ORDER BY u.email
+            """,
+            company_id,
+        )
+
+    contacts = [
+        {"email": row["email"], "name": row["name"] or row["email"]}
+        for row in rows
+    ]
+    return company_name, contacts
+
+
+async def send_ir_notifications_task(
+    *,
+    company_id: str,
+    incident_id: str,
+    incident_number: str,
+    incident_title: str,
+    event_type: str,
+    current_status: str,
+    changed_by_email: Optional[str] = None,
+    previous_status: Optional[str] = None,
+    location_name: Optional[str] = None,
+    occurred_at: Optional[datetime] = None,
+):
+    """Send IR lifecycle notifications to company admins in the background."""
+    email_service = get_email_service()
+    if not email_service.is_configured():
+        logger.info("[IR] Email service not configured - skipping IR notifications")
+        return
+
+    company_name, contacts = await _get_company_admin_contacts(company_id)
+    if not contacts:
+        logger.info(f"[IR] No admin/client contacts found for company {company_id}")
+        return
+
+    tasks = [
+        email_service.send_ir_incident_notification_email(
+            to_email=contact["email"],
+            to_name=contact.get("name"),
+            company_name=company_name,
+            incident_id=incident_id,
+            incident_number=incident_number,
+            incident_title=incident_title,
+            event_type=event_type,
+            current_status=current_status,
+            changed_by_email=changed_by_email,
+            previous_status=previous_status,
+            location_name=location_name,
+            occurred_at=occurred_at,
+        )
+        for contact in contacts
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    sent_count = 0
+    for contact, result in zip(contacts, results):
+        if isinstance(result, Exception):
+            logger.warning(f"[IR] Failed to notify {contact['email']}: {result}")
+            continue
+        if result:
+            sent_count += 1
+
+    if sent_count:
+        logger.info(f"[IR] Sent {sent_count}/{len(contacts)} IR notification email(s)")
+    else:
+        logger.warning("[IR] IR notifications attempted but no emails were sent successfully")
 
 
 async def _get_incident_with_company_check(conn, incident_id: UUID, current_user, columns: str = "*"):
@@ -180,10 +269,12 @@ def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:
 async def create_incident(
     incident: IRIncidentCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user=Depends(require_admin_or_client),
 ):
     """Create a new incident report."""
     incident_number = generate_incident_number()
+    scoped_company_id = await get_client_company_id(current_user)
 
     # Ensure occurred_at is naive UTC for TIMESTAMP column
     occurred_at = incident.occurred_at
@@ -259,6 +350,22 @@ async def create_incident(
         response_row["location_name"] = location_name
         response_row["location_city"] = location_city
         response_row["location_state"] = location_state
+
+        effective_company_id = row.get("company_id") or scoped_company_id
+        if effective_company_id:
+            background_tasks.add_task(
+                send_ir_notifications_task,
+                company_id=str(effective_company_id),
+                incident_id=str(row["id"]),
+                incident_number=row["incident_number"],
+                incident_title=row["title"],
+                event_type="created",
+                current_status=row["status"],
+                changed_by_email=current_user.email,
+                previous_status=None,
+                location_name=location_name or row.get("location"),
+                occurred_at=row.get("occurred_at"),
+            )
 
         return row_to_response(response_row, 0)
 
@@ -397,6 +504,7 @@ async def update_incident(
     incident_id: UUID,
     incident: IRIncidentUpdate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user=Depends(require_admin_or_client),
 ):
     """Update an incident report."""
@@ -421,6 +529,8 @@ async def update_incident(
         params = []
         param_idx = 1
         changes = {}
+        status_changed = False
+        previous_status = existing["status"]
 
         if incident.title is not None:
             updates.append(f"title = ${param_idx}")
@@ -449,6 +559,9 @@ async def update_incident(
             updates.append(f"status = ${param_idx}")
             params.append(incident.status)
             changes["status"] = incident.status
+            if incident.status != existing["status"]:
+                status_changed = True
+                changes["previous_status"] = existing["status"]
             param_idx += 1
             # Set resolved_at if status is resolved or closed
             if incident.status in ("resolved", "closed") and existing["status"] not in ("resolved", "closed"):
@@ -556,11 +669,12 @@ async def update_incident(
                 location_state = loc["state"]
 
         # Log audit
+        audit_action = "status_changed" if status_changed else "incident_updated"
         await log_audit(
             conn,
             str(incident_id),
             str(current_user.id),
-            "incident_updated",
+            audit_action,
             "incident",
             str(incident_id),
             changes if changes else None,
@@ -573,6 +687,23 @@ async def update_incident(
         response_row["location_name"] = location_name
         response_row["location_city"] = location_city
         response_row["location_state"] = location_state
+
+        if status_changed:
+            effective_company_id = row.get("company_id") or company_id
+            if effective_company_id:
+                background_tasks.add_task(
+                    send_ir_notifications_task,
+                    company_id=str(effective_company_id),
+                    incident_id=str(row["id"]),
+                    incident_number=row["incident_number"],
+                    incident_title=row["title"],
+                    event_type="status_changed",
+                    current_status=row["status"],
+                    changed_by_email=current_user.email,
+                    previous_status=previous_status,
+                    location_name=location_name or row.get("location"),
+                    occurred_at=row.get("occurred_at"),
+                )
 
         return row_to_response(response_row, doc_count)
 

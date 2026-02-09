@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from ...database import get_connection
 from ...config import get_settings
 from ...core.models.auth import CurrentUser
+from ...core.services.policy_service import SignatureService
 from ..models.employee import (
     EmployeeResponse, EmployeeUpdate, ProfileUpdateRequest,
     PTOBalanceResponse, PTORequestCreate, PTORequestResponse, PTORequestListResponse,
@@ -598,6 +599,21 @@ async def sign_document(
                          created_at, updated_at""",
             request.signature_data, client_ip, document_id
         )
+
+        # Keep admin policy-signature tracking in sync for employee policy docs.
+        try:
+            await SignatureService.sync_employee_document_signature(
+                company_id=str(updated["org_id"]),
+                employee_id=str(employee["id"]),
+                employee_name=f"{employee['first_name']} {employee['last_name']}".strip(),
+                employee_email=employee["email"],
+                document_title=updated["title"],
+                document_type=updated["doc_type"],
+                signature_data=request.signature_data,
+                ip_address=client_ip,
+            )
+        except Exception as exc:
+            print(f"[Policy] Failed to sync employee policy signature for admin tracking: {exc}")
 
         return EmployeeDocumentResponse(
             id=updated["id"],

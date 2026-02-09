@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional, List
+import re
 import uuid
 
 from ...database import get_connection
@@ -197,6 +198,144 @@ class PolicyService:
 
 
 class SignatureService:
+    @staticmethod
+    def _extract_policy_id_from_document_type(document_type: Optional[str]) -> Optional[str]:
+        """Extract policy UUID hint from doc types like `policy:<uuid>`."""
+        if not document_type:
+            return None
+
+        match = re.search(r"policy[:/_-]?([0-9a-fA-F-]{36})", document_type, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        return None
+
+    @staticmethod
+    async def sync_employee_document_signature(
+        company_id: str,
+        employee_id: str,
+        employee_name: str,
+        employee_email: str,
+        document_title: Optional[str],
+        document_type: Optional[str],
+        signature_data: Optional[str],
+        ip_address: Optional[str] = None,
+    ) -> Optional[PolicySignatureResponse]:
+        """
+        Mirror employee-portal policy document signatures into policy_signatures.
+
+        This keeps admin policy signature dashboards/lists in sync when employees
+        sign policy documents through the portal document workflow.
+        """
+        normalized_type = (document_type or "").strip().lower()
+        if "policy" not in normalized_type and not (document_title or "").strip():
+            return None
+
+        policy_id_hint = SignatureService._extract_policy_id_from_document_type(document_type)
+
+        async with get_connection() as conn:
+            policy_id = None
+
+            if policy_id_hint:
+                policy_id = await conn.fetchval(
+                    "SELECT id FROM policies WHERE id = $1 AND company_id = $2",
+                    policy_id_hint,
+                    company_id,
+                )
+
+            # Fallback: match policy by title when doc_type doesn't carry a policy UUID.
+            if not policy_id and document_title:
+                policy_id = await conn.fetchval(
+                    """
+                        SELECT id
+                        FROM policies
+                        WHERE company_id = $1 AND LOWER(title) = LOWER($2)
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                    """,
+                    company_id,
+                    document_title.strip(),
+                )
+
+            if not policy_id:
+                return None
+
+            existing_signature_id = await conn.fetchval(
+                """
+                    SELECT id
+                    FROM policy_signatures
+                    WHERE policy_id = $1
+                      AND signer_type = 'employee'
+                      AND (
+                          signer_id = $2
+                          OR LOWER(signer_email) = LOWER($3)
+                      )
+                    ORDER BY
+                        CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
+                        created_at DESC
+                    LIMIT 1
+                """,
+                policy_id,
+                employee_id,
+                employee_email,
+            )
+
+            if existing_signature_id:
+                await conn.execute(
+                    """
+                        UPDATE policy_signatures
+                        SET status = 'signed',
+                            signed_at = NOW(),
+                            signature_data = $1,
+                            ip_address = $2
+                        WHERE id = $3
+                    """,
+                    signature_data,
+                    ip_address,
+                    existing_signature_id,
+                )
+                return await SignatureService.get_signature_by_id(existing_signature_id)
+
+            signature_id = await conn.fetchval(
+                """
+                    INSERT INTO policy_signatures
+                    (
+                        policy_id,
+                        signer_type,
+                        signer_id,
+                        signer_name,
+                        signer_email,
+                        token,
+                        status,
+                        signed_at,
+                        signature_data,
+                        ip_address,
+                        expires_at
+                    )
+                    VALUES (
+                        $1,
+                        'employee',
+                        $2,
+                        $3,
+                        $4,
+                        $5,
+                        'signed',
+                        NOW(),
+                        $6,
+                        $7,
+                        NOW() + INTERVAL '365 days'
+                    )
+                    RETURNING id
+                """,
+                policy_id,
+                employee_id,
+                employee_name,
+                employee_email,
+                str(uuid.uuid4()),
+                signature_data,
+                ip_address,
+            )
+            return await SignatureService.get_signature_by_id(signature_id)
+
     @staticmethod
     async def create_signature_request(
         policy_id: str,

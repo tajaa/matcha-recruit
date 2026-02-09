@@ -1,5 +1,6 @@
 """Email service using MailerSend."""
 import httpx
+from datetime import datetime
 from typing import Optional
 
 from ...config import get_settings
@@ -962,6 +963,159 @@ Please log in and review the Compliance tab to see what changed:
 
                 if response.status_code in (200, 201, 202):
                     print(f"[Email] Sent compliance change notification to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
+    async def send_ir_incident_notification_email(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        company_name: str,
+        incident_id: str,
+        incident_number: str,
+        incident_title: str,
+        event_type: str,
+        current_status: str,
+        changed_by_email: Optional[str] = None,
+        previous_status: Optional[str] = None,
+        location_name: Optional[str] = None,
+        occurred_at: Optional[datetime] = None,
+    ) -> bool:
+        """Send incident lifecycle notifications to a company admin/client."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        incident_url = f"{app_base_url}/app/ir/incidents/{incident_id}"
+        recipient_name = to_name or to_email
+
+        status_label = current_status.replace("_", " ").title() if current_status else "Unknown"
+        previous_status_label = (
+            previous_status.replace("_", " ").title()
+            if previous_status else "Unknown"
+        )
+        actor = changed_by_email or "a team member"
+        occurred_text = occurred_at.strftime("%B %d, %Y at %I:%M %p") if occurred_at else "Not provided"
+        location_text = location_name or "Not provided"
+
+        if event_type == "created":
+            subject = f"{company_name}: New incident reported ({incident_number})"
+            summary_line = "A new incident report was created."
+            transition_line = f"Current status: <strong>{status_label}</strong>"
+            transition_text = f"Current status: {status_label}"
+        else:
+            subject = f"{company_name}: Incident {incident_number} moved to {status_label}"
+            summary_line = "An incident report changed stages."
+            transition_line = (
+                f"Status moved from <strong>{previous_status_label}</strong> "
+                f"to <strong>{status_label}</strong>."
+            )
+            transition_text = f"Status moved from {previous_status_label} to {status_label}."
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .event-card {{ background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 8px; padding: 16px; margin: 20px 0; }}
+        .incident-card {{ background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {recipient_name},</p>
+
+            <div class="event-card">
+                <p style="margin: 0 0 8px 0;"><strong>{summary_line}</strong></p>
+                <p style="margin: 0;">{transition_line}</p>
+            </div>
+
+            <div class="incident-card">
+                <p><strong>Incident:</strong> {incident_number}</p>
+                <p><strong>Title:</strong> {incident_title}</p>
+                <p><strong>Occurred:</strong> {occurred_text}</p>
+                <p><strong>Location:</strong> {location_text}</p>
+                <p><strong>Updated by:</strong> {actor}</p>
+            </div>
+
+            <p style="text-align: center; margin-top: 24px;">
+                <a href="{incident_url}" class="btn">Open Incident</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {recipient_name},
+
+{summary_line}
+{transition_text}
+
+Incident: {incident_number}
+Title: {incident_title}
+Occurred: {occurred_text}
+Location: {location_text}
+Updated by: {actor}
+
+Open incident:
+{incident_url}
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": recipient_name,
+                }
+            ],
+            "subject": subject,
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent IR notification to {to_email}")
                     return True
                 else:
                     print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
