@@ -1096,6 +1096,128 @@ async def _create_alert(
     )
 
 
+def _record_change_notification_item(
+    change_items: List[Dict[str, str]],
+    req: dict,
+    change_info: dict,
+):
+    """Capture lightweight change details for post-check admin email notifications."""
+    change_items.append(
+        {
+            "title": req.get("title") or "",
+            "jurisdiction_name": req.get("jurisdiction_name") or "",
+            "old_value": str(change_info.get("old_value") or ""),
+            "new_value": str(change_info.get("new_value") or ""),
+        }
+    )
+
+
+async def _get_company_admin_contacts(company_id: UUID) -> tuple[str, List[Dict[str, str]]]:
+    """Get company name and business admin/client email contacts."""
+    from ...database import get_connection
+
+    async with get_connection() as conn:
+        company_name = await conn.fetchval(
+            "SELECT name FROM companies WHERE id = $1",
+            company_id,
+        ) or "Your company"
+
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT
+                u.email,
+                COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
+            FROM clients c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.company_id = $1
+              AND u.is_active = true
+              AND u.email IS NOT NULL
+            ORDER BY u.email
+            """,
+            company_id,
+        )
+
+    contacts = [
+        {"email": row["email"], "name": row["name"] or row["email"]}
+        for row in rows
+    ]
+    return company_name, contacts
+
+
+async def _notify_company_admins_of_compliance_changes(
+    company_id: UUID,
+    location: BusinessLocation,
+    change_items: List[Dict[str, str]],
+) -> int:
+    """
+    Send one general compliance-change email per business admin for this check run.
+    Returns count of successful sends.
+    """
+    if not change_items:
+        return 0
+
+    from .email import get_email_service
+
+    # Deduplicate repeated writes of the same change during a run.
+    unique_changes = {
+        (
+            (item.get("title") or "").strip(),
+            (item.get("jurisdiction_name") or "").strip(),
+            (item.get("old_value") or "").strip(),
+            (item.get("new_value") or "").strip(),
+        )
+        for item in change_items
+    }
+    change_count = len(unique_changes)
+    if change_count == 0:
+        return 0
+
+    email_service = get_email_service()
+    if not email_service.is_configured():
+        print("[Compliance] Email service not configured, skipping admin change notifications")
+        return 0
+
+    company_name, contacts = await _get_company_admin_contacts(company_id)
+    if not contacts:
+        print(f"[Compliance] No business admin contacts found for company {company_id}")
+        return 0
+
+    jurisdictions = sorted(
+        {
+            jurisdiction
+            for _, jurisdiction, _, _ in unique_changes
+            if jurisdiction
+        }
+    )
+    location_name = location.name or f"{location.city}, {location.state}"
+
+    tasks = [
+        email_service.send_compliance_change_notification_email(
+            to_email=contact["email"],
+            to_name=contact.get("name"),
+            company_name=company_name,
+            location_name=location_name,
+            changed_requirements_count=change_count,
+            jurisdictions=jurisdictions,
+        )
+        for contact in contacts
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    sent_count = 0
+    for contact, result in zip(contacts, results):
+        if isinstance(result, Exception):
+            print(f"[Compliance] Failed to send change notification to {contact['email']}: {result}")
+            continue
+        if result:
+            sent_count += 1
+
+    if sent_count:
+        print(f"[Compliance] Sent compliance change notifications to {sent_count}/{len(contacts)} admin(s)")
+
+    return sent_count
+
+
 async def _log_verification_outcome(
     conn,
     jurisdiction_id: Optional[UUID],
@@ -1564,6 +1686,7 @@ async def run_compliance_check_stream(
 
     service = get_gemini_compliance_service()
     used_repository = False
+    change_email_items: List[Dict[str, str]] = []
 
     async with get_connection() as conn:
         log_id = await _create_check_log(conn, location_id, company_id, "manual")
@@ -1851,6 +1974,7 @@ async def run_compliance_check_stream(
                             conn, jurisdiction_id, alert_id, req_key, req.get("category"),
                             confidence, predicted_is_change=True, verification_sources=verification.sources,
                         )
+                        _record_change_notification_item(change_email_items, req, change_info)
                         verification_count += 1
                     elif confidence >= 0.3:
                         alert_count += 1
@@ -1868,6 +1992,7 @@ async def run_compliance_check_stream(
                             conn, jurisdiction_id, alert_id, req_key, req.get("category"),
                             confidence, predicted_is_change=True, verification_sources=verification.sources,
                         )
+                        _record_change_notification_item(change_email_items, req, change_info)
                         verification_count += 1
                     else:
                         # Log low-confidence rejections too for calibration
@@ -1892,6 +2017,7 @@ async def run_compliance_check_stream(
                         source_url=req.get("source_url"), source_name=req.get("source_name"),
                         alert_type="change",
                     )
+                    _record_change_notification_item(change_email_items, req, change_info)
 
                 if verification_count > 0:
                     yield {"type": "verified", "message": f"Verified {verification_count} change(s)"}
@@ -1935,6 +2061,15 @@ async def run_compliance_check_stream(
         except Exception as e:
             await _complete_check_log(conn, log_id, new_count, updated_count, alert_count, error=str(e))
             raise
+
+    try:
+        await _notify_company_admins_of_compliance_changes(
+            company_id=company_id,
+            location=location,
+            change_items=change_email_items,
+        )
+    except Exception as e:
+        print(f"[Compliance] Error notifying admins about compliance changes: {e}")
 
     yield {
         "type": "completed",
@@ -2635,6 +2770,7 @@ async def run_compliance_check_background(
 
     service = get_gemini_compliance_service()
     used_repository = False
+    change_email_items: List[Dict[str, str]] = []
 
     async with get_connection() as conn:
         log_id = await _create_check_log(conn, location_id, company_id, check_type)
@@ -2828,6 +2964,7 @@ async def run_compliance_check_background(
                             verification_sources=verification.sources,
                             metadata={"verification_explanation": verification.explanation},
                         )
+                        _record_change_notification_item(change_email_items, req, change_info)
                     elif confidence >= 0.3:
                         alert_count += 1
                         await _create_alert(
@@ -2839,6 +2976,7 @@ async def run_compliance_check_background(
                             verification_sources=verification.sources,
                             metadata={"verification_explanation": verification.explanation, "unverified": True},
                         )
+                        _record_change_notification_item(change_email_items, req, change_info)
 
                 for change_info in changes_to_verify[MAX_VERIFICATIONS_PER_CHECK:]:
                     req = change_info["req"]
@@ -2854,6 +2992,7 @@ async def run_compliance_check_background(
                         source_url=req.get("source_url"), source_name=req.get("source_name"),
                         alert_type="change",
                     )
+                    _record_change_notification_item(change_email_items, req, change_info)
 
             # Legislation scan — only via Gemini when not using repository
             if not used_repository:
@@ -2884,5 +3023,14 @@ async def run_compliance_check_background(
         except Exception as e:
             await _complete_check_log(conn, log_id, new_count, updated_count, alert_count, error=str(e))
             raise
+
+    try:
+        await _notify_company_admins_of_compliance_changes(
+            company_id=company_id,
+            location=location,
+            change_items=change_email_items,
+        )
+    except Exception as e:
+        print(f"[Compliance] Error notifying admins about compliance changes: {e}")
 
     return {"new": new_count, "updated": updated_count, "alerts": alert_count}

@@ -838,6 +838,139 @@ Thank you for helping us build a better workplace!
             print(f"[Email] Error sending to {to_email}: {e}")
             return False
 
+    async def send_compliance_change_notification_email(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        company_name: str,
+        location_name: str,
+        changed_requirements_count: int,
+        jurisdictions: Optional[list[str]] = None,
+    ) -> bool:
+        """Send a general compliance change notification to a business admin."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        compliance_url = f"{app_base_url}/app/matcha/compliance"
+        recipient_name = to_name or to_email
+
+        requirement_word = "requirement" if changed_requirements_count == 1 else "requirements"
+        requirement_verb = "has" if changed_requirements_count == 1 else "have"
+
+        jurisdiction_lines = ""
+        jurisdiction_text = ""
+        if jurisdictions:
+            preview = jurisdictions[:5]
+            jurisdiction_items = "".join(f"<li>{name}</li>" for name in preview)
+            jurisdiction_lines = f"""
+            <p style="margin-top: 20px; margin-bottom: 8px;"><strong>Impacted jurisdictions:</strong></p>
+            <ul style="margin-top: 0; color: #374151;">
+                {jurisdiction_items}
+            </ul>
+            """
+            jurisdiction_text = "\n".join([f"- {name}" for name in preview])
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .alert-card {{ background: #fff7ed; border-left: 4px solid #f97316; border-radius: 8px; padding: 16px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {recipient_name},</p>
+
+            <p>We detected an update to your compliance data for <strong>{location_name}</strong>.</p>
+
+            <div class="alert-card">
+                <p style="margin: 0;">
+                    <strong>{changed_requirements_count}</strong> compliance {requirement_word} {requirement_verb} new information.
+                </p>
+            </div>
+
+            {jurisdiction_lines}
+
+            <p>Please log in and review the Compliance tab to see what changed and confirm any needed follow-up.</p>
+
+            <p style="text-align: center; margin-top: 24px;">
+                <a href="{compliance_url}" class="btn">Review Compliance Updates</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {recipient_name},
+
+We detected an update to your compliance data for {location_name}.
+
+{changed_requirements_count} compliance {requirement_word} {requirement_verb} new information.
+{f"{chr(10)}Impacted jurisdictions:{chr(10)}{jurisdiction_text}{chr(10)}" if jurisdiction_text else ""}
+Please log in and review the Compliance tab to see what changed:
+{compliance_url}
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": recipient_name,
+                }
+            ],
+            "subject": f"{company_name}: Compliance update available",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent compliance change notification to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
 
     async def send_business_registration_pending_email(
         self,
