@@ -2141,6 +2141,62 @@ const posters = {
     request<{ pdf_url: string; title: string }>(`/compliance/posters/preview/${templateId}`),
 };
 
+// HR News types
+export interface HRNewsArticle {
+  id: string;
+  title: string;
+  description: string | null;
+  link: string | null;
+  author: string | null;
+  pub_date: string | null;
+  source_name: string | null;
+  image_url: string | null;
+  has_full_content: boolean;
+  content_error: string | null;
+  created_at: string | null;
+}
+
+export interface HRNewsListResponse {
+  articles: HRNewsArticle[];
+  total: number;
+  sources: string[];
+  limit: number;
+  offset: number;
+}
+
+export interface HRNewsRefreshResponse {
+  status: string;
+  message?: string;
+  new_articles: number;
+  feeds?: { source: string; new: number; error?: string }[];
+}
+
+export interface HRNewsFullContent {
+  id: string;
+  title: string;
+  content: string | null;
+  error?: string;
+  fetched_at?: string;
+  cached?: boolean;
+}
+
+export const adminNews = {
+  list: (params?: { source?: string; limit?: number; offset?: number }): Promise<HRNewsListResponse> => {
+    const searchParams = new URLSearchParams();
+    if (params?.source) searchParams.append('source', params.source);
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.offset) searchParams.append('offset', params.offset.toString());
+    const query = searchParams.toString();
+    return request<HRNewsListResponse>(`/admin/news/articles${query ? `?${query}` : ''}`);
+  },
+
+  refresh: (): Promise<HRNewsRefreshResponse> =>
+    request<HRNewsRefreshResponse>('/admin/news/refresh', { method: 'POST' }),
+
+  getFullContent: (id: string): Promise<HRNewsFullContent> =>
+    request<HRNewsFullContent>(`/admin/news/articles/${id}/full-content`),
+};
+
 // Combined API object for convenient imports
 export const api = {
   auth,
@@ -2172,4 +2228,5 @@ export const api = {
   aiChat,
   adminPosters,
   posters,
+  adminNews,
 };

@@ -15,6 +15,7 @@ from .projects import router as projects_router
 from .outreach import router as outreach_router
 from .leads_agent import router as leads_agent_router
 from .posters import router as posters_router
+from .hr_news import router as hr_news_router
 from ...matcha.dependencies import require_feature
 
 # Create main core router
@@ -37,6 +38,7 @@ core_router.include_router(outreach_router, tags=["outreach"])
 core_router.include_router(leads_agent_router, prefix="/leads-agent", tags=["leads-agent"])
 core_router.include_router(posters_router, prefix="/compliance/posters", tags=["compliance-posters"],
                            dependencies=[Depends(require_feature("compliance"))])
+core_router.include_router(hr_news_router, prefix="/admin/news", tags=["hr-news"])
 
 # Export individual routers for backwards compatibility
 __all__ = [
@@ -55,4 +57,5 @@ __all__ = [
     "outreach_router",
     "leads_agent_router",
     "posters_router",
+    "hr_news_router",
 ]

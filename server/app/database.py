@@ -2214,6 +2214,37 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_business_invitations_token ON business_invitations(token)
         """)
 
+        # ===========================================
+        # HR News Articles Table
+        # ===========================================
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS hr_news_articles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                item_hash VARCHAR(64) NOT NULL UNIQUE,
+                title TEXT NOT NULL,
+                description TEXT,
+                link TEXT,
+                author VARCHAR(255),
+                pub_date TIMESTAMP,
+                source_name VARCHAR(100),
+                source_feed_url TEXT,
+                image_url TEXT,
+                full_content TEXT,
+                content_fetched_at TIMESTAMP,
+                content_error TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_hr_news_articles_pub_date ON hr_news_articles(pub_date DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_hr_news_articles_source_name ON hr_news_articles(source_name)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_hr_news_articles_created_at ON hr_news_articles(created_at DESC)
+        """)
+
         # Create default chat rooms if none exist
         room_exists = await conn.fetchval("SELECT COUNT(*) FROM chat_rooms")
         if room_exists == 0:
