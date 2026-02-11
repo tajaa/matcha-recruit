@@ -48,6 +48,78 @@ MATERIAL_CHANGE_THRESHOLDS = {
 }
 
 JURISDICTION_PRIORITY = {'city': 1, 'county': 2, 'state': 3, 'federal': 4}
+
+# State code → state name mapping for jurisdiction relabeling
+_CODE_TO_STATE_NAME = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+    "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming", "DC": "District Of Columbia",
+}
+
+
+def _filter_city_level_requirements(reqs: list, state: str) -> list:
+    """Filter city-level requirements for locations without local ordinances.
+
+    Instead of blindly stripping all city-level requirements (which can lose
+    categories like minimum_wage entirely), this promotes city-level entries
+    to state-level when no state-level entry exists for that category.
+    A city with no local ordinance inherits state rules, so any "city-level"
+    data is really the state requirement mislabeled by the research source.
+    """
+    state_name = _CODE_TO_STATE_NAME.get(state.upper().strip(), state)
+
+    # Separate city-level from non-city-level
+    non_city = []
+    city_level = []
+    for r in reqs:
+        jl = r.get("jurisdiction_level") if isinstance(r, dict) else getattr(r, "jurisdiction_level", None)
+        if jl == "city":
+            city_level.append(r)
+        else:
+            non_city.append(r)
+
+    if not city_level:
+        return reqs
+
+    # Find categories already covered by non-city (state/county/federal) requirements
+    covered_categories = set()
+    for r in non_city:
+        cat = r.get("category") if isinstance(r, dict) else getattr(r, "category", None)
+        norm = _normalize_category(cat) or cat
+        covered_categories.add(norm)
+
+    # Promote city-level entries for categories with no state/county fallback
+    promoted = []
+    for r in city_level:
+        cat = r.get("category") if isinstance(r, dict) else getattr(r, "category", None)
+        norm = _normalize_category(cat) or cat
+        if norm not in covered_categories:
+            # Promote to state-level — the city has no local ordinance so this
+            # data actually represents the inherited state requirement.
+            if isinstance(r, dict):
+                r["jurisdiction_level"] = "state"
+                r["jurisdiction_name"] = state_name
+            else:
+                r.jurisdiction_level = "state"
+                r.jurisdiction_name = state_name
+            promoted.append(r)
+            covered_categories.add(norm)
+
+    stripped = len(city_level) - len(promoted)
+    if stripped:
+        print(f"[Compliance] Stripped {stripped} city-level req(s), promoted {len(promoted)} to state-level")
+
+    return non_city + promoted
 # Valid rate_types for minimum_wage requirements
 VALID_RATE_TYPES = {"general", "tipped", "hotel", "fast_food", "healthcare", "large_employer", "small_employer"}
 
@@ -1614,7 +1686,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             # This keeps create-location behavior consistent with the main
             # compliance check pipeline.
             if has_local_ordinance is False:
-                req_dicts = [r for r in req_dicts if r.get("jurisdiction_level") != "city"]
+                req_dicts = _filter_city_level_requirements(req_dicts, data.state)
             for req in req_dicts:
                 req["category"] = _normalize_category(req.get("category")) or req.get("category")
             req_dicts = await _filter_with_preemption(conn, req_dicts, data.state)
@@ -1720,7 +1792,16 @@ async def run_compliance_check_stream(
 
             if tier1_data:
                 yield {"type": "tier1", "message": f"Loading verified data for {location_name}..."}
-                requirements = tier1_data
+                # Tier 1 only covers a subset of categories (minimum_wage).
+                # Merge with repository data for other categories so the sync
+                # doesn't delete requirements for categories Tier 1 didn't cover.
+                tier1_categories = {_normalize_category(r.get("category")) or r.get("category") for r in tier1_data}
+                j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+                repo_reqs = [
+                    _jurisdiction_row_to_dict(jr) for jr in j_reqs
+                    if (_normalize_category(jr.get("category")) or jr.get("category")) not in tier1_categories
+                ]
+                requirements = tier1_data + repo_reqs
                 used_repository = True  # Skip Gemini and fresh-data logic
 
             # ============================================================
@@ -1830,13 +1911,11 @@ async def run_compliance_check_stream(
                 yield {"type": "completed", "location": location_name, "new": 0, "updated": 0, "alerts": 0}
                 return
 
-            # Post-filter: strip city-level results for cities with no local ordinance
+            # Post-filter: handle city-level results for cities with no local ordinance.
+            # Instead of stripping all city-level entries (which can lose entire categories
+            # like minimum_wage), promote orphaned city-level entries to state-level.
             if has_local_ordinance is False:
-                before = len(requirements)
-                requirements = [r for r in requirements if r.get("jurisdiction_level") != "city"]
-                stripped = before - len(requirements)
-                if stripped:
-                    print(f"[Compliance] Stripped {stripped} city-level req(s) for {location.city} (no local ordinance)")
+                requirements = _filter_city_level_requirements(requirements, location.state)
                 # Annotate remaining reqs with inheritance note
                 parent = f"{location.county} County / " if location.county else ""
                 note = (
@@ -2107,7 +2186,7 @@ async def get_location_counts(location_id: UUID) -> dict:
         )
         req_dicts = [dict(r) for r in rows]
         if has_local_ordinance is False:
-            req_dicts = [r for r in req_dicts if r.get("jurisdiction_level") != "city"]
+            req_dicts = _filter_city_level_requirements(req_dicts, state)
         for r in req_dicts:
             r["category"] = _normalize_category(r.get("category")) or r.get("category")
         filtered = (
@@ -2251,7 +2330,7 @@ async def get_location_requirements(location_id: UUID, company_id: UUID, categor
         rows = await conn.fetch(query, *params)
         row_dicts = [dict(row) for row in rows]
         if has_local_ordinance is False:
-            row_dicts = [r for r in row_dicts if r.get("jurisdiction_level") != "city"]
+            row_dicts = _filter_city_level_requirements(row_dicts, state)
         for r in row_dicts:
             r["category"] = _normalize_category(r.get("category")) or r.get("category")
         filtered = await _filter_with_preemption(conn, row_dicts, state)
@@ -2570,7 +2649,7 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
             )
             req_dicts = [dict(r) for r in reqs]
             if loc.get("has_local_ordinance") is False:
-                req_dicts = [r for r in req_dicts if r.get("jurisdiction_level") != "city"]
+                req_dicts = _filter_city_level_requirements(req_dicts, loc["state"])
             for r in req_dicts:
                 r["category"] = _normalize_category(r.get("category")) or r.get("category")
             filtered_reqs = await _filter_with_preemption(conn, req_dicts, loc["state"])
@@ -2804,7 +2883,15 @@ async def run_compliance_check_background(
             threshold = location.auto_check_interval_days or 7
 
             if tier1_data:
-                requirements = tier1_data
+                # Tier 1 only covers a subset of categories (minimum_wage).
+                # Merge with repository data for other categories.
+                tier1_categories = {_normalize_category(r.get("category")) or r.get("category") for r in tier1_data}
+                j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+                repo_reqs = [
+                    _jurisdiction_row_to_dict(jr) for jr in j_reqs
+                    if (_normalize_category(jr.get("category")) or jr.get("category")) not in tier1_categories
+                ]
+                requirements = tier1_data + repo_reqs
                 used_repository = True
             elif await _is_jurisdiction_fresh(conn, jurisdiction_id, threshold):
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
@@ -2877,13 +2964,9 @@ async def run_compliance_check_background(
                 await _complete_check_log(conn, log_id, 0, 0, 0)
                 return {"new": 0, "updated": 0, "alerts": 0}
 
-            # Post-filter: strip city-level results for cities with no local ordinance
+            # Post-filter: handle city-level results for cities with no local ordinance
             if has_local_ordinance is False:
-                before = len(requirements)
-                requirements = [r for r in requirements if r.get("jurisdiction_level") != "city"]
-                stripped = before - len(requirements)
-                if stripped:
-                    print(f"[Compliance] Stripped {stripped} city-level req(s) for {location.city} (no local ordinance)")
+                requirements = _filter_city_level_requirements(requirements, location.state)
                 # Annotate remaining reqs with inheritance note
                 parent = f"{location.county} County / " if location.county else ""
                 note = (
