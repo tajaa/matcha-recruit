@@ -73,6 +73,7 @@ export function ERCaseDetail() {
   const [violationSummary, setViolationSummary] = useState<string>('');
   const [analysisLoading, setAnalysisLoading] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState<{ step: string; detail?: string } | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -301,17 +302,20 @@ export function ERCaseDetail() {
     if (!id) return;
     setAnalysisLoading('timeline');
     setAnalysisProgress({ step: 'Starting analysis...' });
+    setAnalysisError(null);
     try {
       await erCopilot.generateTimeline(id);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('timeline');
       if (!success && analysisLoading === 'timeline') {
         console.error('Timeline analysis timed out');
+        setAnalysisError('Timeline analysis timed out. Please try again.');
         setAnalysisLoading(null);
         setAnalysisProgress(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to generate timeline:', err);
+      setAnalysisError(err?.message || 'Failed to generate timeline. Please try again.');
       setAnalysisLoading(null);
       setAnalysisProgress(null);
     }
@@ -321,17 +325,20 @@ export function ERCaseDetail() {
     if (!id) return;
     setAnalysisLoading('discrepancies');
     setAnalysisProgress({ step: 'Starting analysis...' });
+    setAnalysisError(null);
     try {
       await erCopilot.generateDiscrepancies(id);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('discrepancies');
       if (!success && analysisLoading === 'discrepancies') {
         console.error('Discrepancy analysis timed out');
+        setAnalysisError('Discrepancy analysis timed out. Please try again.');
         setAnalysisLoading(null);
         setAnalysisProgress(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to generate discrepancies:', err);
+      setAnalysisError(err?.message || 'Failed to analyze discrepancies. Please try again.');
       setAnalysisLoading(null);
       setAnalysisProgress(null);
     }
@@ -341,17 +348,20 @@ export function ERCaseDetail() {
     if (!id) return;
     setAnalysisLoading('policy');
     setAnalysisProgress({ step: 'Starting analysis...' });
+    setAnalysisError(null);
     try {
       await erCopilot.runPolicyCheck(id);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('policy');
       if (!success && analysisLoading === 'policy') {
         console.error('Policy check timed out');
+        setAnalysisError('Policy check timed out. Please try again.');
         setAnalysisLoading(null);
         setAnalysisProgress(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to run policy check:', err);
+      setAnalysisError(err?.message || 'Failed to run policy check. Please try again.');
       setAnalysisLoading(null);
       setAnalysisProgress(null);
     }
@@ -539,6 +549,16 @@ export function ERCaseDetail() {
               );
             })}
           </div>
+
+          {analysisError && (
+            <div className="mb-4 flex items-start gap-2 rounded border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30 px-3 py-2">
+              <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
+              <p className="text-xs text-red-700 dark:text-red-400 flex-1">{analysisError}</p>
+              <button onClick={() => setAnalysisError(null)} className="text-red-400 hover:text-red-600">
+                <X size={12} />
+              </button>
+            </div>
+          )}
 
           <div className="min-h-[400px]">
             {/* Timeline Tab */}

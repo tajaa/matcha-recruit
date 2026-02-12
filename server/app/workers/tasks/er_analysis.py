@@ -10,12 +10,23 @@ Handles AI-powered analysis:
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error, publish_task_progress
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_publish_progress(**kwargs) -> None:
+    """Publish progress, ignoring errors when Redis is unavailable."""
+    try:
+        publish_task_progress(**kwargs)
+    except Exception:
+        logger.debug("Redis unavailable for progress notification, skipping")
 
 
 async def _get_documents_for_analysis(
@@ -98,7 +109,7 @@ async def _run_timeline_analysis(case_id: str) -> dict[str, Any]:
     conn = await get_db_connection()
     try:
         # Progress: Loading documents
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="timeline_analysis",
             entity_id=case_id,
@@ -114,7 +125,7 @@ async def _run_timeline_analysis(case_id: str) -> dict[str, Any]:
             raise ValueError("No processed documents found for timeline analysis")
 
         # Progress: Analyzing documents
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="timeline_analysis",
             entity_id=case_id,
@@ -123,11 +134,11 @@ async def _run_timeline_analysis(case_id: str) -> dict[str, Any]:
             message=f"Reconstructing timeline from {len(documents)} documents...",
         )
 
-        # Run analysis
-        result = analyzer.reconstruct_timeline_sync(documents)
+        # Run analysis (use async method since we're in async context)
+        result = await analyzer.reconstruct_timeline(documents)
 
         # Progress: Saving results
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="timeline_analysis",
             entity_id=case_id,
@@ -203,7 +214,7 @@ async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
     conn = await get_db_connection()
     try:
         # Progress: Loading documents
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="discrepancy_analysis",
             entity_id=case_id,
@@ -219,7 +230,7 @@ async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
             raise ValueError("Need at least 2 documents for discrepancy analysis")
 
         # Progress: Analyzing documents
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="discrepancy_analysis",
             entity_id=case_id,
@@ -228,11 +239,11 @@ async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
             message=f"Analyzing {len(documents)} documents for discrepancies...",
         )
 
-        # Run analysis
-        result = analyzer.detect_discrepancies_sync(documents)
+        # Run analysis (use async method since we're in async context)
+        result = await analyzer.detect_discrepancies(documents)
 
         # Progress: Saving results
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="discrepancy_analysis",
             entity_id=case_id,
@@ -347,7 +358,7 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
     conn = await get_db_connection()
     try:
         # Progress: Loading documents
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="policy_check",
             entity_id=case_id,
@@ -363,7 +374,7 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
             raise ValueError("No active policies found for this company. Please add policies in the Policies section.")
 
         # Progress: Loading evidence
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="policy_check",
             entity_id=case_id,
@@ -379,7 +390,7 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
             raise ValueError("No evidence documents found for policy check")
 
         # Progress: Checking for violations
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="policy_check",
             entity_id=case_id,
@@ -398,11 +409,11 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
             ]),
         }
 
-        # Run analysis
-        result = analyzer.check_policy_violations_sync(combined_policy, evidence_docs)
+        # Run analysis (use async method since we're in async context)
+        result = await analyzer.check_policy_violations(combined_policy, evidence_docs)
 
         # Progress: Saving results
-        publish_task_progress(
+        _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="policy_check",
             entity_id=case_id,

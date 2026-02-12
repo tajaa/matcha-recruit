@@ -944,7 +944,7 @@ async def generate_timeline(
             )
         except Exception as sync_error:
             logger.error(f"Timeline analysis failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Timeline analysis failed")
+            raise HTTPException(status_code=500, detail=f"Timeline analysis failed: {sync_error}")
 
 
 @router.get("/{case_id}/analysis/timeline")
@@ -1055,7 +1055,7 @@ async def generate_discrepancies(
             )
         except Exception as sync_error:
             logger.error(f"Discrepancy analysis failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Discrepancy analysis failed")
+            raise HTTPException(status_code=500, detail=f"Discrepancy analysis failed: {sync_error}")
 
 
 @router.get("/{case_id}/analysis/discrepancies")
@@ -1169,7 +1169,7 @@ async def run_policy_check(
             )
         except Exception as sync_error:
             logger.error(f"Policy check failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Policy check failed")
+            raise HTTPException(status_code=500, detail=f"Policy check failed: {sync_error}")
 
 
 @router.get("/{case_id}/analysis/policy-check")
