@@ -914,8 +914,8 @@ async def generate_timeline(
     # Try to queue analysis task via Celery, fall back to sync
     celery_available = False
     try:
-        from ..workers.tasks.er_analysis import run_timeline_analysis
-        from ..workers.celery_app import celery_app
+        from app.workers.tasks.er_analysis import run_timeline_analysis
+        from app.workers.celery_app import celery_app
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
@@ -933,7 +933,7 @@ async def generate_timeline(
     # Fallback: run synchronously
     if not celery_available:
         try:
-            from ..workers.tasks.er_analysis import _run_timeline_analysis
+            from app.workers.tasks.er_analysis import _run_timeline_analysis
             logger.info(f"Starting synchronous timeline analysis for case {case_id}")
             result = await _run_timeline_analysis(str(case_id))
             logger.info(f"Timeline analysis completed for case {case_id}: {result}")
@@ -1025,8 +1025,8 @@ async def generate_discrepancies(
     # Try to queue analysis task via Celery, fall back to sync
     celery_available = False
     try:
-        from ..workers.tasks.er_analysis import run_discrepancy_analysis
-        from ..workers.celery_app import celery_app
+        from app.workers.tasks.er_analysis import run_discrepancy_analysis
+        from app.workers.celery_app import celery_app
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
@@ -1044,7 +1044,7 @@ async def generate_discrepancies(
     # Fallback: run synchronously
     if not celery_available:
         try:
-            from ..workers.tasks.er_analysis import _run_discrepancy_analysis
+            from app.workers.tasks.er_analysis import _run_discrepancy_analysis
             logger.info(f"Starting synchronous discrepancy analysis for case {case_id}")
             result = await _run_discrepancy_analysis(str(case_id))
             logger.info(f"Discrepancy analysis completed for case {case_id}: {result}")
@@ -1139,8 +1139,8 @@ async def run_policy_check(
     # Try to queue analysis task via Celery, fall back to sync
     celery_available = False
     try:
-        from ..workers.tasks.er_analysis import run_policy_check as run_policy_check_task
-        from ..workers.celery_app import celery_app
+        from app.workers.tasks.er_analysis import run_policy_check as run_policy_check_task
+        from app.workers.celery_app import celery_app
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
@@ -1158,7 +1158,7 @@ async def run_policy_check(
     # Fallback: run synchronously
     if not celery_available:
         try:
-            from ..workers.tasks.er_analysis import _run_policy_check
+            from app.workers.tasks.er_analysis import _run_policy_check
             logger.info(f"Starting synchronous policy check for case {case_id}")
             result = await _run_policy_check(str(case_id))
             logger.info(f"Policy check completed for case {case_id}: {result}")
@@ -1303,8 +1303,8 @@ async def generate_summary_report(
     # Try to queue task via Celery, fall back to sync
     celery_available = False
     try:
-        from ..workers.tasks.er_analysis import generate_summary_report as generate_summary_task
-        from ..workers.celery_app import celery_app
+        from app.workers.tasks.er_analysis import generate_summary_report as generate_summary_task
+        from app.workers.celery_app import celery_app
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
@@ -1322,7 +1322,7 @@ async def generate_summary_report(
     # Fallback: run synchronously
     if not celery_available:
         try:
-            from ..workers.tasks.er_analysis import _generate_summary_report
+            from app.workers.tasks.er_analysis import _generate_summary_report
             logger.info(f"Starting synchronous summary report generation for case {case_id}")
             result = await _generate_summary_report(str(case_id), str(current_user.id))
             logger.info(f"Summary report generated for case {case_id}: {result}")
@@ -1378,8 +1378,8 @@ async def generate_determination_letter(
     # Try to queue task via Celery, fall back to sync
     celery_available = False
     try:
-        from ..workers.tasks.er_analysis import generate_determination_letter as generate_determination_task
-        from ..workers.celery_app import celery_app
+        from app.workers.tasks.er_analysis import generate_determination_letter as generate_determination_task
+        from app.workers.celery_app import celery_app
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
@@ -1401,7 +1401,7 @@ async def generate_determination_letter(
     # Fallback: run synchronously
     if not celery_available:
         try:
-            from ..workers.tasks.er_analysis import _generate_determination_letter
+            from app.workers.tasks.er_analysis import _generate_determination_letter
             logger.info(f"Starting synchronous determination letter generation for case {case_id}")
             result = await _generate_determination_letter(
                 str(case_id),
