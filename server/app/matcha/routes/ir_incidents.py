@@ -90,11 +90,9 @@ async def log_audit(
     )
 
 
-def _company_filter(is_admin: bool, param_idx: int) -> str:
+def _company_filter(param_idx: int) -> str:
     """Build a company_id filter clause for SQL queries."""
-    if is_admin:
-        return f"(i.company_id = ${param_idx} OR i.company_id IS NULL)"
-    return f"i.company_id = ${param_idx}"
+    return f"(i.company_id = ${param_idx} OR i.company_id IS NULL)"
 
 
 async def _get_company_admin_contacts(company_id: str) -> tuple[str, list[dict[str, str]]]:
@@ -189,8 +187,7 @@ async def _get_incident_with_company_check(conn, incident_id: UUID, current_user
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    is_admin = current_user.role == "admin"
-    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    company_clause = "(company_id = $2 OR company_id IS NULL)"
     row = await conn.fetchrow(
         f"SELECT {columns} FROM ir_incidents WHERE id = $1 AND {company_clause}",
         str(incident_id),
@@ -303,7 +300,7 @@ async def create_incident(
             incident.reported_by_email,
             json.dumps([w.model_dump() for w in incident.witnesses]),
             json.dumps(incident.category_data or {}),
-            str(incident.company_id) if incident.company_id else None,
+            str(incident.company_id) if incident.company_id else (str(scoped_company_id) if scoped_company_id else None),
             str(incident.location_id) if incident.location_id else None,
             str(current_user.id),
         )
@@ -387,11 +384,9 @@ async def list_incidents(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return IRIncidentListResponse(incidents=[], total=0)
-    is_admin = current_user.role == "admin"
-
     async with get_connection() as conn:
         # Build dynamic query — always scope by company
-        conditions = [_company_filter(is_admin, 1)]
+        conditions = [_company_filter(1)]
         params = [company_id]
         param_idx = 2
 
@@ -471,8 +466,7 @@ async def get_incident(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    is_admin = current_user.role == "admin"
-    company_clause = _company_filter(is_admin, 2)
+    company_clause = _company_filter(2)
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -511,8 +505,7 @@ async def update_incident(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    is_admin = current_user.role == "admin"
-    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    company_clause = "(company_id = $2 OR company_id IS NULL)"
 
     async with get_connection() as conn:
         # Check exists and belongs to company
@@ -718,8 +711,7 @@ async def delete_incident(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    is_admin = current_user.role == "admin"
-    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    company_clause = "(company_id = $2 OR company_id IS NULL)"
 
     async with get_connection() as conn:
         # Check exists and belongs to company
@@ -769,8 +761,7 @@ async def upload_document(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    is_admin = current_user.role == "admin"
-    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    company_clause = "(company_id = $2 OR company_id IS NULL)"
 
     # Validate incident exists and belongs to company
     async with get_connection() as conn:
@@ -862,8 +853,7 @@ async def list_documents(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    is_admin = current_user.role == "admin"
-    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    company_clause = "(company_id = $2 OR company_id IS NULL)"
 
     async with get_connection() as conn:
         # Verify incident exists and belongs to company
@@ -910,8 +900,7 @@ async def delete_document(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Document not found")
-    is_admin = current_user.role == "admin"
-    company_clause = "(i.company_id = $3 OR i.company_id IS NULL)" if is_admin else "i.company_id = $3"
+    company_clause = "(i.company_id = $3 OR i.company_id IS NULL)"
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -966,8 +955,7 @@ async def get_analytics_summary(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return AnalyticsSummary(total_incidents=0, by_status={}, by_type={}, by_severity={}, recent_count=0, avg_resolution_days=None)
-    is_admin = current_user.role == "admin"
-    co_filter = "(company_id = $1 OR company_id IS NULL)" if is_admin else "company_id = $1"
+    co_filter = "(company_id = $1 OR company_id IS NULL)"
 
     async with get_connection() as conn:
         # Total incidents
@@ -1029,8 +1017,7 @@ async def get_analytics_trends(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return TrendsAnalysis(data=[], period=period, start_date="", end_date="")
-    is_admin = current_user.role == "admin"
-    co_filter = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    co_filter = "(company_id = $2 OR company_id IS NULL)"
 
     # Map validated period to SQL DATE_TRUNC argument (never from user input)
     trunc_map = {"daily": "day", "weekly": "week", "monthly": "month"}
@@ -1085,8 +1072,7 @@ async def get_analytics_locations(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return LocationAnalysis(hotspots=[], total_locations=0)
-    is_admin = current_user.role == "admin"
-    co_filter = "(company_id = $1 OR company_id IS NULL)" if is_admin else "company_id = $1"
+    co_filter = "(company_id = $1 OR company_id IS NULL)"
 
     async with get_connection() as conn:
         rows = await conn.fetch(
@@ -1153,8 +1139,7 @@ async def get_audit_log(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    is_admin = current_user.role == "admin"
-    company_clause = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    company_clause = "(company_id = $2 OR company_id IS NULL)"
 
     async with get_connection() as conn:
         # Verify incident exists and belongs to company
