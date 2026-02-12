@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../api/client';
-import type { HRNewsArticle, HRNewsFullContent } from '../../api/client';
-import { RefreshCw, ExternalLink, ChevronDown, ChevronUp, Newspaper, AlertCircle, Clock } from 'lucide-react';
+import type { HRNewsArticle } from '../../api/client';
+import { RefreshCw, ExternalLink, Newspaper, AlertCircle, Clock } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -17,11 +17,6 @@ export default function HRNews() {
   // Filters
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
-
-  // Expanded article content
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [fullContent, setFullContent] = useState<Record<string, HRNewsFullContent>>({});
-  const [loadingContent, setLoadingContent] = useState<string | null>(null);
 
   const fetchArticles = useCallback(async () => {
     try {
@@ -67,32 +62,6 @@ export default function HRNews() {
       setRefreshing(false);
       // Clear message after 5 seconds
       setTimeout(() => setRefreshMessage(null), 5000);
-    }
-  };
-
-  const handleToggleContent = async (articleId: string) => {
-    if (expandedId === articleId) {
-      setExpandedId(null);
-      return;
-    }
-
-    setExpandedId(articleId);
-
-    // Already loaded
-    if (fullContent[articleId]) return;
-
-    try {
-      setLoadingContent(articleId);
-      const data = await api.adminNews.getFullContent(articleId);
-      setFullContent(prev => ({ ...prev, [articleId]: data }));
-    } catch (err) {
-      console.error('Failed to fetch full content:', err);
-      setFullContent(prev => ({
-        ...prev,
-        [articleId]: { id: articleId, title: '', content: null, error: 'Failed to fetch content' },
-      }));
-    } finally {
-      setLoadingContent(null);
     }
   };
 
@@ -232,80 +201,42 @@ export default function HRNews() {
 
                     {/* Title */}
                     <h3 className="text-sm font-medium text-zinc-200 mb-1 leading-snug">
-                      {article.title}
+                      {article.link ? (
+                        <a
+                          href={article.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-zinc-100 transition-colors"
+                        >
+                          {article.title}
+                        </a>
+                      ) : (
+                        article.title
+                      )}
                     </h3>
 
                     {/* Description */}
                     {article.description && (
-                      <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">
+                      <p className="text-xs text-zinc-400 leading-relaxed">
                         {article.description}
                       </p>
                     )}
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      onClick={() => handleToggleContent(article.id)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-300 rounded-lg border border-zinc-700/50 transition-colors"
+                  {/* External Link */}
+                  {article.link && (
+                    <a
+                      href={article.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-300 rounded-lg border border-zinc-700/50 transition-colors flex-shrink-0"
                     >
-                      {expandedId === article.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                      {expandedId === article.id ? 'Close' : 'Read'}
-                    </button>
-                    {article.link && (
-                      <a
-                        href={article.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-300 rounded-lg border border-zinc-700/50 transition-colors"
-                      >
-                        <ExternalLink size={12} />
-                      </a>
-                    )}
-                  </div>
+                      <ExternalLink size={12} />
+                      Read
+                    </a>
+                  )}
                 </div>
               </div>
-
-              {/* Expanded Content */}
-              {expandedId === article.id && (
-                <div className="border-t border-zinc-800 px-4 py-4">
-                  {loadingContent === article.id && (
-                    <div className="flex items-center gap-2 text-xs text-zinc-500">
-                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" />
-                      Fetching full article...
-                    </div>
-                  )}
-                  {fullContent[article.id]?.error && (
-                    <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
-                      <AlertCircle size={12} />
-                      {fullContent[article.id].error}
-                      {article.link && (
-                        <a
-                          href={article.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="ml-auto text-amber-300 hover:text-amber-200 underline"
-                        >
-                          Open original
-                        </a>
-                      )}
-                    </div>
-                  )}
-                  {fullContent[article.id]?.content && (
-                    <div className="prose prose-sm prose-invert prose-zinc max-w-none text-xs leading-relaxed [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_p]:text-xs [&_li]:text-xs [&_a]:text-blue-400 [&_a:hover]:text-blue-300 [&_img]:rounded-lg [&_img]:max-h-64">
-                      <div
-                        dangerouslySetInnerHTML={{
-                          __html: fullContent[article.id].content!
-                            .replace(/\n/g, '<br/>')
-                            .replace(/^# (.*?)(<br\/>)/gm, '<h1>$1</h1>')
-                            .replace(/^## (.*?)(<br\/>)/gm, '<h2>$1</h2>')
-                            .replace(/^### (.*?)(<br\/>)/gm, '<h3>$1</h3>')
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           ))}
         </div>

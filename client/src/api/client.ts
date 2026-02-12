@@ -2151,8 +2151,6 @@ export interface HRNewsArticle {
   pub_date: string | null;
   source_name: string | null;
   image_url: string | null;
-  has_full_content: boolean;
-  content_error: string | null;
   created_at: string | null;
 }
 
@@ -2171,15 +2169,6 @@ export interface HRNewsRefreshResponse {
   feeds?: { source: string; new: number; error?: string }[];
 }
 
-export interface HRNewsFullContent {
-  id: string;
-  title: string;
-  content: string | null;
-  error?: string;
-  fetched_at?: string;
-  cached?: boolean;
-}
-
 export const adminNews = {
   list: (params?: { source?: string; limit?: number; offset?: number }): Promise<HRNewsListResponse> => {
     const searchParams = new URLSearchParams();
@@ -2192,9 +2181,6 @@ export const adminNews = {
 
   refresh: (): Promise<HRNewsRefreshResponse> =>
     request<HRNewsRefreshResponse>('/admin/news/refresh', { method: 'POST' }),
-
-  getFullContent: (id: string): Promise<HRNewsFullContent> =>
-    request<HRNewsFullContent>(`/admin/news/articles/${id}/full-content`),
 };
 
 // Combined API object for convenient imports

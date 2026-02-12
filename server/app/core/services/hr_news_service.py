@@ -3,10 +3,9 @@
 import re
 from datetime import datetime, timedelta
 from typing import Optional
-from uuid import UUID
 
 from .rss_parser import fetch_feed, compute_item_hash
-from .jina_reader import JinaReaderClient
+
 
 # HR news RSS feeds (free, no API key needed)
 HR_NEWS_FEEDS = [
@@ -63,8 +62,7 @@ async def list_articles(
     rows = await conn.fetch(
         f"""
         SELECT id, item_hash, title, description, link, author, pub_date,
-               source_name, source_feed_url, image_url, full_content,
-               content_fetched_at, content_error, created_at
+               source_name, source_feed_url, image_url, created_at
         FROM hr_news_articles
         {where}
         ORDER BY pub_date DESC NULLS LAST, created_at DESC
@@ -90,8 +88,6 @@ async def list_articles(
             "pub_date": r["pub_date"].isoformat() if r["pub_date"] else None,
             "source_name": r["source_name"],
             "image_url": r["image_url"],
-            "has_full_content": r["full_content"] is not None,
-            "content_error": r["content_error"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
         })
 
@@ -186,78 +182,4 @@ async def refresh_feeds(conn) -> dict:
         "status": "refreshed",
         "new_articles": total_new,
         "feeds": feed_results,
-    }
-
-
-async def fetch_full_article(conn, article_id: UUID, jina_api_key: Optional[str] = None) -> dict:
-    """Lazy-load full article content via Jina Reader API. Cache in DB."""
-    row = await conn.fetchrow(
-        """
-        SELECT id, title, link, full_content, content_fetched_at, content_error
-        FROM hr_news_articles WHERE id = $1
-        """,
-        article_id,
-    )
-
-    if not row:
-        return {"error": "Article not found"}
-
-    # Return cached content if available
-    if row["full_content"]:
-        return {
-            "id": str(row["id"]),
-            "title": row["title"],
-            "content": row["full_content"],
-            "fetched_at": row["content_fetched_at"].isoformat() if row["content_fetched_at"] else None,
-            "cached": True,
-        }
-
-    # Return cached error if we already tried and failed
-    if row["content_error"]:
-        return {
-            "id": str(row["id"]),
-            "title": row["title"],
-            "content": None,
-            "error": row["content_error"],
-            "cached": True,
-        }
-
-    # Need a link to fetch
-    if not row["link"]:
-        return {"id": str(row["id"]), "title": row["title"], "content": None, "error": "No article link available"}
-
-    # Need Jina API key
-    if not jina_api_key:
-        return {"id": str(row["id"]), "title": row["title"], "content": None, "error": "Jina API key not configured"}
-
-    # Fetch via Jina Reader
-    client = JinaReaderClient(api_key=jina_api_key)
-    response = await client.fetch_as_markdown(row["link"])
-
-    if response.error:
-        # Cache the error so we don't retry
-        await conn.execute(
-            "UPDATE hr_news_articles SET content_error = $1, content_fetched_at = NOW() WHERE id = $2",
-            response.error, article_id,
-        )
-        return {
-            "id": str(row["id"]),
-            "title": row["title"],
-            "content": None,
-            "error": response.error,
-            "cached": False,
-        }
-
-    # Cache successful content
-    await conn.execute(
-        "UPDATE hr_news_articles SET full_content = $1, content_fetched_at = NOW() WHERE id = $2",
-        response.markdown, article_id,
-    )
-
-    return {
-        "id": str(row["id"]),
-        "title": row["title"],
-        "content": response.markdown,
-        "fetched_at": datetime.utcnow().isoformat(),
-        "cached": False,
     }
