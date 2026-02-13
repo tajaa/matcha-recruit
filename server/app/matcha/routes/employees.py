@@ -5,6 +5,7 @@ Allows admins/clients to create, update, delete employees and send invitations.
 import asyncio
 import csv
 import io
+import logging
 import re
 import secrets
 from datetime import datetime, date, timedelta
@@ -21,6 +22,8 @@ from ...core.dependencies import get_current_user
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
 from ...core.services.email import EmailService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 pto_admin_router = APIRouter()
@@ -1742,3 +1745,56 @@ async def get_leave_eligibility(
         )
 
         return result
+
+
+class LeaveNoticeRequest(BaseModel):
+    notice_type: str  # fmla_eligibility_notice, fmla_designation_notice, state_leave_notice, return_to_work_notice
+
+
+@leave_admin_router.post("/requests/{leave_id}/notices",
+                          dependencies=[Depends(require_feature("compliance_plus"))])
+async def create_leave_notice(
+    leave_id: UUID,
+    request: LeaveNoticeRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Generate a compliance leave notice PDF and store it as an employee document.
+
+    Requires the ``compliance_plus`` feature flag.
+    """
+    from ..services.leave_notices_service import LeaveNoticeService, VALID_NOTICE_TYPES
+
+    if request.notice_type not in VALID_NOTICE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid notice_type. Must be one of: {', '.join(sorted(VALID_NOTICE_TYPES))}",
+        )
+
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        leave = await conn.fetchrow(
+            "SELECT id, employee_id FROM leave_requests WHERE id = $1 AND org_id = $2",
+            leave_id, company_id,
+        )
+        if not leave:
+            raise HTTPException(status_code=404, detail="Leave request not found")
+
+        try:
+            service = LeaveNoticeService()
+            doc = await service.create_notice(
+                conn,
+                notice_type=request.notice_type,
+                employee_id=leave["employee_id"],
+                org_id=company_id,
+                leave_request_id=leave_id,
+            )
+            return doc
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Failed to generate leave notice: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate leave notice. Please try again.",
+            )
