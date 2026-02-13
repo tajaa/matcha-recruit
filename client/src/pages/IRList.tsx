@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { irIncidents } from '../api/client';
 import type { IRIncident, IRIncidentType, IRSeverity, IRStatus, IRAnalyticsSummary } from '../types';
 import { Plus, Trash2, BarChart3 } from 'lucide-react';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const STATUS_TABS: { label: string; value: IRStatus | 'all' | 'needs_attention' }[] = [
   { label: 'Needs Attention', value: 'needs_attention' },
@@ -132,17 +133,22 @@ export function IRList() {
       {/* Header */}
       <div className="flex justify-between items-start border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Incident Management</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Incident Management</h1>
+            <FeatureGuideTrigger guideId="ir-list" />
+          </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">{total} Records in Current View</p>
         </div>
         <div className="flex gap-3">
           <button
+            data-tour="ir-list-analytics-btn"
             onClick={() => navigate('/app/ir/dashboard')}
             className="flex items-center gap-2 px-4 py-2 border border-white/10 hover:bg-zinc-900 text-xs font-bold text-zinc-400 hover:text-white uppercase tracking-wider transition-colors"
           >
             <BarChart3 size={14} /> Analytics
           </button>
           <button
+            data-tour="ir-list-report-btn"
             onClick={() => navigate('/app/ir/incidents/new')}
             className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
           >
@@ -152,7 +158,7 @@ export function IRList() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10">
+      <div data-tour="ir-list-stats" className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10">
         <div className="bg-zinc-950 p-4">
           <div className="text-2xl font-light text-white font-mono">{openCount}</div>
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1 font-bold">Open</div>
@@ -180,7 +186,7 @@ export function IRList() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-6 pb-6 border-b border-white/10">
         {/* Status Tabs */}
-        <div className="flex gap-2">
+        <div data-tour="ir-list-tabs" className="flex gap-2">
           {STATUS_TABS.map((tab) => (
             <button
               key={tab.value}
@@ -200,6 +206,7 @@ export function IRList() {
 
         {/* Type */}
         <select
+          data-tour="ir-list-type-filter"
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as IRIncidentType | '')}
           className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider focus:outline-none focus:border-zinc-600 cursor-pointer"
@@ -214,6 +221,7 @@ export function IRList() {
 
         {/* Severity */}
         <select
+          data-tour="ir-list-severity-filter"
           value={severityFilter}
           onChange={(e) => setSeverityFilter(e.target.value as IRSeverity | '')}
           className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider focus:outline-none focus:border-zinc-600 cursor-pointer"
@@ -226,7 +234,7 @@ export function IRList() {
         </select>
 
         {/* Search */}
-        <div className="flex-1 min-w-[200px]">
+        <div data-tour="ir-list-search" className="flex-1 min-w-[200px]">
           <input
             type="text"
             placeholder="SEARCH INCIDENTS..."
@@ -256,7 +264,7 @@ export function IRList() {
           </button>
         </div>
       ) : (
-        <div className="space-y-px bg-white/10 border border-white/10">
+        <div data-tour="ir-list-rows" className="space-y-px bg-white/10 border border-white/10">
           {/* Header row */}
           <div className="flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10 font-bold">
             <div className="w-3" />
@@ -291,6 +299,7 @@ export function IRList() {
               </div>
               <div className="w-40">
                 <select
+                  data-tour="ir-list-status-dropdown"
                   value={incident.status}
                   onClick={(e) => e.stopPropagation()}
                   onChange={(e) => handleStatusUpdate(incident.id, e.target.value as IRStatus, e)}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Calendar, Clock, CheckCircle, XCircle, AlertCircle, Plus, X } from 'lucide-react';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 import { portalApi } from '../../api/portal';
 
 interface PTOBalance {
@@ -140,10 +141,14 @@ export function PortalPTO() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-mono font-medium text-zinc-900">Time Off</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-mono font-medium text-zinc-900">Time Off</h1>
+            <FeatureGuideTrigger guideId="portal-pto" variant="light" />
+          </div>
           <p className="text-sm text-zinc-500 mt-1">Manage your PTO requests</p>
         </div>
         <button
+          data-tour="portal-pto-request-btn"
           onClick={() => setShowRequestModal(true)}
           className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors"
         >
@@ -160,7 +165,7 @@ export function PortalPTO() {
 
       {/* Balance Cards */}
       {balance && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div data-tour="portal-pto-balance" className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white border border-zinc-200 rounded-lg p-5">
             <span className="text-xs font-mono uppercase tracking-wider text-zinc-500">Available</span>
             <div className="text-3xl font-mono font-medium text-zinc-900 mt-1">
@@ -194,7 +199,7 @@ export function PortalPTO() {
 
       {/* Pending Requests */}
       {pendingRequests.length > 0 && (
-        <div className="bg-white border border-zinc-200 rounded-lg">
+        <div data-tour="portal-pto-pending" className="bg-white border border-zinc-200 rounded-lg">
           <div className="px-5 py-4 border-b border-zinc-100">
             <h2 className="text-sm font-mono uppercase tracking-wider text-zinc-500">Pending Requests</h2>
           </div>
@@ -218,6 +223,7 @@ export function PortalPTO() {
                 <div className="flex items-center gap-3">
                   {getStatusBadge(req.status)}
                   <button
+                    data-tour="portal-pto-cancel-btn"
                     onClick={() => handleCancelRequest(req.id)}
                     className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                     title="Cancel request"
@@ -232,7 +238,7 @@ export function PortalPTO() {
       )}
 
       {/* Approved Requests */}
-      <div className="bg-white border border-zinc-200 rounded-lg">
+      <div data-tour="portal-pto-approved" className="bg-white border border-zinc-200 rounded-lg">
         <div className="px-5 py-4 border-b border-zinc-100">
           <h2 className="text-sm font-mono uppercase tracking-wider text-zinc-500">Approved Time Off</h2>
         </div>

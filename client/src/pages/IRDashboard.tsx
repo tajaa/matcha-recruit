@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { irIncidents } from '../api/client';
 import type { IRAnalyticsSummary, IRTrendsAnalysis, IRLocationAnalysis, IRIncident } from '../types';
 import { Plus, ArrowRight, Activity, MapPin, ShieldAlert } from 'lucide-react';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const TYPE_LABELS: Record<string, string> = {
   safety: 'Safety',
@@ -79,7 +80,10 @@ export function IRDashboard() {
       {/* Header */}
       <div className="flex justify-between items-start border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Incidents</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Incidents</h1>
+            <FeatureGuideTrigger guideId="ir-dashboard" />
+          </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Workplace incident tracking</p>
         </div>
         <div className="flex gap-3">
@@ -99,7 +103,7 @@ export function IRDashboard() {
       </div>
 
       {/* Stats Row */}
-      <div className="grid grid-cols-4 gap-px bg-white/10 border border-white/10">
+      <div data-tour="ir-dash-stats" className="grid grid-cols-4 gap-px bg-white/10 border border-white/10">
         <div className="bg-zinc-950 p-6">
           <div className="text-3xl font-light text-white font-mono">{summary?.total_incidents || 0}</div>
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-2 font-bold">Total</div>
@@ -122,7 +126,7 @@ export function IRDashboard() {
 
       {/* Trend Chart */}
       {trends && trends.data.length > 0 && (
-        <div className="bg-zinc-900 border border-white/10 p-6">
+        <div data-tour="ir-dash-trend" className="bg-zinc-900 border border-white/10 p-6">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-6 font-bold flex items-center gap-2">
              <Activity size={14} /> Weekly Trend
           </div>
@@ -152,7 +156,7 @@ export function IRDashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {/* By Type */}
-        <div className="bg-zinc-950 border border-white/10 p-6">
+        <div data-tour="ir-dash-by-type" className="bg-zinc-950 border border-white/10 p-6">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-6 font-bold flex items-center gap-2">
              <ShieldAlert size={14} /> By Type
           </div>
@@ -171,7 +175,7 @@ export function IRDashboard() {
         </div>
 
         {/* By Severity */}
-        <div className="bg-zinc-950 border border-white/10 p-6">
+        <div data-tour="ir-dash-by-severity" className="bg-zinc-950 border border-white/10 p-6">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-6 font-bold flex items-center gap-2">
              <ShieldAlert size={14} /> By Severity
           </div>
@@ -197,7 +201,7 @@ export function IRDashboard() {
         </div>
 
         {/* Hotspots */}
-        <div className="bg-zinc-950 border border-white/10 p-6">
+        <div data-tour="ir-dash-hotspots" className="bg-zinc-950 border border-white/10 p-6">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-6 font-bold flex items-center gap-2">
              <MapPin size={14} /> Hotspots
           </div>
@@ -217,7 +221,7 @@ export function IRDashboard() {
       </div>
 
       {/* Recent Incidents */}
-      <div className="space-y-px bg-white/10 border border-white/10">
+      <div data-tour="ir-dash-recent" className="space-y-px bg-white/10 border border-white/10">
         <div className="flex justify-between items-center p-4 bg-zinc-950 border-b border-white/10">
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Recent Incidents</div>
           <button

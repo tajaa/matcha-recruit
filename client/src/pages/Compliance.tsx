@@ -16,6 +16,7 @@ import {
     History, Eye, Zap, Info
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 function linkifyText(text: string) {
     const splitRegex = /(https?:\/\/[^\s,)]+)/g;
@@ -372,13 +373,17 @@ export function Compliance() {
             <div className="flex items-center justify-between border-b border-white/10 pb-8">
                 <div className="flex items-center gap-6">
                     <div>
-                        <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Compliance</h1>
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Compliance</h1>
+                            <FeatureGuideTrigger guideId="compliance" />
+                        </div>
                         <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
                             Monitor labor laws, tax rates, and posting requirements
                         </p>
                     </div>
                     {isAdmin && companies?.companies && companies.companies.length > 0 && (
                         <select
+                            data-tour="compliance-company-select"
                             value={selectedCompanyId || ''}
                             onChange={e => setSelectedCompanyId(e.target.value)}
                             className="px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-white/20 transition-colors min-w-[200px]"
@@ -390,6 +395,7 @@ export function Compliance() {
                     )}
                 </div>
                 <button
+                    data-tour="compliance-add-btn"
                     onClick={() => {
                         setFormData(emptyFormData);
                         setEditingLocation(null);
@@ -404,7 +410,7 @@ export function Compliance() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-1 space-y-4">
+                <div data-tour="compliance-locations" className="lg:col-span-1 space-y-4">
                     <h2 className="text-xs font-bold text-white uppercase tracking-wider pb-2 border-b border-white/10">
                         Locations
                     </h2>
@@ -435,6 +441,7 @@ export function Compliance() {
                         <div className="space-y-2">
                             {locations?.map(location => (
                                 <div
+                                    data-tour="compliance-location-card"
                                     key={location.id}
                                     onClick={() => setSelectedLocationId(location.id)}
                                     className={`border rounded p-4 cursor-pointer transition-all group ${
@@ -497,7 +504,7 @@ export function Compliance() {
                     )}
                 </div>
 
-                <div className="lg:col-span-2">
+                <div data-tour="compliance-content" className="lg:col-span-2">
                     {selectedLocationId && selectedLocation ? (
                         <div className="bg-zinc-950 border border-white/10 rounded overflow-hidden min-h-[600px] flex flex-col">
                             <div className="p-6 border-b border-white/10 bg-zinc-900/50">
@@ -631,7 +638,7 @@ export function Compliance() {
                                 </div>
                             )}
 
-                            <div className="flex border-b border-white/10">
+                            <div data-tour="compliance-tabs" className="flex border-b border-white/10">
                                 <button
                                     onClick={() => setActiveTab('requirements')}
                                     className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${

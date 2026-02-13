@@ -1,5 +1,6 @@
 import { Modal } from '../Modal';
 import type { IRCategorizationAnalysis } from '../../types';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 
 interface CategorizationAnalysisModalProps {
   isOpen: boolean;
@@ -45,8 +46,9 @@ export function CategorizationAnalysisModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Category Analysis">
       <div className="space-y-5">
+        <FeatureGuideTrigger guideId="ir-categorization" />
         {/* Suggested Type */}
-        <div>
+        <div data-tour="ir-cat-type">
           <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
             Suggested Type
           </div>
@@ -60,7 +62,7 @@ export function CategorizationAnalysisModal({
         </div>
 
         {/* Confidence */}
-        <div>
+        <div data-tour="ir-cat-confidence">
           <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
             Confidence
           </div>
@@ -76,7 +78,7 @@ export function CategorizationAnalysisModal({
         </div>
 
         {/* Reasoning */}
-        <div>
+        <div data-tour="ir-cat-reasoning">
           <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
             Reasoning
           </div>
@@ -86,7 +88,7 @@ export function CategorizationAnalysisModal({
         </div>
 
         {/* Metadata */}
-        <div className="pt-4 border-t border-zinc-800 space-y-2 text-[10px]">
+        <div data-tour="ir-cat-meta" className="pt-4 border-t border-zinc-800 space-y-2 text-[10px]">
           <div className="flex justify-between">
             <span className="text-zinc-600">Generated</span>
             <span className="text-zinc-400">{formatDate(analysis.generated_at)}</span>

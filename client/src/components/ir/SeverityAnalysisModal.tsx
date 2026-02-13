@@ -1,5 +1,6 @@
 import { Modal } from '../Modal';
 import type { IRSeverityAnalysis } from '../../types';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 
 interface SeverityAnalysisModalProps {
   isOpen: boolean;
@@ -41,8 +42,9 @@ export function SeverityAnalysisModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Severity Analysis">
       <div className="space-y-5">
+        <FeatureGuideTrigger guideId="ir-severity" />
         {/* Suggested Severity */}
-        <div>
+        <div data-tour="ir-sev-badge">
           <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
             Suggested Severity
           </div>
@@ -58,7 +60,7 @@ export function SeverityAnalysisModal({
 
         {/* Contributing Factors */}
         {analysis.factors.length > 0 && (
-          <div>
+          <div data-tour="ir-sev-factors">
             <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
               Contributing Factors
             </div>
@@ -74,7 +76,7 @@ export function SeverityAnalysisModal({
         )}
 
         {/* Reasoning */}
-        <div>
+        <div data-tour="ir-sev-reasoning">
           <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
             Detailed Reasoning
           </div>

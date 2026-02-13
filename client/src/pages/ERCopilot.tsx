@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { erCopilot } from '../api/client';
 import type { ERCase, ERCaseStatus, ERCaseCreate } from '../types';
 import { X, ChevronRight } from 'lucide-react';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const STATUS_TABS: { label: string; value: ERCaseStatus | 'all' }[] = [
   { label: 'All', value: 'all' },
@@ -89,10 +90,14 @@ export function ERCopilot() {
       {/* Header */}
       <div className="flex justify-between items-start mb-12 border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">ER Copilot</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">ER Copilot</h1>
+            <FeatureGuideTrigger guideId="er-copilot" />
+          </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Investigation Assistant</p>
         </div>
         <button
+          data-tour="er-new-case"
           onClick={() => setShowCreateModal(true)}
           className="px-6 py-2 bg-white text-black text-xs font-bold hover:bg-zinc-200 uppercase tracking-wider transition-colors"
         >
@@ -101,7 +106,7 @@ export function ERCopilot() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-8 mb-px border-b border-white/10">
+      <div data-tour="er-tabs" className="flex gap-8 mb-px border-b border-white/10">
         {STATUS_TABS.map((tab) => (
           <button
             key={tab.value}
@@ -132,7 +137,7 @@ export function ERCopilot() {
           </button>
         </div>
       ) : (
-        <div className="space-y-px bg-white/10 border border-white/10 mt-8">
+        <div data-tour="er-case-list" className="space-y-px bg-white/10 border border-white/10 mt-8">
            {/* List Header */}
            <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950 border-b border-white/10">
              <div className="w-8"></div>
@@ -144,8 +149,9 @@ export function ERCopilot() {
            </div>
 
           {cases.map((erCase) => (
-            <div 
-              key={erCase.id} 
+            <div
+              data-tour="er-case-row"
+              key={erCase.id}
               className="group flex items-center gap-4 py-4 px-4 cursor-pointer bg-zinc-950 hover:bg-zinc-900 transition-colors"
               onClick={() => navigate(`/app/matcha/er-copilot/${erCase.id}`)}
             >
@@ -166,7 +172,7 @@ export function ERCopilot() {
                  )}
               </div>
 
-              <div className={`w-32 text-[10px] font-bold uppercase tracking-wider ${STATUS_COLORS[erCase.status]}`}>
+              <div data-tour="er-status-col" className={`w-32 text-[10px] font-bold uppercase tracking-wider ${STATUS_COLORS[erCase.status]}`}>
                  {STATUS_LABELS[erCase.status]}
               </div>
 

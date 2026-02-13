@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { CheckCircle, Clock, FileText, Laptop, GraduationCap, Settings, AlertCircle } from 'lucide-react';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -103,7 +104,10 @@ export function PortalOnboarding() {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-mono font-medium text-zinc-900">Onboarding Checklist</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-mono font-medium text-zinc-900">Onboarding Checklist</h1>
+          <FeatureGuideTrigger guideId="portal-onboarding" variant="light" />
+        </div>
         <p className="text-sm text-zinc-500 mt-1">Complete your onboarding tasks to get started</p>
       </div>
 
@@ -116,7 +120,7 @@ export function PortalOnboarding() {
 
       {/* Progress Card */}
       {progress && progress.total > 0 && (
-        <div className="bg-white border border-zinc-200 rounded-lg p-6">
+        <div data-tour="portal-onboard-progress" className="bg-white border border-zinc-200 rounded-lg p-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-zinc-900">Your Progress</span>
             <span className="text-sm text-zinc-500">
@@ -151,7 +155,7 @@ export function PortalOnboarding() {
 
       {/* My Tasks Section */}
       {myTasks.length > 0 && (
-        <div className="bg-white border border-zinc-200 rounded-lg">
+        <div data-tour="portal-onboard-my-tasks" className="bg-white border border-zinc-200 rounded-lg">
           <div className="px-5 py-4 border-b border-zinc-100">
             <h2 className="text-sm font-mono uppercase tracking-wider text-zinc-500">Your Tasks</h2>
           </div>
@@ -199,6 +203,7 @@ export function PortalOnboarding() {
                       </span>
                     ) : (
                       <button
+                        data-tour="portal-onboard-complete-btn"
                         onClick={() => handleCompleteTask(task.id)}
                         disabled={completingTask === task.id}
                         className="px-4 py-2 bg-zinc-900 text-white text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-50"
@@ -216,7 +221,7 @@ export function PortalOnboarding() {
 
       {/* HR Tasks Section */}
       {hrTasks.length > 0 && (
-        <div className="bg-white border border-zinc-200 rounded-lg">
+        <div data-tour="portal-onboard-hr-tasks" className="bg-white border border-zinc-200 rounded-lg">
           <div className="px-5 py-4 border-b border-zinc-100">
             <h2 className="text-sm font-mono uppercase tracking-wider text-zinc-500">HR/Manager Tasks</h2>
             <p className="text-xs text-zinc-400 mt-1">These tasks will be completed by your HR team or manager</p>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAccessToken } from '../api/client';
 import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download } from 'lucide-react';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -356,13 +357,17 @@ export default function Employees() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Directory</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Directory</h1>
+            <FeatureGuideTrigger guideId="employees" />
+          </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
             Manage personnel and access rights
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
+            data-tour="emp-help-btn"
             onClick={() => setShowHelp(!showHelp)}
             className={`flex items-center gap-2 px-4 py-2 border text-xs font-bold uppercase tracking-wider transition-colors ${
               showHelp
@@ -407,6 +412,7 @@ export default function Employees() {
             )}
           </div>
           <button
+            data-tour="emp-bulk-btn"
             onClick={() => setShowBulkUploadModal(true)}
             className="flex items-center gap-2 px-4 py-2 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-xs font-bold uppercase tracking-wider transition-colors"
           >
@@ -414,6 +420,7 @@ export default function Employees() {
             Bulk Upload
           </button>
           <button
+            data-tour="emp-add-btn"
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
           >
@@ -512,7 +519,7 @@ export default function Employees() {
       )}
 
       {/* Filter tabs */}
-      <div className="border-b border-white/10">
+      <div data-tour="emp-tabs" className="border-b border-white/10">
         <nav className="-mb-px flex space-x-8">
           {[
             { value: '', label: 'All' },
@@ -551,7 +558,7 @@ export default function Employees() {
           </button>
         </div>
       ) : (
-        <div className="space-y-px bg-white/10 border border-white/10">
+        <div data-tour="emp-list" className="space-y-px bg-white/10 border border-white/10">
            {/* Table Header */}
            <div className="hidden md:flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
               <div className="flex-1">Name / Email</div>
@@ -593,7 +600,7 @@ export default function Employees() {
                       {employee.employment_type?.replace('_', ' ') || '—'}
                     </p>
                  </div>
-                 <div className="w-36 flex justify-end">
+                 <div data-tour="emp-onboarding-col" className="w-36 flex justify-end">
                     {onboardingProgress[employee.id]?.has_onboarding ? (
                       <div className="flex items-center gap-2">
                         <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
@@ -619,6 +626,7 @@ export default function Employees() {
                  <div className="w-32 flex justify-end">
                     {!employee.user_id && !employee.termination_date && (
                       <button
+                        data-tour="emp-invite-btn"
                         onClick={(e) => { e.stopPropagation(); handleSendInvite(employee.id); }}
                         disabled={invitingId === employee.id}
                         className="inline-flex items-center px-3 py-1.5 border border-white/10 text-[10px] font-bold uppercase tracking-wider rounded text-zinc-300 hover:text-white hover:border-white/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-zinc-900"

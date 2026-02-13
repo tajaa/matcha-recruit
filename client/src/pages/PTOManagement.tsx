@@ -3,6 +3,7 @@ import { getAccessToken } from '../api/client';
 import {
   Calendar, Clock, CheckCircle, XCircle, AlertTriangle
 } from 'lucide-react';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -183,7 +184,10 @@ export default function PTOManagement() {
       {/* Header */}
       <div className="flex justify-between items-start border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Time Off Requests</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Time Off Requests</h1>
+            <FeatureGuideTrigger guideId="time-off" />
+          </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
             Manage employee PTO requests
           </p>
@@ -192,7 +196,7 @@ export default function PTOManagement() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div data-tour="pto-summary" className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-zinc-900/50 border border-white/10 p-6">
             <div className="flex items-center justify-between">
               <div>
@@ -235,7 +239,7 @@ export default function PTOManagement() {
       )}
 
       {/* Filter Tabs */}
-      <div className="flex gap-8 border-b border-white/10 pb-px">
+      <div data-tour="pto-tabs" className="flex gap-8 border-b border-white/10 pb-px">
         {[
             { value: 'pending', label: 'Pending' },
             { value: 'approved', label: 'Approved' },
@@ -265,7 +269,7 @@ export default function PTOManagement() {
           </p>
         </div>
       ) : (
-        <div className="space-y-px bg-white/10 border border-white/10">
+        <div data-tour="pto-request-list" className="space-y-px bg-white/10 border border-white/10">
           {/* Table Header */}
           <div className="hidden md:flex items-center gap-4 py-3 px-4 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
             <div className="flex-1">Employee</div>
@@ -313,6 +317,7 @@ export default function PTOManagement() {
                   {request.status === 'pending' && (
                     <>
                       <button
+                        data-tour="pto-approve-btn"
                         onClick={() => handleApprove(request.id)}
                         disabled={processing === request.id}
                         className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wider rounded transition-colors disabled:opacity-50"
@@ -320,6 +325,7 @@ export default function PTOManagement() {
                         {processing === request.id ? '...' : 'Approve'}
                       </button>
                       <button
+                        data-tour="pto-deny-btn"
                         onClick={() => openDenyModal(request)}
                         disabled={processing === request.id}
                         className="px-3 py-1.5 border border-white/10 text-zinc-400 hover:text-white hover:border-white/30 text-[10px] font-bold uppercase tracking-wider rounded transition-colors disabled:opacity-50"

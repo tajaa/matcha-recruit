@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { FileText, CheckCircle, Clock, AlertCircle, X } from 'lucide-react';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 import { portalApi } from '../../api/portal';
 
 interface Document {
@@ -99,13 +100,16 @@ export function PortalDocuments() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-mono font-medium text-zinc-900">My Documents</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-mono font-medium text-zinc-900">My Documents</h1>
+            <FeatureGuideTrigger guideId="portal-documents" variant="light" />
+          </div>
           <p className="text-sm text-zinc-500 mt-1">View and sign assigned documents</p>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2">
+      <div data-tour="portal-docs-filters" className="flex gap-2">
         <button
           onClick={() => setFilter('')}
           className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
@@ -142,7 +146,7 @@ export function PortalDocuments() {
       )}
 
       {/* Documents List */}
-      <div className="bg-white border border-zinc-200 rounded-lg divide-y divide-zinc-100">
+      <div data-tour="portal-docs-list" className="bg-white border border-zinc-200 rounded-lg divide-y divide-zinc-100">
         {documents.length === 0 ? (
           <div className="p-8 text-center text-zinc-500">
             <FileText className="w-12 h-12 mx-auto text-zinc-300 mb-3" />
@@ -173,10 +177,11 @@ export function PortalDocuments() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div data-tour="portal-docs-status" className="flex items-center gap-3">
                   {getStatusBadge(doc.status)}
                   {doc.status === 'pending_signature' && (
                     <button
+                      data-tour="portal-docs-sign-btn"
                       onClick={() => setSigningDoc(doc)}
                       className="px-4 py-2 bg-zinc-900 text-white text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors"
                     >

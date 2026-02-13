@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { irIncidents } from '../api/client';
 import { complianceAPI, type BusinessLocation } from '../api/compliance';
 import type { IRIncidentType, IRSeverity, IRWitness, IRIncidentCreate } from '../types';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const TYPES: { value: IRIncidentType; label: string }[] = [
   { value: 'safety', label: 'Safety' },
@@ -104,14 +105,17 @@ export function IRCreate() {
         <span>←</span> Back
       </button>
 
-      <h1 className="text-lg font-medium text-white mb-8">New Incident Report</h1>
+      <div className="flex items-center gap-3 mb-8">
+        <h1 className="text-lg font-medium text-white">New Incident Report</h1>
+        <FeatureGuideTrigger guideId="ir-create" />
+      </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
         {error && <div className="text-xs text-red-400">{error}</div>}
 
         {/* Type & Severity - inline */}
         <div className="flex gap-8">
-          <div className="flex-1">
+          <div data-tour="ir-create-type" className="flex-1">
             <div className={labelClass}>Type</div>
             <div className="flex gap-1 flex-wrap">
               {TYPES.map((t) => (
@@ -130,7 +134,7 @@ export function IRCreate() {
               ))}
             </div>
           </div>
-          <div>
+          <div data-tour="ir-create-severity">
             <div className={labelClass}>Severity</div>
             <div className="flex gap-1">
               {SEVERITIES.map((s) => (
@@ -150,7 +154,7 @@ export function IRCreate() {
         </div>
 
         {/* Title */}
-        <div>
+        <div data-tour="ir-create-title">
           <div className={labelClass}>What happened *</div>
           <input
             type="text"
@@ -176,7 +180,7 @@ export function IRCreate() {
 
         {/* When & Where */}
         <div className="grid grid-cols-2 gap-6">
-          <div>
+          <div data-tour="ir-create-when">
             <div className={labelClass}>When *</div>
             <input
               type="datetime-local"
@@ -186,7 +190,7 @@ export function IRCreate() {
               required
             />
           </div>
-          <div>
+          <div data-tour="ir-create-where">
             <div className={labelClass}>Where</div>
             <input
               type="text"
@@ -419,7 +423,7 @@ export function IRCreate() {
         </div>
 
         {/* Witnesses */}
-        <div>
+        <div data-tour="ir-create-witnesses">
           <div className="flex justify-between items-center">
             <div className={labelClass}>Witnesses</div>
             <button
@@ -481,6 +485,7 @@ export function IRCreate() {
             Cancel
           </button>
           <button
+            data-tour="ir-create-submit"
             type="submit"
             disabled={creating}
             className="px-4 py-2 bg-white text-black text-xs font-medium rounded hover:bg-zinc-200 disabled:opacity-50 uppercase tracking-wider"

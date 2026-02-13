@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Modal } from '../Modal';
 import type { IRSimilarIncidentsAnalysis } from '../../types';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 
 interface SimilarIncidentsAnalysisModalProps {
   isOpen: boolean;
@@ -50,9 +51,10 @@ export function SimilarIncidentsAnalysisModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Similar Incidents">
       <div className="space-y-5">
+        <FeatureGuideTrigger guideId="ir-similar" />
         {/* Pattern Summary */}
         {analysis.pattern_summary && (
-          <div>
+          <div data-tour="ir-sim-pattern">
             <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
               Pattern Summary
             </div>
@@ -63,7 +65,7 @@ export function SimilarIncidentsAnalysisModal({
         )}
 
         {/* Similar Incidents */}
-        <div>
+        <div data-tour="ir-sim-cards">
           <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-3">
             Similar Incidents ({analysis.similar_incidents.length})
           </div>
@@ -147,7 +149,7 @@ export function SimilarIncidentsAnalysisModal({
         </div>
 
         {/* Metadata */}
-        <div className="pt-4 border-t border-zinc-800 space-y-2 text-[10px]">
+        <div data-tour="ir-sim-meta" className="pt-4 border-t border-zinc-800 space-y-2 text-[10px]">
           <div className="flex justify-between">
             <span className="text-zinc-600">Generated</span>
             <span className="text-zinc-400">{formatDate(analysis.generated_at)}</span>

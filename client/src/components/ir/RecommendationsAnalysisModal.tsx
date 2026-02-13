@@ -1,5 +1,6 @@
 import { Modal } from '../Modal';
 import type { IRRecommendationsAnalysis } from '../../types';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 
 interface RecommendationsAnalysisModalProps {
   isOpen: boolean;
@@ -39,9 +40,10 @@ export function RecommendationsAnalysisModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Recommended Actions">
       <div className="space-y-5">
+        <FeatureGuideTrigger guideId="ir-recommendations" />
         {/* Summary */}
         {analysis.summary && (
-          <div>
+          <div data-tour="ir-rec-summary">
             <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
               Summary
             </div>
@@ -52,7 +54,7 @@ export function RecommendationsAnalysisModal({
         )}
 
         {/* Recommendations */}
-        <div>
+        <div data-tour="ir-rec-cards">
           <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-3">
             Recommended Actions ({analysis.recommendations.length})
           </div>
@@ -96,7 +98,7 @@ export function RecommendationsAnalysisModal({
         </div>
 
         {/* Metadata */}
-        <div className="pt-4 border-t border-zinc-800 space-y-2 text-[10px]">
+        <div data-tour="ir-rec-meta" className="pt-4 border-t border-zinc-800 space-y-2 text-[10px]">
           <div className="flex justify-between">
             <span className="text-zinc-600">Generated</span>
             <span className="text-zinc-400">{formatDate(analysis.generated_at)}</span>

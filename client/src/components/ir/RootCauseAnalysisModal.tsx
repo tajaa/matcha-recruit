@@ -1,5 +1,6 @@
 import { Modal } from '../Modal';
 import type { IRRootCauseAnalysis } from '../../types';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 
 interface RootCauseAnalysisModalProps {
   isOpen: boolean;
@@ -27,8 +28,9 @@ export function RootCauseAnalysisModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Root Cause Analysis">
       <div className="space-y-5">
+        <FeatureGuideTrigger guideId="ir-root-cause" />
         {/* Primary Cause */}
-        <div>
+        <div data-tour="ir-rc-cause">
           <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
             Primary Cause
           </div>
@@ -39,7 +41,7 @@ export function RootCauseAnalysisModal({
 
         {/* Contributing Factors */}
         {analysis.contributing_factors.length > 0 && (
-          <div>
+          <div data-tour="ir-rc-factors">
             <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
               Contributing Factors
             </div>
@@ -56,7 +58,7 @@ export function RootCauseAnalysisModal({
 
         {/* Prevention Suggestions */}
         {analysis.prevention_suggestions.length > 0 && (
-          <div>
+          <div data-tour="ir-rc-prevention">
             <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
               Prevention Suggestions
             </div>
@@ -72,7 +74,7 @@ export function RootCauseAnalysisModal({
         )}
 
         {/* Detailed Reasoning */}
-        <div>
+        <div data-tour="ir-rc-analysis">
           <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">
             Detailed Analysis
           </div>
