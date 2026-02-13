@@ -7,7 +7,8 @@ import csv
 import io
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
+from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from ...core.services.email import EmailService
 
 router = APIRouter()
 pto_admin_router = APIRouter()
+leave_admin_router = APIRouter()
 
 
 # Request/Response Models
@@ -1494,3 +1496,205 @@ async def handle_pto_request(
             )
 
             return {"message": "PTO request denied", "status": "denied"}
+
+
+# ================================
+# Leave Admin Routes (leave_admin_router)
+# ================================
+
+VALID_LEAVE_STATUSES = {"requested", "approved", "denied", "active", "completed", "cancelled"}
+
+
+class LeaveActionRequest(BaseModel):
+    action: str  # 'approve', 'deny', 'activate', 'complete'
+    denial_reason: Optional[str] = None
+    end_date: Optional[date] = None
+    expected_return_date: Optional[date] = None
+    actual_return_date: Optional[date] = None
+    hours_approved: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class LeaveRequestAdminResponse(BaseModel):
+    id: UUID
+    employee_id: UUID
+    org_id: UUID
+    leave_type: str
+    reason: Optional[str]
+    start_date: date
+    end_date: Optional[date]
+    expected_return_date: Optional[date]
+    actual_return_date: Optional[date]
+    status: str
+    intermittent: bool
+    intermittent_schedule: Optional[str]
+    hours_approved: Optional[Decimal]
+    hours_used: Optional[Decimal]
+    denial_reason: Optional[str]
+    reviewed_by: Optional[UUID]
+    reviewed_at: Optional[datetime]
+    notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    employee_name: Optional[str] = None
+
+
+@leave_admin_router.get("/requests", response_model=List[LeaveRequestAdminResponse])
+async def list_leave_requests(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    leave_type: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List all leave requests for the company."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        conditions = ["lr.org_id = $1"]
+        params: list = [company_id]
+        idx = 2
+
+        if status_filter:
+            conditions.append(f"lr.status = ${idx}")
+            params.append(status_filter)
+            idx += 1
+
+        if leave_type:
+            conditions.append(f"lr.leave_type = ${idx}")
+            params.append(leave_type)
+            idx += 1
+
+        where = " AND ".join(conditions)
+        rows = await conn.fetch(
+            f"""SELECT lr.*, e.first_name || ' ' || e.last_name AS employee_name
+                FROM leave_requests lr
+                JOIN employees e ON lr.employee_id = e.id
+                WHERE {where}
+                ORDER BY lr.created_at DESC""",
+            *params,
+        )
+        return [LeaveRequestAdminResponse(**dict(r)) for r in rows]
+
+
+@leave_admin_router.get("/requests/{leave_id}", response_model=LeaveRequestAdminResponse)
+async def get_leave_request(
+    leave_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get a specific leave request with employee name."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT lr.*, e.first_name || ' ' || e.last_name AS employee_name
+               FROM leave_requests lr
+               JOIN employees e ON lr.employee_id = e.id
+               WHERE lr.id = $1 AND lr.org_id = $2""",
+            leave_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Leave request not found")
+        return LeaveRequestAdminResponse(**dict(row))
+
+
+@leave_admin_router.patch("/requests/{leave_id}")
+async def handle_leave_request(
+    leave_id: UUID,
+    request: LeaveActionRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Approve, deny, activate, or complete a leave request."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, status FROM leave_requests WHERE id = $1 AND org_id = $2",
+            leave_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Leave request not found")
+
+        current_status = row["status"]
+        reviewed_by = current_user.id
+
+        if request.action == "approve":
+            if current_status != "requested":
+                raise HTTPException(status_code=400, detail="Can only approve requests in 'requested' status")
+
+            sets = ["status = 'approved'", "reviewed_by = $2", "reviewed_at = NOW()", "updated_at = NOW()"]
+            params: list = [leave_id, reviewed_by]
+            idx = 3
+
+            if request.end_date:
+                sets.append(f"end_date = ${idx}")
+                params.append(request.end_date)
+                idx += 1
+            if request.expected_return_date:
+                sets.append(f"expected_return_date = ${idx}")
+                params.append(request.expected_return_date)
+                idx += 1
+            if request.hours_approved is not None:
+                sets.append(f"hours_approved = ${idx}")
+                params.append(request.hours_approved)
+                idx += 1
+            if request.notes:
+                sets.append(f"notes = ${idx}")
+                params.append(request.notes)
+                idx += 1
+
+            await conn.execute(
+                f"UPDATE leave_requests SET {', '.join(sets)} WHERE id = $1",
+                *params,
+            )
+            return {"message": "Leave request approved", "status": "approved"}
+
+        elif request.action == "deny":
+            if current_status != "requested":
+                raise HTTPException(status_code=400, detail="Can only deny requests in 'requested' status")
+            if not request.denial_reason:
+                raise HTTPException(status_code=400, detail="Denial reason is required")
+
+            await conn.execute(
+                """UPDATE leave_requests
+                   SET status = 'denied', denial_reason = $1, reviewed_by = $2,
+                       reviewed_at = NOW(), updated_at = NOW()
+                   WHERE id = $3""",
+                request.denial_reason, reviewed_by, leave_id,
+            )
+            return {"message": "Leave request denied", "status": "denied"}
+
+        elif request.action == "activate":
+            if current_status != "approved":
+                raise HTTPException(status_code=400, detail="Can only activate approved leave requests")
+
+            await conn.execute(
+                "UPDATE leave_requests SET status = 'active', updated_at = NOW() WHERE id = $1",
+                leave_id,
+            )
+            return {"message": "Leave activated", "status": "active"}
+
+        elif request.action == "complete":
+            if current_status not in ("active", "approved"):
+                raise HTTPException(status_code=400, detail="Can only complete active or approved leave requests")
+
+            sets = ["status = 'completed'", "updated_at = NOW()"]
+            params = [leave_id]
+            idx = 2
+
+            actual_return = request.actual_return_date or date.today()
+            sets.append(f"actual_return_date = ${idx}")
+            params.append(actual_return)
+            idx += 1
+
+            if request.notes:
+                sets.append(f"notes = ${idx}")
+                params.append(request.notes)
+                idx += 1
+
+            await conn.execute(
+                f"UPDATE leave_requests SET {', '.join(sets)} WHERE id = $1",
+                *params,
+            )
+            return {"message": "Leave completed", "status": "completed"}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid action: {request.action}")

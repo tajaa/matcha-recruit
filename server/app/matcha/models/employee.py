@@ -10,6 +10,15 @@ PTORequestType = Literal["vacation", "sick", "personal", "other"]
 PTORequestStatus = Literal["pending", "approved", "denied", "cancelled"]
 DocumentStatus = Literal["draft", "pending_signature", "signed", "expired", "archived"]
 
+LeaveType = Literal[
+    "fmla", "state_pfml", "parental", "bereavement",
+    "jury_duty", "medical", "military", "unpaid_loa",
+]
+LeaveStatus = Literal[
+    "requested", "approved", "denied",
+    "active", "completed", "cancelled",
+]
+
 
 # ================================
 # Employee Models
@@ -190,3 +199,58 @@ class ProfileUpdateRequest(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     emergency_contact: Optional[dict] = None
+
+
+# ================================
+# Leave Request Models
+# ================================
+
+class LeaveRequestCreate(BaseModel):
+    leave_type: LeaveType
+    start_date: date
+    end_date: Optional[date] = None
+    expected_return_date: Optional[date] = None
+    reason: Optional[str] = None
+    intermittent: bool = False
+    intermittent_schedule: Optional[str] = None
+
+
+class LeaveRequestUpdate(BaseModel):
+    status: Optional[LeaveStatus] = None
+    end_date: Optional[date] = None
+    expected_return_date: Optional[date] = None
+    actual_return_date: Optional[date] = None
+    denial_reason: Optional[str] = None
+    hours_approved: Optional[Decimal] = None
+    notes: Optional[str] = None
+
+
+class LeaveRequestResponse(BaseModel):
+    id: UUID
+    employee_id: UUID
+    org_id: UUID
+    leave_type: LeaveType
+    reason: Optional[str]
+    start_date: date
+    end_date: Optional[date]
+    expected_return_date: Optional[date]
+    actual_return_date: Optional[date]
+    status: LeaveStatus
+    intermittent: bool
+    intermittent_schedule: Optional[str]
+    hours_approved: Optional[Decimal]
+    hours_used: Optional[Decimal]
+    denial_reason: Optional[str]
+    reviewed_by: Optional[UUID]
+    reviewed_at: Optional[datetime]
+    notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LeaveRequestListResponse(BaseModel):
+    requests: list[LeaveRequestResponse]
+    total: int

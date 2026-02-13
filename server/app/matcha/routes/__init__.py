@@ -6,7 +6,7 @@ from .companies import router as companies_router
 from .positions import router as positions_router
 from .candidates import router as candidates_router
 from .interviews import router as interviews_router
-from .employees import router as employees_router, pto_admin_router
+from .employees import router as employees_router, pto_admin_router, leave_admin_router
 from .employee_portal import router as employee_portal_router
 from .onboarding import router as onboarding_router
 from .invitations import router as invitations_router
@@ -33,6 +33,8 @@ matcha_router.include_router(employees_router, prefix="/employees", tags=["emplo
                              dependencies=[Depends(require_feature("employees"))])
 matcha_router.include_router(pto_admin_router, prefix="/employees/pto", tags=["pto-admin"],
                              dependencies=[Depends(require_feature("time_off"))])
+matcha_router.include_router(leave_admin_router, prefix="/employees/leave", tags=["leave-admin"],
+                             dependencies=[Depends(require_feature("time_off"))])
 matcha_router.include_router(employee_portal_router, prefix="/v1/portal", tags=["employee-portal"])
 matcha_router.include_router(onboarding_router, prefix="/onboarding", tags=["onboarding"])
 matcha_router.include_router(invitations_router, prefix="/invitations", tags=["invitations"])
@@ -58,6 +60,7 @@ __all__ = [
     "interviews_router",
     "employees_router",
     "pto_admin_router",
+    "leave_admin_router",
     "employee_portal_router",
     "onboarding_router",
     "invitations_router",
