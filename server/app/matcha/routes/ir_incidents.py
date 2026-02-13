@@ -95,6 +95,18 @@ def _company_filter(param_idx: int) -> str:
     return f"i.company_id = ${param_idx}"
 
 
+def _to_naive_utc(value: datetime) -> datetime:
+    """Normalize datetimes to naive UTC for TIMESTAMP (without timezone) columns."""
+    if value.tzinfo:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _utc_now_naive() -> datetime:
+    """Return current UTC time as naive datetime."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 async def _get_company_admin_contacts(company_id: str) -> tuple[str, list[dict[str, str]]]:
     """Return company display name and company-admin/client email recipients."""
     async with get_connection() as conn:
@@ -421,12 +433,12 @@ async def list_incidents(
 
         if from_date:
             conditions.append(f"i.occurred_at >= ${param_idx}")
-            params.append(from_date)
+            params.append(_to_naive_utc(from_date))
             param_idx += 1
 
         if to_date:
             conditions.append(f"i.occurred_at <= ${param_idx}")
-            params.append(to_date)
+            params.append(_to_naive_utc(to_date))
             param_idx += 1
 
         if search:
@@ -991,7 +1003,7 @@ async def get_analytics_summary(
         by_severity = {row["severity"]: row["count"] for row in severity_rows}
 
         # Recent (last 30 days)
-        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        thirty_days_ago = _utc_now_naive() - timedelta(days=30)
         recent_count = await conn.fetchval(
             f"SELECT COUNT(*) FROM ir_incidents WHERE {co_filter} AND occurred_at >= $2",
             company_id,
@@ -1035,7 +1047,7 @@ async def get_analytics_trends(
     date_trunc = trunc_map[period]
 
     async with get_connection() as conn:
-        start_date = datetime.now(timezone.utc) - timedelta(days=days)
+        start_date = _utc_now_naive() - timedelta(days=days)
 
         rows = await conn.fetch(
             f"""
@@ -1070,7 +1082,7 @@ async def get_analytics_trends(
             data=data,
             period=period,
             start_date=start_date.strftime("%Y-%m-%d"),
-            end_date=datetime.utcnow().strftime("%Y-%m-%d"),
+            end_date=_utc_now_naive().strftime("%Y-%m-%d"),
         )
 
 

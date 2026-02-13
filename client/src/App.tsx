@@ -492,6 +492,14 @@ function App() {
                 path="ir"
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="incidents">
+                    <IRList />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="ir/dashboard"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="incidents">
                     <IRDashboard />
                   </ProtectedRoute>
                 }

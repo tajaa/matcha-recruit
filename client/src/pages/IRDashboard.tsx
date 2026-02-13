@@ -84,7 +84,7 @@ export function IRDashboard() {
         </div>
         <div className="flex gap-3">
           <button
-            onClick={() => navigate('/app/ir/incidents')}
+            onClick={() => navigate('/app/ir')}
             className="text-xs text-zinc-500 hover:text-white uppercase tracking-wider transition-colors px-4 py-2 border border-white/10"
           >
             View All
@@ -221,7 +221,7 @@ export function IRDashboard() {
         <div className="flex justify-between items-center p-4 bg-zinc-950 border-b border-white/10">
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Recent Incidents</div>
           <button
-            onClick={() => navigate('/app/ir/incidents')}
+            onClick={() => navigate('/app/ir')}
             className="text-[10px] text-zinc-500 hover:text-white uppercase tracking-wider transition-colors flex items-center gap-1"
           >
             All <ArrowRight size={10} />
