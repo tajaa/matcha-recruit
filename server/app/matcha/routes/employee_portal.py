@@ -466,6 +466,8 @@ async def cancel_pto_request(
 
 LEAVE_TYPES = {"fmla", "state_pfml", "parental", "bereavement", "jury_duty", "medical", "military", "unpaid_loa"}
 
+_compliance_plus_dep = [Depends(require_feature("compliance_plus"))]
+
 
 @router.get("/me/leave", response_model=LeaveRequestListResponse, dependencies=_pto_dep)
 async def get_my_leave_requests(
@@ -492,6 +494,21 @@ async def get_my_leave_requests(
             requests=[LeaveRequestResponse(**dict(r)) for r in rows],
             total=len(rows),
         )
+
+
+@router.get("/me/leave/eligibility", dependencies=_compliance_plus_dep)
+async def get_my_leave_eligibility(
+    employee: dict = Depends(require_employee_record),
+):
+    """Check what leave programs the employee may qualify for.
+
+    Requires the ``compliance_plus`` feature flag.
+    Returns FMLA eligibility and applicable state programs.
+    """
+    from ..services.leave_eligibility_service import LeaveEligibilityService
+
+    service = LeaveEligibilityService()
+    return await service.get_eligibility_summary(employee["id"])
 
 
 @router.get("/me/leave/{leave_id}", response_model=LeaveRequestResponse, dependencies=_pto_dep)

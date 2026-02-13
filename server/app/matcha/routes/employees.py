@@ -1698,3 +1698,47 @@ async def handle_leave_request(
 
         else:
             raise HTTPException(status_code=400, detail=f"Invalid action: {request.action}")
+
+
+@leave_admin_router.get("/requests/{leave_id}/eligibility",
+                         dependencies=[Depends(require_feature("compliance_plus"))])
+async def get_leave_eligibility(
+    leave_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get FMLA + state program eligibility for the employee on a leave request.
+
+    Requires the ``compliance_plus`` feature flag.  Results are cached in
+    ``leave_requests.eligibility_data`` so repeated calls are fast.
+    """
+    import json
+    from ..services.leave_eligibility_service import LeaveEligibilityService
+
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, employee_id, eligibility_data FROM leave_requests WHERE id = $1 AND org_id = $2",
+            leave_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Leave request not found")
+
+        # Return cached result if present
+        cached = row["eligibility_data"]
+        if isinstance(cached, str):
+            cached = json.loads(cached)
+        if cached and cached.get("checked_at"):
+            return cached
+
+        # Run fresh eligibility check
+        service = LeaveEligibilityService()
+        result = await service.get_eligibility_summary(row["employee_id"])
+
+        # Cache on the leave request row
+        await conn.execute(
+            "UPDATE leave_requests SET eligibility_data = $1, updated_at = NOW() WHERE id = $2",
+            json.dumps(result), leave_id,
+        )
+
+        return result

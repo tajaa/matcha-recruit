@@ -91,8 +91,8 @@ async def admin_overview():
 
 # Known feature keys that can be toggled
 KNOWN_FEATURES = {
-    "offer_letters", "policies", "compliance", "employees",
-    "vibe_checks", "enps", "performance_reviews",
+    "offer_letters", "policies", "compliance", "compliance_plus",
+    "employees", "vibe_checks", "enps", "performance_reviews",
     "er_copilot", "incidents", "time_off",
 }
 
