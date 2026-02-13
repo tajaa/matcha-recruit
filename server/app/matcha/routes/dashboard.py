@@ -30,6 +30,15 @@ class ActivityItem(BaseModel):
     type: str  # 'success' | 'warning' | 'neutral'
 
 
+class IncidentSummary(BaseModel):
+    total_open: int
+    critical: int
+    high: int
+    medium: int
+    low: int
+    recent_7_days: int
+
+
 class DashboardStats(BaseModel):
     active_policies: int
     pending_signatures: int
@@ -37,6 +46,7 @@ class DashboardStats(BaseModel):
     compliance_rate: float
     pending_incidents: List[PendingIncident]
     recent_activity: List[ActivityItem]
+    incident_summary: Optional[IncidentSummary] = None
 
 
 @router.get("/stats", response_model=DashboardStats)
@@ -112,6 +122,32 @@ async def get_dashboard_stats(
             for row in incident_rows
         ]
 
+        # Incident summary (open incidents by severity + recent 7 days)
+        ir_severity_rows = await conn.fetch(
+            """SELECT severity, COUNT(*) AS cnt
+               FROM ir_incidents
+               WHERE company_id = $1 AND status IN ('reported', 'investigating', 'action_required')
+               GROUP BY severity""",
+            company_id,
+        )
+        severity_map = {row["severity"]: row["cnt"] for row in ir_severity_rows}
+        total_open = sum(severity_map.values())
+
+        recent_7_days = await conn.fetchval(
+            """SELECT COUNT(*) FROM ir_incidents
+               WHERE company_id = $1 AND created_at >= NOW() - INTERVAL '7 days'""",
+            company_id,
+        ) or 0
+
+        incident_summary = IncidentSummary(
+            total_open=total_open,
+            critical=severity_map.get("critical", 0),
+            high=severity_map.get("high", 0),
+            medium=severity_map.get("medium", 0),
+            low=severity_map.get("low", 0),
+            recent_7_days=recent_7_days,
+        )
+
         # Recent activity from audit log
         activity_rows = await conn.fetch(
             """SELECT al.action, al.created_at, al.details
@@ -145,6 +181,7 @@ async def get_dashboard_stats(
         compliance_rate=compliance_rate,
         pending_incidents=pending_incidents,
         recent_activity=recent_activity,
+        incident_summary=incident_summary,
     )
 
 

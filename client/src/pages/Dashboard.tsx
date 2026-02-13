@@ -24,6 +24,15 @@ interface ActivityItem {
   type: string;
 }
 
+interface IncidentSummary {
+  total_open: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  recent_7_days: number;
+}
+
 interface DashboardStats {
   active_policies: number;
   pending_signatures: number;
@@ -31,6 +40,7 @@ interface DashboardStats {
   compliance_rate: number;
   pending_incidents: PendingIncident[];
   recent_activity: ActivityItem[];
+  incident_summary?: IncidentSummary;
 }
 
 export function Dashboard() {
@@ -242,6 +252,51 @@ export function Dashboard() {
             </div>
           )}
         </div>
+
+        {/* Incident Reports Widget */}
+        {dashStats?.incident_summary && dashStats.incident_summary.total_open > 0 && (
+          <div className="lg:col-span-2 border border-white/10 bg-zinc-900/30">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center">
+              <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Incident Reports</h2>
+              <ShieldAlert className="w-4 h-4 text-zinc-500" />
+            </div>
+            <div className="p-6">
+              <div className="flex items-baseline gap-3 mb-6">
+                <span className="text-4xl font-light text-white tabular-nums">{dashStats.incident_summary.total_open}</span>
+                <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold">Open Incident{dashStats.incident_summary.total_open !== 1 ? 's' : ''}</span>
+                {dashStats.incident_summary.recent_7_days > 0 && (
+                  <span className="ml-auto text-[10px] font-mono text-amber-500 border border-amber-500/20 bg-amber-500/10 px-2 py-1 rounded">
+                    +{dashStats.incident_summary.recent_7_days} this week
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-4 gap-px bg-white/10">
+                {([
+                  { label: 'Critical', count: dashStats.incident_summary.critical, color: 'text-red-400', bg: 'bg-red-500' },
+                  { label: 'High', count: dashStats.incident_summary.high, color: 'text-orange-400', bg: 'bg-orange-500' },
+                  { label: 'Medium', count: dashStats.incident_summary.medium, color: 'text-amber-400', bg: 'bg-amber-500' },
+                  { label: 'Low', count: dashStats.incident_summary.low, color: 'text-zinc-400', bg: 'bg-zinc-500' },
+                ] as const).map((sev) => (
+                  <div key={sev.label} className="bg-zinc-950 p-4 text-center">
+                    <div className={`text-2xl font-light tabular-nums ${sev.count > 0 ? sev.color : 'text-zinc-700'}`}>{sev.count}</div>
+                    <div className="flex items-center justify-center gap-1.5 mt-2">
+                      <span className={`w-1.5 h-1.5 rounded-full ${sev.count > 0 ? sev.bg : 'bg-zinc-800'}`} />
+                      <span className="text-[9px] uppercase tracking-widest text-zinc-500">{sev.label}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 border-t border-white/10 bg-white/5">
+              <button
+                onClick={() => navigate('/app/ir/incidents')}
+                className="w-full text-center text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors"
+              >
+                View All Incidents
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Action / Compliance Column */}
         <div className="space-y-8">
