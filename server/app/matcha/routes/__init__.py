@@ -15,6 +15,7 @@ from .openings import router as openings_router
 from .matching import router as matching_router
 from .er_copilot import router as er_copilot_router
 from .ir_incidents import router as ir_incidents_router
+from .accommodations import router as accommodations_router
 from .job_search import router as job_search_router
 from .public_jobs import router as public_jobs_router
 from .xp_admin import router as xp_admin_router
@@ -46,6 +47,8 @@ matcha_router.include_router(er_copilot_router, prefix="/er/cases", tags=["er-co
                              dependencies=[Depends(require_feature("er_copilot"))])
 matcha_router.include_router(ir_incidents_router, prefix="/ir/incidents", tags=["ir-incidents"],
                              dependencies=[Depends(require_feature("incidents"))])
+matcha_router.include_router(accommodations_router, prefix="/accommodations", tags=["accommodations"],
+                             dependencies=[Depends(require_feature("accommodations"))])
 matcha_router.include_router(job_search_router, prefix="/jobs", tags=["job-search"])
 matcha_router.include_router(public_jobs_router, prefix="/job-board", tags=["public-jobs"])
 matcha_router.include_router(xp_admin_router, tags=["employee-experience"])
@@ -73,4 +76,5 @@ __all__ = [
     "public_jobs_router",
     "xp_admin_router",
     "dashboard_router",
+    "accommodations_router",
 ]

@@ -93,7 +93,7 @@ async def admin_overview():
 KNOWN_FEATURES = {
     "offer_letters", "policies", "compliance", "compliance_plus",
     "employees", "vibe_checks", "enps", "performance_reviews",
-    "er_copilot", "incidents", "time_off",
+    "er_copilot", "incidents", "time_off", "accommodations",
 }
 
 
