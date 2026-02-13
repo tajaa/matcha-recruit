@@ -27,6 +27,7 @@ celery_app = Celery(
         "app.workers.tasks.legislation_watch",
         "app.workers.tasks.pattern_recognition",
         "app.workers.tasks.structured_data_fetch",
+        "app.workers.tasks.leave_deadline_checks",
     ],
 )
 
@@ -125,3 +126,10 @@ def on_worker_ready(**kwargs):
         run_pattern_recognition.delay()
     else:
         print("[Worker] Pattern recognition scheduler is disabled, skipping.")
+
+    from app.workers.tasks.leave_deadline_checks import check_leave_deadlines
+
+    if _is_scheduler_enabled("leave_deadline_checks"):
+        check_leave_deadlines.delay()
+    else:
+        print("[Worker] Leave deadline checks scheduler is disabled, skipping.")

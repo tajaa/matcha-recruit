@@ -1648,6 +1648,14 @@ async def handle_leave_request(
                 f"UPDATE leave_requests SET {', '.join(sets)} WHERE id = $1",
                 *params,
             )
+
+            # Fire deadline creation task for the approved leave
+            try:
+                from ...workers.tasks.leave_deadline_checks import create_leave_deadlines
+                create_leave_deadlines.delay(str(leave_id))
+            except Exception:
+                logger.warning("Failed to enqueue leave deadline creation for %s", leave_id)
+
             return {"message": "Leave request approved", "status": "approved"}
 
         elif request.action == "deny":
@@ -1745,6 +1753,91 @@ async def get_leave_eligibility(
         )
 
         return result
+
+
+class LeaveDeadlineResponse(BaseModel):
+    id: UUID
+    leave_request_id: UUID
+    org_id: UUID
+    deadline_type: str
+    due_date: date
+    status: str
+    escalation_level: int
+    completed_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class LeaveDeadlineActionRequest(BaseModel):
+    action: str  # 'complete' or 'waive'
+    notes: Optional[str] = None
+
+
+@leave_admin_router.get("/requests/{leave_id}/deadlines",
+                         dependencies=[Depends(require_feature("compliance_plus"))],
+                         response_model=List[LeaveDeadlineResponse])
+async def list_leave_deadlines(
+    leave_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List all compliance deadlines for a leave request."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify leave request belongs to this company
+        lr = await conn.fetchval(
+            "SELECT id FROM leave_requests WHERE id = $1 AND org_id = $2",
+            leave_id, company_id,
+        )
+        if not lr:
+            raise HTTPException(status_code=404, detail="Leave request not found")
+
+        rows = await conn.fetch(
+            """SELECT * FROM leave_deadlines
+               WHERE leave_request_id = $1 AND org_id = $2
+               ORDER BY due_date ASC""",
+            leave_id, company_id,
+        )
+        return [LeaveDeadlineResponse(**dict(r)) for r in rows]
+
+
+@leave_admin_router.patch("/requests/{leave_id}/deadlines/{deadline_id}",
+                           dependencies=[Depends(require_feature("compliance_plus"))],
+                           response_model=LeaveDeadlineResponse)
+async def update_leave_deadline(
+    leave_id: UUID,
+    deadline_id: UUID,
+    request: LeaveDeadlineActionRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Complete or waive a leave compliance deadline."""
+    company_id = await get_client_company_id(current_user)
+
+    if request.action not in ("complete", "waive"):
+        raise HTTPException(status_code=400, detail="Action must be 'complete' or 'waive'")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT id, status FROM leave_deadlines
+               WHERE id = $1 AND leave_request_id = $2 AND org_id = $3""",
+            deadline_id, leave_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Deadline not found")
+        if row["status"] in ("completed", "waived"):
+            raise HTTPException(status_code=400, detail="Deadline already resolved")
+
+        new_status = "completed" if request.action == "complete" else "waived"
+
+        updated = await conn.fetchrow(
+            """UPDATE leave_deadlines
+               SET status = $1, completed_at = NOW(), notes = $2, updated_at = NOW()
+               WHERE id = $3
+               RETURNING *""",
+            new_status, request.notes, deadline_id,
+        )
+        return LeaveDeadlineResponse(**dict(updated))
 
 
 class LeaveNoticeRequest(BaseModel):
