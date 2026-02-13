@@ -13,8 +13,15 @@ from ..notifications import publish_task_complete, publish_task_error
 from ..utils import get_db_connection
 
 
-# FMLA-related leave types that get the full notice/certification deadline set
-FMLA_LEAVE_TYPES = {"fmla_serious_health", "fmla_family_care", "fmla_baby_bonding", "fmla_military"}
+# FMLA-related leave types that get the full notice/certification deadline set.
+# Includes both the current canonical value and legacy granular variants.
+FMLA_LEAVE_TYPES = {
+    "fmla",
+    "fmla_serious_health",
+    "fmla_family_care",
+    "fmla_baby_bonding",
+    "fmla_military",
+}
 
 
 def _add_business_days(start: date, days: int) -> date:
@@ -37,8 +44,8 @@ async def _check_deadlines() -> dict:
     conn = await get_db_connection()
     try:
         rows = await conn.fetch(
-            "SELECT id, leave_request_id, org_id, deadline_type, due_date, escalation_level "
-            "FROM leave_deadlines WHERE status = 'pending'"
+            "SELECT id, leave_request_id, org_id, deadline_type, due_date, escalation_level, status "
+            "FROM leave_deadlines WHERE status IN ('pending', 'overdue')"
         )
 
         today = date.today()
@@ -49,11 +56,12 @@ async def _check_deadlines() -> dict:
         for row in rows:
             due = row["due_date"]
             level = row["escalation_level"]
+            status = row["status"]
             new_level = level
-            new_status = "pending"
+            new_status = status
 
             # Level 1: warning — due within 2 days
-            if (due - today).days <= 2 and level == 0:
+            if status == "pending" and 0 <= (due - today).days <= 2 and level == 0:
                 new_level = 1
                 warnings += 1
 
@@ -69,7 +77,7 @@ async def _check_deadlines() -> dict:
                 new_status = "overdue"
                 escalated += 1
 
-            if new_level != level or new_status != "pending":
+            if new_level != level or new_status != status:
                 await conn.execute(
                     "UPDATE leave_deadlines "
                     "SET escalation_level = $1, status = $2, updated_at = NOW() "
@@ -117,9 +125,9 @@ async def _create_deadlines(leave_request_id: str) -> dict:
         today = date.today()
         deadlines: list[dict] = []
 
-        leave_type = lr["leave_type"]
+        leave_type = (lr["leave_type"] or "").strip().lower()
         return_date = lr["expected_return_date"] or lr["end_date"]
-        is_fmla = leave_type in FMLA_LEAVE_TYPES
+        is_fmla = leave_type in FMLA_LEAVE_TYPES or leave_type.startswith("fmla_")
 
         # --- FMLA-specific deadlines ---
         if is_fmla:
@@ -159,15 +167,20 @@ async def _create_deadlines(leave_request_id: str) -> dict:
             row = await conn.fetchrow(
                 "INSERT INTO leave_deadlines "
                 "(leave_request_id, org_id, deadline_type, due_date) "
-                "VALUES ($1, $2, $3, $4) "
+                "SELECT $1, $2, $3, $4 "
+                "WHERE NOT EXISTS ("
+                "  SELECT 1 FROM leave_deadlines "
+                "  WHERE leave_request_id = $1 AND deadline_type = $3"
+                ") "
                 "RETURNING id, deadline_type, due_date",
                 lr["id"], lr["org_id"], d["type"], d["due"],
             )
-            created_records.append({
-                "id": str(row["id"]),
-                "deadline_type": row["deadline_type"],
-                "due_date": str(row["due_date"]),
-            })
+            if row:
+                created_records.append({
+                    "id": str(row["id"]),
+                    "deadline_type": row["deadline_type"],
+                    "due_date": str(row["due_date"]),
+                })
 
         return {"created": len(created_records), "deadlines": created_records}
     finally:

@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
+TEXT_EXTRACTABLE_EXTENSIONS = {".txt", ".md", ".csv", ".json"}
+MAX_ANALYSIS_DOC_CHARS = 12_000
 
 
 # ===========================================
@@ -48,8 +50,9 @@ MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 def generate_case_number() -> str:
     """Generate a unique case number."""
     now = datetime.now(timezone.utc)
-    random_suffix = secrets.token_hex(2).upper()
-    return f"AC-{now.year}-{now.month:02d}-{random_suffix}"
+    timestamp = now.strftime("%Y%m%d-%H%M%S")
+    random_suffix = secrets.token_hex(4).upper()
+    return f"AC-{timestamp}-{random_suffix}"
 
 
 async def log_audit(
@@ -121,6 +124,27 @@ def _case_response(row, document_count: int = 0) -> AccommodationCaseResponse:
     )
 
 
+async def _extract_document_text_from_storage(file_path: Optional[str], filename: str) -> str:
+    """Extract plain text for text-like files used in analysis prompts."""
+    if not file_path:
+        return ""
+
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in TEXT_EXTRACTABLE_EXTENSIONS:
+        return ""
+
+    try:
+        content = await get_storage().download_file(file_path)
+    except Exception:
+        logger.warning("Failed to download accommodation document for analysis: %s", filename)
+        return ""
+
+    text = content.decode("utf-8", errors="ignore").strip()
+    if len(text) > MAX_ANALYSIS_DOC_CHARS:
+        text = text[:MAX_ANALYSIS_DOC_CHARS] + "\n...[truncated]..."
+    return text
+
+
 # ===========================================
 # Cases CRUD
 # ===========================================
@@ -155,6 +179,20 @@ async def create_case(
         )
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found in your organization")
+
+        if case.linked_leave_id:
+            linked_leave = await conn.fetchval(
+                """SELECT id FROM leave_requests
+                   WHERE id = $1 AND org_id = $2 AND employee_id = $3""",
+                case.linked_leave_id,
+                company_id,
+                case.employee_id,
+            )
+            if not linked_leave:
+                raise HTTPException(
+                    status_code=400,
+                    detail="linked_leave_id must reference this employee's leave request in your organization",
+                )
 
         row = await conn.fetchrow(
             f"""
@@ -540,13 +578,18 @@ async def delete_document(
     async with get_connection() as conn:
         await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         doc = await conn.fetchrow(
-            "SELECT filename FROM accommodation_documents WHERE id = $1 AND case_id = $2",
+            "SELECT filename, file_path FROM accommodation_documents WHERE id = $1 AND case_id = $2",
             doc_id,
             case_id,
         )
 
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
+
+        try:
+            await get_storage().delete_file(doc["file_path"])
+        except Exception:
+            logger.warning("Failed to delete accommodation document from storage: %s", doc_id)
 
         await conn.execute("DELETE FROM accommodation_documents WHERE id = $1", doc_id)
 
@@ -591,12 +634,20 @@ async def _get_case_info(conn, case_id: UUID) -> dict:
 
 
 async def _get_case_documents_text(conn, case_id: UUID) -> list[dict]:
-    """Fetch document metadata for a case (no text extraction for now)."""
+    """Fetch document metadata and extract text when possible."""
     rows = await conn.fetch(
-        "SELECT id, filename, document_type FROM accommodation_documents WHERE case_id = $1",
+        "SELECT id, filename, document_type, file_path FROM accommodation_documents WHERE case_id = $1",
         case_id,
     )
-    return [{"filename": r["filename"], "document_type": r["document_type"], "text": ""} for r in rows]
+    documents = []
+    for r in rows:
+        text = await _extract_document_text_from_storage(r["file_path"], r["filename"])
+        documents.append({
+            "filename": r["filename"],
+            "document_type": r["document_type"],
+            "text": text,
+        })
+    return documents
 
 
 async def _upsert_analysis(conn, case_id: UUID, analysis_type: str, data: dict, user_id: str):
@@ -799,10 +850,16 @@ async def generate_job_functions(
 
         # Try to find a job description document
         jd_row = await conn.fetchrow(
-            "SELECT filename FROM accommodation_documents WHERE case_id = $1 AND document_type = 'job_description' LIMIT 1",
+            """SELECT filename, file_path FROM accommodation_documents
+               WHERE case_id = $1 AND document_type = 'job_description'
+               LIMIT 1""",
             case_id,
         )
-        job_description = jd_row["filename"] if jd_row else ""
+        if jd_row:
+            extracted = await _extract_document_text_from_storage(jd_row["file_path"], jd_row["filename"])
+            job_description = extracted or f"Job description file: {jd_row['filename']}"
+        else:
+            job_description = ""
 
     analyzer = _get_analyzer()
     result = await analyzer.analyze_job_functions(case_info, job_description)
