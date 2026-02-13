@@ -1230,6 +1230,41 @@ async def init_db():
             ADD COLUMN IF NOT EXISTS next_auto_check TIMESTAMP
         """)
 
+        # Backfill legacy IR incidents with missing company_id so tenant-scoped
+        # dashboard/list queries remain accurate and isolated.
+        await conn.execute("""
+            UPDATE ir_incidents i
+            SET company_id = bl.company_id
+            FROM business_locations bl
+            WHERE i.company_id IS NULL
+              AND i.location_id = bl.id
+        """)
+        await conn.execute("""
+            UPDATE ir_incidents i
+            SET company_id = c.company_id
+            FROM clients c
+            WHERE i.company_id IS NULL
+              AND i.created_by = c.user_id
+        """)
+        await conn.execute("""
+            WITH single_company AS (
+                SELECT id
+                FROM companies
+                ORDER BY created_at
+                LIMIT 1
+            )
+            UPDATE ir_incidents i
+            SET company_id = sc.id
+            FROM single_company sc
+            WHERE i.company_id IS NULL
+              AND 1 = (SELECT COUNT(*) FROM companies)
+        """)
+        remaining_ir_without_company = await conn.fetchval(
+            "SELECT COUNT(*) FROM ir_incidents WHERE company_id IS NULL"
+        )
+        if remaining_ir_without_company:
+            print(f"[DB] Warning: {remaining_ir_without_company} IR incident(s) still have NULL company_id")
+
         # Compliance check log table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS compliance_check_log (

@@ -29,6 +29,26 @@ def _safe_publish_progress(**kwargs) -> None:
         logger.debug("Redis unavailable for progress notification, skipping")
 
 
+def _build_er_analyzer():
+    """Create ERAnalyzer from shared app settings (Vertex or API-key mode)."""
+    from app.matcha.services.er_analyzer import ERAnalyzer
+    from app.config import load_settings
+    import os
+
+    settings = load_settings()
+    explicit_api_key = os.getenv("GEMINI_API_KEY")
+
+    if not explicit_api_key and not settings.use_vertex and not settings.gemini_api_key:
+        raise ValueError("ER analysis requires GEMINI_API_KEY, LIVE_API, or VERTEX_PROJECT configuration")
+
+    return ERAnalyzer(
+        api_key=explicit_api_key or settings.gemini_api_key,
+        vertex_project=settings.vertex_project,
+        vertex_location=settings.vertex_location,
+        model=settings.analysis_model,
+    )
+
+
 async def _get_documents_for_analysis(
     conn,
     case_id: str,
@@ -93,18 +113,7 @@ async def _save_analysis_result(
 
 async def _run_timeline_analysis(case_id: str) -> dict[str, Any]:
     """Run timeline reconstruction analysis."""
-    from app.matcha.services.er_analyzer import ERAnalyzer
-    from app.config import load_settings
-
-    import os
-    settings = load_settings()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
-    analyzer = ERAnalyzer(
-        api_key=api_key,
-        model=settings.analysis_model,
-    )
+    analyzer = _build_er_analyzer()
 
     conn = await get_db_connection()
     try:
@@ -198,18 +207,7 @@ def run_timeline_analysis(self, case_id: str) -> dict[str, Any]:
 
 async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
     """Run discrepancy detection analysis."""
-    from app.matcha.services.er_analyzer import ERAnalyzer
-    from app.config import load_settings
-
-    import os
-    settings = load_settings()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
-    analyzer = ERAnalyzer(
-        api_key=api_key,
-        model=settings.analysis_model,
-    )
+    analyzer = _build_er_analyzer()
 
     conn = await get_db_connection()
     try:
@@ -342,18 +340,7 @@ async def _get_company_policies(conn, case_id: str) -> list[dict]:
 
 async def _run_policy_check(case_id: str) -> dict[str, Any]:
     """Run policy violation check against all company policies."""
-    from app.matcha.services.er_analyzer import ERAnalyzer
-    from app.config import load_settings
-
-    import os
-    settings = load_settings()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
-    analyzer = ERAnalyzer(
-        api_key=api_key,
-        model=settings.analysis_model,
-    )
+    analyzer = _build_er_analyzer()
 
     conn = await get_db_connection()
     try:
@@ -473,18 +460,7 @@ def run_policy_check(self, case_id: str) -> dict[str, Any]:
 
 async def _generate_summary_report(case_id: str, generated_by: str) -> dict[str, Any]:
     """Generate investigation summary report."""
-    from app.matcha.services.er_analyzer import ERAnalyzer
-    from app.config import load_settings
-
-    import os
-    settings = load_settings()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
-    analyzer = ERAnalyzer(
-        api_key=api_key,
-        model=settings.analysis_model,
-    )
+    analyzer = _build_er_analyzer()
 
     conn = await get_db_connection()
     try:
@@ -595,18 +571,7 @@ async def _generate_determination_letter(
     generated_by: str,
 ) -> dict[str, Any]:
     """Generate determination letter."""
-    from app.matcha.services.er_analyzer import ERAnalyzer
-    from app.config import load_settings
-
-    import os
-    settings = load_settings()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is required for ER analysis")
-    analyzer = ERAnalyzer(
-        api_key=api_key,
-        model=settings.analysis_model,
-    )
+    analyzer = _build_er_analyzer()
 
     conn = await get_db_connection()
     try:

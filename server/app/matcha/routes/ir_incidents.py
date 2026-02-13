@@ -92,7 +92,7 @@ async def log_audit(
 
 def _company_filter(param_idx: int) -> str:
     """Build a company_id filter clause for SQL queries."""
-    return f"(i.company_id = ${param_idx} OR i.company_id IS NULL)"
+    return f"i.company_id = ${param_idx}"
 
 
 async def _get_company_admin_contacts(company_id: str) -> tuple[str, list[dict[str, str]]]:
@@ -187,7 +187,7 @@ async def _get_incident_with_company_check(conn, incident_id: UUID, current_user
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    company_clause = "(company_id = $2 OR company_id IS NULL)"
+    company_clause = "company_id = $2"
     row = await conn.fetchrow(
         f"SELECT {columns} FROM ir_incidents WHERE id = $1 AND {company_clause}",
         str(incident_id),
@@ -272,6 +272,15 @@ async def create_incident(
     """Create a new incident report."""
     incident_number = generate_incident_number()
     scoped_company_id = await get_client_company_id(current_user)
+    if current_user.role == "admin":
+        effective_company_id = (
+            str(incident.company_id)
+            if incident.company_id
+            else (str(scoped_company_id) if scoped_company_id else None)
+        )
+    else:
+        # Clients are always scoped to their own company.
+        effective_company_id = str(scoped_company_id) if scoped_company_id else None
 
     # Ensure occurred_at is naive UTC for TIMESTAMP column
     occurred_at = incident.occurred_at
@@ -300,7 +309,7 @@ async def create_incident(
             incident.reported_by_email,
             json.dumps([w.model_dump() for w in incident.witnesses]),
             json.dumps(incident.category_data or {}),
-            str(incident.company_id) if incident.company_id else (str(scoped_company_id) if scoped_company_id else None),
+            effective_company_id,
             str(incident.location_id) if incident.location_id else None,
             str(current_user.id),
         )
@@ -505,7 +514,7 @@ async def update_incident(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    company_clause = "(company_id = $2 OR company_id IS NULL)"
+    company_clause = "company_id = $2"
 
     async with get_connection() as conn:
         # Check exists and belongs to company
@@ -598,6 +607,8 @@ async def update_incident(
             param_idx += 1
 
         if incident.company_id is not None:
+            if current_user.role != "admin":
+                raise HTTPException(status_code=403, detail="Only admins can change incident company")
             updates.append(f"company_id = ${param_idx}")
             params.append(str(incident.company_id))
             changes["company_id"] = str(incident.company_id)
@@ -711,7 +722,7 @@ async def delete_incident(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    company_clause = "(company_id = $2 OR company_id IS NULL)"
+    company_clause = "company_id = $2"
 
     async with get_connection() as conn:
         # Check exists and belongs to company
@@ -761,7 +772,7 @@ async def upload_document(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    company_clause = "(company_id = $2 OR company_id IS NULL)"
+    company_clause = "company_id = $2"
 
     # Validate incident exists and belongs to company
     async with get_connection() as conn:
@@ -853,7 +864,7 @@ async def list_documents(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    company_clause = "(company_id = $2 OR company_id IS NULL)"
+    company_clause = "company_id = $2"
 
     async with get_connection() as conn:
         # Verify incident exists and belongs to company
@@ -900,7 +911,7 @@ async def delete_document(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Document not found")
-    company_clause = "(i.company_id = $3 OR i.company_id IS NULL)"
+    company_clause = "i.company_id = $3"
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -955,7 +966,7 @@ async def get_analytics_summary(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return AnalyticsSummary(total_incidents=0, by_status={}, by_type={}, by_severity={}, recent_count=0, avg_resolution_days=None)
-    co_filter = "(company_id = $1 OR company_id IS NULL)"
+    co_filter = "company_id = $1"
 
     async with get_connection() as conn:
         # Total incidents
@@ -1017,7 +1028,7 @@ async def get_analytics_trends(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return TrendsAnalysis(data=[], period=period, start_date="", end_date="")
-    co_filter = "(company_id = $2 OR company_id IS NULL)"
+    co_filter = "company_id = $2"
 
     # Map validated period to SQL DATE_TRUNC argument (never from user input)
     trunc_map = {"daily": "day", "weekly": "week", "monthly": "month"}
@@ -1072,7 +1083,7 @@ async def get_analytics_locations(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return LocationAnalysis(hotspots=[], total_locations=0)
-    co_filter = "(company_id = $1 OR company_id IS NULL)"
+    co_filter = "company_id = $1"
 
     async with get_connection() as conn:
         rows = await conn.fetch(
@@ -1139,7 +1150,7 @@ async def get_audit_log(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    company_clause = "(company_id = $2 OR company_id IS NULL)"
+    company_clause = "company_id = $2"
 
     async with get_connection() as conn:
         # Verify incident exists and belongs to company
