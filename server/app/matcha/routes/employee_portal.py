@@ -8,7 +8,7 @@ Provides API endpoints for employees to:
 - Search company policies
 - Update personal information
 """
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -853,7 +853,7 @@ async def complete_onboarding_task(
 
 def get_current_week_start() -> datetime:
     """Get the start of the current vibe check week (Monday 7 AM)."""
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     # Calculate days since Monday (Monday = 0)
     days_since_monday = now.weekday()
     # Get this Monday at 7 AM
