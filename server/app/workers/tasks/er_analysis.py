@@ -30,23 +30,31 @@ def _safe_publish_progress(**kwargs) -> None:
 
 
 def _build_er_analyzer():
-    """Create ERAnalyzer from shared app settings (Vertex or API-key mode)."""
+    """Create ERAnalyzer using the same credential cascade as GeminiComplianceService."""
     from app.matcha.services.er_analyzer import ERAnalyzer
-    from app.config import load_settings
+    from app.config import get_settings
     import os
 
-    settings = load_settings()
+    settings = get_settings()
+
+    # Same priority as GeminiComplianceService.client:
+    # 1. GEMINI_API_KEY env var (explicit override)
+    # 2. Vertex AI (if VERTEX_PROJECT configured)
+    # 3. LIVE_API via settings.gemini_api_key
     explicit_api_key = os.getenv("GEMINI_API_KEY")
 
-    if not explicit_api_key and not settings.use_vertex and not settings.gemini_api_key:
+    if explicit_api_key:
+        return ERAnalyzer(api_key=explicit_api_key, model=settings.analysis_model)
+    elif settings.use_vertex:
+        return ERAnalyzer(
+            vertex_project=settings.vertex_project,
+            vertex_location=settings.vertex_location,
+            model=settings.analysis_model,
+        )
+    elif settings.gemini_api_key:
+        return ERAnalyzer(api_key=settings.gemini_api_key, model=settings.analysis_model)
+    else:
         raise ValueError("ER analysis requires GEMINI_API_KEY, LIVE_API, or VERTEX_PROJECT configuration")
-
-    return ERAnalyzer(
-        api_key=explicit_api_key or settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-        model=settings.analysis_model,
-    )
 
 
 async def _get_documents_for_analysis(
