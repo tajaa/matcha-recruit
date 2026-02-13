@@ -28,6 +28,7 @@ celery_app = Celery(
         "app.workers.tasks.pattern_recognition",
         "app.workers.tasks.structured_data_fetch",
         "app.workers.tasks.leave_deadline_checks",
+        "app.workers.tasks.leave_agent_tasks",
     ],
 )
 
@@ -99,6 +100,7 @@ def on_worker_ready(**kwargs):
         run_deadline_escalation,
     )
     from app.workers.tasks.legislation_watch import run_legislation_watch
+    from app.workers.tasks.leave_agent_tasks import run_leave_agent_orchestration
     from app.workers.tasks.pattern_recognition import run_pattern_recognition
     from app.workers.tasks.structured_data_fetch import fetch_structured_data_sources
 
@@ -133,3 +135,8 @@ def on_worker_ready(**kwargs):
         check_leave_deadlines.delay()
     else:
         print("[Worker] Leave deadline checks scheduler is disabled, skipping.")
+
+    if _is_scheduler_enabled("leave_agent_orchestration"):
+        run_leave_agent_orchestration.delay()
+    else:
+        print("[Worker] Leave agent orchestration scheduler is disabled, skipping.")

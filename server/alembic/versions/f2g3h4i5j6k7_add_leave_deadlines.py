@@ -52,7 +52,7 @@ def upgrade() -> None:
 
     # Seed scheduler_settings for the leave deadline checks task
     op.execute("""
-        INSERT INTO scheduler_settings (task_key, task_label, description, enabled, max_per_cycle)
+        INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
         VALUES ('leave_deadline_checks', 'Leave Deadline Checks',
                 'Checks leave compliance deadlines and escalates overdue items.',
                 false, 0)

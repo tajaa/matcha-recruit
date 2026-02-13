@@ -1125,6 +1125,306 @@ Open incident:
             print(f"[Email] Error sending to {to_email}: {e}")
             return False
 
+    async def send_leave_request_notification_email(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        company_name: str,
+        employee_name: str,
+        leave_type: str,
+        event_type: str,
+        leave_id: str,
+        start_date: str,
+        end_date: Optional[str] = None,
+        deadline_date: Optional[str] = None,
+        deadline_type: Optional[str] = None,
+    ) -> bool:
+        """Send lifecycle notifications for leave requests and deadlines."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        leave_url = f"{app_base_url}/app/matcha/employees/leave/requests/{leave_id}"
+        recipient_name = to_name or to_email
+        leave_type_label = leave_type.replace("_", " ").upper()
+        date_range = f"{start_date} to {end_date}" if end_date else start_date
+
+        subject_map = {
+            "submitted": f"{company_name}: Leave request from {employee_name}",
+            "approved": f"{company_name}: Your leave request has been approved",
+            "denied": f"{company_name}: Leave request update",
+            "deadline_approaching": (
+                f"{company_name}: Action needed — "
+                f"{(deadline_type or 'deadline').replace('_', ' ').title()} due {deadline_date or 'soon'}"
+            ),
+            "notice_ready": f"{company_name}: Document ready for signature",
+            "return_pending": f"{company_name}: Return-to-work tasks assigned",
+        }
+        subject = subject_map.get(event_type, f"{company_name}: Leave request update")
+
+        if event_type == "submitted":
+            summary = "A leave request was submitted and requires review."
+        elif event_type == "approved":
+            summary = "A leave request was approved."
+        elif event_type == "denied":
+            summary = "A leave request decision was recorded."
+        elif event_type == "deadline_approaching":
+            summary = "A leave compliance deadline is approaching."
+        elif event_type == "notice_ready":
+            summary = "A leave notice document is ready for review/signature."
+        elif event_type == "return_pending":
+            summary = "Return-to-work tasks were assigned."
+        else:
+            summary = "A leave request update is available."
+
+        deadline_line = ""
+        deadline_text = ""
+        if deadline_type or deadline_date:
+            dt_label = (deadline_type or "deadline").replace("_", " ").title()
+            deadline_line = f"<p><strong>Deadline:</strong> {dt_label} ({deadline_date or 'soon'})</p>"
+            deadline_text = f"Deadline: {dt_label} ({deadline_date or 'soon'})\n"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .event-card {{ background: #f9fafb; border-left: 4px solid #2563eb; border-radius: 8px; padding: 16px; margin: 20px 0; }}
+        .leave-card {{ background: #f8fafc; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {recipient_name},</p>
+
+            <div class="event-card">
+                <p style="margin: 0;"><strong>{summary}</strong></p>
+            </div>
+
+            <div class="leave-card">
+                <p><strong>Employee:</strong> {employee_name}</p>
+                <p><strong>Leave Type:</strong> {leave_type_label}</p>
+                <p><strong>Date Range:</strong> {date_range}</p>
+                {deadline_line}
+            </div>
+
+            <p style="text-align: center; margin-top: 24px;">
+                <a href="{leave_url}" class="btn">Open Leave Request</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {recipient_name},
+
+{summary}
+
+Employee: {employee_name}
+Leave Type: {leave_type_label}
+Date Range: {date_range}
+{deadline_text}Open leave request:
+{leave_url}
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": recipient_name,
+                }
+            ],
+            "subject": subject,
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent leave notification to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
+    async def send_accommodation_notification_email(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        company_name: str,
+        case_number: str,
+        event_type: str,
+        employee_name: Optional[str] = None,
+        details: Optional[str] = None,
+    ) -> bool:
+        """Send lifecycle notifications for accommodation cases."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        accommodations_url = f"{app_base_url}/app/matcha/accommodations"
+        recipient_name = to_name or to_email
+        employee_line = employee_name or "Employee"
+
+        subject_map = {
+            "case_opened": f"{company_name}: Accommodation request received ({case_number})",
+            "action_needed": f"{company_name}: Action needed on accommodation {case_number}",
+            "determination_made": f"{company_name}: Accommodation determination for {case_number}",
+            "interactive_meeting_scheduled": f"{company_name}: Interactive process update for {case_number}",
+        }
+        subject = subject_map.get(event_type, f"{company_name}: Accommodation case update ({case_number})")
+
+        if event_type == "case_opened":
+            summary = "A new accommodation case was opened."
+        elif event_type == "action_needed":
+            summary = "This accommodation case needs follow-up."
+        elif event_type == "determination_made":
+            summary = "A determination has been recorded for this accommodation case."
+        elif event_type == "interactive_meeting_scheduled":
+            summary = "An interactive process meeting update is available."
+        else:
+            summary = "An accommodation case update is available."
+
+        details_line = f"<p><strong>Details:</strong> {details}</p>" if details else ""
+        details_text = f"Details: {details}\n" if details else ""
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .event-card {{ background: #f9fafb; border-left: 4px solid #7c3aed; border-radius: 8px; padding: 16px; margin: 20px 0; }}
+        .case-card {{ background: #f8fafc; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {recipient_name},</p>
+
+            <div class="event-card">
+                <p style="margin: 0;"><strong>{summary}</strong></p>
+            </div>
+
+            <div class="case-card">
+                <p><strong>Case Number:</strong> {case_number}</p>
+                <p><strong>Employee:</strong> {employee_line}</p>
+                {details_line}
+            </div>
+
+            <p style="text-align: center; margin-top: 24px;">
+                <a href="{accommodations_url}" class="btn">Open Accommodation Cases</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {recipient_name},
+
+{summary}
+
+Case Number: {case_number}
+Employee: {employee_line}
+{details_text}Open accommodation cases:
+{accommodations_url}
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": recipient_name,
+                }
+            ],
+            "subject": subject,
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent accommodation notification to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
 
     async def send_business_registration_pending_email(
         self,

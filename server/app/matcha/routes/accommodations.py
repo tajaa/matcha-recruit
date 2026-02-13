@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Request
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Request, BackgroundTasks
 
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
@@ -161,6 +161,7 @@ CASE_COLUMNS = """
 async def create_case(
     case: AccommodationCaseCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new accommodation case."""
@@ -224,6 +225,9 @@ async def create_case(
             request.client.host if request.client else None,
         )
 
+        from ..services.leave_agent import get_leave_agent
+
+        background_tasks.add_task(get_leave_agent().on_accommodation_request_created, row["id"])
         return _case_response(row, document_count=0)
 
 
@@ -304,6 +308,7 @@ async def update_case(
     case_id: UUID,
     case: AccommodationCaseUpdate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update a case."""
@@ -378,6 +383,15 @@ async def update_case(
             case.model_dump(exclude_none=True),
             request.client.host if request.client else None,
         )
+
+        if case.status is not None:
+            from ..services.leave_agent import get_leave_agent
+
+            background_tasks.add_task(
+                get_leave_agent().on_accommodation_status_changed,
+                case_id,
+                case.status,
+            )
 
         return _case_response(row, document_count=doc_count or 0)
 

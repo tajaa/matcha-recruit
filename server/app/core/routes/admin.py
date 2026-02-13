@@ -1216,6 +1216,7 @@ async def trigger_scheduler(task_key: str):
         enqueue_scheduled_compliance_checks,
         run_deadline_escalation,
     )
+    from ...workers.tasks.leave_agent_tasks import run_leave_agent_orchestration
 
     if task_key == "compliance_checks":
         enqueue_scheduled_compliance_checks.delay()
@@ -1223,6 +1224,9 @@ async def trigger_scheduler(task_key: str):
     elif task_key == "deadline_escalation":
         run_deadline_escalation.delay()
         return {"status": "triggered", "task_key": task_key, "message": "Deadline escalation enqueued"}
+    elif task_key == "leave_agent_orchestration":
+        run_leave_agent_orchestration.delay()
+        return {"status": "triggered", "task_key": task_key, "message": "Leave agent orchestration enqueued"}
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task key: {task_key}")
 

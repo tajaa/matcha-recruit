@@ -20,7 +20,7 @@ router = APIRouter()
 class OnboardingTaskTemplateCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    category: str = "admin"  # documents, equipment, training, admin
+    category: str = "admin"  # documents, equipment, training, admin, return_to_work
     is_employee_task: bool = False
     due_days: int = 7
     sort_order: int = 0
@@ -71,6 +71,13 @@ DEFAULT_TEMPLATES = [
     # Admin
     {"title": "Benefits Enrollment", "description": "Enroll in health insurance and other benefits", "category": "admin", "is_employee_task": True, "due_days": 30, "sort_order": 1},
     {"title": "Parking/Transit Setup", "description": "Set up parking pass or transit benefits", "category": "admin", "is_employee_task": True, "due_days": 14, "sort_order": 2},
+    # Return-to-work
+    {"title": "Fitness-for-Duty Certification", "description": "Submit medical clearance from healthcare provider", "category": "return_to_work", "is_employee_task": True, "due_days": 0, "sort_order": 1},
+    {"title": "Modified Duty Agreement", "description": "Review and sign modified duty or accommodation plan", "category": "return_to_work", "is_employee_task": True, "due_days": 1, "sort_order": 2},
+    {"title": "Accommodation Review", "description": "Meet with HR to review workplace accommodations", "category": "return_to_work", "is_employee_task": False, "due_days": 3, "sort_order": 3},
+    {"title": "Gradual Return Schedule", "description": "Confirm phased return-to-work schedule", "category": "return_to_work", "is_employee_task": False, "due_days": 1, "sort_order": 4},
+    {"title": "Benefits Reinstatement Review", "description": "Verify benefits and leave balances are current", "category": "return_to_work", "is_employee_task": False, "due_days": 5, "sort_order": 5},
+    {"title": "Manager Check-in", "description": "Schedule return meeting with direct manager", "category": "return_to_work", "is_employee_task": True, "due_days": 3, "sort_order": 6},
 ]
 
 
@@ -149,7 +156,7 @@ async def create_template(
     company_id = await get_client_company_id(current_user)
 
     # Validate category
-    valid_categories = ["documents", "equipment", "training", "admin"]
+    valid_categories = ["documents", "equipment", "training", "admin", "return_to_work"]
     if request.category not in valid_categories:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {valid_categories}")
 
@@ -200,7 +207,7 @@ async def update_template(
 
         # Validate category if provided
         if request.category:
-            valid_categories = ["documents", "equipment", "training", "admin"]
+            valid_categories = ["documents", "equipment", "training", "admin", "return_to_work"]
             if request.category not in valid_categories:
                 raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {valid_categories}")
 

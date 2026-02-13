@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr
 
@@ -981,6 +981,7 @@ class EmployeeOnboardingTaskResponse(BaseModel):
     id: UUID
     employee_id: UUID
     task_id: Optional[UUID]
+    leave_request_id: Optional[UUID]
     title: str
     description: Optional[str]
     category: str
@@ -999,6 +1000,7 @@ class EmployeeOnboardingTaskResponse(BaseModel):
 class AssignOnboardingTasksRequest(BaseModel):
     task_ids: Optional[List[UUID]] = None  # Template task IDs to assign
     custom_tasks: Optional[List[dict]] = None  # Custom tasks: {title, description, category, is_employee_task, due_date}
+    leave_request_id: Optional[UUID] = None
 
 
 class UpdateOnboardingTaskRequest(BaseModel):
@@ -1006,13 +1008,161 @@ class UpdateOnboardingTaskRequest(BaseModel):
     notes: Optional[str] = None
 
 
+VALID_ONBOARDING_CATEGORIES = ["documents", "equipment", "training", "admin", "return_to_work"]
+
+RETURN_TO_WORK_DEFAULT_TEMPLATES = [
+    {
+        "title": "Fitness-for-Duty Certification",
+        "description": "Submit medical clearance from healthcare provider",
+        "category": "return_to_work",
+        "is_employee_task": True,
+        "due_days": 0,
+        "sort_order": 1,
+    },
+    {
+        "title": "Modified Duty Agreement",
+        "description": "Review and sign modified duty or accommodation plan",
+        "category": "return_to_work",
+        "is_employee_task": True,
+        "due_days": 1,
+        "sort_order": 2,
+    },
+    {
+        "title": "Accommodation Review",
+        "description": "Meet with HR to review workplace accommodations",
+        "category": "return_to_work",
+        "is_employee_task": False,
+        "due_days": 3,
+        "sort_order": 3,
+    },
+    {
+        "title": "Gradual Return Schedule",
+        "description": "Confirm phased return-to-work schedule",
+        "category": "return_to_work",
+        "is_employee_task": False,
+        "due_days": 1,
+        "sort_order": 4,
+    },
+    {
+        "title": "Benefits Reinstatement Review",
+        "description": "Verify benefits and leave balances are current",
+        "category": "return_to_work",
+        "is_employee_task": False,
+        "due_days": 5,
+        "sort_order": 5,
+    },
+    {
+        "title": "Manager Check-in",
+        "description": "Schedule return meeting with direct manager",
+        "category": "return_to_work",
+        "is_employee_task": True,
+        "due_days": 3,
+        "sort_order": 6,
+    },
+]
+
+
+async def _ensure_rtw_templates(conn, company_id: UUID) -> None:
+    """Create default return-to-work templates if they do not exist for the company."""
+    count = await conn.fetchval(
+        "SELECT COUNT(*) FROM onboarding_tasks WHERE org_id = $1 AND category = 'return_to_work'",
+        company_id,
+    )
+    if count and count > 0:
+        return
+
+    for template in RETURN_TO_WORK_DEFAULT_TEMPLATES:
+        await conn.execute(
+            """
+            INSERT INTO onboarding_tasks (org_id, title, description, category, is_employee_task, due_days, sort_order)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """,
+            company_id,
+            template["title"],
+            template["description"],
+            template["category"],
+            template["is_employee_task"],
+            template["due_days"],
+            template["sort_order"],
+        )
+
+
+async def assign_rtw_tasks(
+    employee_id: UUID,
+    leave_request_id: UUID,
+    company_id: UUID,
+    conn,
+) -> list:
+    """Assign return-to-work onboarding tasks linked to a leave request."""
+    leave = await conn.fetchrow(
+        """
+        SELECT id, employee_id, expected_return_date, end_date
+        FROM leave_requests
+        WHERE id = $1 AND org_id = $2
+        """,
+        leave_request_id,
+        company_id,
+    )
+    if not leave or leave["employee_id"] != employee_id:
+        raise HTTPException(status_code=404, detail="Leave request not found for employee")
+
+    await _ensure_rtw_templates(conn, company_id)
+
+    templates = await conn.fetch(
+        """
+        SELECT id, title, description, category, is_employee_task, due_days
+        FROM onboarding_tasks
+        WHERE org_id = $1 AND is_active = true AND category = 'return_to_work'
+        ORDER BY sort_order, title
+        """,
+        company_id,
+    )
+
+    base_date = leave["expected_return_date"] or leave["end_date"] or date.today()
+    assigned_tasks = []
+
+    for template in templates:
+        due_date = base_date + timedelta(days=template["due_days"] or 0)
+        row = await conn.fetchrow(
+            """
+            INSERT INTO employee_onboarding_tasks
+                (employee_id, task_id, leave_request_id, title, description, category, is_employee_task, due_date)
+            SELECT $1, $2, $3, $4, $5, $6, $7, $8
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM employee_onboarding_tasks
+                WHERE employee_id = $1
+                  AND leave_request_id = $3
+                  AND title = $4
+            )
+            RETURNING *
+            """,
+            employee_id,
+            template["id"],
+            leave_request_id,
+            template["title"],
+            template["description"],
+            template["category"],
+            template["is_employee_task"],
+            due_date,
+        )
+        if row:
+            assigned_tasks.append(row)
+
+    return assigned_tasks
+
+
 @router.get("/{employee_id}/onboarding", response_model=List[EmployeeOnboardingTaskResponse])
 async def get_employee_onboarding_tasks(
     employee_id: UUID,
+    category: Optional[str] = Query(None),
+    leave_request_id: Optional[UUID] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get all onboarding tasks for an employee."""
     company_id = await get_client_company_id(current_user)
+    if category and category not in VALID_ONBOARDING_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {VALID_ONBOARDING_CATEGORIES}")
 
     async with get_connection() as conn:
         # Verify employee belongs to company
@@ -1023,22 +1173,37 @@ async def get_employee_onboarding_tasks(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
 
-        rows = await conn.fetch(
-            """
+        query = """
             SELECT * FROM employee_onboarding_tasks
             WHERE employee_id = $1
+        """
+        params: list = [employee_id]
+        idx = 2
+
+        if category:
+            query += f" AND category = ${idx}"
+            params.append(category)
+            idx += 1
+
+        if leave_request_id:
+            query += f" AND leave_request_id = ${idx}"
+            params.append(leave_request_id)
+            idx += 1
+
+        query += """
             ORDER BY
                 CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
                 category, due_date, created_at
-            """,
-            employee_id
-        )
+        """
+
+        rows = await conn.fetch(query, *params)
 
         return [
             EmployeeOnboardingTaskResponse(
                 id=row["id"],
                 employee_id=row["employee_id"],
                 task_id=row["task_id"],
+                leave_request_id=row["leave_request_id"],
                 title=row["title"],
                 description=row["description"],
                 category=row["category"],
@@ -1072,6 +1237,19 @@ async def assign_onboarding_tasks(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
 
+        if request.leave_request_id:
+            leave = await conn.fetchrow(
+                """
+                SELECT id, employee_id
+                FROM leave_requests
+                WHERE id = $1 AND org_id = $2
+                """,
+                request.leave_request_id,
+                company_id,
+            )
+            if not leave or leave["employee_id"] != employee_id:
+                raise HTTPException(status_code=400, detail="leave_request_id is invalid for this employee")
+
         start_date = employee["start_date"] or datetime.now().date()
         assigned_tasks = []
 
@@ -1083,22 +1261,45 @@ async def assign_onboarding_tasks(
                     task_id, company_id
                 )
                 if template:
+                    if template["category"] == "return_to_work" and not request.leave_request_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="return_to_work tasks require leave_request_id",
+                        )
                     due_date = start_date + timedelta(days=template["due_days"])
                     row = await conn.fetchrow(
                         """
                         INSERT INTO employee_onboarding_tasks
-                        (employee_id, task_id, title, description, category, is_employee_task, due_date)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        (employee_id, task_id, leave_request_id, title, description, category, is_employee_task, due_date)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         RETURNING *
                         """,
-                        employee_id, task_id, template["title"], template["description"],
-                        template["category"], template["is_employee_task"], due_date
+                        employee_id,
+                        task_id,
+                        request.leave_request_id,
+                        template["title"],
+                        template["description"],
+                        template["category"],
+                        template["is_employee_task"],
+                        due_date,
                     )
                     assigned_tasks.append(row)
 
         # Assign custom tasks
         if request.custom_tasks:
             for task in request.custom_tasks:
+                task_category = task.get("category", "admin")
+                if task_category not in VALID_ONBOARDING_CATEGORIES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid category. Must be one of: {VALID_ONBOARDING_CATEGORIES}",
+                    )
+                if task_category == "return_to_work" and not request.leave_request_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="return_to_work tasks require leave_request_id",
+                    )
+
                 due_date = None
                 if task.get("due_date"):
                     try:
@@ -1109,13 +1310,17 @@ async def assign_onboarding_tasks(
                 row = await conn.fetchrow(
                     """
                     INSERT INTO employee_onboarding_tasks
-                    (employee_id, title, description, category, is_employee_task, due_date)
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                    (employee_id, leave_request_id, title, description, category, is_employee_task, due_date)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                     RETURNING *
                     """,
-                    employee_id, task.get("title", "Custom Task"),
-                    task.get("description"), task.get("category", "admin"),
-                    task.get("is_employee_task", False), due_date
+                    employee_id,
+                    request.leave_request_id,
+                    task.get("title", "Custom Task"),
+                    task.get("description"),
+                    task_category,
+                    task.get("is_employee_task", False),
+                    due_date,
                 )
                 assigned_tasks.append(row)
 
@@ -1124,6 +1329,56 @@ async def assign_onboarding_tasks(
                 id=row["id"],
                 employee_id=row["employee_id"],
                 task_id=row["task_id"],
+                leave_request_id=row["leave_request_id"],
+                title=row["title"],
+                description=row["description"],
+                category=row["category"],
+                is_employee_task=row["is_employee_task"],
+                due_date=str(row["due_date"]) if row["due_date"] else None,
+                status=row["status"],
+                completed_at=row["completed_at"],
+                completed_by=row["completed_by"],
+                notes=row["notes"],
+                created_at=row["created_at"],
+            )
+            for row in assigned_tasks
+        ]
+
+
+@router.post(
+    "/{employee_id}/onboarding/assign-rtw/{leave_request_id}",
+    response_model=List[EmployeeOnboardingTaskResponse],
+)
+async def assign_return_to_work_tasks(
+    employee_id: UUID,
+    leave_request_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Assign return-to-work tasks linked to a specific leave request."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        employee = await conn.fetchrow(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id,
+            company_id,
+        )
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        assigned_tasks = await assign_rtw_tasks(
+            employee_id=employee_id,
+            leave_request_id=leave_request_id,
+            company_id=company_id,
+            conn=conn,
+        )
+
+        return [
+            EmployeeOnboardingTaskResponse(
+                id=row["id"],
+                employee_id=row["employee_id"],
+                task_id=row["task_id"],
+                leave_request_id=row["leave_request_id"],
                 title=row["title"],
                 description=row["description"],
                 category=row["category"],
@@ -1160,7 +1415,9 @@ async def assign_all_onboarding_templates(
 
         # Get all active templates
         templates = await conn.fetch(
-            "SELECT * FROM onboarding_tasks WHERE org_id = $1 AND is_active = true ORDER BY category, sort_order",
+            """SELECT * FROM onboarding_tasks
+               WHERE org_id = $1 AND is_active = true AND category != 'return_to_work'
+               ORDER BY category, sort_order""",
             company_id
         )
 
@@ -1262,6 +1519,7 @@ async def update_employee_onboarding_task(
             id=row["id"],
             employee_id=row["employee_id"],
             task_id=row["task_id"],
+            leave_request_id=row["leave_request_id"],
             title=row["title"],
             description=row["description"],
             category=row["category"],
@@ -1603,9 +1861,12 @@ async def get_leave_request(
 async def handle_leave_request(
     leave_id: UUID,
     request: LeaveActionRequest,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Approve, deny, activate, or complete a leave request."""
+    from ..services.leave_agent import get_leave_agent
+
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
@@ -1656,6 +1917,8 @@ async def handle_leave_request(
             except Exception:
                 logger.warning("Failed to enqueue leave deadline creation for %s", leave_id)
 
+            background_tasks.add_task(get_leave_agent().on_leave_request_approved, leave_id)
+
             return {"message": "Leave request approved", "status": "approved"}
 
         elif request.action == "deny":
@@ -1671,6 +1934,7 @@ async def handle_leave_request(
                    WHERE id = $3""",
                 request.denial_reason, reviewed_by, leave_id,
             )
+            background_tasks.add_task(get_leave_agent().on_leave_status_changed, leave_id, "denied")
             return {"message": "Leave request denied", "status": "denied"}
 
         elif request.action == "activate":
@@ -1681,6 +1945,7 @@ async def handle_leave_request(
                 "UPDATE leave_requests SET status = 'active', updated_at = NOW() WHERE id = $1",
                 leave_id,
             )
+            background_tasks.add_task(get_leave_agent().on_leave_status_changed, leave_id, "active")
             return {"message": "Leave activated", "status": "active"}
 
         elif request.action == "complete":
@@ -1705,6 +1970,7 @@ async def handle_leave_request(
                 f"UPDATE leave_requests SET {', '.join(sets)} WHERE id = $1",
                 *params,
             )
+            background_tasks.add_task(get_leave_agent().on_leave_status_changed, leave_id, "completed")
             return {"message": "Leave completed", "status": "completed"}
 
         else:
@@ -1849,6 +2115,7 @@ class LeaveNoticeRequest(BaseModel):
 async def create_leave_notice(
     leave_id: UUID,
     request: LeaveNoticeRequest,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Generate a compliance leave notice PDF and store it as an employee document.
@@ -1882,6 +2149,9 @@ async def create_leave_notice(
                 org_id=company_id,
                 leave_request_id=leave_id,
             )
+            from ..services.leave_agent import get_leave_agent
+
+            background_tasks.add_task(get_leave_agent().on_leave_notice_ready, leave_id)
             return doc
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))

@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, status, Request
+from fastapi import APIRouter, HTTPException, Depends, status, Request, BackgroundTasks
 from pydantic import BaseModel
 
 from ...database import get_connection
@@ -212,6 +212,28 @@ async def get_pending_tasks(
                 description=doc["description"],
                 due_date=doc["expires_at"],
                 created_at=doc["created_at"]
+            ))
+
+        # Include pending onboarding / return-to-work tasks assigned to the employee
+        onboarding_rows = await conn.fetch(
+            """SELECT id, title, description, category, due_date, created_at
+               FROM employee_onboarding_tasks
+               WHERE employee_id = $1
+                 AND status = 'pending'
+                 AND is_employee_task = true
+               ORDER BY due_date ASC NULLS LAST, created_at DESC""",
+            employee["id"],
+        )
+
+        for task in onboarding_rows:
+            task_type = "return_to_work_task" if task["category"] == "return_to_work" else "onboarding_task"
+            tasks.append(PendingTask(
+                id=task["id"],
+                task_type=task_type,
+                title=task["title"],
+                description=task["description"],
+                due_date=task["due_date"],
+                created_at=task["created_at"],
             ))
 
         # Only show PTO approval tasks if time_off feature is enabled
@@ -530,6 +552,7 @@ async def get_my_leave_request(
 @router.post("/me/leave/request", response_model=LeaveRequestResponse, dependencies=_pto_dep)
 async def submit_leave_request(
     request: LeaveRequestCreate,
+    background_tasks: BackgroundTasks,
     employee: dict = Depends(require_employee_record),
 ):
     """Submit an extended leave request."""
@@ -554,6 +577,9 @@ async def submit_leave_request(
             request.expected_return_date, request.reason,
             request.intermittent, request.intermittent_schedule,
         )
+        from ..services.leave_agent import get_leave_agent
+
+        background_tasks.add_task(get_leave_agent().on_leave_request_created, row["id"])
         return LeaveRequestResponse(**dict(row))
 
 
@@ -841,6 +867,7 @@ async def get_policy(
 
 class OnboardingTaskResponse(BaseModel):
     id: UUID
+    leave_request_id: Optional[UUID] = None
     title: str
     description: Optional[str]
     category: str
@@ -886,6 +913,7 @@ async def get_my_onboarding_tasks(
         tasks = [
             {
                 "id": str(row["id"]),
+                "leave_request_id": str(row["leave_request_id"]) if row["leave_request_id"] else None,
                 "title": row["title"],
                 "description": row["description"],
                 "category": row["category"],

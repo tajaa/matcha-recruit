@@ -52,6 +52,7 @@ async def _check_deadlines() -> dict:
         warnings = 0
         overdue = 0
         escalated = 0
+        updated_deadline_ids = []
 
         for row in rows:
             due = row["due_date"]
@@ -84,6 +85,7 @@ async def _check_deadlines() -> dict:
                     "WHERE id = $3",
                     new_level, new_status, row["id"],
                 )
+                updated_deadline_ids.append(row["id"])
 
                 publish_task_complete(
                     channel=f"company:{row['org_id']}",
@@ -96,6 +98,17 @@ async def _check_deadlines() -> dict:
                         "status": new_status,
                     },
                 )
+
+        if updated_deadline_ids:
+            from app.matcha.services.leave_agent import get_leave_agent
+
+            leave_agent = get_leave_agent()
+            for deadline_id in updated_deadline_ids:
+                try:
+                    await leave_agent.on_deadline_approaching(deadline_id)
+                except Exception as e:
+                    # Deadline escalation must complete even if notification fanout fails.
+                    print(f"[Leave Deadlines] LeaveAgent notification failed for deadline {deadline_id}: {e}")
 
         return {
             "checked": len(rows),
