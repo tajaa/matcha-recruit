@@ -32,6 +32,17 @@ function getClipPath(rect: DOMRect): string {
   )`;
 }
 
+const TOOLTIP_W = 360;
+const TOOLTIP_MARGIN = 12;
+
+function clampX(x: number): number {
+  return Math.max(TOOLTIP_MARGIN, Math.min(x, window.innerWidth - TOOLTIP_W - TOOLTIP_MARGIN));
+}
+
+function clampY(y: number): number {
+  return Math.max(TOOLTIP_MARGIN, Math.min(y, window.innerHeight - TOOLTIP_MARGIN));
+}
+
 function getTooltipPosition(
   rect: DOMRect,
   placement: Placement
@@ -41,28 +52,42 @@ function getTooltipPosition(
   switch (placement) {
     case 'bottom':
       return {
-        top: rect.bottom + PAD + gap,
-        left: rect.left + rect.width / 2,
-        transform: 'translateX(-50%)',
+        top: clampY(rect.bottom + PAD + gap),
+        left: clampX(rect.left + rect.width / 2 - TOOLTIP_W / 2),
       };
     case 'top':
       return {
-        bottom: window.innerHeight - rect.top + PAD + gap,
-        left: rect.left + rect.width / 2,
-        transform: 'translateX(-50%)',
+        bottom: Math.max(TOOLTIP_MARGIN, window.innerHeight - rect.top + PAD + gap),
+        left: clampX(rect.left + rect.width / 2 - TOOLTIP_W / 2),
       };
-    case 'left':
+    case 'left': {
+      const leftEdge = rect.left - PAD - gap - TOOLTIP_W;
+      if (leftEdge < TOOLTIP_MARGIN) {
+        // Not enough room on the left — flip to bottom
+        return {
+          top: clampY(rect.bottom + PAD + gap),
+          left: clampX(rect.left + rect.width / 2 - TOOLTIP_W / 2),
+        };
+      }
       return {
-        top: rect.top + rect.height / 2,
-        right: window.innerWidth - rect.left + PAD + gap,
-        transform: 'translateY(-50%)',
+        top: clampY(rect.top + rect.height / 2),
+        left: leftEdge,
       };
-    case 'right':
+    }
+    case 'right': {
+      const rightEdge = rect.right + PAD + gap;
+      if (rightEdge + TOOLTIP_W > window.innerWidth - TOOLTIP_MARGIN) {
+        // Not enough room on the right — flip to bottom
+        return {
+          top: clampY(rect.bottom + PAD + gap),
+          left: clampX(rect.left + rect.width / 2 - TOOLTIP_W / 2),
+        };
+      }
       return {
-        top: rect.top + rect.height / 2,
-        left: rect.right + PAD + gap,
-        transform: 'translateY(-50%)',
+        top: clampY(rect.top + rect.height / 2),
+        left: rightEdge,
       };
+    }
   }
 }
 
