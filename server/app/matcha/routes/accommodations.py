@@ -1146,6 +1146,17 @@ async def get_audit_log(
             case_id,
         )
 
+        def _parse_details(raw_details):
+            if isinstance(raw_details, dict):
+                return raw_details
+            if isinstance(raw_details, str):
+                try:
+                    parsed = json.loads(raw_details)
+                    return parsed if isinstance(parsed, dict) else None
+                except Exception:
+                    return None
+            return None
+
         entries = [
             AuditLogEntry(
                 id=row["id"],
@@ -1154,7 +1165,7 @@ async def get_audit_log(
                 action=row["action"],
                 entity_type=row["entity_type"],
                 entity_id=row["entity_id"],
-                details=row["details"],
+                details=_parse_details(row["details"]),
                 ip_address=row["ip_address"],
                 created_at=row["created_at"],
             )

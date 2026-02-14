@@ -178,21 +178,27 @@ export default function Accommodations() {
 
   const loadSelectedCaseData = async (caseId: string) => {
     try {
-      const [caseDetail, docs, audit, suggestionsResult, hardshipResult, jobFunctionsResult] = await Promise.all([
-        accommodationsApi.getCase(caseId),
+      const caseDetail = await accommodationsApi.getCase(caseId);
+      const [docsResult, auditResult, suggestionsResult, hardshipResult, jobFunctionsResult] = await Promise.allSettled([
         accommodationsApi.listDocuments(caseId),
         accommodationsApi.getAuditLog(caseId).then((response) => response.entries),
-        accommodationsApi.getSuggestions(caseId).catch(() => null),
-        accommodationsApi.getHardship(caseId).catch(() => null),
-        accommodationsApi.getJobFunctions(caseId).catch(() => null),
+        accommodationsApi.getSuggestions(caseId),
+        accommodationsApi.getHardship(caseId),
+        accommodationsApi.getJobFunctions(caseId),
       ]);
+
+      const docs = docsResult.status === 'fulfilled' ? docsResult.value : [];
+      const audit = auditResult.status === 'fulfilled' ? auditResult.value : [];
+      const suggestionsValue = suggestionsResult.status === 'fulfilled' ? suggestionsResult.value : null;
+      const hardshipValue = hardshipResult.status === 'fulfilled' ? hardshipResult.value : null;
+      const jobFunctionsValue = jobFunctionsResult.status === 'fulfilled' ? jobFunctionsResult.value : null;
 
       setSelectedCase(caseDetail);
       setDocuments(docs);
       setAuditLog(audit);
-      setSuggestions(suggestionsResult);
-      setHardship(hardshipResult);
-      setJobFunctions(jobFunctionsResult);
+      setSuggestions(suggestionsValue);
+      setHardship(hardshipValue);
+      setJobFunctions(jobFunctionsValue);
 
       setEditForm({
         title: caseDetail.title,
