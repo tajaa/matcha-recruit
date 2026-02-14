@@ -54,6 +54,85 @@ export const complianceWalkthrough: WalkthroughConfig = {
   ],
 };
 
+export const policiesWalkthrough: WalkthroughConfig = {
+  id: 'policies',
+  title: 'Policies',
+  category: 'admin',
+  steps: [
+    {
+      target: 'policies-create-btn',
+      title: 'Create Policy',
+      content: 'Start drafting a new company policy with sections, signature settings, and publication status.',
+      placement: 'bottom',
+      action: 'Click to open the policy editor.',
+    },
+    {
+      target: 'policies-tabs',
+      title: 'Status Filters',
+      content: 'Filter policies by lifecycle status: Active, Draft, and Archived.',
+      placement: 'bottom',
+      action: 'Click a tab to narrow the policy list.',
+    },
+    {
+      target: 'policies-list',
+      title: 'Policy List',
+      content: 'Browse all policies, open details, and manage versions from this table.',
+      placement: 'top',
+      action: 'Click any row to open the policy detail page.',
+      expect: 'Rows with policy title, version, signed count, and status.',
+      ifMissing: 'No policies match the current filter. Create your first policy to populate this list.',
+    },
+    {
+      target: 'policies-activate-btn',
+      title: 'Activate Drafts',
+      content: 'Publish a draft policy so employees can review and sign it.',
+      placement: 'left',
+      action: 'Click the check icon on a draft policy to activate it.',
+      ifMissing: 'This action appears only on policies currently in draft status.',
+    },
+  ],
+};
+
+export const offerLettersWalkthrough: WalkthroughConfig = {
+  id: 'offer-letters',
+  title: 'Offer Letters',
+  category: 'admin',
+  steps: [
+    {
+      target: 'offer-create-btn',
+      title: 'Create Offer',
+      content: 'Generate a new offer letter for a candidate.',
+      placement: 'bottom',
+      action: 'Click to choose Quick Form or Wizard Mode.',
+    },
+    {
+      target: 'offer-create-mode',
+      title: 'Creation Mode',
+      content: 'Choose between Quick Form (single screen) and Wizard Mode (guided steps).',
+      placement: 'left',
+      action: 'Pick the mode that matches your workflow.',
+      ifMissing: 'Click Create Offer first to open this menu.',
+    },
+    {
+      target: 'offer-list',
+      title: 'Offer List',
+      content: 'Review drafted and sent offers, then open any offer to view details or download PDF.',
+      placement: 'top',
+      action: 'Click any offer row/card to open its detail view.',
+      expect: 'Offer entries with candidate name, role, status, and created date.',
+      ifMissing: 'No offers exist yet. Use Create Offer to generate your first one.',
+    },
+    {
+      target: 'offer-first-create-btn',
+      title: 'First Offer Shortcut',
+      content: 'When the list is empty, this shortcut starts your first offer directly.',
+      placement: 'bottom',
+      action: 'Click to start in Wizard Mode.',
+      ifMissing: 'This shortcut appears only when there are no existing offer letters.',
+    },
+  ],
+};
+
 export const erCopilotWalkthrough: WalkthroughConfig = {
   id: 'er-copilot',
   title: 'ER Copilot',

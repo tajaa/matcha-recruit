@@ -11,6 +11,8 @@ import {
 } from './ir';
 import {
   complianceWalkthrough,
+  policiesWalkthrough,
+  offerLettersWalkthrough,
   erCopilotWalkthrough,
   timeOffWalkthrough,
   employeesWalkthrough,
@@ -31,6 +33,8 @@ export const WALKTHROUGH_CONFIGS: Record<GuideKey, WalkthroughConfig> = {
   'ir-recommendations': irRecommendationsWalkthrough,
   'ir-similar': irSimilarWalkthrough,
   compliance: complianceWalkthrough,
+  policies: policiesWalkthrough,
+  'offer-letters': offerLettersWalkthrough,
   'er-copilot': erCopilotWalkthrough,
   'time-off': timeOffWalkthrough,
   employees: employeesWalkthrough,

@@ -8,10 +8,18 @@ AI-powered analysis for Employee Relations investigations:
 """
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Optional, Any
 
 from google import genai
+
+logger = logging.getLogger(__name__)
+
+FALLBACK_MODELS = (
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+)
 
 
 # ===========================================
@@ -242,6 +250,90 @@ class ERAnalyzer:
         else:
             raise ValueError("Either api_key or vertex_project must be provided")
 
+    @staticmethod
+    def _is_model_unavailable_error(error: Exception) -> bool:
+        """Return True when the configured model is unavailable for the current account/project."""
+        message = str(error).lower()
+        if "model" not in message:
+            return False
+        return (
+            "not found" in message
+            or "does not have access" in message
+            or "unsupported model" in message
+            or "404" in message
+        )
+
+    def _model_candidates(self) -> list[str]:
+        """Try configured model first, then stable fallbacks."""
+        candidates = [self.model, *FALLBACK_MODELS]
+        deduped: list[str] = []
+        for candidate in candidates:
+            if candidate and candidate not in deduped:
+                deduped.append(candidate)
+        return deduped
+
+    async def _generate_content_async(self, prompt: str) -> str:
+        """Generate content with automatic fallback when the configured model is unavailable."""
+        last_model_error: Exception | None = None
+        for candidate in self._model_candidates():
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=candidate,
+                    contents=prompt,
+                )
+                if candidate != self.model:
+                    logger.warning(
+                        "ERAnalyzer model '%s' unavailable; fell back to '%s'",
+                        self.model,
+                        candidate,
+                    )
+                return (response.text or "").strip()
+            except Exception as exc:
+                if self._is_model_unavailable_error(exc):
+                    last_model_error = exc
+                    logger.warning(
+                        "ERAnalyzer model candidate '%s' unavailable: %s",
+                        candidate,
+                        exc,
+                    )
+                    continue
+                raise
+
+        if last_model_error:
+            raise last_model_error
+        raise RuntimeError("No Gemini model candidates were available for ER analysis")
+
+    def _generate_content_sync(self, prompt: str) -> str:
+        """Synchronous generate_content with the same model fallback behavior."""
+        last_model_error: Exception | None = None
+        for candidate in self._model_candidates():
+            try:
+                response = self.client.models.generate_content(
+                    model=candidate,
+                    contents=prompt,
+                )
+                if candidate != self.model:
+                    logger.warning(
+                        "ERAnalyzer model '%s' unavailable; fell back to '%s'",
+                        self.model,
+                        candidate,
+                    )
+                return (response.text or "").strip()
+            except Exception as exc:
+                if self._is_model_unavailable_error(exc):
+                    last_model_error = exc
+                    logger.warning(
+                        "ERAnalyzer model candidate '%s' unavailable: %s",
+                        candidate,
+                        exc,
+                    )
+                    continue
+                raise
+
+        if last_model_error:
+            raise last_model_error
+        raise RuntimeError("No Gemini model candidates were available for ER analysis")
+
     def _parse_json_response(self, text: str) -> dict[str, Any]:
         """Parse JSON from LLM response, handling markdown code blocks."""
         text = text.strip()
@@ -283,12 +375,8 @@ class ERAnalyzer:
         documents_text = self._format_documents_for_prompt(documents)
         prompt = TIMELINE_RECONSTRUCTION_PROMPT.format(documents=documents_text)
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        text = await self._generate_content_async(prompt)
+        result = self._parse_json_response(text)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -308,12 +396,8 @@ class ERAnalyzer:
         documents_text = self._format_documents_for_prompt(documents)
         prompt = DISCREPANCY_DETECTION_PROMPT.format(documents=documents_text)
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        text = await self._generate_content_async(prompt)
+        result = self._parse_json_response(text)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -340,12 +424,8 @@ class ERAnalyzer:
             evidence=evidence_text,
         )
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        text = await self._generate_content_async(prompt)
+        result = self._parse_json_response(text)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -375,12 +455,7 @@ class ERAnalyzer:
             policy_analysis=json.dumps(policy_analysis, indent=2) if policy_analysis else "Not yet analyzed",
         )
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        return response.text.strip()
+        return await self._generate_content_async(prompt)
 
     async def generate_determination_letter(
         self,
@@ -405,12 +480,7 @@ class ERAnalyzer:
             findings=findings,
         )
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        return response.text.strip()
+        return await self._generate_content_async(prompt)
 
     # Synchronous versions for Celery tasks
 
@@ -419,12 +489,8 @@ class ERAnalyzer:
         documents_text = self._format_documents_for_prompt(documents)
         prompt = TIMELINE_RECONSTRUCTION_PROMPT.format(documents=documents_text)
 
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        text = self._generate_content_sync(prompt)
+        result = self._parse_json_response(text)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -433,12 +499,8 @@ class ERAnalyzer:
         documents_text = self._format_documents_for_prompt(documents)
         prompt = DISCREPANCY_DETECTION_PROMPT.format(documents=documents_text)
 
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        text = self._generate_content_sync(prompt)
+        result = self._parse_json_response(text)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
@@ -456,11 +518,7 @@ class ERAnalyzer:
             evidence=evidence_text,
         )
 
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-        )
-
-        result = self._parse_json_response(response.text)
+        text = self._generate_content_sync(prompt)
+        result = self._parse_json_response(text)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result

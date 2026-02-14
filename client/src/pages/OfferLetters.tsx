@@ -3,6 +3,7 @@ import { Button } from '../components/Button';
 import { ChevronRight, Check, ArrowRight, ArrowLeft, Upload, X } from 'lucide-react';
 import { offerLetters as offerLettersApi } from '../api/client';
 import type { OfferLetter, OfferLetterCreate } from '../types';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const EMPLOYMENT_TYPES = [
   'Full-Time Exempt',
@@ -650,11 +651,15 @@ export function OfferLetters() {
       {/* Header */}
       <div className="flex flex-col gap-4 mb-8 border-b border-white/10 pb-6 sm:flex-row sm:items-start sm:justify-between sm:mb-12 sm:pb-8">
         <div>
-          <h1 className="text-2xl sm:text-4xl font-bold tracking-tighter text-white uppercase">Offer Letters</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl sm:text-4xl font-bold tracking-tighter text-white uppercase">Offer Letters</h1>
+            <FeatureGuideTrigger guideId="offer-letters" />
+          </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Manage & Generate Candidate Offers</p>
         </div>
         <div className="relative w-full sm:w-auto">
           <button
+            data-tour="offer-create-btn"
             onClick={() => setCreateMode(createMode ? null : 'select')} // Toggle selection mode
             className="w-full sm:w-auto px-6 py-2 bg-white text-black text-xs font-bold hover:bg-zinc-200 uppercase tracking-wider transition-colors"
           >
@@ -665,7 +670,7 @@ export function OfferLetters() {
           {createMode === 'select' && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setCreateMode(null)} />
-              <div className="absolute left-0 right-0 top-full mt-2 sm:left-auto sm:right-0 sm:w-48 bg-zinc-900 border border-zinc-700 shadow-xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+              <div data-tour="offer-create-mode" className="absolute left-0 right-0 top-full mt-2 sm:left-auto sm:right-0 sm:w-48 bg-zinc-900 border border-zinc-700 shadow-xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                 <button 
                   onClick={() => setCreateMode('form')}
                   className="w-full text-left px-4 py-3 hover:bg-zinc-800 transition-colors border-b border-zinc-800"
@@ -694,6 +699,7 @@ export function OfferLetters() {
         <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
           <div className="text-xs text-zinc-500 mb-4 font-mono uppercase tracking-wider">NO OFFERS GENERATED</div>
           <button
+            data-tour="offer-first-create-btn"
             onClick={() => setCreateMode('wizard')}
             className="text-xs text-white hover:text-zinc-300 font-bold uppercase tracking-wider underline underline-offset-4"
           >
@@ -701,7 +707,7 @@ export function OfferLetters() {
           </button>
         </div>
       ) : (
-        <>
+        <div data-tour="offer-list">
           <div className="md:hidden space-y-3">
             {offerLetters.map((letter) => (
               <button
@@ -775,7 +781,7 @@ export function OfferLetters() {
               </div>
             ))}
           </div>
-        </>
+        </div>
       )}
 
       {/* Create Modal (Form or Wizard) */}

@@ -1,11 +1,13 @@
 import html
 import logging
+import mimetypes
+import base64
 from io import BytesIO
 from typing import List
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, File, UploadFile
+from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Request
 from fastapi.responses import StreamingResponse
 
 from ...database import get_connection
@@ -297,7 +299,27 @@ def _safe(value: str | None, default: str = "") -> str:
     return html.escape(str(value)) if value else default
 
 
-def _generate_offer_letter_html(offer: dict) -> str:
+async def _build_logo_data_uri(logo_path: str | None) -> str | None:
+    """Download logo bytes and return a data URI so PDF rendering doesn't depend on external fetches."""
+    if not logo_path:
+        return None
+
+    if logo_path.startswith("data:image/"):
+        return logo_path
+
+    try:
+        logo_bytes = await get_storage().download_file(logo_path)
+        if not logo_bytes:
+            return None
+        mime_type = mimetypes.guess_type(logo_path)[0] or "image/png"
+        encoded = base64.b64encode(logo_bytes).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+    except Exception:
+        logger.debug("Unable to build logo data URI for %s", logo_path, exc_info=True)
+        return None
+
+
+def _generate_offer_letter_html(offer: dict, logo_src: str | None = None) -> str:
     """Generate HTML for the offer letter PDF."""
     # Format dates
     created_date = offer["created_at"].strftime("%B %d, %Y") if offer.get("created_at") else ""
@@ -332,8 +354,8 @@ def _generate_offer_letter_html(offer: dict) -> str:
 
     # Logo section — sanitize URL
     logo_html = ""
-    if offer.get("company_logo_url"):
-        safe_url = quote(offer["company_logo_url"], safe=":/?#[]@!$&'()*+,;=")
+    if logo_src:
+        safe_url = quote(logo_src, safe=":/?#[]@!$&'()*+,;=,%")
         logo_html = f'<img src="{safe_url}" alt="Company Logo" style="max-height: 60px; max-width: 200px;" />'
 
     html = f"""
@@ -546,6 +568,7 @@ def _generate_offer_letter_html(offer: dict) -> str:
 @router.get("/{offer_id}/pdf")
 async def download_offer_letter_pdf(
     offer_id: UUID,
+    request: Request,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Generate and download offer letter as PDF."""
@@ -571,8 +594,17 @@ async def download_offer_letter_pdf(
 
         offer = dict(row)
 
+    # Resolve logo to an embeddable data URI when possible so PDF rendering is reliable.
+    logo_src = await _build_logo_data_uri(offer.get("company_logo_url"))
+    if not logo_src and offer.get("company_logo_url"):
+        raw_logo_url = str(offer["company_logo_url"])
+        if raw_logo_url.startswith("/"):
+            logo_src = f"{str(request.base_url).rstrip('/')}{raw_logo_url}"
+        else:
+            logo_src = raw_logo_url
+
     # Generate HTML
-    html_content = _generate_offer_letter_html(offer)
+    html_content = _generate_offer_letter_html(offer, logo_src=logo_src)
 
     # Try to use weasyprint for PDF generation
     try:

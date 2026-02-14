@@ -4,6 +4,7 @@ import { policies } from '../api/client';
 import type { Policy, PolicyStatus } from '../types';
 import { ChevronRight, FileText, Plus, Pencil, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 export function Policies() {
   const navigate = useNavigate();
@@ -62,10 +63,14 @@ export function Policies() {
       {/* Header */}
       <div className="flex justify-between items-start border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Policies</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Policies</h1>
+            <FeatureGuideTrigger guideId="policies" />
+          </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Company Guidelines & Compliance</p>
         </div>
         <button
+          data-tour="policies-create-btn"
           onClick={() => navigate('/app/matcha/policies/new')}
           className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
         >
@@ -75,7 +80,7 @@ export function Policies() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex gap-8 border-b border-white/10 pb-px">
+      <div data-tour="policies-tabs" className="flex gap-8 border-b border-white/10 pb-px">
         {[
           { label: 'All', value: '' },
           { label: 'Active', value: 'active' },
@@ -114,7 +119,7 @@ export function Policies() {
           </button>
         </div>
       ) : (
-        <div className="space-y-px bg-white/10 border border-white/10">
+        <div data-tour="policies-list" className="space-y-px bg-white/10 border border-white/10">
           {/* List Header */}
           <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950 border-b border-white/10">
             <div className="w-4"></div>
@@ -172,6 +177,7 @@ export function Policies() {
                 </button>
                 {policy.status === 'draft' && (
                   <button
+                    data-tour="policies-activate-btn"
                     onClick={(e) => handleActivate(e, policy.id)}
                     className="p-1.5 text-emerald-600 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors rounded"
                     title="Activate policy"
