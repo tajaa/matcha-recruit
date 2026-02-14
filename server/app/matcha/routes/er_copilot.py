@@ -1254,39 +1254,47 @@ async def search_evidence(
     async with get_connection() as verify_conn:
         await _verify_case_company(verify_conn, case_id, company_id, current_user.role == "admin")
 
-    settings = get_settings()
-
-    from ...core.services.embedding_service import EmbeddingService
-    from ...core.services.rag_service import RAGService
-
-    embedding_service = EmbeddingService(
-        api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-    )
-    rag_service = RAGService(embedding_service)
-
     async with get_connection() as conn:
         total_chunks = await conn.fetchval(
             "SELECT COUNT(*) FROM er_evidence_chunks WHERE case_id = $1",
             case_id,
         )
         results: list[dict] = []
+        semantic_error: Exception | None = None
 
         try:
+            settings = get_settings()
+            from ...core.services.embedding_service import EmbeddingService
+            from ...core.services.rag_service import RAGService
+
+            embedding_service = EmbeddingService(
+                api_key=settings.gemini_api_key,
+                vertex_project=settings.vertex_project,
+                vertex_location=settings.vertex_location,
+            )
+            rag_service = RAGService(embedding_service)
             results = await rag_service.search_evidence(
                 case_id=str(case_id),
                 query=search.query,
                 conn=conn,
                 top_k=search.top_k,
             )
-        except Exception as semantic_error:
-            # Fallback to keyword matching when embeddings/search providers are unavailable.
-            logger.warning(
-                "Semantic evidence search failed for case %s; using keyword fallback: %s",
-                case_id,
-                semantic_error,
-            )
+        except Exception as exc:
+            semantic_error = exc
+
+        # Fallback to keyword matching when semantic search is unavailable or returns no matches.
+        if semantic_error is not None or not results:
+            if semantic_error is not None:
+                logger.warning(
+                    "Semantic evidence search failed for case %s; using keyword fallback: %s",
+                    case_id,
+                    semantic_error,
+                )
+            else:
+                logger.info(
+                    "Semantic evidence search returned no matches for case %s; using keyword fallback",
+                    case_id,
+                )
             like_query = f"%{search.query.strip()}%"
             chunk_rows = await conn.fetch(
                 """
@@ -1312,6 +1320,7 @@ async def search_evidence(
                 search.top_k,
             )
 
+            results = []
             for row in chunk_rows:
                 line_range = None
                 if row["line_start"] is not None:
