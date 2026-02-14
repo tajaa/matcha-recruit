@@ -17,6 +17,7 @@ import {
   type LeaveRequestCreate,
 } from '../../api/leave';
 import { useAuth } from '../../context/AuthContext';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 
 function formatLeaveType(value: string): string {
   return value
@@ -190,7 +191,10 @@ export default function PortalLeave() {
     <div className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-mono font-medium text-zinc-900">Extended Leave</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-mono font-medium text-zinc-900">Extended Leave</h1>
+            <FeatureGuideTrigger guideId="portal-leave" variant="light" />
+          </div>
           <p className="text-sm text-zinc-500 mt-1">Submit and track long-duration leave requests</p>
         </div>
         <div className="flex items-center gap-2">
@@ -203,6 +207,7 @@ export default function PortalLeave() {
             Refresh
           </button>
           <button
+            data-tour="portal-leave-request-btn"
             onClick={() => setShowModal(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors"
           >
@@ -226,7 +231,7 @@ export default function PortalLeave() {
       )}
 
       {compliancePlusEnabled && (
-        <div className="bg-white border border-zinc-200 rounded-lg p-5">
+        <div data-tour="portal-leave-eligibility" className="bg-white border border-zinc-200 rounded-lg p-5">
           <div className="flex items-center gap-2 mb-3">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
             <h2 className="text-sm font-medium text-zinc-900">Eligibility Snapshot</h2>
@@ -243,10 +248,11 @@ export default function PortalLeave() {
         </div>
       )}
 
-      <div className="bg-white border border-zinc-200 rounded-lg">
+      <div data-tour="portal-leave-list" className="bg-white border border-zinc-200 rounded-lg">
         <div className="px-5 py-4 border-b border-zinc-100 flex items-center justify-between">
           <h2 className="text-sm font-mono uppercase tracking-wider text-zinc-500">My Leave Requests</h2>
           <select
+            data-tour="portal-leave-filters"
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
             className="px-3 py-1.5 border border-zinc-200 rounded-lg text-sm"
@@ -294,6 +300,7 @@ export default function PortalLeave() {
 
                 {request.status === 'requested' && (
                   <button
+                    data-tour="portal-leave-cancel-btn"
                     onClick={() => handleCancel(request.id)}
                     disabled={submitting}
                     className="self-start px-3 py-1.5 border border-red-200 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50"

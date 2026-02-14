@@ -124,3 +124,48 @@ export const portalPTOWalkthrough: WalkthroughConfig = {
     },
   ],
 };
+
+export const portalLeaveWalkthrough: WalkthroughConfig = {
+  id: 'portal-leave',
+  title: 'Extended Leave',
+  category: 'employee',
+  steps: [
+    {
+      target: 'portal-leave-request-btn',
+      title: 'Request Leave',
+      content: 'Submit a long-duration leave request with dates, reason, and optional intermittent schedule.',
+      placement: 'bottom',
+      action: 'Click Request Leave to open the submission form.',
+    },
+    {
+      target: 'portal-leave-filters',
+      title: 'Status Filter',
+      content: 'Filter your leave requests by status to quickly review requested, approved, active, or completed leaves.',
+      placement: 'left',
+      action: 'Select a status to narrow your request history.',
+    },
+    {
+      target: 'portal-leave-list',
+      title: 'My Leave Requests',
+      content: 'Track each leave request, including dates, status, expected return date, and any denial reason.',
+      placement: 'top',
+      expect: 'A list of leave request cards with status badges.',
+      ifMissing: 'No leave requests found yet. Submit your first request to populate this list.',
+    },
+    {
+      target: 'portal-leave-cancel-btn',
+      title: 'Cancel Pending Request',
+      content: 'Cancel a leave request while it is still pending review.',
+      placement: 'left',
+      action: 'Use Cancel Request if plans change before approval.',
+      ifMissing: 'Cancel is available only for requests in Requested status.',
+    },
+    {
+      target: 'portal-leave-eligibility',
+      title: 'Eligibility Snapshot',
+      content: 'When enabled, this panel shows your current leave eligibility data and program context.',
+      placement: 'bottom',
+      ifMissing: 'Eligibility appears only when Compliance Plus is enabled for your company.',
+    },
+  ],
+};

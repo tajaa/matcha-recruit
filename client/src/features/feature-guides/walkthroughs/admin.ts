@@ -227,6 +227,125 @@ export const timeOffWalkthrough: WalkthroughConfig = {
   ],
 };
 
+export const leaveManagementWalkthrough: WalkthroughConfig = {
+  id: 'leave-management',
+  title: 'Leave Management',
+  category: 'admin',
+  steps: [
+    {
+      target: 'leave-admin-filters',
+      title: 'Filters & Refresh',
+      content: 'Use status and leave-type filters to narrow requests, then refresh to pull the latest queue.',
+      placement: 'bottom',
+      action: 'Change filters to focus on a specific workflow stage.',
+    },
+    {
+      target: 'leave-admin-list',
+      title: 'Leave Request Queue',
+      content: 'This sidebar lists leave cases. Selecting a row opens the full request details and actions.',
+      placement: 'right',
+      expect: 'Rows with employee, leave type, date, and current status.',
+      ifMissing: 'No leave requests match the active filters.',
+    },
+    {
+      target: 'leave-admin-detail',
+      title: 'Selected Leave Case',
+      content: 'Review the selected case summary, leave dates, and reason before taking status actions.',
+      placement: 'left',
+      ifMissing: 'Select a leave request from the queue to load case details.',
+    },
+    {
+      target: 'leave-admin-actions',
+      title: 'Case Actions',
+      content: 'Approve, deny, activate, complete, and assign return-to-work tasks from this action bar.',
+      placement: 'bottom',
+      ifMissing: 'Actions appear after selecting a leave case.',
+    },
+    {
+      target: 'leave-admin-deadlines',
+      title: 'Deadline Tracking',
+      content: 'Track required deadline events tied to the leave case and mark them complete or waived.',
+      placement: 'left',
+      ifMissing: 'Deadline tracking appears when Compliance Plus is enabled and a leave case is selected.',
+    },
+    {
+      target: 'leave-admin-notices',
+      title: 'Notice Generation',
+      content: 'Generate leave notice documents directly from the case timeline for employee delivery.',
+      placement: 'top',
+      action: 'Choose a notice type and click Generate Notice.',
+      ifMissing: 'Notice generation appears when Compliance Plus is enabled.',
+    },
+    {
+      target: 'leave-admin-rtw-btn',
+      title: 'Assign Return-To-Work Tasks',
+      content: 'Create return-to-work onboarding tasks for the employee once leave is approved or active.',
+      placement: 'left',
+      ifMissing: 'This button appears only when the leave case status is Approved or Active.',
+    },
+  ],
+};
+
+export const accommodationsWalkthrough: WalkthroughConfig = {
+  id: 'accommodations',
+  title: 'Accommodations',
+  category: 'admin',
+  steps: [
+    {
+      target: 'accom-admin-toolbar',
+      title: 'Filters & New Case',
+      content: 'Filter accommodation cases by status, refresh data, and create new ADA interactive process cases.',
+      placement: 'bottom',
+      action: 'Use New Case to open the accommodation intake form.',
+    },
+    {
+      target: 'accom-admin-case-list',
+      title: 'Case List',
+      content: 'All accommodation cases are listed here. Select a case to manage details, documents, and analysis.',
+      placement: 'right',
+      expect: 'Rows with case number, title, and status.',
+      ifMissing: 'No accommodation cases exist yet. Start with New Case.',
+    },
+    {
+      target: 'accom-admin-detail',
+      title: 'Case Detail Editor',
+      content: 'Update case status, disability category, requested accommodation, and final decision details.',
+      placement: 'left',
+      ifMissing: 'Select a case from the list to load the detail editor.',
+    },
+    {
+      target: 'accom-admin-documents',
+      title: 'Documents',
+      content: 'Upload supporting files like medical certifications and interactive process notes.',
+      placement: 'top',
+      action: 'Pick a document type, then upload the file.',
+      ifMissing: 'Document tools appear after selecting a case.',
+    },
+    {
+      target: 'accom-admin-analysis',
+      title: 'AI Analysis',
+      content: 'Run suggestion, hardship, and essential-job-function analyses for faster decision support.',
+      placement: 'top',
+      action: 'Run each analysis as case information and evidence become available.',
+      ifMissing: 'Analysis tools appear after selecting a case.',
+    },
+    {
+      target: 'accom-admin-audit',
+      title: 'Audit Log',
+      content: 'Review the chronological audit trail of case updates and analysis events.',
+      placement: 'top',
+      ifMissing: 'Audit entries appear as the case is updated over time.',
+    },
+    {
+      target: 'accom-admin-new-case-btn',
+      title: 'Create Case',
+      content: 'Start a new accommodation case and optionally link it to an existing leave request.',
+      placement: 'left',
+      action: 'Click New Case to launch the intake modal.',
+    },
+  ],
+};
+
 export const employeesWalkthrough: WalkthroughConfig = {
   id: 'employees',
   title: 'Employee Directory',

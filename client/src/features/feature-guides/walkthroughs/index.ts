@@ -15,12 +15,15 @@ import {
   offerLettersWalkthrough,
   erCopilotWalkthrough,
   timeOffWalkthrough,
+  leaveManagementWalkthrough,
+  accommodationsWalkthrough,
   employeesWalkthrough,
 } from './admin';
 import {
   portalOnboardingWalkthrough,
   portalDocumentsWalkthrough,
   portalPTOWalkthrough,
+  portalLeaveWalkthrough,
 } from './portal';
 
 export const WALKTHROUGH_CONFIGS: Record<GuideKey, WalkthroughConfig> = {
@@ -37,8 +40,11 @@ export const WALKTHROUGH_CONFIGS: Record<GuideKey, WalkthroughConfig> = {
   'offer-letters': offerLettersWalkthrough,
   'er-copilot': erCopilotWalkthrough,
   'time-off': timeOffWalkthrough,
+  'leave-management': leaveManagementWalkthrough,
+  accommodations: accommodationsWalkthrough,
   employees: employeesWalkthrough,
   'portal-onboarding': portalOnboardingWalkthrough,
   'portal-documents': portalDocumentsWalkthrough,
   'portal-pto': portalPTOWalkthrough,
+  'portal-leave': portalLeaveWalkthrough,
 };

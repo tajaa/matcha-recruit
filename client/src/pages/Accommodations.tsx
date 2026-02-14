@@ -25,6 +25,7 @@ import {
   type DisabilityCategory,
   type EmployeeOption,
 } from '../api/accommodations';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const STATUS_OPTIONS: AccommodationStatus[] = [
   'requested',
@@ -368,12 +369,15 @@ export default function Accommodations() {
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 border-b border-white/10 pb-6">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Accommodations</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Accommodations</h1>
+            <FeatureGuideTrigger guideId="accommodations" />
+          </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
             ADA interactive process case management
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div data-tour="accom-admin-toolbar" className="flex flex-wrap items-center gap-2">
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
@@ -392,6 +396,7 @@ export default function Accommodations() {
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
           </button>
           <button
+            data-tour="accom-admin-new-case-btn"
             onClick={() => setShowCreateModal(true)}
             className="inline-flex items-center gap-2 px-3 py-2 text-xs uppercase tracking-wider bg-white text-zinc-900 hover:bg-zinc-200"
           >
@@ -415,7 +420,7 @@ export default function Accommodations() {
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[340px_1fr] gap-6">
-        <div className="border border-white/10 bg-zinc-950">
+        <div data-tour="accom-admin-case-list" className="border border-white/10 bg-zinc-950">
           <div className="px-4 py-3 border-b border-white/10 text-[10px] uppercase tracking-widest text-zinc-500">
             Cases ({cases.length})
           </div>
@@ -448,7 +453,7 @@ export default function Accommodations() {
           <div className="border border-white/10 bg-zinc-950 p-10 text-center text-zinc-500">Select a case to view details.</div>
         ) : (
           <div className="space-y-6">
-            <div className="border border-white/10 bg-zinc-950 p-5 space-y-4">
+            <div data-tour="accom-admin-detail" className="border border-white/10 bg-zinc-950 p-5 space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-xl text-white font-semibold">{selectedCase.case_number}</h2>
@@ -565,7 +570,7 @@ export default function Accommodations() {
               </div>
             </div>
 
-            <div className="border border-white/10 bg-zinc-950 p-5 space-y-4">
+            <div data-tour="accom-admin-documents" className="border border-white/10 bg-zinc-950 p-5 space-y-4">
               <div className="flex items-center gap-2">
                 <FileText size={16} className="text-blue-400" />
                 <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Documents</h3>
@@ -617,7 +622,7 @@ export default function Accommodations() {
               )}
             </div>
 
-            <div className="border border-white/10 bg-zinc-950 p-5 space-y-4">
+            <div data-tour="accom-admin-analysis" className="border border-white/10 bg-zinc-950 p-5 space-y-4">
               <div className="flex items-center gap-2">
                 <Bot size={16} className="text-emerald-400" />
                 <h3 className="text-sm font-semibold text-white uppercase tracking-wider">AI Analysis</h3>
@@ -675,7 +680,7 @@ export default function Accommodations() {
               </div>
             </div>
 
-            <div className="border border-white/10 bg-zinc-950 p-5 space-y-4">
+            <div data-tour="accom-admin-audit" className="border border-white/10 bg-zinc-950 p-5 space-y-4">
               <div className="flex items-center gap-2">
                 <User size={16} className="text-violet-400" />
                 <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Audit Log</h3>

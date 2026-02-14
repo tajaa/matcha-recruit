@@ -31,7 +31,10 @@ export type GuideKey =
   | 'ir-similar'
   | 'er-copilot'
   | 'time-off'
+  | 'leave-management'
+  | 'accommodations'
   | 'employees'
   | 'portal-onboarding'
   | 'portal-documents'
-  | 'portal-pto';
+  | 'portal-pto'
+  | 'portal-leave';
