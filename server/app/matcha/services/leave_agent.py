@@ -499,49 +499,87 @@ class LeaveAgent:
     async def on_accommodation_request_created(self, case_id: UUID | str) -> dict:
         """Send initial accommodation notifications and create baseline SLA deadline."""
         case_id = _normalize_uuid(case_id)
-        async with get_connection() as conn:
-            case = await conn.fetchrow(
-                """
-                SELECT ac.id, ac.case_number, ac.org_id, ac.employee_id, ac.linked_leave_id, ac.status,
-                       e.first_name, e.last_name, e.email,
-                       c.name AS company_name
-                FROM accommodation_cases ac
-                JOIN employees e ON e.id = ac.employee_id
-                LEFT JOIN companies c ON c.id = ac.org_id
-                WHERE ac.id = $1
-                """,
-                case_id,
-            )
-            if not case:
-                return {"status": "not_found"}
-
-            await conn.execute(
-                """
-                INSERT INTO leave_deadlines (leave_request_id, org_id, deadline_type, due_date, accommodation_case_id, notes)
-                SELECT $1, $2, 'accommodation_interactive_process_due', CURRENT_DATE + 14, $3,
-                       'Created by LeaveAgent for ADA interactive process SLA'
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM leave_deadlines
-                    WHERE accommodation_case_id = $3
-                      AND deadline_type = 'accommodation_interactive_process_due'
+        try:
+            async with get_connection() as conn:
+                case = await conn.fetchrow(
+                    """
+                    SELECT ac.id, ac.case_number, ac.org_id, ac.employee_id, ac.linked_leave_id, ac.status,
+                           e.first_name, e.last_name, e.email,
+                           c.name AS company_name
+                    FROM accommodation_cases ac
+                    JOIN employees e ON e.id = ac.employee_id
+                    LEFT JOIN companies c ON c.id = ac.org_id
+                    WHERE ac.id = $1
+                    """,
+                    case_id,
                 )
-                """,
-                case["linked_leave_id"],
-                case["org_id"],
-                case["id"],
-            )
+                if not case:
+                    return {"status": "not_found"}
 
-            employee_name = f"{case['first_name']} {case['last_name']}".strip()
-            contacts = await self._get_company_admin_contacts(conn, case["org_id"])
-            sent = await self._send_accommodation_notifications(
-                contacts,
-                company_name=case["company_name"] or "Your company",
-                case_number=case["case_number"],
-                event_type="case_opened",
-                employee_name=employee_name,
-            )
-            return {"status": "ok", "notifications_sent": sent}
+                # The deadline insert is best-effort so case creation never fails if
+                # schema drift exists across environments.
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO leave_deadlines (leave_request_id, org_id, deadline_type, due_date, accommodation_case_id, notes)
+                        SELECT $1, $2, 'accommodation_interactive_process_due', CURRENT_DATE + 14, $3,
+                               'Created by LeaveAgent for ADA interactive process SLA'
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM leave_deadlines
+                            WHERE accommodation_case_id = $3
+                              AND deadline_type = 'accommodation_interactive_process_due'
+                        )
+                        """,
+                        case["linked_leave_id"],
+                        case["org_id"],
+                        case["id"],
+                    )
+                except Exception as deadline_error:
+                    logger.warning(
+                        "[LeaveAgent] Failed to create accommodation SLA deadline for case %s: %s",
+                        case_id,
+                        deadline_error,
+                    )
+
+                    # Fallback path for older schemas lacking accommodation_case_id.
+                    if case["linked_leave_id"]:
+                        try:
+                            await conn.execute(
+                                """
+                                INSERT INTO leave_deadlines (leave_request_id, org_id, deadline_type, due_date, notes)
+                                SELECT $1, $2, 'accommodation_interactive_process_due', CURRENT_DATE + 14,
+                                       'Created by LeaveAgent for ADA interactive process SLA'
+                                WHERE NOT EXISTS (
+                                    SELECT 1
+                                    FROM leave_deadlines
+                                    WHERE leave_request_id = $1
+                                      AND deadline_type = 'accommodation_interactive_process_due'
+                                )
+                                """,
+                                case["linked_leave_id"],
+                                case["org_id"],
+                            )
+                        except Exception as fallback_error:
+                            logger.warning(
+                                "[LeaveAgent] Fallback deadline insert failed for case %s: %s",
+                                case_id,
+                                fallback_error,
+                            )
+
+                employee_name = f"{case['first_name']} {case['last_name']}".strip()
+                contacts = await self._get_company_admin_contacts(conn, case["org_id"])
+                sent = await self._send_accommodation_notifications(
+                    contacts,
+                    company_name=case["company_name"] or "Your company",
+                    case_number=case["case_number"],
+                    event_type="case_opened",
+                    employee_name=employee_name,
+                )
+                return {"status": "ok", "notifications_sent": sent}
+        except Exception as exc:
+            logger.exception("[LeaveAgent] on_accommodation_request_created failed for case %s: %s", case_id, exc)
+            return {"status": "error", "error": str(exc)}
 
     async def on_accommodation_status_changed(self, case_id: UUID | str, status: str) -> dict:
         """Send notifications for key accommodation status transitions."""

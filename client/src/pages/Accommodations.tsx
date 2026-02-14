@@ -124,6 +124,7 @@ export default function Accommodations() {
   const [statusFilter, setStatusFilter] = useState<string>('');
 
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [createPayload, setCreatePayload] = useState<AccommodationCaseCreate>({
     employee_id: '',
     title: '',
@@ -224,6 +225,7 @@ export default function Accommodations() {
     if (!createPayload.employee_id || !createPayload.title.trim()) return;
 
     setSaving(true);
+    setCreateError(null);
     try {
       const payload: AccommodationCaseCreate = {
         employee_id: createPayload.employee_id,
@@ -248,9 +250,12 @@ export default function Accommodations() {
       await loadCases(true);
       setSelectedCaseId(created.id);
       setSuccessMessage(`Created case ${created.case_number}.`);
+      setCreateError(null);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create case');
+      const message = err instanceof Error ? err.message : 'Failed to create case';
+      setCreateError(message);
+      setError(message);
     } finally {
       setSaving(false);
     }
@@ -397,7 +402,10 @@ export default function Accommodations() {
           </button>
           <button
             data-tour="accom-admin-new-case-btn"
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => {
+              setCreateError(null);
+              setShowCreateModal(true);
+            }}
             className="inline-flex items-center gap-2 px-3 py-2 text-xs uppercase tracking-wider bg-white text-zinc-900 hover:bg-zinc-200"
           >
             <Plus size={14} /> New Case
@@ -786,7 +794,10 @@ export default function Accommodations() {
 
             <div className="p-5 border-t border-white/10 flex justify-end gap-2">
               <button
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => {
+                  setCreateError(null);
+                  setShowCreateModal(false);
+                }}
                 className="px-3 py-2 text-xs uppercase tracking-wider text-zinc-400 hover:text-zinc-200"
               >
                 Cancel
@@ -799,6 +810,13 @@ export default function Accommodations() {
                 {saving ? 'Creating...' : 'Create Case'}
               </button>
             </div>
+            {createError && (
+              <div className="px-5 pb-5">
+                <div className="bg-red-500/10 border border-red-500/30 text-red-300 text-xs px-3 py-2">
+                  {createError}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

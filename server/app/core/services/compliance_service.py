@@ -1149,7 +1149,7 @@ async def _create_alert(
     metadata: Optional[dict] = None,
 ) -> UUID:
     """Create a compliance alert with extended fields. Returns alert ID."""
-    return await conn.fetchval(
+    alert_id = await conn.fetchval(
         """
         INSERT INTO compliance_alerts
         (location_id, company_id, requirement_id, title, message, severity, status,
@@ -1166,6 +1166,75 @@ async def _create_alert(
         effective_date,
         json.dumps(metadata) if metadata else None,
     )
+
+    # Best-effort email notification for every newly created alert.
+    try:
+        from .email import get_email_service
+
+        email_service = get_email_service()
+        if email_service.is_configured():
+            company_name = await conn.fetchval(
+                "SELECT name FROM companies WHERE id = $1",
+                company_id,
+            ) or "Your company"
+
+            location_row = await conn.fetchrow(
+                "SELECT name, city, state FROM business_locations WHERE id = $1",
+                location_id,
+            )
+            if location_row:
+                location_name = location_row["name"] or f"{location_row['city']}, {location_row['state']}"
+            else:
+                location_name = "your location"
+
+            contact_rows = await conn.fetch(
+                """
+                SELECT DISTINCT
+                    u.email,
+                    COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
+                FROM clients c
+                JOIN users u ON u.id = c.user_id
+                WHERE c.company_id = $1
+                  AND u.is_active = true
+                  AND u.email IS NOT NULL
+                ORDER BY u.email
+                """,
+                company_id,
+            )
+
+            contacts = [
+                {"email": row["email"], "name": row["name"] or row["email"]}
+                for row in contact_rows
+            ]
+            if contacts:
+                jurisdictions: list[str] = []
+                if metadata and isinstance(metadata, dict):
+                    if metadata.get("jurisdiction_name"):
+                        jurisdictions.append(str(metadata["jurisdiction_name"]))
+                    elif metadata.get("jurisdiction_id"):
+                        jurisdiction_row = await conn.fetchrow(
+                            "SELECT city, state FROM jurisdictions WHERE id = $1",
+                            metadata["jurisdiction_id"],
+                        )
+                        if jurisdiction_row:
+                            jurisdictions.append(f"{jurisdiction_row['city']}, {jurisdiction_row['state']}")
+
+                send_tasks = [
+                    email_service.send_compliance_change_notification_email(
+                        to_email=contact["email"],
+                        to_name=contact.get("name"),
+                        company_name=company_name,
+                        location_name=location_name,
+                        changed_requirements_count=1,
+                        jurisdictions=jurisdictions or None,
+                    )
+                    for contact in contacts
+                ]
+                await asyncio.gather(*send_tasks, return_exceptions=True)
+    except Exception as email_error:
+        print(f"[Compliance] Failed to send alert notification email for alert {alert_id}: {email_error}")
+
+    return alert_id
 
 
 def _record_change_notification_item(
