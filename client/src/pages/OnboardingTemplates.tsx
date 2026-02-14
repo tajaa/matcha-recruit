@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getAccessToken } from '../api/client';
-import { Plus, X, Edit2, Trash2, CheckCircle, FileText, Laptop, GraduationCap, Settings, AlertTriangle } from 'lucide-react';
+import { Plus, X, Edit2, Trash2, CheckCircle, FileText, Laptop, GraduationCap, Settings, AlertTriangle, RotateCcw } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -8,7 +8,7 @@ interface OnboardingTemplate {
   id: string;
   title: string;
   description: string | null;
-  category: 'documents' | 'equipment' | 'training' | 'admin';
+  category: 'documents' | 'equipment' | 'training' | 'admin' | 'return_to_work';
   is_employee_task: boolean;
   due_days: number;
   is_active: boolean;
@@ -30,6 +30,7 @@ const CATEGORIES = [
   { value: 'equipment', label: 'Equipment', icon: Laptop, color: 'text-purple-400' },
   { value: 'training', label: 'Training', icon: GraduationCap, color: 'text-amber-400' },
   { value: 'admin', label: 'Admin', icon: Settings, color: 'text-zinc-400' },
+  { value: 'return_to_work', label: 'Return to Work', icon: RotateCcw, color: 'text-emerald-400' },
 ];
 
 export default function OnboardingTemplates() {

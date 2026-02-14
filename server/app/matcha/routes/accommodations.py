@@ -27,6 +27,7 @@ from ..models.accommodation import (
     AccommodationCaseUpdate,
     AccommodationCaseResponse,
     AccommodationCaseListResponse,
+    AccommodationEmployeeOption,
     AccommodationCaseStatus,
     AccommodationDocumentResponse,
     AccommodationAnalysisResponse,
@@ -270,6 +271,36 @@ async def list_cases(
 
         cases = [_case_response(row, document_count=row["document_count"]) for row in rows]
         return AccommodationCaseListResponse(cases=cases, total=len(cases))
+
+
+@router.get("/employees", response_model=list[AccommodationEmployeeOption])
+async def list_employees_for_accommodations(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List company employees for accommodation case creation/edit workflows."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, first_name, last_name, email
+            FROM employees
+            WHERE org_id = $1
+            ORDER BY first_name, last_name, email
+            """,
+            company_id,
+        )
+        return [
+            AccommodationEmployeeOption(
+                id=row["id"],
+                first_name=row["first_name"],
+                last_name=row["last_name"],
+                email=row["email"],
+            )
+            for row in rows
+        ]
 
 
 @router.get("/{case_id}", response_model=AccommodationCaseResponse)

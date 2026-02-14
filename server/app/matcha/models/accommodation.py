@@ -80,6 +80,14 @@ class AccommodationCaseListResponse(BaseModel):
     total: int
 
 
+class AccommodationEmployeeOption(BaseModel):
+    """Employee option payload used by accommodations UI forms."""
+    id: UUID
+    first_name: str
+    last_name: str
+    email: str
+
+
 # ===========================================
 # Document Models
 # ===========================================

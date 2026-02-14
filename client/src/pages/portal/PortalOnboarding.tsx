@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, Clock, FileText, Laptop, GraduationCap, Settings, AlertCircle } from 'lucide-react';
+import { CheckCircle, Clock, FileText, Laptop, GraduationCap, Settings, AlertCircle, RotateCcw } from 'lucide-react';
 import { FeatureGuideTrigger } from '../../features/feature-guides';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
@@ -29,6 +29,7 @@ const CATEGORIES = [
   { value: 'equipment', label: 'Equipment', icon: Laptop, color: 'text-purple-500', bgColor: 'bg-purple-100' },
   { value: 'training', label: 'Training', icon: GraduationCap, color: 'text-amber-500', bgColor: 'bg-amber-100' },
   { value: 'admin', label: 'Admin', icon: Settings, color: 'text-zinc-500', bgColor: 'bg-zinc-100' },
+  { value: 'return_to_work', label: 'Return to Work', icon: RotateCcw, color: 'text-emerald-500', bgColor: 'bg-emerald-100' },
 ];
 
 async function fetchWithAuth(url: string, options: RequestInit = {}) {

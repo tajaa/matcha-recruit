@@ -7,6 +7,7 @@ const FEATURE_CONFIG: { key: string; label: string; section: string }[] = [
   { key: 'offer_letters', label: 'Offer Letters', section: 'Recruiting' },
   { key: 'policies', label: 'Policies', section: 'Recruiting' },
   { key: 'compliance', label: 'Compliance', section: 'Recruiting' },
+  { key: 'compliance_plus', label: 'Compliance Plus', section: 'HR Tools' },
   { key: 'employees', label: 'Employees', section: 'Recruiting' },
   { key: 'vibe_checks', label: 'Vibe Checks', section: 'Employee Experience' },
   { key: 'enps', label: 'eNPS Surveys', section: 'Employee Experience' },
@@ -14,6 +15,7 @@ const FEATURE_CONFIG: { key: string; label: string; section: string }[] = [
   { key: 'er_copilot', label: 'ER Copilot', section: 'HR Tools' },
   { key: 'incidents', label: 'Incidents', section: 'HR Tools' },
   { key: 'time_off', label: 'Time Off', section: 'HR Tools' },
+  { key: 'accommodations', label: 'Accommodations', section: 'HR Tools' },
 ];
 
 export function CompanyFeatures() {

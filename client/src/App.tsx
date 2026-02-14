@@ -61,12 +61,15 @@ const Employees = lazy(() => import('./pages/Employees'));
 const EmployeeDetail = lazy(() => import('./pages/EmployeeDetail'));
 const OnboardingTemplates = lazy(() => import('./pages/OnboardingTemplates'));
 const PTOManagement = lazy(() => import('./pages/PTOManagement'));
+const LeaveManagement = lazy(() => import('./pages/LeaveManagement'));
+const Accommodations = lazy(() => import('./pages/Accommodations'));
 const AcceptInvitation = lazy(() => import('./pages/AcceptInvitation'));
 
 // Employee Portal Pages
 const PortalHome = lazy(() => import('./pages/portal/PortalHome'));
 const PortalDocuments = lazy(() => import('./pages/portal/PortalDocuments'));
 const PortalPTO = lazy(() => import('./pages/portal/PortalPTO'));
+const PortalLeave = lazy(() => import('./pages/portal/PortalLeave'));
 const PortalPolicies = lazy(() => import('./pages/portal/PortalPolicies'));
 const PortalProfile = lazy(() => import('./pages/portal/PortalProfile'));
 const PortalOnboarding = lazy(() => import('./pages/portal/PortalOnboarding'));
@@ -279,6 +282,22 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="time_off">
                     <PTOManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/leave"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="time_off">
+                    <LeaveManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/accommodations"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="accommodations">
+                    <Accommodations />
                   </ProtectedRoute>
                 }
               />
@@ -567,6 +586,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['employee']} requiredFeature="time_off">
                     <PortalPTO />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="portal/leave"
+                element={
+                  <ProtectedRoute roles={['employee']} requiredFeature="time_off">
+                    <PortalLeave />
                   </ProtectedRoute>
                 }
               />

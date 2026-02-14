@@ -309,10 +309,15 @@ def run_discrepancy_analysis(self, case_id: str) -> dict[str, Any]:
 
 async def _get_company_policies(conn, case_id: str) -> list[dict]:
     """Get all active policies for the company that owns this ER case."""
-    # Get the company_id from the user who created the case
+    from app.core.services.storage import get_storage
+    from app.matcha.services.er_document_parser import ERDocumentParser
+    from urllib.parse import urlparse, unquote
+    import os
+
+    # Resolve the company from the case itself first (source of truth), then creator fallback.
     company_id = await conn.fetchval(
         """
-        SELECT COALESCE(cl.company_id, (SELECT id FROM companies ORDER BY created_at LIMIT 1))
+        SELECT COALESCE(ec.company_id, cl.company_id, (SELECT id FROM companies ORDER BY created_at LIMIT 1))
         FROM er_cases ec
         LEFT JOIN users u ON ec.created_by = u.id
         LEFT JOIN clients cl ON u.id = cl.user_id
@@ -335,15 +340,49 @@ async def _get_company_policies(conn, case_id: str) -> list[dict]:
         company_id,
     )
 
-    return [
-        {
-            "id": str(row["id"]),
-            "title": row["title"],
-            "text": row["content"] or "",
-        }
-        for row in rows
-        if row["content"]  # Only include policies with content
-    ]
+    storage = get_storage()
+    parser = ERDocumentParser()
+    policies: list[dict] = []
+
+    for row in rows:
+        text = (row["content"] or "").strip()
+
+        # Fallback: extract text from uploaded policy file when content is empty.
+        if not text and row["file_url"]:
+            file_url = str(row["file_url"])
+            try:
+                parsed_path = urlparse(file_url).path
+                filename = os.path.basename(unquote(parsed_path)) or f"policy-{row['id']}.txt"
+                if "." not in filename:
+                    filename = f"{filename}.txt"
+                file_bytes = await storage.download_file(file_url)
+                parsed = parser.parse_document(file_bytes, filename)
+                text = parsed.text.strip()
+            except Exception as exc:
+                logger.warning(
+                    "Failed to parse active policy %s (%s) from %s: %s",
+                    row["id"],
+                    row["title"],
+                    file_url,
+                    exc,
+                )
+
+        if text:
+            policies.append(
+                {
+                    "id": str(row["id"]),
+                    "title": row["title"],
+                    "text": text,
+                }
+            )
+        else:
+            logger.info(
+                "Skipping active policy %s (%s): no usable text content",
+                row["id"],
+                row["title"],
+            )
+
+    return policies
 
 
 async def _run_policy_check(case_id: str) -> dict[str, Any]:
@@ -368,13 +407,15 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
         if not policies:
             raise ValueError("No active policies found for this company. Please add policies in the Policies section.")
 
+        total_steps = len(policies) + 3  # load policies + load evidence + each policy check + save
+
         # Progress: Loading evidence
         _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="policy_check",
             entity_id=case_id,
             progress=2,
-            total=4,
+            total=total_steps,
             message=f"Found {len(policies)} policies. Loading evidence documents...",
         )
 
@@ -384,36 +425,72 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
         if not evidence_docs:
             raise ValueError("No evidence documents found for policy check")
 
-        # Progress: Checking for violations
-        _safe_publish_progress(
-            channel=f"er_case:{case_id}",
-            task_type="policy_check",
-            entity_id=case_id,
-            progress=3,
-            total=4,
-            message=f"Checking {len(evidence_docs)} documents against {len(policies)} policies...",
-        )
+        all_violations: list[dict[str, Any]] = []
+        applicable_policies: list[str] = []
+        policy_summaries: list[str] = []
 
-        # Combine all policies into one document for analysis
-        combined_policy = {
-            "id": "combined_policies",
-            "filename": "Company Policies",
-            "text": "\n\n---\n\n".join([
-                f"## {p['title']}\n\n{p['text']}"
-                for p in policies
-            ]),
+        # Analyze each policy individually so every active policy is checked.
+        for idx, policy in enumerate(policies):
+            _safe_publish_progress(
+                channel=f"er_case:{case_id}",
+                task_type="policy_check",
+                entity_id=case_id,
+                progress=3 + idx,
+                total=total_steps,
+                message=f"Checking policy {idx + 1}/{len(policies)}: {policy['title']}",
+            )
+
+            policy_doc = {
+                "id": policy["id"],
+                "filename": policy["title"],
+                "text": policy["text"],
+            }
+            policy_result = await analyzer.check_policy_violations(policy_doc, evidence_docs)
+
+            violations = policy_result.get("violations", [])
+            if isinstance(violations, list):
+                all_violations.extend(violations)
+
+            maybe_applicable = policy_result.get("policies_potentially_applicable", [])
+            if isinstance(maybe_applicable, list):
+                for item in maybe_applicable:
+                    if isinstance(item, str) and item not in applicable_policies:
+                        applicable_policies.append(item)
+
+            summary = policy_result.get("summary")
+            if isinstance(summary, str) and summary.strip():
+                policy_summaries.append(f"{policy['title']}: {summary.strip()}")
+
+        if all_violations:
+            summary_text = (
+                f"Checked {len(policies)} active policies and identified "
+                f"{len(all_violations)} potential violation(s)."
+            )
+        else:
+            summary_text = f"Checked {len(policies)} active policies. No policy violations identified."
+
+        if policy_summaries:
+            preview = " ".join(policy_summaries[:3])
+            extra_count = max(len(policy_summaries) - 3, 0)
+            if extra_count:
+                summary_text = f"{summary_text} {preview} (+{extra_count} more policy summary items)"
+            else:
+                summary_text = f"{summary_text} {preview}"
+
+        result = {
+            "violations": all_violations,
+            "policies_potentially_applicable": applicable_policies,
+            "summary": summary_text,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         }
-
-        # Run analysis (use async method since we're in async context)
-        result = await analyzer.check_policy_violations(combined_policy, evidence_docs)
 
         # Progress: Saving results
         _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="policy_check",
             entity_id=case_id,
-            progress=4,
-            total=4,
+            progress=total_steps,
+            total=total_steps,
             message="Saving analysis results...",
         )
 
