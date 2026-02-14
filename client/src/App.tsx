@@ -111,6 +111,12 @@ function CompanyRedirect() {
   return <Navigate to={`/app/companies/${id}`} replace />;
 }
 
+function LeaveRequestRedirect() {
+  const { leaveId } = useParams<{ leaveId: string }>();
+  const query = leaveId ? `?leaveId=${encodeURIComponent(leaveId)}` : '';
+  return <Navigate to={`/app/matcha/leave${query}`} replace />;
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -290,6 +296,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="time_off">
                     <LeaveManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/employees/leave/requests/:leaveId"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="time_off">
+                    <LeaveRequestRedirect />
                   </ProtectedRoute>
                 }
               />

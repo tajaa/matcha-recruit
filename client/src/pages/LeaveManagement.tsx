@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   Calendar,
@@ -59,6 +60,7 @@ function formatDate(value?: string | null): string {
 
 export default function LeaveManagement() {
   const { hasFeature } = useAuth();
+  const [searchParams] = useSearchParams();
   const [requests, setRequests] = useState<LeaveRequestAdmin[]>([]);
   const [selectedLeaveId, setSelectedLeaveId] = useState<string | null>(null);
   const [selectedLeave, setSelectedLeave] = useState<LeaveRequestAdmin | null>(null);
@@ -79,6 +81,7 @@ export default function LeaveManagement() {
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
 
   const compliancePlusEnabled = hasFeature('compliance_plus');
+  const requestedLeaveId = searchParams.get('leaveId');
 
   const selectedLeaveSummary = useMemo(() => {
     if (!selectedLeave) return null;
@@ -105,9 +108,13 @@ export default function LeaveManagement() {
       });
       setRequests(rows);
 
-      const nextSelectedId = selectedLeaveId && rows.some((r) => r.id === selectedLeaveId)
-        ? selectedLeaveId
-        : rows[0]?.id || null;
+      const requestedIdInRows = requestedLeaveId && rows.some((r) => r.id === requestedLeaveId)
+        ? requestedLeaveId
+        : null;
+      const nextSelectedId = requestedIdInRows
+        || (selectedLeaveId && rows.some((r) => r.id === selectedLeaveId)
+          ? selectedLeaveId
+          : rows[0]?.id || null);
       setSelectedLeaveId(nextSelectedId);
 
       if (!nextSelectedId) {
@@ -156,7 +163,7 @@ export default function LeaveManagement() {
   useEffect(() => {
     loadRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, typeFilter]);
+  }, [statusFilter, typeFilter, requestedLeaveId]);
 
   useEffect(() => {
     if (!selectedLeaveId) return;

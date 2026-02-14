@@ -13,7 +13,9 @@ export function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = (location.state as { from?: Location })?.from?.pathname;
+  const from = (location.state as {
+    from?: { pathname?: string; search?: string; hash?: string };
+  })?.from;
 
   const getDefaultRoute = (role: string) => {
     switch (role) {
@@ -35,7 +37,9 @@ export function Login() {
 
     try {
       const loggedInUser = await login({ email, password });
-      const destination = from || getDefaultRoute(loggedInUser.role);
+      const destination = from?.pathname
+        ? `${from.pathname}${from.search || ''}${from.hash || ''}`
+        : getDefaultRoute(loggedInUser.role);
       navigate(destination, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');

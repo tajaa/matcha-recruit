@@ -7,6 +7,7 @@ Accommodation interactive process management:
 - Audit log
 """
 
+import asyncio
 import json
 import logging
 import secrets
@@ -42,6 +43,144 @@ router = APIRouter()
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 TEXT_EXTRACTABLE_EXTENSIONS = {".txt", ".md", ".csv", ".json"}
 MAX_ANALYSIS_DOC_CHARS = 12_000
+_schema_ready = False
+_schema_lock = asyncio.Lock()
+
+
+async def _ensure_accommodations_schema(conn) -> None:
+    """Best-effort schema guard for environments that missed accommodation migrations."""
+    global _schema_ready
+    if _schema_ready:
+        return
+
+    async with _schema_lock:
+        if _schema_ready:
+            return
+
+        has_cases_table = await conn.fetchval(
+            "SELECT to_regclass('accommodation_cases') IS NOT NULL"
+        )
+        if not has_cases_table:
+            await conn.execute(
+                """
+                CREATE TABLE accommodation_cases (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    case_number VARCHAR(50) NOT NULL UNIQUE,
+                    org_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                    linked_leave_id UUID,
+                    title VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    disability_category VARCHAR(50),
+                    status VARCHAR(50) NOT NULL DEFAULT 'requested',
+                    requested_accommodation TEXT,
+                    approved_accommodation TEXT,
+                    denial_reason TEXT,
+                    undue_hardship_analysis TEXT,
+                    assigned_to UUID REFERENCES users(id),
+                    created_by UUID REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    closed_at TIMESTAMP
+                )
+                """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_accommodation_cases_status ON accommodation_cases(status)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_accommodation_cases_employee ON accommodation_cases(employee_id)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_accommodation_cases_org ON accommodation_cases(org_id)"
+            )
+        else:
+            has_linked_leave_column = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'accommodation_cases'
+                      AND column_name = 'linked_leave_id'
+                )
+                """
+            )
+            if not has_linked_leave_column:
+                await conn.execute(
+                    "ALTER TABLE accommodation_cases ADD COLUMN linked_leave_id UUID"
+                )
+
+        has_documents_table = await conn.fetchval(
+            "SELECT to_regclass('accommodation_documents') IS NOT NULL"
+        )
+        if not has_documents_table:
+            await conn.execute(
+                """
+                CREATE TABLE accommodation_documents (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    case_id UUID NOT NULL REFERENCES accommodation_cases(id) ON DELETE CASCADE,
+                    document_type VARCHAR(50) NOT NULL,
+                    filename VARCHAR(255) NOT NULL,
+                    file_path VARCHAR(500) NOT NULL,
+                    mime_type VARCHAR(100),
+                    file_size INTEGER,
+                    uploaded_by UUID REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+                """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_accommodation_documents_case ON accommodation_documents(case_id)"
+            )
+
+        has_analysis_table = await conn.fetchval(
+            "SELECT to_regclass('accommodation_analysis') IS NOT NULL"
+        )
+        if not has_analysis_table:
+            await conn.execute(
+                """
+                CREATE TABLE accommodation_analysis (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    case_id UUID NOT NULL REFERENCES accommodation_cases(id) ON DELETE CASCADE,
+                    analysis_type VARCHAR(50) NOT NULL,
+                    analysis_data JSONB NOT NULL,
+                    generated_by UUID REFERENCES users(id),
+                    generated_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(case_id, analysis_type)
+                )
+                """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_accommodation_analysis_case ON accommodation_analysis(case_id)"
+            )
+
+        has_audit_table = await conn.fetchval(
+            "SELECT to_regclass('accommodation_audit_log') IS NOT NULL"
+        )
+        if not has_audit_table:
+            await conn.execute(
+                """
+                CREATE TABLE accommodation_audit_log (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    case_id UUID REFERENCES accommodation_cases(id) ON DELETE SET NULL,
+                    user_id UUID REFERENCES users(id),
+                    action VARCHAR(100) NOT NULL,
+                    entity_type VARCHAR(50),
+                    entity_id UUID,
+                    details JSONB,
+                    ip_address VARCHAR(50),
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+                """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_accommodation_audit_case ON accommodation_audit_log(case_id)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_accommodation_audit_user ON accommodation_audit_log(user_id)"
+            )
+
+        _schema_ready = True
 
 
 # ===========================================
@@ -84,6 +223,7 @@ async def log_audit(
 
 async def _verify_case_company(conn, case_id: UUID, company_id: UUID, is_admin: bool = False):
     """Verify a case exists and belongs to the company. Raises 404 if not."""
+    await _ensure_accommodations_schema(conn)
     if is_admin:
         exists = await conn.fetchval(
             "SELECT 1 FROM accommodation_cases WHERE id = $1 AND (org_id = $2 OR org_id IS NULL)",
@@ -173,6 +313,7 @@ async def create_case(
     case_number = generate_case_number()
 
     async with get_connection() as conn:
+        await _ensure_accommodations_schema(conn)
         # Verify employee belongs to company
         emp = await conn.fetchval(
             "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
@@ -245,6 +386,7 @@ async def list_cases(
 
     is_admin = current_user.role == "admin"
     async with get_connection() as conn:
+        await _ensure_accommodations_schema(conn)
         company_filter = "(c.org_id = $1 OR c.org_id IS NULL)" if is_admin else "c.org_id = $1"
         base_query = f"""
             SELECT c.*, COUNT(d.id) as document_count
@@ -283,6 +425,7 @@ async def list_employees_for_accommodations(
         return []
 
     async with get_connection() as conn:
+        await _ensure_accommodations_schema(conn)
         rows = await conn.fetch(
             """
             SELECT id, first_name, last_name, email
@@ -315,6 +458,7 @@ async def get_case(
 
     is_admin = current_user.role == "admin"
     async with get_connection() as conn:
+        await _ensure_accommodations_schema(conn)
         company_filter = "(c.org_id = $2 OR c.org_id IS NULL)" if is_admin else "c.org_id = $2"
         row = await conn.fetchrow(
             f"""
