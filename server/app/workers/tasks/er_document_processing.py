@@ -138,7 +138,7 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
                 chunk.get("line_start"),
                 chunk.get("line_end"),
                 embedding_str,
-                json.dumps({"char_start": chunk.get("char_start")}),
+                {"char_start": chunk.get("char_start")},
             )
 
             # Publish progress periodically

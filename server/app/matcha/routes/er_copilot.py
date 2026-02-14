@@ -13,7 +13,7 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Request
@@ -105,6 +105,29 @@ async def _verify_case_company(conn, case_id: UUID, company_id: UUID, is_admin: 
         )
     if not exists:
         raise HTTPException(status_code=404, detail="Case not found")
+
+
+def _normalize_search_metadata(raw_value: Any) -> Optional[dict]:
+    """Normalize metadata payloads to dict for API response compatibility."""
+    if isinstance(raw_value, dict):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return None
+    return None
+
+
+def _normalize_document_type(raw_value: Any) -> str:
+    """Normalize legacy/invalid document types to a supported value."""
+    if isinstance(raw_value, str):
+        value = raw_value.strip().lower()
+        if value in {"transcript", "policy", "email", "other"}:
+            return value
+    return "other"
 
 
 # ===========================================
@@ -1255,10 +1278,18 @@ async def search_evidence(
         await _verify_case_company(verify_conn, case_id, company_id, current_user.role == "admin")
 
     async with get_connection() as conn:
-        total_chunks = await conn.fetchval(
-            "SELECT COUNT(*) FROM er_evidence_chunks WHERE case_id = $1",
-            case_id,
-        )
+        try:
+            total_chunks = await conn.fetchval(
+                "SELECT COUNT(*) FROM er_evidence_chunks WHERE case_id = $1",
+                case_id,
+            )
+        except Exception as chunk_count_error:
+            logger.warning(
+                "Failed to count evidence chunks for case %s: %s",
+                case_id,
+                chunk_count_error,
+            )
+            total_chunks = 0
         results: list[dict] = []
         semantic_error: Exception | None = None
 
@@ -1296,29 +1327,37 @@ async def search_evidence(
                     case_id,
                 )
             like_query = f"%{search.query.strip()}%"
-            chunk_rows = await conn.fetch(
-                """
-                SELECT
-                    ec.id,
-                    ec.content,
-                    ec.speaker,
-                    ec.page_number,
-                    ec.line_start,
-                    ec.line_end,
-                    ec.metadata,
-                    ed.filename,
-                    ed.document_type
-                FROM er_evidence_chunks ec
-                JOIN er_case_documents ed ON ec.document_id = ed.id
-                WHERE ec.case_id = $1
-                  AND ec.content ILIKE $2
-                ORDER BY ec.created_at DESC
-                LIMIT $3
-                """,
-                case_id,
-                like_query,
-                search.top_k,
-            )
+            chunk_rows = []
+            try:
+                chunk_rows = await conn.fetch(
+                    """
+                    SELECT
+                        ec.id,
+                        ec.content,
+                        ec.speaker,
+                        ec.page_number,
+                        ec.line_start,
+                        ec.line_end,
+                        ec.metadata,
+                        ed.filename,
+                        ed.document_type
+                    FROM er_evidence_chunks ec
+                    JOIN er_case_documents ed ON ec.document_id = ed.id
+                    WHERE ec.case_id = $1
+                      AND ec.content ILIKE $2
+                    ORDER BY ec.created_at DESC
+                    LIMIT $3
+                    """,
+                    case_id,
+                    like_query,
+                    search.top_k,
+                )
+            except Exception as chunk_query_error:
+                logger.warning(
+                    "Chunk-level keyword search failed for case %s: %s",
+                    case_id,
+                    chunk_query_error,
+                )
 
             results = []
             for row in chunk_rows:
@@ -1343,20 +1382,28 @@ async def search_evidence(
                 )
 
             if not results:
-                doc_rows = await conn.fetch(
-                    """
-                    SELECT id, filename, document_type, scrubbed_text
-                    FROM er_case_documents
-                    WHERE case_id = $1
-                      AND processing_status = 'completed'
-                      AND scrubbed_text ILIKE $2
-                    ORDER BY created_at DESC
-                    LIMIT $3
-                    """,
-                    case_id,
-                    like_query,
-                    search.top_k,
-                )
+                doc_rows = []
+                try:
+                    doc_rows = await conn.fetch(
+                        """
+                        SELECT id, filename, document_type, scrubbed_text
+                        FROM er_case_documents
+                        WHERE case_id = $1
+                          AND processing_status = 'completed'
+                          AND scrubbed_text ILIKE $2
+                        ORDER BY created_at DESC
+                        LIMIT $3
+                        """,
+                        case_id,
+                        like_query,
+                        search.top_k,
+                    )
+                except Exception as doc_query_error:
+                    logger.warning(
+                        "Document-level keyword search failed for case %s: %s",
+                        case_id,
+                        doc_query_error,
+                    )
 
                 query_lower = search.query.strip().lower()
                 for row in doc_rows:
@@ -1388,21 +1435,30 @@ async def search_evidence(
                         }
                     )
 
-        return EvidenceSearchResponse(
-            results=[
+        normalized_results: list[EvidenceSearchResult] = []
+        for r in results:
+            similarity_raw = r.get("similarity") if isinstance(r, dict) else None
+            try:
+                similarity = float(similarity_raw) if similarity_raw is not None else 0.0
+            except Exception:
+                similarity = 0.0
+
+            normalized_results.append(
                 EvidenceSearchResult(
-                    chunk_id=r["chunk_id"],
-                    content=r["content"],
-                    speaker=r["speaker"],
-                    source_file=r["source_file"],
-                    document_type=r["document_type"],
-                    page_number=r["page_number"],
-                    line_range=r["line_range"],
-                    similarity=r["similarity"],
-                    metadata=r["metadata"],
+                    chunk_id=str(r.get("chunk_id") or ""),
+                    content=str(r.get("content") or ""),
+                    speaker=r.get("speaker") if isinstance(r.get("speaker"), str) else None,
+                    source_file=str(r.get("source_file") or "Unknown source"),
+                    document_type=_normalize_document_type(r.get("document_type")),
+                    page_number=r.get("page_number") if isinstance(r.get("page_number"), int) else None,
+                    line_range=r.get("line_range") if isinstance(r.get("line_range"), str) else None,
+                    similarity=similarity,
+                    metadata=_normalize_search_metadata(r.get("metadata")),
                 )
-                for r in results
-            ],
+            )
+
+        return EvidenceSearchResponse(
+            results=normalized_results,
             query=search.query,
             total_chunks=total_chunks or 0,
         )
