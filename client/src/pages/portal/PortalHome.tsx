@@ -23,6 +23,15 @@ interface PortalDashboard {
   pending_pto_requests_count: number;
 }
 
+function toFiniteNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
 export function PortalHome() {
   const [dashboard, setDashboard] = useState<PortalDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,7 +75,7 @@ export function PortalHome() {
   }
 
   const availablePTO = dashboard.pto_balance
-    ? dashboard.pto_balance.balance_hours - dashboard.pto_balance.used_hours
+    ? toFiniteNumber(dashboard.pto_balance.balance_hours) - toFiniteNumber(dashboard.pto_balance.used_hours)
     : 0;
 
   return (

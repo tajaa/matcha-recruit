@@ -23,6 +23,15 @@ interface PTORequest {
   created_at: string;
 }
 
+function toFiniteNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
 export function PortalPTO() {
   const [balance, setBalance] = useState<PTOBalance | null>(null);
   const [pendingRequests, setPendingRequests] = useState<PTORequest[]>([]);
@@ -43,7 +52,17 @@ export function PortalPTO() {
     try {
       setLoading(true);
       const data = await portalApi.getPTOSummary();
-      setBalance(data.balance);
+      if (data.balance) {
+        setBalance({
+          ...data.balance,
+          balance_hours: toFiniteNumber(data.balance.balance_hours),
+          accrued_hours: toFiniteNumber(data.balance.accrued_hours),
+          used_hours: toFiniteNumber(data.balance.used_hours),
+          carryover_hours: toFiniteNumber(data.balance.carryover_hours),
+        });
+      } else {
+        setBalance(null);
+      }
       setPendingRequests(data.pending_requests);
       setApprovedRequests(data.approved_requests);
     } catch (err) {

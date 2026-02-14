@@ -52,6 +52,132 @@ function statusClasses(status: string): string {
   }
 }
 
+interface ParsedFmlaEligibility {
+  label: string;
+  eligible: boolean | null;
+  reasons: string[];
+  monthsEmployed: number | null;
+  hoursWorked12mo: number | null;
+  companyEmployeeCount: number | null;
+}
+
+interface ParsedStateProgram {
+  program: string;
+  label: string;
+  eligible: boolean | null;
+  paid: boolean | null;
+  maxWeeks: number | null;
+  wageReplacementPct: number | null;
+  jobProtection: boolean | null;
+  reasons: string[];
+  notes: string | null;
+  sourceUrl: string | null;
+}
+
+interface ParsedStatePrograms {
+  state: string | null;
+  message: string | null;
+  programs: ParsedStateProgram[];
+}
+
+interface ParsedEligibility {
+  checkedAt: string | null;
+  fmla: ParsedFmlaEligibility | null;
+  statePrograms: ParsedStatePrograms | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function toStringOrNull(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function toNumberOrNull(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function toBooleanOrNull(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+function formatNumber(value: number | null, digits = 1): string {
+  if (value === null) return '—';
+  return value.toFixed(digits);
+}
+
+function formatPercentage(value: number | null): string {
+  if (value === null) return '—';
+  return `${Math.round(value * 100)}%`;
+}
+
+function parseEligibilitySnapshot(payload: Record<string, unknown> | null): ParsedEligibility | null {
+  if (!payload) return null;
+
+  const fmlaRaw = isRecord(payload.fmla) ? payload.fmla : null;
+  const stateRaw = isRecord(payload.state_programs) ? payload.state_programs : null;
+
+  const fmla: ParsedFmlaEligibility | null = fmlaRaw
+    ? {
+        label: toStringOrNull(fmlaRaw.label) ?? 'FMLA',
+        eligible: toBooleanOrNull(fmlaRaw.eligible),
+        reasons: toStringArray(fmlaRaw.reasons),
+        monthsEmployed: toNumberOrNull(fmlaRaw.months_employed),
+        hoursWorked12mo: toNumberOrNull(fmlaRaw.hours_worked_12mo),
+        companyEmployeeCount: toNumberOrNull(fmlaRaw.company_employee_count),
+      }
+    : null;
+
+  const statePrograms: ParsedStatePrograms | null = stateRaw
+    ? {
+        state: toStringOrNull(stateRaw.state),
+        message: toStringOrNull(stateRaw.message),
+        programs: Array.isArray(stateRaw.programs)
+          ? stateRaw.programs
+              .filter(isRecord)
+              .map((program): ParsedStateProgram => ({
+                program: toStringOrNull(program.program) ?? 'state_program',
+                label: toStringOrNull(program.label) ?? 'State Program',
+                eligible: toBooleanOrNull(program.eligible),
+                paid: toBooleanOrNull(program.paid),
+                maxWeeks: toNumberOrNull(program.max_weeks),
+                wageReplacementPct: toNumberOrNull(program.wage_replacement_pct),
+                jobProtection: toBooleanOrNull(program.job_protection),
+                reasons: toStringArray(program.reasons),
+                notes: toStringOrNull(program.notes),
+                sourceUrl: toStringOrNull(program.source_url),
+              }))
+          : [],
+      }
+    : null;
+
+  if (!fmla && !statePrograms) return null;
+
+  return {
+    checkedAt: toStringOrNull(payload.checked_at),
+    fmla,
+    statePrograms,
+  };
+}
+
 export default function PortalLeave() {
   const { hasFeature } = useAuth();
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
@@ -81,6 +207,7 @@ export default function PortalLeave() {
     if (!statusFilter) return requests;
     return requests.filter((request) => request.status === statusFilter);
   }, [requests, statusFilter]);
+  const parsedEligibility = useMemo(() => parseEligibilitySnapshot(eligibility), [eligibility]);
 
   const resetForm = () => {
     setLeaveType('medical');
@@ -232,16 +359,161 @@ export default function PortalLeave() {
 
       {compliancePlusEnabled && (
         <div data-tour="portal-leave-eligibility" className="bg-white border border-zinc-200 rounded-lg p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <h2 className="text-sm font-medium text-zinc-900">Eligibility Snapshot</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              <h2 className="text-sm font-medium text-zinc-900">Eligibility Snapshot</h2>
+            </div>
+            {parsedEligibility?.checkedAt && (
+              <span className="text-xs text-zinc-500">
+                Updated {new Date(parsedEligibility.checkedAt).toLocaleString()}
+              </span>
+            )}
           </div>
           {eligibilityLoading ? (
             <p className="text-sm text-zinc-500">Loading eligibility...</p>
-          ) : eligibility ? (
-            <pre className="text-xs text-zinc-700 bg-zinc-50 border border-zinc-200 rounded-lg p-3 overflow-x-auto max-h-60">
-              {JSON.stringify(eligibility, null, 2)}
-            </pre>
+          ) : parsedEligibility ? (
+            <div className="space-y-4">
+              {parsedEligibility.fmla && (
+                <div className="border border-zinc-200 rounded-lg p-4 bg-zinc-50/60">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="text-sm font-medium text-zinc-900">{parsedEligibility.fmla.label}</h3>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${
+                        parsedEligibility.fmla.eligible === null
+                          ? 'bg-zinc-200 text-zinc-700'
+                          : parsedEligibility.fmla.eligible
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {parsedEligibility.fmla.eligible === null
+                        ? 'Unknown'
+                        : parsedEligibility.fmla.eligible
+                          ? 'Eligible'
+                          : 'Not eligible'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3 text-xs">
+                    <div className="rounded-md bg-white border border-zinc-200 p-2.5">
+                      <div className="text-zinc-500 uppercase tracking-wide">Tenure</div>
+                      <div className="text-zinc-900 font-medium">
+                        {formatNumber(parsedEligibility.fmla.monthsEmployed)} months
+                      </div>
+                    </div>
+                    <div className="rounded-md bg-white border border-zinc-200 p-2.5">
+                      <div className="text-zinc-500 uppercase tracking-wide">Hours (12 mo)</div>
+                      <div className="text-zinc-900 font-medium">
+                        {formatNumber(parsedEligibility.fmla.hoursWorked12mo, 0)}
+                      </div>
+                    </div>
+                    <div className="rounded-md bg-white border border-zinc-200 p-2.5">
+                      <div className="text-zinc-500 uppercase tracking-wide">Company size</div>
+                      <div className="text-zinc-900 font-medium">
+                        {formatNumber(parsedEligibility.fmla.companyEmployeeCount, 0)} employees
+                      </div>
+                    </div>
+                  </div>
+                  {parsedEligibility.fmla.reasons.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      {parsedEligibility.fmla.reasons.map((reason, index) => (
+                        <p key={`${reason}-${index}`} className="text-xs text-zinc-600">
+                          • {reason}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {parsedEligibility.statePrograms && (
+                <div className="border border-zinc-200 rounded-lg p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-medium text-zinc-900">State Programs</h3>
+                    {parsedEligibility.statePrograms.state && (
+                      <span className="text-xs uppercase tracking-wider text-zinc-500">
+                        {parsedEligibility.statePrograms.state}
+                      </span>
+                    )}
+                  </div>
+
+                  {parsedEligibility.statePrograms.programs.length === 0 ? (
+                    <p className="mt-3 text-sm text-zinc-500">
+                      {parsedEligibility.statePrograms.message || 'No state leave programs found.'}
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      {parsedEligibility.statePrograms.programs.map((program) => (
+                        <div key={program.program} className="border border-zinc-200 rounded-lg p-3 bg-zinc-50/60">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-medium text-zinc-900">{program.label}</div>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${
+                                program.eligible === null
+                                  ? 'bg-zinc-200 text-zinc-700'
+                                  : program.eligible
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {program.eligible === null
+                                ? 'Unknown'
+                                : program.eligible
+                                  ? 'Eligible'
+                                  : 'Not eligible'}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-xs">
+                            <div className="rounded-md bg-white border border-zinc-200 p-2">
+                              <div className="text-zinc-500 uppercase tracking-wide">Paid</div>
+                              <div className="text-zinc-900 font-medium">
+                                {program.paid === null ? '—' : program.paid ? 'Yes' : 'No'}
+                              </div>
+                            </div>
+                            <div className="rounded-md bg-white border border-zinc-200 p-2">
+                              <div className="text-zinc-500 uppercase tracking-wide">Max weeks</div>
+                              <div className="text-zinc-900 font-medium">{formatNumber(program.maxWeeks, 0)}</div>
+                            </div>
+                            <div className="rounded-md bg-white border border-zinc-200 p-2">
+                              <div className="text-zinc-500 uppercase tracking-wide">Wage replacement</div>
+                              <div className="text-zinc-900 font-medium">{formatPercentage(program.wageReplacementPct)}</div>
+                            </div>
+                            <div className="rounded-md bg-white border border-zinc-200 p-2">
+                              <div className="text-zinc-500 uppercase tracking-wide">Job protection</div>
+                              <div className="text-zinc-900 font-medium">
+                                {program.jobProtection === null ? '—' : program.jobProtection ? 'Yes' : 'No'}
+                              </div>
+                            </div>
+                          </div>
+                          {program.reasons.length > 0 && (
+                            <div className="mt-3 space-y-1">
+                              {program.reasons.map((reason, index) => (
+                                <p key={`${program.program}-${index}`} className="text-xs text-zinc-600">
+                                  • {reason}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          {program.notes && (
+                            <p className="mt-2 text-xs text-zinc-500">{program.notes}</p>
+                          )}
+                          {program.sourceUrl && (
+                            <a
+                              href={program.sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 inline-flex text-xs text-zinc-600 hover:text-zinc-900 underline"
+                            >
+                              Program source
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           ) : (
             <p className="text-sm text-zinc-500">Eligibility data is not available for your account.</p>
           )}
