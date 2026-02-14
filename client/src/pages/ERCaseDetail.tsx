@@ -17,6 +17,59 @@ import {
   AlertTriangle, CheckCircle, Clock, X, RefreshCw
 } from 'lucide-react';
 
+function normalizeDiscrepancyStatement(
+  value: unknown,
+  fallbackSpeaker: string
+): Discrepancy['statement_1'] {
+  if (!value || typeof value !== 'object') {
+    return {
+      source_document_id: '',
+      speaker: fallbackSpeaker,
+      quote: 'No quote provided.',
+      location: '',
+    };
+  }
+
+  const statement = value as Record<string, unknown>;
+  const speaker = typeof statement.speaker === 'string' && statement.speaker.trim()
+    ? statement.speaker
+    : fallbackSpeaker;
+  const quote = typeof statement.quote === 'string' && statement.quote.trim()
+    ? statement.quote
+    : 'No quote provided.';
+
+  return {
+    source_document_id: typeof statement.source_document_id === 'string' ? statement.source_document_id : '',
+    speaker,
+    quote,
+    location: typeof statement.location === 'string' ? statement.location : '',
+  };
+}
+
+function normalizeDiscrepancies(payload: unknown): Discrepancy[] {
+  if (!Array.isArray(payload)) return [];
+
+  return payload
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => ({
+      type: typeof item.type === 'string' ? item.type : 'inconsistency',
+      severity:
+        item.severity === 'high' || item.severity === 'medium' || item.severity === 'low'
+          ? item.severity
+          : 'low',
+      description:
+        typeof item.description === 'string' && item.description.trim()
+          ? item.description
+          : 'Potential inconsistency detected in witness accounts.',
+      statement_1: normalizeDiscrepancyStatement(item.statement_1, 'Source 1'),
+      statement_2: normalizeDiscrepancyStatement(item.statement_2, 'Source 2'),
+      analysis:
+        typeof item.analysis === 'string' && item.analysis.trim()
+          ? item.analysis
+          : 'No additional analysis provided.',
+    }));
+}
+
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
   open: 'text-zinc-900',
   in_review: 'text-amber-600',
@@ -110,7 +163,7 @@ export function ERCaseDetail() {
         setTimelineGaps(data.analysis.gaps_identified || []);
       } else if (type === 'discrepancies') {
         const data = await erCopilot.getDiscrepancies(id);
-        setDiscrepancies(data.analysis.discrepancies || []);
+        setDiscrepancies(normalizeDiscrepancies(data.analysis.discrepancies));
         setDiscrepancySummary(data.analysis.summary || '');
       } else if (type === 'policy') {
         const data = await erCopilot.getPolicyCheck(id);
@@ -282,7 +335,7 @@ export function ERCaseDetail() {
           return true;
         } else if (type === 'discrepancies') {
           const data = await erCopilot.getDiscrepancies(id!);
-          setDiscrepancies(data.analysis.discrepancies || []);
+          setDiscrepancies(normalizeDiscrepancies(data.analysis.discrepancies));
           setDiscrepancySummary(data.analysis.summary || '');
           return true;
         } else if (type === 'policy') {
@@ -726,15 +779,19 @@ export function ERCaseDetail() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
                           <div>
                             <p className="text-[10px] text-zinc-500 mb-1 uppercase tracking-wide">
-                              {disc.statement_1.speaker}
+                              {disc.statement_1?.speaker || 'Source 1'}
                             </p>
-                            <p className="text-xs text-zinc-600 italic border-l border-zinc-200 pl-2">"{disc.statement_1.quote}"</p>
+                            <p className="text-xs text-zinc-600 italic border-l border-zinc-200 pl-2">
+                              "{disc.statement_1?.quote || 'No quote provided.'}"
+                            </p>
                           </div>
                           <div>
                             <p className="text-[10px] text-zinc-500 mb-1 uppercase tracking-wide">
-                              {disc.statement_2.speaker}
+                              {disc.statement_2?.speaker || 'Source 2'}
                             </p>
-                            <p className="text-xs text-zinc-600 italic border-l border-zinc-200 pl-2">"{disc.statement_2.quote}"</p>
+                            <p className="text-xs text-zinc-600 italic border-l border-zinc-200 pl-2">
+                              "{disc.statement_2?.quote || 'No quote provided.'}"
+                            </p>
                           </div>
                         </div>
                         
