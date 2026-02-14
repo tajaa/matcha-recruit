@@ -1208,24 +1208,24 @@ export const erCopilot = {
       method: 'POST',
     }),
 
-  getTimeline: (caseId: string): Promise<{ analysis: TimelineAnalysis; source_documents: string[]; generated_at: string }> =>
-    request<{ analysis: TimelineAnalysis; source_documents: string[]; generated_at: string }>(`/er/cases/${caseId}/analysis/timeline`),
+  getTimeline: (caseId: string): Promise<{ analysis: TimelineAnalysis; source_documents: string[]; generated_at: string | null }> =>
+    request<{ analysis: TimelineAnalysis; source_documents: string[]; generated_at: string | null }>(`/er/cases/${caseId}/analysis/timeline`),
 
   generateDiscrepancies: (caseId: string): Promise<ERTaskStatus> =>
     request<ERTaskStatus>(`/er/cases/${caseId}/analysis/discrepancies`, {
       method: 'POST',
     }),
 
-  getDiscrepancies: (caseId: string): Promise<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string }> =>
-    request<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string }>(`/er/cases/${caseId}/analysis/discrepancies`),
+  getDiscrepancies: (caseId: string): Promise<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string | null }> =>
+    request<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string | null }>(`/er/cases/${caseId}/analysis/discrepancies`),
 
   runPolicyCheck: (caseId: string): Promise<ERTaskStatus> =>
     request<ERTaskStatus>(`/er/cases/${caseId}/analysis/policy-check`, {
       method: 'POST',
     }),
 
-  getPolicyCheck: (caseId: string): Promise<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string }> =>
-    request<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string }>(`/er/cases/${caseId}/analysis/policy-check`),
+  getPolicyCheck: (caseId: string): Promise<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string | null }> =>
+    request<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string | null }>(`/er/cases/${caseId}/analysis/policy-check`),
 
   searchEvidence: (caseId: string, query: string, topK: number = 5): Promise<EvidenceSearchResponse> =>
     request<EvidenceSearchResponse>(`/er/cases/${caseId}/search`, {

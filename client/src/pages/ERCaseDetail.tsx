@@ -158,15 +158,31 @@ export function ERCaseDetail() {
     try {
       if (type === 'timeline') {
         const data = await erCopilot.getTimeline(id);
+        if (!data.generated_at) {
+          setTimeline([]);
+          setTimelineSummary('');
+          setTimelineGaps([]);
+          return;
+        }
         setTimeline(data.analysis.events || []);
         setTimelineSummary(data.analysis.timeline_summary || '');
         setTimelineGaps(data.analysis.gaps_identified || []);
       } else if (type === 'discrepancies') {
         const data = await erCopilot.getDiscrepancies(id);
+        if (!data.generated_at) {
+          setDiscrepancies([]);
+          setDiscrepancySummary('');
+          return;
+        }
         setDiscrepancies(normalizeDiscrepancies(data.analysis.discrepancies));
         setDiscrepancySummary(data.analysis.summary || '');
       } else if (type === 'policy') {
         const data = await erCopilot.getPolicyCheck(id);
+        if (!data.generated_at) {
+          setViolations([]);
+          setViolationSummary('');
+          return;
+        }
         setViolations(data.analysis.violations || []);
         setViolationSummary(data.analysis.summary || '');
       }
@@ -229,6 +245,7 @@ export function ERCaseDetail() {
           setAnalysisProgress(null);
         } else if (data.type === 'task_error') {
           console.error('[ERCaseDetail] Analysis failed:', data.error);
+          setAnalysisError(data.error || 'Analysis failed. Please try again.');
           setAnalysisLoading(null);
           setAnalysisProgress(null);
         }
@@ -322,24 +339,33 @@ export function ERCaseDetail() {
 
   const hasUnprocessedDocs = documents.some(d => d.processing_status === 'pending' || d.processing_status === 'failed');
 
-  const pollForAnalysis = useCallback(async (type: AnalysisTab, maxAttempts = 30) => {
-    // Poll every 2 seconds for up to 60 seconds
+  const pollForAnalysis = useCallback(async (type: AnalysisTab, maxAttempts = 60) => {
+    // Poll every 2 seconds for up to 2 minutes.
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(resolve => setTimeout(resolve, 2000));
       try {
         if (type === 'timeline') {
           const data = await erCopilot.getTimeline(id!);
+          if (!data.generated_at) {
+            continue;
+          }
           setTimeline(data.analysis.events || []);
           setTimelineSummary(data.analysis.timeline_summary || '');
           setTimelineGaps(data.analysis.gaps_identified || []);
           return true;
         } else if (type === 'discrepancies') {
           const data = await erCopilot.getDiscrepancies(id!);
+          if (!data.generated_at) {
+            continue;
+          }
           setDiscrepancies(normalizeDiscrepancies(data.analysis.discrepancies));
           setDiscrepancySummary(data.analysis.summary || '');
           return true;
         } else if (type === 'policy') {
           const data = await erCopilot.getPolicyCheck(id!);
+          if (!data.generated_at) {
+            continue;
+          }
           setViolations(data.analysis.violations || []);
           setViolationSummary(data.analysis.summary || '');
           return true;
@@ -360,7 +386,7 @@ export function ERCaseDetail() {
       await erCopilot.generateTimeline(id);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('timeline');
-      if (!success && analysisLoading === 'timeline') {
+      if (!success) {
         console.error('Timeline analysis timed out');
         setAnalysisError('Timeline analysis timed out. Please try again.');
         setAnalysisLoading(null);
@@ -383,7 +409,7 @@ export function ERCaseDetail() {
       await erCopilot.generateDiscrepancies(id);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('discrepancies');
-      if (!success && analysisLoading === 'discrepancies') {
+      if (!success) {
         console.error('Discrepancy analysis timed out');
         setAnalysisError('Discrepancy analysis timed out. Please try again.');
         setAnalysisLoading(null);
@@ -406,7 +432,7 @@ export function ERCaseDetail() {
       await erCopilot.runPolicyCheck(id);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('policy');
-      if (!success && analysisLoading === 'policy') {
+      if (!success) {
         console.error('Policy check timed out');
         setAnalysisError('Policy check timed out. Please try again.');
         setAnalysisLoading(null);
@@ -423,11 +449,14 @@ export function ERCaseDetail() {
   const handleSearch = async () => {
     if (!id || !searchQuery.trim()) return;
     setSearching(true);
+    setAnalysisError(null);
     try {
       const data = await erCopilot.searchEvidence(id, searchQuery);
       setSearchResults(data.results);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Search failed:', err);
+      setAnalysisError(err?.message || 'Search failed. Please try again.');
+      setSearchResults([]);
     } finally {
       setSearching(false);
     }

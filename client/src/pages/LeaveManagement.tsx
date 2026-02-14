@@ -58,6 +58,132 @@ function formatDate(value?: string | null): string {
   return date.toLocaleDateString();
 }
 
+interface ParsedFmlaEligibility {
+  label: string;
+  eligible: boolean | null;
+  reasons: string[];
+  monthsEmployed: number | null;
+  hoursWorked12mo: number | null;
+  companyEmployeeCount: number | null;
+}
+
+interface ParsedStateProgram {
+  program: string;
+  label: string;
+  eligible: boolean | null;
+  paid: boolean | null;
+  maxWeeks: number | null;
+  wageReplacementPct: number | null;
+  jobProtection: boolean | null;
+  reasons: string[];
+  notes: string | null;
+  sourceUrl: string | null;
+}
+
+interface ParsedStatePrograms {
+  state: string | null;
+  message: string | null;
+  programs: ParsedStateProgram[];
+}
+
+interface ParsedEligibility {
+  checkedAt: string | null;
+  fmla: ParsedFmlaEligibility | null;
+  statePrograms: ParsedStatePrograms | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function toStringOrNull(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function toNumberOrNull(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function toBooleanOrNull(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+function formatNumber(value: number | null, digits = 1): string {
+  if (value === null) return '—';
+  return value.toFixed(digits);
+}
+
+function formatPercentage(value: number | null): string {
+  if (value === null) return '—';
+  return `${Math.round(value * 100)}%`;
+}
+
+function parseEligibilitySnapshot(payload: Record<string, unknown> | null): ParsedEligibility | null {
+  if (!payload) return null;
+
+  const fmlaRaw = isRecord(payload.fmla) ? payload.fmla : null;
+  const stateRaw = isRecord(payload.state_programs) ? payload.state_programs : null;
+
+  const fmla: ParsedFmlaEligibility | null = fmlaRaw
+    ? {
+        label: toStringOrNull(fmlaRaw.label) ?? 'FMLA',
+        eligible: toBooleanOrNull(fmlaRaw.eligible),
+        reasons: toStringArray(fmlaRaw.reasons),
+        monthsEmployed: toNumberOrNull(fmlaRaw.months_employed),
+        hoursWorked12mo: toNumberOrNull(fmlaRaw.hours_worked_12mo),
+        companyEmployeeCount: toNumberOrNull(fmlaRaw.company_employee_count),
+      }
+    : null;
+
+  const statePrograms: ParsedStatePrograms | null = stateRaw
+    ? {
+        state: toStringOrNull(stateRaw.state),
+        message: toStringOrNull(stateRaw.message),
+        programs: Array.isArray(stateRaw.programs)
+          ? stateRaw.programs
+              .filter(isRecord)
+              .map((program): ParsedStateProgram => ({
+                program: toStringOrNull(program.program) ?? 'state_program',
+                label: toStringOrNull(program.label) ?? 'State Program',
+                eligible: toBooleanOrNull(program.eligible),
+                paid: toBooleanOrNull(program.paid),
+                maxWeeks: toNumberOrNull(program.max_weeks),
+                wageReplacementPct: toNumberOrNull(program.wage_replacement_pct),
+                jobProtection: toBooleanOrNull(program.job_protection),
+                reasons: toStringArray(program.reasons),
+                notes: toStringOrNull(program.notes),
+                sourceUrl: toStringOrNull(program.source_url),
+              }))
+          : [],
+      }
+    : null;
+
+  if (!fmla && !statePrograms) return null;
+
+  return {
+    checkedAt: toStringOrNull(payload.checked_at),
+    fmla,
+    statePrograms,
+  };
+}
+
 export default function LeaveManagement() {
   const { hasFeature } = useAuth();
   const [searchParams] = useSearchParams();
@@ -82,6 +208,7 @@ export default function LeaveManagement() {
 
   const compliancePlusEnabled = hasFeature('compliance_plus');
   const requestedLeaveId = searchParams.get('leaveId');
+  const parsedEligibility = useMemo(() => parseEligibilitySnapshot(eligibility), [eligibility]);
 
   const selectedLeaveSummary = useMemo(() => {
     if (!selectedLeave) return null;
@@ -452,10 +579,132 @@ export default function LeaveManagement() {
                     </div>
                     {loadingCompliance ? (
                       <div className="text-xs text-zinc-500 uppercase tracking-widest animate-pulse">Loading eligibility...</div>
-                    ) : eligibility ? (
-                      <pre className="text-xs text-zinc-300 bg-zinc-900/50 border border-white/5 p-3 overflow-x-auto max-h-72">
-                        {JSON.stringify(eligibility, null, 2)}
-                      </pre>
+                    ) : parsedEligibility ? (
+                      <div className="space-y-4">
+                        {parsedEligibility.checkedAt && (
+                          <div className="text-[10px] uppercase tracking-widest text-zinc-500">
+                            Updated {new Date(parsedEligibility.checkedAt).toLocaleString()}
+                          </div>
+                        )}
+
+                        {parsedEligibility.fmla && (
+                          <div className="border border-white/10 bg-zinc-900/40 rounded p-3 space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <h4 className="text-xs font-semibold text-zinc-100">{parsedEligibility.fmla.label}</h4>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 uppercase tracking-wider border ${
+                                  parsedEligibility.fmla.eligible === null
+                                    ? 'border-zinc-600 text-zinc-400'
+                                    : parsedEligibility.fmla.eligible
+                                      ? 'border-emerald-500/30 text-emerald-400'
+                                      : 'border-amber-500/30 text-amber-400'
+                                }`}
+                              >
+                                {parsedEligibility.fmla.eligible === null
+                                  ? 'Unknown'
+                                  : parsedEligibility.fmla.eligible
+                                    ? 'Eligible'
+                                    : 'Not eligible'}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                              <div className="border border-white/10 bg-zinc-950/80 p-2">
+                                <div className="text-zinc-500 uppercase tracking-wider text-[10px]">Tenure</div>
+                                <div className="text-zinc-200">{formatNumber(parsedEligibility.fmla.monthsEmployed)} months</div>
+                              </div>
+                              <div className="border border-white/10 bg-zinc-950/80 p-2">
+                                <div className="text-zinc-500 uppercase tracking-wider text-[10px]">Hours (12 mo)</div>
+                                <div className="text-zinc-200">{formatNumber(parsedEligibility.fmla.hoursWorked12mo, 0)}</div>
+                              </div>
+                              <div className="border border-white/10 bg-zinc-950/80 p-2">
+                                <div className="text-zinc-500 uppercase tracking-wider text-[10px]">Company size</div>
+                                <div className="text-zinc-200">{formatNumber(parsedEligibility.fmla.companyEmployeeCount, 0)} employees</div>
+                              </div>
+                            </div>
+                            {parsedEligibility.fmla.reasons.length > 0 && (
+                              <div className="space-y-1">
+                                {parsedEligibility.fmla.reasons.map((reason, index) => (
+                                  <p key={`${reason}-${index}`} className="text-xs text-zinc-400">
+                                    • {reason}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {parsedEligibility.statePrograms && (
+                          <div className="border border-white/10 bg-zinc-900/40 rounded p-3 space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <h4 className="text-xs font-semibold text-zinc-100">State Programs</h4>
+                              {parsedEligibility.statePrograms.state && (
+                                <span className="text-[10px] uppercase tracking-wider text-zinc-400">
+                                  {parsedEligibility.statePrograms.state}
+                                </span>
+                              )}
+                            </div>
+
+                            {parsedEligibility.statePrograms.programs.length === 0 ? (
+                              <p className="text-sm text-zinc-500">
+                                {parsedEligibility.statePrograms.message || 'No state leave programs found.'}
+                              </p>
+                            ) : (
+                              <div className="space-y-2">
+                                {parsedEligibility.statePrograms.programs.map((program) => (
+                                  <div key={program.program} className="border border-white/10 bg-zinc-950/80 p-3 space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <p className="text-sm text-zinc-100">{program.label}</p>
+                                      <span
+                                        className={`text-[10px] px-2 py-0.5 uppercase tracking-wider border ${
+                                          program.eligible === null
+                                            ? 'border-zinc-600 text-zinc-400'
+                                            : program.eligible
+                                              ? 'border-emerald-500/30 text-emerald-400'
+                                              : 'border-amber-500/30 text-amber-400'
+                                        }`}
+                                      >
+                                        {program.eligible === null
+                                          ? 'Unknown'
+                                          : program.eligible
+                                            ? 'Eligible'
+                                            : 'Not eligible'}
+                                      </span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                      <div className="text-zinc-300">Paid: {program.paid === null ? '—' : program.paid ? 'Yes' : 'No'}</div>
+                                      <div className="text-zinc-300">Max weeks: {formatNumber(program.maxWeeks, 0)}</div>
+                                      <div className="text-zinc-300">Wage replacement: {formatPercentage(program.wageReplacementPct)}</div>
+                                      <div className="text-zinc-300">Job protection: {program.jobProtection === null ? '—' : program.jobProtection ? 'Yes' : 'No'}</div>
+                                    </div>
+                                    {program.reasons.length > 0 && (
+                                      <div className="space-y-1">
+                                        {program.reasons.map((reason, index) => (
+                                          <p key={`${program.program}-${index}`} className="text-xs text-zinc-400">
+                                            • {reason}
+                                          </p>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {program.notes && (
+                                      <p className="text-xs text-zinc-500">{program.notes}</p>
+                                    )}
+                                    {program.sourceUrl && (
+                                      <a
+                                        href={program.sourceUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex text-xs text-zinc-300 hover:text-white underline"
+                                      >
+                                        Program source
+                                      </a>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <p className="text-sm text-zinc-500">No eligibility data found yet.</p>
                     )}

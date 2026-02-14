@@ -969,7 +969,15 @@ async def get_timeline(
         )
 
         if not row:
-            raise HTTPException(status_code=404, detail="Timeline analysis not found. Generate it first.")
+            return {
+                "analysis": {
+                    "events": [],
+                    "gaps_identified": [],
+                    "timeline_summary": "",
+                },
+                "source_documents": [],
+                "generated_at": None,
+            }
 
         # Handle case where JSONB might be returned as string
         analysis = row["analysis_data"]
@@ -1080,7 +1088,15 @@ async def get_discrepancies(
         )
 
         if not row:
-            raise HTTPException(status_code=404, detail="Discrepancy analysis not found.")
+            return {
+                "analysis": {
+                    "discrepancies": [],
+                    "credibility_notes": [],
+                    "summary": "",
+                },
+                "source_documents": [],
+                "generated_at": None,
+            }
 
         analysis = row["analysis_data"]
         if isinstance(analysis, str):
@@ -1194,7 +1210,15 @@ async def get_policy_check(
         )
 
         if not row:
-            raise HTTPException(status_code=404, detail="Policy check not found.")
+            return {
+                "analysis": {
+                    "violations": [],
+                    "policies_potentially_applicable": [],
+                    "summary": "",
+                },
+                "source_documents": [],
+                "generated_at": None,
+            }
 
         analysis = row["analysis_data"]
         if isinstance(analysis, str):
@@ -1232,8 +1256,8 @@ async def search_evidence(
 
     settings = get_settings()
 
-    from ..services.embedding_service import EmbeddingService
-    from ..services.rag_service import RAGService
+    from ...core.services.embedding_service import EmbeddingService
+    from ...core.services.rag_service import RAGService
 
     embedding_service = EmbeddingService(
         api_key=settings.gemini_api_key,
@@ -1243,14 +1267,117 @@ async def search_evidence(
     rag_service = RAGService(embedding_service)
 
     async with get_connection() as conn:
-        results = await rag_service.search_evidence(
-            case_id=str(case_id),
-            query=search.query,
-            conn=conn,
-            top_k=search.top_k,
+        total_chunks = await conn.fetchval(
+            "SELECT COUNT(*) FROM er_evidence_chunks WHERE case_id = $1",
+            case_id,
         )
+        results: list[dict] = []
 
-        total_chunks = await rag_service.get_total_chunks(str(case_id), conn)
+        try:
+            results = await rag_service.search_evidence(
+                case_id=str(case_id),
+                query=search.query,
+                conn=conn,
+                top_k=search.top_k,
+            )
+        except Exception as semantic_error:
+            # Fallback to keyword matching when embeddings/search providers are unavailable.
+            logger.warning(
+                "Semantic evidence search failed for case %s; using keyword fallback: %s",
+                case_id,
+                semantic_error,
+            )
+            like_query = f"%{search.query.strip()}%"
+            chunk_rows = await conn.fetch(
+                """
+                SELECT
+                    ec.id,
+                    ec.content,
+                    ec.speaker,
+                    ec.page_number,
+                    ec.line_start,
+                    ec.line_end,
+                    ec.metadata,
+                    ed.filename,
+                    ed.document_type
+                FROM er_evidence_chunks ec
+                JOIN er_case_documents ed ON ec.document_id = ed.id
+                WHERE ec.case_id = $1
+                  AND ec.content ILIKE $2
+                ORDER BY ec.created_at DESC
+                LIMIT $3
+                """,
+                case_id,
+                like_query,
+                search.top_k,
+            )
+
+            for row in chunk_rows:
+                line_range = None
+                if row["line_start"] is not None:
+                    line_range = f"{row['line_start']}"
+                    if row["line_end"] is not None and row["line_end"] != row["line_start"]:
+                        line_range += f"-{row['line_end']}"
+
+                results.append(
+                    {
+                        "chunk_id": str(row["id"]),
+                        "content": row["content"],
+                        "speaker": row["speaker"],
+                        "source_file": row["filename"],
+                        "document_type": row["document_type"],
+                        "page_number": row["page_number"],
+                        "line_range": line_range,
+                        "similarity": 0.35,
+                        "metadata": row["metadata"] or {"search_mode": "keyword_chunk"},
+                    }
+                )
+
+            if not results:
+                doc_rows = await conn.fetch(
+                    """
+                    SELECT id, filename, document_type, scrubbed_text
+                    FROM er_case_documents
+                    WHERE case_id = $1
+                      AND processing_status = 'completed'
+                      AND scrubbed_text ILIKE $2
+                    ORDER BY created_at DESC
+                    LIMIT $3
+                    """,
+                    case_id,
+                    like_query,
+                    search.top_k,
+                )
+
+                query_lower = search.query.strip().lower()
+                for row in doc_rows:
+                    text = (row["scrubbed_text"] or "").strip()
+                    if not text:
+                        continue
+                    match_idx = text.lower().find(query_lower)
+                    if match_idx < 0:
+                        continue
+                    start = max(0, match_idx - 140)
+                    end = min(len(text), match_idx + len(query_lower) + 180)
+                    snippet = text[start:end].strip()
+                    if start > 0:
+                        snippet = f"...{snippet}"
+                    if end < len(text):
+                        snippet = f"{snippet}..."
+
+                    results.append(
+                        {
+                            "chunk_id": f"doc-{row['id']}",
+                            "content": snippet,
+                            "speaker": None,
+                            "source_file": row["filename"],
+                            "document_type": row["document_type"],
+                            "page_number": None,
+                            "line_range": None,
+                            "similarity": 0.2,
+                            "metadata": {"search_mode": "keyword_document_excerpt"},
+                        }
+                    )
 
         return EvidenceSearchResponse(
             results=[
@@ -1268,7 +1395,7 @@ async def search_evidence(
                 for r in results
             ],
             query=search.query,
-            total_chunks=total_chunks,
+            total_chunks=total_chunks or 0,
         )
 
 
