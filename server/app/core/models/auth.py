@@ -104,6 +104,21 @@ class BusinessRegister(BaseModel):
     invite_token: Optional[str] = None
 
 
+class TestAccountRegister(BaseModel):
+    """
+    Test account registration - creates an approved company with all feature flags
+    enabled and pre-seeded demo data for feature validation.
+    """
+    company_name: Optional[str] = None
+    industry: Optional[str] = None
+    company_size: Optional[str] = None
+    email: EmailStr
+    password: str
+    name: str
+    phone: Optional[str] = None
+    job_title: Optional[str] = None
+
+
 # Profile models
 class AdminProfile(BaseModel):
     id: UUID

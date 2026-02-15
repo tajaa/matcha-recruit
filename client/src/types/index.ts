@@ -473,6 +473,17 @@ export interface BusinessRegister {
   invite_token?: string;
 }
 
+export interface TestAccountRegister {
+  company_name?: string;
+  industry?: string;
+  company_size?: string;
+  email: string;
+  password: string;
+  name: string;
+  phone?: string;
+  job_title?: string;
+}
+
 export interface BusinessInvite {
   id: string;
   token: string;

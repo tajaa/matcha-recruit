@@ -1,5 +1,6 @@
 import json
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends, status
 
@@ -9,7 +10,7 @@ from uuid import UUID
 from ..models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
     AdminRegister, ClientRegister, CandidateRegister, EmployeeRegister,
-    BusinessRegister,
+    BusinessRegister, TestAccountRegister,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
     CurrentUser,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
@@ -24,6 +25,669 @@ from ..dependencies import get_current_user, require_admin
 from ...config import get_settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+TEST_ACCOUNT_FEATURES = {
+    "offer_letters": True,
+    "policies": True,
+    "compliance": True,
+    "compliance_plus": True,
+    "employees": True,
+    "vibe_checks": True,
+    "enps": True,
+    "performance_reviews": True,
+    "er_copilot": True,
+    "incidents": True,
+    "time_off": True,
+    "accommodations": True,
+}
+
+
+def _split_name(full_name: str) -> tuple[str, str]:
+    parts = [part for part in full_name.strip().split() if part]
+    if not parts:
+        return "Test", "User"
+    if len(parts) == 1:
+        return parts[0], "User"
+    return parts[0], " ".join(parts[1:])
+
+
+async def _table_exists(conn, table_name: str) -> bool:
+    return bool(await conn.fetchval("SELECT to_regclass($1) IS NOT NULL", table_name))
+
+
+async def _column_exists(conn, table_name: str, column_name: str) -> bool:
+    return bool(
+        await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = $1 AND column_name = $2
+            )
+            """,
+            table_name,
+            column_name,
+        )
+    )
+
+
+async def _seed_test_account_data(
+    conn,
+    *,
+    company_id: UUID,
+    client_user_id: UUID,
+    owner_name: str,
+    owner_email: str,
+    company_name: str,
+) -> None:
+    """Seed representative data for enabled product features."""
+    today = datetime.utcnow().date()
+    suffix = str(company_id).split("-")[0]
+    owner_first, owner_last = _split_name(owner_name)
+
+    manager_employee_id = None
+    sample_employee_id = None
+    leave_request_id = None
+    location_id = None
+    er_case_id = None
+
+    if await _table_exists(conn, "employees"):
+        manager = await conn.fetchrow(
+            """
+            INSERT INTO employees (org_id, email, first_name, last_name, work_state, employment_type, start_date)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id
+            """,
+            company_id,
+            f"manager+{suffix}@test-account.local",
+            owner_first,
+            owner_last,
+            "CA",
+            "full_time",
+            today - timedelta(days=420),
+        )
+        manager_employee_id = manager["id"] if manager else None
+
+        sample = await conn.fetchrow(
+            """
+            INSERT INTO employees (org_id, email, first_name, last_name, work_state, employment_type, start_date, manager_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id
+            """,
+            company_id,
+            f"employee+{suffix}@test-account.local",
+            "Jordan",
+            "Case",
+            "CA",
+            "full_time",
+            today - timedelta(days=210),
+            manager_employee_id,
+        )
+        sample_employee_id = sample["id"] if sample else None
+
+    if sample_employee_id and await _table_exists(conn, "pto_balances"):
+        current_year = today.year
+        await conn.execute(
+            """
+            INSERT INTO pto_balances (employee_id, balance_hours, accrued_hours, used_hours, year)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (employee_id, year) DO NOTHING
+            """,
+            sample_employee_id,
+            96,
+            120,
+            24,
+            current_year,
+        )
+
+        if manager_employee_id:
+            await conn.execute(
+                """
+                INSERT INTO pto_balances (employee_id, balance_hours, accrued_hours, used_hours, year)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (employee_id, year) DO NOTHING
+                """,
+                manager_employee_id,
+                128,
+                140,
+                12,
+                current_year,
+            )
+
+    if sample_employee_id and await _table_exists(conn, "pto_requests"):
+        await conn.execute(
+            """
+            INSERT INTO pto_requests (
+                employee_id, request_type, start_date, end_date, hours, reason, status, approved_by, approved_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            """,
+            sample_employee_id,
+            "vacation",
+            today + timedelta(days=21),
+            today + timedelta(days=23),
+            24,
+            "Family travel",
+            "approved",
+            manager_employee_id,
+        )
+
+    if sample_employee_id and await _table_exists(conn, "leave_requests"):
+        leave_row = await conn.fetchrow(
+            """
+            INSERT INTO leave_requests (
+                employee_id, org_id, leave_type, reason,
+                start_date, end_date, expected_return_date,
+                status, intermittent, hours_approved, reviewed_by, reviewed_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', false, $8, $9, NOW())
+            RETURNING id
+            """,
+            sample_employee_id,
+            company_id,
+            "medical",
+            "Recovery from a non-work-related injury.",
+            today + timedelta(days=10),
+            today + timedelta(days=24),
+            today + timedelta(days=25),
+            120,
+            client_user_id,
+        )
+        leave_request_id = leave_row["id"] if leave_row else None
+
+        if await _column_exists(conn, "leave_requests", "eligibility_data"):
+            await conn.execute(
+                """
+                UPDATE leave_requests
+                SET eligibility_data = $2::jsonb
+                WHERE id = $1
+                """,
+                leave_request_id,
+                json.dumps(
+                    {
+                        "fmla": {
+                            "eligible": True,
+                            "program": "fmla",
+                            "label": "Family and Medical Leave Act (FMLA)",
+                            "reasons": [],
+                        }
+                    }
+                ),
+            )
+
+    if sample_employee_id and await _table_exists(conn, "employee_hours_log"):
+        await conn.execute(
+            """
+            INSERT INTO employee_hours_log (employee_id, org_id, period_start, period_end, hours_worked, source)
+            VALUES ($1, $2, $3, $4, $5, 'manual')
+            ON CONFLICT (employee_id, period_start, period_end) DO NOTHING
+            """,
+            sample_employee_id,
+            company_id,
+            today - timedelta(days=28),
+            today - timedelta(days=1),
+            160,
+        )
+
+    if leave_request_id and await _table_exists(conn, "leave_deadlines"):
+        await conn.execute(
+            """
+            INSERT INTO leave_deadlines (leave_request_id, org_id, deadline_type, due_date, status, notes)
+            VALUES ($1, $2, $3, $4, 'pending', $5)
+            """,
+            leave_request_id,
+            company_id,
+            "initial_notice",
+            today + timedelta(days=5),
+            "Send rights & responsibilities notice to employee.",
+        )
+
+    if await _table_exists(conn, "policies"):
+        await conn.execute(
+            """
+            INSERT INTO policies (company_id, title, description, content, version, status, created_by)
+            VALUES ($1, $2, $3, $4, '1.0', 'active', $5)
+            """,
+            company_id,
+            "Code of Conduct",
+            "Behavior and workplace standards for all employees.",
+            (
+                "# Code of Conduct\n\n"
+                "All team members must maintain respectful communication, avoid retaliation, "
+                "and report concerns promptly through approved channels."
+            ),
+            client_user_id,
+        )
+
+    if await _table_exists(conn, "offer_letters"):
+        has_offer_company_id = await _column_exists(conn, "offer_letters", "company_id")
+        if has_offer_company_id:
+            await conn.execute(
+                """
+                INSERT INTO offer_letters (
+                    candidate_name, position_title, company_name, company_id, status,
+                    salary, start_date, employment_type, location, benefits,
+                    manager_name, manager_title, expiration_date, company_logo_url
+                )
+                VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                """,
+                "Morgan Riley",
+                "Operations Specialist",
+                company_name,
+                company_id,
+                "$82,000",
+                datetime.utcnow() + timedelta(days=20),
+                "Full-time",
+                "Los Angeles, CA",
+                "Medical, dental, vision, 401(k), PTO",
+                owner_name,
+                "HR Lead",
+                datetime.utcnow() + timedelta(days=35),
+                "https://placehold.co/200x60?text=Company+Logo",
+            )
+
+    if await _table_exists(conn, "business_locations"):
+        location_row = await conn.fetchrow(
+            """
+            INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+            RETURNING id
+            """,
+            company_id,
+            "HQ - Los Angeles",
+            "100 Main St",
+            "Los Angeles",
+            "CA",
+            "Los Angeles",
+            "90012",
+        )
+        location_id = location_row["id"] if location_row else None
+
+    if location_id and await _table_exists(conn, "compliance_requirements"):
+        req_row = await conn.fetchrow(
+            """
+            INSERT INTO compliance_requirements (
+                location_id, category, jurisdiction_level, jurisdiction_name,
+                title, description, current_value, source_name, source_url
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id
+            """,
+            location_id,
+            "minimum_wage",
+            "state",
+            "California",
+            "California Minimum Wage",
+            "Minimum hourly wage requirement for exempt and non-exempt employees.",
+            "$16.00/hour",
+            "CA DIR",
+            "https://www.dir.ca.gov/dlse/minimum_wage.htm",
+        )
+        requirement_id = req_row["id"] if req_row else None
+
+        if await _table_exists(conn, "compliance_alerts"):
+            await conn.execute(
+                """
+                INSERT INTO compliance_alerts (
+                    location_id, company_id, requirement_id, title, message, severity, status, category, source_name
+                )
+                VALUES ($1, $2, $3, $4, $5, 'warning', 'unread', 'minimum_wage', 'CA DIR')
+                """,
+                location_id,
+                company_id,
+                requirement_id,
+                "Minimum wage update review due",
+                "California minimum wage rules were refreshed. Confirm payroll settings are aligned.",
+            )
+
+    if location_id and await _table_exists(conn, "ir_incidents"):
+        incident_number = f"IR-{datetime.utcnow().year}-{suffix.upper()[:6]}"
+        await conn.execute(
+            """
+            INSERT INTO ir_incidents (
+                incident_number, title, description, incident_type, severity, status,
+                occurred_at, location, reported_by_name, reported_by_email,
+                witnesses, category_data, company_id, location_id, created_by
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, 'reported',
+                $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14
+            )
+            """,
+            incident_number,
+            "Slip in warehouse aisle",
+            "Employee reported a slip hazard near receiving; no severe injuries.",
+            "safety",
+            "medium",
+            datetime.utcnow() - timedelta(days=2),
+            "Receiving - Aisle B",
+            owner_name,
+            owner_email,
+            json.dumps([{"name": "Jordan Case", "contact": "employee witness"}]),
+            json.dumps({"hazard_type": "spill", "ppe_used": True}),
+            company_id,
+            location_id,
+            client_user_id,
+        )
+
+    if await _table_exists(conn, "er_cases"):
+        has_er_company_id = await _column_exists(conn, "er_cases", "company_id")
+        er_insert_query = """
+            INSERT INTO er_cases (case_number, title, description, status, created_by, company_id)
+            VALUES ($1, $2, $3, 'open', $4, $5)
+            RETURNING id
+        """ if has_er_company_id else """
+            INSERT INTO er_cases (case_number, title, description, status, created_by)
+            VALUES ($1, $2, $3, 'open', $4)
+            RETURNING id
+        """
+        er_case = await conn.fetchrow(
+            er_insert_query,
+            f"ER-{datetime.utcnow().year}-{today.month:02d}-{suffix.upper()[:4]}",
+            "Sample ER Investigation",
+            "Conflict between witness statements during an employee complaint review.",
+            client_user_id,
+            company_id,
+        ) if has_er_company_id else await conn.fetchrow(
+            er_insert_query,
+            f"ER-{datetime.utcnow().year}-{today.month:02d}-{suffix.upper()[:4]}",
+            "Sample ER Investigation",
+            "Conflict between witness statements during an employee complaint review.",
+            client_user_id,
+        )
+        er_case_id = er_case["id"] if er_case else None
+
+    if er_case_id and await _table_exists(conn, "er_case_documents"):
+        er_doc = await conn.fetchrow(
+            """
+            INSERT INTO er_case_documents (
+                case_id, document_type, filename, file_path, mime_type,
+                file_size, pii_scrubbed, original_text, scrubbed_text,
+                processing_status, parsed_at, uploaded_by
+            )
+            VALUES (
+                $1, 'email', $2, $3, 'text/plain',
+                $4, true, $5, $6, 'completed', NOW(), $7
+            )
+            RETURNING id
+            """,
+            er_case_id,
+            "witness-summary.txt",
+            f"er-documents/{er_case_id}/witness-summary.txt",
+            2048,
+            (
+                "Witness A stated the manager was frustrated and raised their voice.\n"
+                "Witness B stated the manager remained calm and professional."
+            ),
+            (
+                "Witness A stated the manager was frustrated and raised their voice.\n"
+                "Witness B stated the manager remained calm and professional."
+            ),
+            client_user_id,
+        )
+        er_doc_id = er_doc["id"] if er_doc else None
+
+        if er_doc_id and await _table_exists(conn, "er_evidence_chunks"):
+            await conn.execute(
+                """
+                INSERT INTO er_evidence_chunks (document_id, case_id, chunk_index, content, speaker, line_start, line_end, metadata)
+                VALUES ($1, $2, 0, $3, 'Witness A', 1, 2, $4::jsonb)
+                """,
+                er_doc_id,
+                er_case_id,
+                "Witness A: I observed the manager visibly frustrated during the meeting.",
+                json.dumps({"search_mode": "seed", "source": "demo"}),
+            )
+            await conn.execute(
+                """
+                INSERT INTO er_evidence_chunks (document_id, case_id, chunk_index, content, speaker, line_start, line_end, metadata)
+                VALUES ($1, $2, 1, $3, 'Witness B', 3, 4, $4::jsonb)
+                """,
+                er_doc_id,
+                er_case_id,
+                "Witness B: The manager stayed calm and focused on problem solving.",
+                json.dumps({"search_mode": "seed", "source": "demo"}),
+            )
+
+        if await _table_exists(conn, "er_case_analysis"):
+            source_docs = json.dumps([str(er_doc_id)]) if er_doc_id else json.dumps([])
+            await conn.execute(
+                """
+                INSERT INTO er_case_analysis (case_id, analysis_type, analysis_data, source_documents, generated_by)
+                VALUES ($1, 'timeline', $2::jsonb, $3::jsonb, $4)
+                ON CONFLICT (case_id, analysis_type) DO NOTHING
+                """,
+                er_case_id,
+                json.dumps(
+                    {
+                        "events": [
+                            {
+                                "date": str(today - timedelta(days=3)),
+                                "description": "Witness interviews captured conflicting accounts.",
+                                "participants": ["Witness A", "Witness B"],
+                                "source_document_id": str(er_doc_id) if er_doc_id else "seed-doc",
+                                "source_location": "Lines 1-4",
+                                "confidence": "medium",
+                                "evidence_quote": "Accounts differ on manager tone and behavior.",
+                            }
+                        ],
+                        "gaps_identified": ["No camera footage was provided."],
+                        "timeline_summary": "Statements conflict on key behavior details and require follow-up.",
+                    }
+                ),
+                source_docs,
+                client_user_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO er_case_analysis (case_id, analysis_type, analysis_data, source_documents, generated_by)
+                VALUES ($1, 'discrepancies', $2::jsonb, $3::jsonb, $4)
+                ON CONFLICT (case_id, analysis_type) DO NOTHING
+                """,
+                er_case_id,
+                json.dumps(
+                    {
+                        "discrepancies": [
+                            {
+                                "type": "contradiction",
+                                "severity": "medium",
+                                "description": "Witnesses describe opposite manager demeanor.",
+                                "statement_1": {
+                                    "source_document_id": str(er_doc_id) if er_doc_id else "seed-doc",
+                                    "speaker": "Witness A",
+                                    "quote": "The manager seemed frustrated.",
+                                    "location": "Line 1",
+                                },
+                                "statement_2": {
+                                    "source_document_id": str(er_doc_id) if er_doc_id else "seed-doc",
+                                    "speaker": "Witness B",
+                                    "quote": "The manager stayed calm.",
+                                    "location": "Line 3",
+                                },
+                                "analysis": "Additional corroboration is required before conclusions.",
+                            }
+                        ],
+                        "credibility_notes": [],
+                        "summary": "At least one key discrepancy was identified for review.",
+                    }
+                ),
+                source_docs,
+                client_user_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO er_case_analysis (case_id, analysis_type, analysis_data, source_documents, generated_by)
+                VALUES ($1, 'policy_check', $2::jsonb, $3::jsonb, $4)
+                ON CONFLICT (case_id, analysis_type) DO NOTHING
+                """,
+                er_case_id,
+                json.dumps(
+                    {
+                        "violations": [
+                            {
+                                "policy_section": "Respectful Workplace",
+                                "policy_text": "All leaders must maintain professional conduct.",
+                                "severity": "minor",
+                                "evidence": [
+                                    {
+                                        "source_document_id": str(er_doc_id) if er_doc_id else "seed-doc",
+                                        "quote": "Witness noted frustration during the meeting.",
+                                        "location": "Line 1",
+                                        "how_it_violates": "Potentially inconsistent with conduct expectations.",
+                                    }
+                                ],
+                                "analysis": "Monitor and coach communication behaviors.",
+                            }
+                        ],
+                        "policies_potentially_applicable": ["Code of Conduct", "Respectful Workplace"],
+                        "summary": "Potential low-severity conduct risk found.",
+                    }
+                ),
+                source_docs,
+                client_user_id,
+            )
+
+    if sample_employee_id and await _table_exists(conn, "accommodation_cases"):
+        await conn.execute(
+            """
+            INSERT INTO accommodation_cases (
+                case_number, org_id, employee_id, linked_leave_id, title, description,
+                disability_category, requested_accommodation, status, created_by
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'requested', $9)
+            """,
+            f"AC-{datetime.utcnow().strftime('%Y%m%d-%H%M')}-{suffix.upper()[:4]}",
+            company_id,
+            sample_employee_id,
+            leave_request_id,
+            "Standing desk and modified duties",
+            "Employee requested temporary duty modifications while recovering.",
+            "Physical",
+            "Standing desk and reduced lifting requirements for 30 days.",
+            client_user_id,
+        )
+
+    if await _table_exists(conn, "vibe_check_configs"):
+        await conn.execute(
+            """
+            INSERT INTO vibe_check_configs (org_id, frequency, enabled, is_anonymous, questions)
+            VALUES ($1, 'weekly', true, true, $2::jsonb)
+            ON CONFLICT (org_id) DO UPDATE SET
+                frequency = EXCLUDED.frequency,
+                enabled = EXCLUDED.enabled,
+                is_anonymous = EXCLUDED.is_anonymous,
+                questions = EXCLUDED.questions,
+                updated_at = NOW()
+            """,
+            company_id,
+            json.dumps(
+                [
+                    {"id": "mood", "text": "How are you feeling this week?", "type": "rating"},
+                    {"id": "blockers", "text": "Any blockers or concerns to share?", "type": "text"},
+                ]
+            ),
+        )
+
+    if sample_employee_id and await _table_exists(conn, "vibe_check_responses"):
+        await conn.execute(
+            """
+            INSERT INTO vibe_check_responses (org_id, employee_id, mood_rating, comment, sentiment_analysis)
+            VALUES ($1, $2, 4, $3, $4::jsonb)
+            """,
+            company_id,
+            sample_employee_id,
+            "Team collaboration improved after process updates.",
+            json.dumps({"sentiment_score": 0.61, "themes": ["collaboration", "clarity"]}),
+        )
+
+    enps_survey_id = None
+    if await _table_exists(conn, "enps_surveys"):
+        survey = await conn.fetchrow(
+            """
+            INSERT INTO enps_surveys (
+                org_id, title, description, start_date, end_date, status, is_anonymous, custom_question, created_by
+            )
+            VALUES ($1, $2, $3, $4, $5, 'active', true, $6, $7)
+            RETURNING id
+            """,
+            company_id,
+            "Quarterly eNPS Pulse",
+            "Quick pulse survey to track employee advocacy and engagement.",
+            today - timedelta(days=2),
+            today + timedelta(days=14),
+            "What is one thing we could improve this quarter?",
+            client_user_id,
+        )
+        enps_survey_id = survey["id"] if survey else None
+
+    if enps_survey_id and sample_employee_id and await _table_exists(conn, "enps_responses"):
+        await conn.execute(
+            """
+            INSERT INTO enps_responses (survey_id, employee_id, score, reason, category, sentiment_analysis)
+            VALUES ($1, $2, 9, $3, 'promoter', $4::jsonb)
+            ON CONFLICT (survey_id, employee_id) DO NOTHING
+            """,
+            enps_survey_id,
+            sample_employee_id,
+            "Great team support and clear direction from leadership.",
+            json.dumps({"sentiment_score": 0.74, "themes": ["leadership", "support"]}),
+        )
+
+    review_template_id = None
+    if await _table_exists(conn, "review_templates"):
+        template = await conn.fetchrow(
+            """
+            INSERT INTO review_templates (org_id, name, description, categories, is_active)
+            VALUES ($1, $2, $3, $4::jsonb, true)
+            RETURNING id
+            """,
+            company_id,
+            "Core Competency Review",
+            "Standard performance review covering execution, communication, and ownership.",
+            json.dumps(
+                [
+                    {"id": "execution", "label": "Execution"},
+                    {"id": "communication", "label": "Communication"},
+                    {"id": "ownership", "label": "Ownership"},
+                ]
+            ),
+        )
+        review_template_id = template["id"] if template else None
+
+    review_cycle_id = None
+    if review_template_id and await _table_exists(conn, "review_cycles"):
+        cycle = await conn.fetchrow(
+            """
+            INSERT INTO review_cycles (org_id, title, description, start_date, end_date, status, template_id)
+            VALUES ($1, $2, $3, $4, $5, 'active', $6)
+            RETURNING id
+            """,
+            company_id,
+            "Q1 Performance Cycle",
+            "Quarterly performance cycle for active employees.",
+            today - timedelta(days=7),
+            today + timedelta(days=21),
+            review_template_id,
+        )
+        review_cycle_id = cycle["id"] if cycle else None
+
+    if (
+        review_cycle_id
+        and sample_employee_id
+        and manager_employee_id
+        and await _table_exists(conn, "performance_reviews")
+    ):
+        await conn.execute(
+            """
+            INSERT INTO performance_reviews (cycle_id, employee_id, manager_id, status)
+            VALUES ($1, $2, $3, 'pending')
+            ON CONFLICT (cycle_id, employee_id) DO NOTHING
+            """,
+            review_cycle_id,
+            sample_employee_id,
+            manager_employee_id,
+        )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -356,6 +1020,89 @@ async def register_business(request: BusinessRegister):
                     "Your business registration is pending approval. You will be notified once it's reviewed."
                 ),
             }
+
+
+@router.post("/register/test-account", response_model=TokenResponse)
+async def register_test_account(request: TestAccountRegister):
+    """Register an approved client account with seeded demo data for feature testing."""
+    company_name = (request.company_name or "").strip() or f"{request.name.strip() or 'Test User'} Test Account"
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already registered")
+
+            company = await conn.fetchrow(
+                """
+                INSERT INTO companies (name, industry, size, status, approved_at, enabled_features)
+                VALUES ($1, $2, $3, 'approved', NOW(), $4::jsonb)
+                RETURNING id
+                """,
+                company_name,
+                request.industry,
+                request.company_size,
+                json.dumps(TEST_ACCOUNT_FEATURES),
+            )
+            company_id = company["id"]
+
+            password_hash = hash_password(request.password)
+            user = await conn.fetchrow(
+                """
+                INSERT INTO users (email, password_hash, role)
+                VALUES ($1, $2, 'client')
+                RETURNING id, email, role, is_active, created_at
+                """,
+                request.email,
+                password_hash,
+            )
+
+            await conn.execute(
+                """
+                INSERT INTO clients (user_id, company_id, name, phone, job_title)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                user["id"],
+                company_id,
+                request.name,
+                request.phone,
+                request.job_title,
+            )
+
+            await conn.execute(
+                "UPDATE companies SET owner_id = $1 WHERE id = $2",
+                user["id"],
+                company_id,
+            )
+
+            await _seed_test_account_data(
+                conn,
+                company_id=company_id,
+                client_user_id=user["id"],
+                owner_name=request.name,
+                owner_email=request.email,
+                company_name=company_name,
+            )
+
+            logger.info("Created seeded test account for %s (company=%s)", request.email, company_id)
+
+        settings = get_settings()
+        access_token = create_access_token(user["id"], user["email"], user["role"])
+        refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=settings.jwt_access_token_expire_minutes * 60,
+            user=UserResponse(
+                id=user["id"],
+                email=user["email"],
+                role=user["role"],
+                is_active=user["is_active"],
+                created_at=user["created_at"],
+                last_login=None,
+            ),
+        )
 
 
 @router.post("/register/employee", response_model=TokenResponse)
