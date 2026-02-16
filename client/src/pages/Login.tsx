@@ -1,21 +1,72 @@
-import { useState } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useLocation, Link, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ParticleSphere } from '../components/ParticleSphere';
+import { auth } from '../api/client';
+import type { BrokerBrandingRuntime } from '../types';
 
 export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [branding, setBranding] = useState<BrokerBrandingRuntime | null>(null);
+  const [brandingError, setBrandingError] = useState('');
+  const [brandingLoading, setBrandingLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { brokerSlug } = useParams<{ brokerSlug: string }>();
+
+  const brokerFromQuery = new URLSearchParams(location.search).get('broker') || '';
+  const brokerKey = (brokerSlug || brokerFromQuery).trim().toLowerCase();
 
   const from = (location.state as {
     from?: { pathname?: string; search?: string; hash?: string };
   })?.from;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!brokerKey) {
+      setBranding(null);
+      setBrandingError('');
+      setBrandingLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setBrandingLoading(true);
+    setBrandingError('');
+    auth
+      .getBrokerBranding(brokerKey)
+      .then((result) => {
+        if (!cancelled) {
+          setBranding(result);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setBranding(null);
+          setBrandingError(err instanceof Error ? err.message : 'Unable to load broker branding');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBrandingLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [brokerKey]);
+
+  const brandName = branding?.brand_display_name || 'Matcha';
+  const primaryColor = branding?.primary_color || '#18181b';
+  const showPoweredBy = !branding || branding.powered_by_badge || !branding.hide_matcha_identity;
 
   const getDefaultRoute = (role: string) => {
     switch (role) {
@@ -56,9 +107,13 @@ export function Login() {
       <div className="w-full lg:w-[480px] xl:w-[560px] flex flex-col justify-center px-8 sm:px-12 lg:px-16 xl:px-20 border-r border-zinc-100 z-10 bg-white">
         <div className="w-full max-w-sm mx-auto">
           <Link to="/" className="inline-flex items-center gap-2 mb-12 group">
-            <div className="w-2.5 h-2.5 rounded-full bg-zinc-900 group-hover:bg-zinc-700 transition-colors" />
+            {branding?.logo_url ? (
+              <img src={branding.logo_url} alt={`${brandName} logo`} className="h-6 w-6 rounded-sm object-cover" />
+            ) : (
+              <div className="w-2.5 h-2.5 rounded-full transition-colors" style={{ backgroundColor: primaryColor }} />
+            )}
             <span className="text-sm font-medium tracking-widest uppercase text-zinc-900">
-              Matcha
+              {brandName}
             </span>
           </Link>
 
@@ -67,8 +122,16 @@ export function Login() {
               Welcome back
             </h1>
             <p className="text-sm text-zinc-500">
-              Please sign in to access your dashboard.
+              Please sign in to access your dashboard{branding ? ` for ${brandName}` : ''}.
             </p>
+            {brandingLoading && (
+              <p className="text-xs text-zinc-400 mt-2">Loading broker branding...</p>
+            )}
+            {brandingError && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm px-2 py-1 mt-2">
+                {brandingError}. Using default Matcha login.
+              </p>
+            )}
           </div>
 
           <form className="space-y-6" onSubmit={handleSubmit}>
@@ -114,7 +177,8 @@ export function Login() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full flex justify-center py-3 px-4 border border-transparent rounded-sm text-xs font-medium uppercase tracking-wider text-white bg-zinc-900 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="w-full flex justify-center py-3 px-4 border border-transparent rounded-sm text-xs font-medium uppercase tracking-wider text-white focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                style={{ backgroundColor: primaryColor, boxShadow: 'none' }}
               >
                 {isLoading ? 'Signing in...' : 'Sign in'}
               </button>
@@ -124,13 +188,25 @@ export function Login() {
               <span className="text-xs text-zinc-500">
                 Don't have an account?{' '}
                 <Link
-                  to="/register"
-                  className="text-zinc-900 hover:text-zinc-700 font-medium underline underline-offset-4"
+                  to={brokerKey ? `/register?broker=${encodeURIComponent(brokerKey)}` : '/register'}
+                  className="font-medium underline underline-offset-4"
+                  style={{ color: primaryColor }}
                 >
                   Register
                 </Link>
               </span>
             </div>
+            {showPoweredBy && (
+              <p className="text-[10px] uppercase tracking-wider text-zinc-400 text-center">Powered by Matcha</p>
+            )}
+            {branding?.support_email && (
+              <p className="text-xs text-zinc-500 text-center">
+                Need help? Contact{' '}
+                <a className="underline" href={`mailto:${branding.support_email}`}>
+                  {branding.support_email}
+                </a>
+              </p>
+            )}
           </form>
         </div>
       </div>
@@ -160,7 +236,7 @@ export function Login() {
               "The future of recruiting is intelligent, data-driven, and seamlessly connected."
             </p>
             <footer className="text-sm text-zinc-500 font-mono uppercase tracking-widest">
-              Matcha Intelligence
+              {brandName}
             </footer>
           </blockquote>
         </div>

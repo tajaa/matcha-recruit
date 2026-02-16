@@ -562,7 +562,11 @@ VALID_BROKER_BILLING_MODES = {"direct", "reseller", "hybrid"}
 VALID_INVOICE_OWNERS = {"matcha", "broker"}
 VALID_BROKER_CONTRACT_STATUSES = {"draft", "active", "suspended", "terminated"}
 VALID_BROKER_LINK_STATUSES = {"pending", "active", "suspending", "grace", "terminated", "transferred"}
-VALID_POST_TERMINATION_MODES = {"convert_to_direct", "transfer_to_broker", "sunset"}
+VALID_POST_TERMINATION_MODES = {"convert_to_direct", "transfer_to_broker", "sunset", "matcha_managed"}
+VALID_BROKER_BRANDING_MODES = {"direct", "co_branded", "white_label"}
+VALID_TRANSITION_STATUSES = {"planned", "in_progress", "completed", "cancelled"}
+VALID_DATA_HANDOFF_STATUSES = {"not_required", "pending", "in_progress", "completed"}
+VALID_LINK_TRANSITION_STATES = {"none", "planned", "in_progress", "matcha_managed", "completed"}
 
 
 def _slugify_broker_name(name: str) -> str:
@@ -604,15 +608,61 @@ class BrokerContractRequest(BaseModel):
 
 class BrokerCompanyLinkRequest(BaseModel):
     status: str = Field(default="active")
-    permissions: dict = {}
+    permissions: dict = Field(default_factory=dict)
     post_termination_mode: Optional[str] = None
     grace_until: Optional[datetime] = None
 
 
+class BrokerBrandingRequest(BaseModel):
+    branding_mode: str = Field(default="direct")
+    brand_display_name: Optional[str] = Field(default=None, max_length=255)
+    brand_legal_name: Optional[str] = Field(default=None, max_length=255)
+    logo_url: Optional[str] = None
+    favicon_url: Optional[str] = None
+    primary_color: Optional[str] = Field(default=None, max_length=20)
+    secondary_color: Optional[str] = Field(default=None, max_length=20)
+    login_subdomain: Optional[str] = Field(default=None, max_length=120)
+    custom_login_url: Optional[str] = None
+    support_email: Optional[EmailStr] = None
+    support_phone: Optional[str] = Field(default=None, max_length=50)
+    support_url: Optional[str] = None
+    email_from_name: Optional[str] = Field(default=None, max_length=255)
+    email_from_address: Optional[EmailStr] = None
+    powered_by_badge: bool = True
+    hide_matcha_identity: bool = False
+    mobile_branding_enabled: bool = False
+    theme: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+
+
+class BrokerCompanyTransitionRequest(BaseModel):
+    mode: str
+    status: str = Field(default="planned")
+    transfer_target_broker_id: Optional[UUID] = None
+    grace_until: Optional[datetime] = None
+    matcha_managed_until: Optional[datetime] = None
+    data_handoff_status: str = Field(default="pending")
+    data_handoff_notes: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class BrokerCompanyTransitionUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    grace_until: Optional[datetime] = None
+    matcha_managed_until: Optional[datetime] = None
+    data_handoff_status: Optional[str] = None
+    data_handoff_notes: Optional[str] = None
+    completed_at: Optional[datetime] = None
+    metadata: Optional[dict] = None
+
+
 def _validate_broker_enums(*, status_value: Optional[str] = None, support_routing: Optional[str] = None,
                            billing_mode: Optional[str] = None, invoice_owner: Optional[str] = None,
-                           contract_status: Optional[str] = None,
-                           link_status: Optional[str] = None, post_termination_mode: Optional[str] = None):
+                           contract_status: Optional[str] = None, link_status: Optional[str] = None,
+                           post_termination_mode: Optional[str] = None, branding_mode: Optional[str] = None,
+                           transition_status: Optional[str] = None,
+                           data_handoff_status: Optional[str] = None,
+                           link_transition_state: Optional[str] = None):
     if status_value is not None and status_value not in VALID_BROKER_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid broker status '{status_value}'")
     if support_routing is not None and support_routing not in VALID_BROKER_SUPPORT_ROUTING:
@@ -627,6 +677,51 @@ def _validate_broker_enums(*, status_value: Optional[str] = None, support_routin
         raise HTTPException(status_code=400, detail=f"Invalid link status '{link_status}'")
     if post_termination_mode is not None and post_termination_mode not in VALID_POST_TERMINATION_MODES:
         raise HTTPException(status_code=400, detail=f"Invalid post_termination_mode '{post_termination_mode}'")
+    if branding_mode is not None and branding_mode not in VALID_BROKER_BRANDING_MODES:
+        raise HTTPException(status_code=400, detail=f"Invalid branding_mode '{branding_mode}'")
+    if transition_status is not None and transition_status not in VALID_TRANSITION_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid transition status '{transition_status}'")
+    if data_handoff_status is not None and data_handoff_status not in VALID_DATA_HANDOFF_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid data_handoff_status '{data_handoff_status}'")
+    if link_transition_state is not None and link_transition_state not in VALID_LINK_TRANSITION_STATES:
+        raise HTTPException(status_code=400, detail=f"Invalid link transition state '{link_transition_state}'")
+
+
+def _transition_state_for(mode: str, transition_status: str) -> str:
+    if transition_status == "cancelled":
+        return "none"
+    if mode == "matcha_managed":
+        return "matcha_managed"
+    if transition_status == "planned":
+        return "planned"
+    if transition_status == "in_progress":
+        return "in_progress"
+    if transition_status == "completed":
+        return "completed"
+    return "none"
+
+
+def _link_status_for(mode: str, transition_status: str, current_status: str) -> str:
+    if transition_status == "planned":
+        if mode in {"convert_to_direct", "matcha_managed"}:
+            return "grace"
+        if mode in {"transfer_to_broker", "sunset"}:
+            return "suspending"
+    if transition_status == "in_progress":
+        if mode in {"convert_to_direct", "matcha_managed"}:
+            return "grace"
+        if mode in {"transfer_to_broker", "sunset"}:
+            return "suspending"
+    if transition_status == "completed":
+        if mode == "transfer_to_broker":
+            return "transferred"
+        if mode in {"convert_to_direct", "sunset"}:
+            return "terminated"
+        if mode == "matcha_managed":
+            return "grace"
+    if transition_status == "cancelled":
+        return "active" if current_status in {"grace", "suspending"} else current_status
+    return current_status
 
 
 @router.post("/brokers", dependencies=[Depends(require_admin)])
@@ -711,6 +806,19 @@ async def create_broker(
                 current_user.id,
             )
 
+            await conn.execute(
+                """
+                INSERT INTO broker_branding_configs (
+                    broker_id, branding_mode, brand_display_name, created_by, updated_by
+                )
+                VALUES ($1, 'direct', $2, $3, $3)
+                ON CONFLICT (broker_id) DO NOTHING
+                """,
+                broker["id"],
+                request.broker_name.strip(),
+                current_user.id,
+            )
+
     return {
         "status": "created",
         "broker": {
@@ -744,6 +852,7 @@ async def list_brokers():
             SELECT
                 b.id, b.name, b.slug, b.status, b.support_routing, b.billing_mode,
                 b.invoice_owner, b.terms_required_version, b.created_at,
+                COALESCE(bb.branding_mode, 'direct') as branding_mode,
                 COUNT(DISTINCT bm.user_id) FILTER (WHERE bm.is_active = true) AS active_member_count,
                 COUNT(DISTINCT bcl.company_id) FILTER (WHERE bcl.status IN ('active', 'grace')) AS active_company_count,
                 bc.id AS active_contract_id,
@@ -752,6 +861,7 @@ async def list_brokers():
                 bc.pepm_rate,
                 bc.minimum_monthly_commit
             FROM brokers b
+            LEFT JOIN broker_branding_configs bb ON bb.broker_id = b.id
             LEFT JOIN broker_members bm ON bm.broker_id = b.id
             LEFT JOIN broker_company_links bcl ON bcl.broker_id = b.id
             LEFT JOIN LATERAL (
@@ -763,7 +873,7 @@ async def list_brokers():
             ) bc ON true
             GROUP BY
                 b.id, b.name, b.slug, b.status, b.support_routing, b.billing_mode,
-                b.invoice_owner, b.terms_required_version, b.created_at,
+                b.invoice_owner, b.terms_required_version, b.created_at, bb.branding_mode,
                 bc.id, bc.currency, bc.base_platform_fee, bc.pepm_rate, bc.minimum_monthly_commit
             ORDER BY b.created_at DESC
             """
@@ -780,6 +890,7 @@ async def list_brokers():
                     "billing_mode": row["billing_mode"],
                     "invoice_owner": row["invoice_owner"],
                     "terms_required_version": row["terms_required_version"],
+                    "branding_mode": row["branding_mode"],
                     "active_member_count": row["active_member_count"],
                     "active_company_count": row["active_company_count"],
                     "active_contract": {
@@ -1020,6 +1131,624 @@ async def upsert_broker_company_link(
             "grace_until": row["grace_until"].isoformat() if row["grace_until"] else None,
             "post_termination_mode": row["post_termination_mode"],
             "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        },
+    }
+
+
+# =============================================================================
+# Broker Branding & Transition Runtime
+# =============================================================================
+
+
+@router.get("/brokers/{broker_id}/branding", dependencies=[Depends(require_admin)])
+async def get_broker_branding(broker_id: UUID):
+    """Get broker white-label/co-brand branding configuration."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                b.id as broker_id,
+                b.name as broker_name,
+                b.slug as broker_slug,
+                b.support_routing,
+                cfg.id,
+                COALESCE(cfg.branding_mode, 'direct') as branding_mode,
+                COALESCE(cfg.brand_display_name, b.name) as brand_display_name,
+                cfg.brand_legal_name,
+                cfg.logo_url,
+                cfg.favicon_url,
+                cfg.primary_color,
+                cfg.secondary_color,
+                cfg.login_subdomain,
+                cfg.custom_login_url,
+                cfg.support_email,
+                cfg.support_phone,
+                cfg.support_url,
+                cfg.email_from_name,
+                cfg.email_from_address,
+                COALESCE(cfg.powered_by_badge, true) as powered_by_badge,
+                COALESCE(cfg.hide_matcha_identity, false) as hide_matcha_identity,
+                COALESCE(cfg.mobile_branding_enabled, false) as mobile_branding_enabled,
+                COALESCE(cfg.theme, '{}'::jsonb) as theme,
+                cfg.created_at,
+                cfg.updated_at
+            FROM brokers b
+            LEFT JOIN broker_branding_configs cfg ON cfg.broker_id = b.id
+            WHERE b.id = $1
+            """,
+            broker_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Broker not found")
+
+    return {
+        "broker_id": str(row["broker_id"]),
+        "broker_name": row["broker_name"],
+        "broker_slug": row["broker_slug"],
+        "support_routing": row["support_routing"],
+        "branding_mode": row["branding_mode"],
+        "brand_display_name": row["brand_display_name"],
+        "brand_legal_name": row["brand_legal_name"],
+        "logo_url": row["logo_url"],
+        "favicon_url": row["favicon_url"],
+        "primary_color": row["primary_color"],
+        "secondary_color": row["secondary_color"],
+        "login_subdomain": row["login_subdomain"],
+        "custom_login_url": row["custom_login_url"],
+        "support_email": row["support_email"],
+        "support_phone": row["support_phone"],
+        "support_url": row["support_url"],
+        "email_from_name": row["email_from_name"],
+        "email_from_address": row["email_from_address"],
+        "powered_by_badge": row["powered_by_badge"],
+        "hide_matcha_identity": row["hide_matcha_identity"],
+        "mobile_branding_enabled": row["mobile_branding_enabled"],
+        "theme": row["theme"] if isinstance(row["theme"], dict) else {},
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+@router.put("/brokers/{broker_id}/branding", dependencies=[Depends(require_admin)])
+async def upsert_broker_branding(
+    broker_id: UUID,
+    request: BrokerBrandingRequest,
+    current_user=Depends(require_admin),
+):
+    """Upsert broker branding/runtime config for co-branded or white-label delivery."""
+    _validate_broker_enums(branding_mode=request.branding_mode)
+    if request.login_subdomain and not re.fullmatch(r"[a-z0-9-]{2,120}", request.login_subdomain):
+        raise HTTPException(status_code=400, detail="login_subdomain must be 2-120 chars [a-z0-9-]")
+    if request.custom_login_url and not request.custom_login_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="custom_login_url must start with http:// or https://")
+
+    async with get_connection() as conn:
+        broker = await conn.fetchrow("SELECT id, name, slug, support_routing FROM brokers WHERE id = $1", broker_id)
+        if not broker:
+            raise HTTPException(status_code=404, detail="Broker not found")
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO broker_branding_configs (
+                broker_id, branding_mode, brand_display_name, brand_legal_name, logo_url, favicon_url,
+                primary_color, secondary_color, login_subdomain, custom_login_url,
+                support_email, support_phone, support_url,
+                email_from_name, email_from_address,
+                powered_by_badge, hide_matcha_identity, mobile_branding_enabled,
+                theme, metadata, created_by, updated_by, updated_at
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10,
+                $11, $12, $13,
+                $14, $15,
+                $16, $17, $18,
+                $19::jsonb, $20::jsonb, $21, $21, NOW()
+            )
+            ON CONFLICT (broker_id)
+            DO UPDATE SET
+                branding_mode = EXCLUDED.branding_mode,
+                brand_display_name = EXCLUDED.brand_display_name,
+                brand_legal_name = EXCLUDED.brand_legal_name,
+                logo_url = EXCLUDED.logo_url,
+                favicon_url = EXCLUDED.favicon_url,
+                primary_color = EXCLUDED.primary_color,
+                secondary_color = EXCLUDED.secondary_color,
+                login_subdomain = EXCLUDED.login_subdomain,
+                custom_login_url = EXCLUDED.custom_login_url,
+                support_email = EXCLUDED.support_email,
+                support_phone = EXCLUDED.support_phone,
+                support_url = EXCLUDED.support_url,
+                email_from_name = EXCLUDED.email_from_name,
+                email_from_address = EXCLUDED.email_from_address,
+                powered_by_badge = EXCLUDED.powered_by_badge,
+                hide_matcha_identity = EXCLUDED.hide_matcha_identity,
+                mobile_branding_enabled = EXCLUDED.mobile_branding_enabled,
+                theme = EXCLUDED.theme,
+                metadata = EXCLUDED.metadata,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = NOW()
+            RETURNING *
+            """,
+            broker_id,
+            request.branding_mode,
+            request.brand_display_name,
+            request.brand_legal_name,
+            request.logo_url,
+            request.favicon_url,
+            request.primary_color,
+            request.secondary_color,
+            request.login_subdomain,
+            request.custom_login_url,
+            request.support_email,
+            request.support_phone,
+            request.support_url,
+            request.email_from_name,
+            request.email_from_address,
+            request.powered_by_badge,
+            request.hide_matcha_identity,
+            request.mobile_branding_enabled,
+            json.dumps(request.theme or {}),
+            json.dumps(request.metadata or {}),
+            current_user.id,
+        )
+
+    return {
+        "status": "saved",
+        "branding": {
+            "id": str(row["id"]),
+            "broker_id": str(row["broker_id"]),
+            "branding_mode": row["branding_mode"],
+            "brand_display_name": row["brand_display_name"],
+            "brand_legal_name": row["brand_legal_name"],
+            "logo_url": row["logo_url"],
+            "favicon_url": row["favicon_url"],
+            "primary_color": row["primary_color"],
+            "secondary_color": row["secondary_color"],
+            "login_subdomain": row["login_subdomain"],
+            "custom_login_url": row["custom_login_url"],
+            "support_email": row["support_email"],
+            "support_phone": row["support_phone"],
+            "support_url": row["support_url"],
+            "email_from_name": row["email_from_name"],
+            "email_from_address": row["email_from_address"],
+            "powered_by_badge": row["powered_by_badge"],
+            "hide_matcha_identity": row["hide_matcha_identity"],
+            "mobile_branding_enabled": row["mobile_branding_enabled"],
+            "theme": row["theme"] if isinstance(row["theme"], dict) else {},
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        },
+    }
+
+
+@router.get("/brokers/{broker_id}/companies/{company_id}/transitions", dependencies=[Depends(require_admin)])
+async def list_broker_company_transitions(broker_id: UUID, company_id: UUID):
+    """List offboarding/transfer transitions for a broker-company relationship."""
+    async with get_connection() as conn:
+        exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM broker_company_links WHERE broker_id = $1 AND company_id = $2)",
+            broker_id,
+            company_id,
+        )
+        if not exists:
+            raise HTTPException(status_code=404, detail="Broker-company link not found")
+
+        rows = await conn.fetch(
+            """
+            SELECT
+                t.id, t.mode, t.status, t.transfer_target_broker_id, tb.name as transfer_target_broker_name,
+                t.grace_until, t.matcha_managed_until,
+                t.data_handoff_status, t.data_handoff_notes,
+                t.started_at, t.completed_at, t.metadata, t.created_at, t.updated_at
+            FROM broker_company_transitions t
+            LEFT JOIN brokers tb ON tb.id = t.transfer_target_broker_id
+            WHERE t.broker_id = $1 AND t.company_id = $2
+            ORDER BY t.created_at DESC
+            """,
+            broker_id,
+            company_id,
+        )
+
+    return {
+        "transitions": [
+            {
+                "id": str(row["id"]),
+                "mode": row["mode"],
+                "status": row["status"],
+                "transfer_target_broker_id": str(row["transfer_target_broker_id"]) if row["transfer_target_broker_id"] else None,
+                "transfer_target_broker_name": row["transfer_target_broker_name"],
+                "grace_until": row["grace_until"].isoformat() if row["grace_until"] else None,
+                "matcha_managed_until": row["matcha_managed_until"].isoformat() if row["matcha_managed_until"] else None,
+                "data_handoff_status": row["data_handoff_status"],
+                "data_handoff_notes": row["data_handoff_notes"],
+                "started_at": row["started_at"].isoformat() if row["started_at"] else None,
+                "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+                "metadata": row["metadata"] if isinstance(row["metadata"], dict) else {},
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            }
+            for row in rows
+        ],
+        "total": len(rows),
+    }
+
+
+@router.post("/brokers/{broker_id}/companies/{company_id}/transitions", dependencies=[Depends(require_admin)])
+async def create_broker_company_transition(
+    broker_id: UUID,
+    company_id: UUID,
+    request: BrokerCompanyTransitionRequest,
+    current_user=Depends(require_admin),
+):
+    """Create a broker-company transition (convert/transfer/sunset/matcha-managed)."""
+    _validate_broker_enums(
+        post_termination_mode=request.mode,
+        transition_status=request.status,
+        data_handoff_status=request.data_handoff_status,
+    )
+    if request.transfer_target_broker_id and request.mode != "transfer_to_broker":
+        raise HTTPException(status_code=400, detail="transfer_target_broker_id is only valid for transfer_to_broker mode")
+    if request.mode == "transfer_to_broker" and not request.transfer_target_broker_id:
+        raise HTTPException(status_code=400, detail="transfer_target_broker_id is required for transfer_to_broker mode")
+    if request.mode == "matcha_managed" and request.matcha_managed_until is None:
+        raise HTTPException(status_code=400, detail="matcha_managed_until is required for matcha_managed mode")
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            link = await conn.fetchrow(
+                """
+                SELECT id, status, metadata
+                FROM broker_company_links
+                WHERE broker_id = $1 AND company_id = $2
+                FOR UPDATE
+                """,
+                broker_id,
+                company_id,
+            )
+            if not link:
+                raise HTTPException(status_code=404, detail="Broker-company link not found")
+
+            active_transition = await conn.fetchval(
+                """
+                SELECT id
+                FROM broker_company_transitions
+                WHERE broker_id = $1
+                  AND company_id = $2
+                  AND status IN ('planned', 'in_progress')
+                """,
+                broker_id,
+                company_id,
+            )
+            if active_transition:
+                raise HTTPException(status_code=409, detail="An active transition already exists for this broker-company link")
+
+            if request.transfer_target_broker_id:
+                if request.transfer_target_broker_id == broker_id:
+                    raise HTTPException(status_code=400, detail="transfer_target_broker_id must be different from broker_id")
+                target_exists = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM brokers WHERE id = $1)",
+                    request.transfer_target_broker_id,
+                )
+                if not target_exists:
+                    raise HTTPException(status_code=404, detail="Transfer target broker not found")
+
+            data_handoff_status = request.data_handoff_status
+            if request.mode == "sunset" and data_handoff_status == "pending":
+                data_handoff_status = "not_required"
+            _validate_broker_enums(data_handoff_status=data_handoff_status)
+
+            started_at = datetime.utcnow() if request.status in {"in_progress", "completed"} else None
+            completed_at = datetime.utcnow() if request.status == "completed" else None
+
+            transition = await conn.fetchrow(
+                """
+                INSERT INTO broker_company_transitions (
+                    broker_id, company_id, source_link_id, mode, status,
+                    transfer_target_broker_id, grace_until, matcha_managed_until,
+                    data_handoff_status, data_handoff_notes,
+                    started_at, completed_at, metadata, created_by, updated_by, updated_at
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5,
+                    $6, $7, $8,
+                    $9, $10,
+                    $11, $12, $13::jsonb, $14, $14, NOW()
+                )
+                RETURNING *
+                """,
+                broker_id,
+                company_id,
+                link["id"],
+                request.mode,
+                request.status,
+                request.transfer_target_broker_id,
+                request.grace_until,
+                request.matcha_managed_until,
+                data_handoff_status,
+                request.data_handoff_notes,
+                started_at,
+                completed_at,
+                json.dumps(request.metadata or {}),
+                current_user.id,
+            )
+
+            transition_state = _transition_state_for(request.mode, request.status)
+            next_link_status = _link_status_for(request.mode, request.status, link["status"])
+            _validate_broker_enums(link_status=next_link_status, link_transition_state=transition_state)
+
+            link_metadata_patch = {
+                "transition_id": str(transition["id"]),
+                "transition_mode": request.mode,
+            }
+            if request.transfer_target_broker_id:
+                link_metadata_patch["transfer_target_broker_id"] = str(request.transfer_target_broker_id)
+            if request.matcha_managed_until:
+                link_metadata_patch["matcha_managed_until"] = request.matcha_managed_until.isoformat()
+
+            terminated_at = (
+                datetime.utcnow()
+                if request.status == "completed" and request.mode in {"convert_to_direct", "transfer_to_broker", "sunset"}
+                else None
+            )
+            post_termination_mode = request.mode if request.status != "cancelled" else None
+
+            link_row = await conn.fetchrow(
+                """
+                UPDATE broker_company_links
+                SET status = $3,
+                    post_termination_mode = $4,
+                    grace_until = COALESCE($5, broker_company_links.grace_until),
+                    transition_state = $6,
+                    transition_updated_at = NOW(),
+                    data_handoff_status = $7,
+                    data_handoff_notes = $8,
+                    current_transition_id = $9,
+                    terminated_at = CASE WHEN $10::timestamptz IS NOT NULL THEN $10 ELSE broker_company_links.terminated_at END,
+                    metadata = COALESCE(broker_company_links.metadata, '{}'::jsonb) || $11::jsonb,
+                    updated_at = NOW()
+                WHERE broker_id = $1 AND company_id = $2
+                RETURNING id, broker_id, company_id, status, transition_state, post_termination_mode, current_transition_id,
+                          data_handoff_status, data_handoff_notes, grace_until, terminated_at, updated_at
+                """,
+                broker_id,
+                company_id,
+                next_link_status,
+                post_termination_mode,
+                request.grace_until,
+                transition_state,
+                data_handoff_status,
+                request.data_handoff_notes,
+                transition["id"],
+                terminated_at,
+                json.dumps(link_metadata_patch),
+            )
+
+    return {
+        "status": "created",
+        "transition": {
+            "id": str(transition["id"]),
+            "mode": transition["mode"],
+            "status": transition["status"],
+            "transfer_target_broker_id": str(transition["transfer_target_broker_id"]) if transition["transfer_target_broker_id"] else None,
+            "grace_until": transition["grace_until"].isoformat() if transition["grace_until"] else None,
+            "matcha_managed_until": transition["matcha_managed_until"].isoformat() if transition["matcha_managed_until"] else None,
+            "data_handoff_status": transition["data_handoff_status"],
+            "data_handoff_notes": transition["data_handoff_notes"],
+            "started_at": transition["started_at"].isoformat() if transition["started_at"] else None,
+            "completed_at": transition["completed_at"].isoformat() if transition["completed_at"] else None,
+            "metadata": transition["metadata"] if isinstance(transition["metadata"], dict) else {},
+            "created_at": transition["created_at"].isoformat() if transition["created_at"] else None,
+            "updated_at": transition["updated_at"].isoformat() if transition["updated_at"] else None,
+        },
+        "link": {
+            "id": str(link_row["id"]),
+            "broker_id": str(link_row["broker_id"]),
+            "company_id": str(link_row["company_id"]),
+            "status": link_row["status"],
+            "transition_state": link_row["transition_state"],
+            "post_termination_mode": link_row["post_termination_mode"],
+            "current_transition_id": str(link_row["current_transition_id"]) if link_row["current_transition_id"] else None,
+            "data_handoff_status": link_row["data_handoff_status"],
+            "data_handoff_notes": link_row["data_handoff_notes"],
+            "grace_until": link_row["grace_until"].isoformat() if link_row["grace_until"] else None,
+            "terminated_at": link_row["terminated_at"].isoformat() if link_row["terminated_at"] else None,
+            "updated_at": link_row["updated_at"].isoformat() if link_row["updated_at"] else None,
+        },
+    }
+
+
+@router.patch("/brokers/{broker_id}/companies/{company_id}/transitions/{transition_id}", dependencies=[Depends(require_admin)])
+async def update_broker_company_transition(
+    broker_id: UUID,
+    company_id: UUID,
+    transition_id: UUID,
+    request: BrokerCompanyTransitionUpdateRequest,
+    current_user=Depends(require_admin),
+):
+    """Update transition status, handoff progress, or completion markers."""
+    _validate_broker_enums(
+        transition_status=request.status,
+        data_handoff_status=request.data_handoff_status,
+    )
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            transition = await conn.fetchrow(
+                """
+                SELECT *
+                FROM broker_company_transitions
+                WHERE id = $1 AND broker_id = $2 AND company_id = $3
+                FOR UPDATE
+                """,
+                transition_id,
+                broker_id,
+                company_id,
+            )
+            if not transition:
+                raise HTTPException(status_code=404, detail="Transition not found")
+
+            link = await conn.fetchrow(
+                """
+                SELECT id, status
+                FROM broker_company_links
+                WHERE broker_id = $1 AND company_id = $2
+                FOR UPDATE
+                """,
+                broker_id,
+                company_id,
+            )
+            if not link:
+                raise HTTPException(status_code=404, detail="Broker-company link not found")
+
+            updated_status = request.status or transition["status"]
+            updated_grace_until = request.grace_until if request.grace_until is not None else transition["grace_until"]
+            updated_matcha_managed_until = (
+                request.matcha_managed_until
+                if request.matcha_managed_until is not None
+                else transition["matcha_managed_until"]
+            )
+            updated_data_handoff_status = request.data_handoff_status or transition["data_handoff_status"]
+            updated_data_handoff_notes = (
+                request.data_handoff_notes
+                if request.data_handoff_notes is not None
+                else transition["data_handoff_notes"]
+            )
+
+            _validate_broker_enums(
+                transition_status=updated_status,
+                data_handoff_status=updated_data_handoff_status,
+            )
+            if transition["mode"] == "matcha_managed" and updated_matcha_managed_until is None:
+                raise HTTPException(status_code=400, detail="matcha_managed_until is required for matcha_managed transitions")
+
+            started_at = transition["started_at"]
+            if updated_status in {"in_progress", "completed"} and started_at is None:
+                started_at = datetime.utcnow()
+
+            completed_at = transition["completed_at"]
+            if updated_status == "completed":
+                completed_at = request.completed_at or datetime.utcnow()
+            elif request.completed_at is not None:
+                completed_at = request.completed_at
+
+            metadata_update = request.metadata if request.metadata is not None else {}
+            transition_row = await conn.fetchrow(
+                """
+                UPDATE broker_company_transitions
+                SET status = $1,
+                    grace_until = $2,
+                    matcha_managed_until = $3,
+                    data_handoff_status = $4,
+                    data_handoff_notes = $5,
+                    started_at = $6,
+                    completed_at = $7,
+                    metadata = COALESCE(broker_company_transitions.metadata, '{}'::jsonb) || $8::jsonb,
+                    updated_by = $9,
+                    updated_at = NOW()
+                WHERE id = $10
+                RETURNING *
+                """,
+                updated_status,
+                updated_grace_until,
+                updated_matcha_managed_until,
+                updated_data_handoff_status,
+                updated_data_handoff_notes,
+                started_at,
+                completed_at,
+                json.dumps(metadata_update),
+                current_user.id,
+                transition_id,
+            )
+
+            transition_state = _transition_state_for(transition_row["mode"], transition_row["status"])
+            next_link_status = _link_status_for(transition_row["mode"], transition_row["status"], link["status"])
+            _validate_broker_enums(link_status=next_link_status, link_transition_state=transition_state)
+
+            terminated_at = (
+                datetime.utcnow()
+                if transition_row["status"] == "completed" and transition_row["mode"] in {"convert_to_direct", "transfer_to_broker", "sunset"}
+                else None
+            )
+            clear_terminated = transition_row["status"] == "cancelled"
+            post_termination_mode = transition_row["mode"] if transition_row["status"] != "cancelled" else None
+            current_transition_id = transition_row["id"] if transition_row["status"] != "cancelled" else None
+
+            link_metadata_patch = {
+                "transition_id": str(transition_row["id"]),
+                "transition_mode": transition_row["mode"],
+                "transition_status": transition_row["status"],
+            }
+            if transition_row["transfer_target_broker_id"]:
+                link_metadata_patch["transfer_target_broker_id"] = str(transition_row["transfer_target_broker_id"])
+            if transition_row["matcha_managed_until"]:
+                link_metadata_patch["matcha_managed_until"] = transition_row["matcha_managed_until"].isoformat()
+
+            link_row = await conn.fetchrow(
+                """
+                UPDATE broker_company_links
+                SET status = $3,
+                    post_termination_mode = $4,
+                    grace_until = COALESCE($5, broker_company_links.grace_until),
+                    transition_state = $6,
+                    transition_updated_at = NOW(),
+                    data_handoff_status = $7,
+                    data_handoff_notes = $8,
+                    current_transition_id = $9,
+                    terminated_at = CASE
+                        WHEN $10::timestamptz IS NOT NULL THEN $10
+                        WHEN $11::boolean THEN NULL
+                        ELSE broker_company_links.terminated_at
+                    END,
+                    metadata = COALESCE(broker_company_links.metadata, '{}'::jsonb) || $12::jsonb,
+                    updated_at = NOW()
+                WHERE broker_id = $1 AND company_id = $2
+                RETURNING id, broker_id, company_id, status, transition_state, post_termination_mode, current_transition_id,
+                          data_handoff_status, data_handoff_notes, grace_until, terminated_at, updated_at
+                """,
+                broker_id,
+                company_id,
+                next_link_status,
+                post_termination_mode,
+                transition_row["grace_until"],
+                transition_state,
+                transition_row["data_handoff_status"],
+                transition_row["data_handoff_notes"],
+                current_transition_id,
+                terminated_at,
+                clear_terminated,
+                json.dumps(link_metadata_patch),
+            )
+
+    return {
+        "status": "updated",
+        "transition": {
+            "id": str(transition_row["id"]),
+            "mode": transition_row["mode"],
+            "status": transition_row["status"],
+            "transfer_target_broker_id": str(transition_row["transfer_target_broker_id"]) if transition_row["transfer_target_broker_id"] else None,
+            "grace_until": transition_row["grace_until"].isoformat() if transition_row["grace_until"] else None,
+            "matcha_managed_until": transition_row["matcha_managed_until"].isoformat() if transition_row["matcha_managed_until"] else None,
+            "data_handoff_status": transition_row["data_handoff_status"],
+            "data_handoff_notes": transition_row["data_handoff_notes"],
+            "started_at": transition_row["started_at"].isoformat() if transition_row["started_at"] else None,
+            "completed_at": transition_row["completed_at"].isoformat() if transition_row["completed_at"] else None,
+            "metadata": transition_row["metadata"] if isinstance(transition_row["metadata"], dict) else {},
+            "updated_at": transition_row["updated_at"].isoformat() if transition_row["updated_at"] else None,
+        },
+        "link": {
+            "id": str(link_row["id"]),
+            "broker_id": str(link_row["broker_id"]),
+            "company_id": str(link_row["company_id"]),
+            "status": link_row["status"],
+            "transition_state": link_row["transition_state"],
+            "post_termination_mode": link_row["post_termination_mode"],
+            "current_transition_id": str(link_row["current_transition_id"]) if link_row["current_transition_id"] else None,
+            "data_handoff_status": link_row["data_handoff_status"],
+            "data_handoff_notes": link_row["data_handoff_notes"],
+            "grace_until": link_row["grace_until"].isoformat() if link_row["grace_until"] else None,
+            "terminated_at": link_row["terminated_at"].isoformat() if link_row["terminated_at"] else None,
+            "updated_at": link_row["updated_at"].isoformat() if link_row["updated_at"] else None,
         },
     }
 

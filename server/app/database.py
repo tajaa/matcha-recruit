@@ -2607,7 +2607,7 @@ async def init_db():
                 terminated_at TIMESTAMPTZ,
                 grace_until TIMESTAMPTZ,
                 post_termination_mode VARCHAR(30)
-                    CHECK (post_termination_mode IN ('convert_to_direct', 'transfer_to_broker', 'sunset')),
+                    CHECK (post_termination_mode IN ('convert_to_direct', 'transfer_to_broker', 'sunset', 'matcha_managed')),
                 metadata JSONB DEFAULT '{}'::jsonb,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
@@ -2654,7 +2654,14 @@ async def init_db():
                 terminated_at TIMESTAMPTZ,
                 grace_until TIMESTAMPTZ,
                 post_termination_mode VARCHAR(30)
-                    CHECK (post_termination_mode IN ('convert_to_direct', 'transfer_to_broker', 'sunset')),
+                    CHECK (post_termination_mode IN ('convert_to_direct', 'transfer_to_broker', 'sunset', 'matcha_managed')),
+                transition_state VARCHAR(20) DEFAULT 'none'
+                    CHECK (transition_state IN ('none', 'planned', 'in_progress', 'matcha_managed', 'completed')),
+                transition_updated_at TIMESTAMPTZ,
+                data_handoff_status VARCHAR(20) DEFAULT 'not_required'
+                    CHECK (data_handoff_status IN ('not_required', 'pending', 'in_progress', 'completed')),
+                data_handoff_notes TEXT,
+                current_transition_id UUID,
                 created_by UUID REFERENCES users(id),
                 metadata JSONB DEFAULT '{}'::jsonb,
                 created_at TIMESTAMP DEFAULT NOW(),
@@ -2670,6 +2677,69 @@ async def init_db():
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_broker_company_links_broker_status ON broker_company_links(broker_id, status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_company_links_transition_state ON broker_company_links(transition_state)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_company_links_current_transition ON broker_company_links(current_transition_id)
+        """)
+
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'broker_company_links' AND column_name = 'transition_state'
+                ) THEN
+                    ALTER TABLE broker_company_links ADD COLUMN transition_state VARCHAR(20) DEFAULT 'none';
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'broker_company_links' AND column_name = 'transition_updated_at'
+                ) THEN
+                    ALTER TABLE broker_company_links ADD COLUMN transition_updated_at TIMESTAMPTZ;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'broker_company_links' AND column_name = 'data_handoff_status'
+                ) THEN
+                    ALTER TABLE broker_company_links ADD COLUMN data_handoff_status VARCHAR(20) DEFAULT 'not_required';
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'broker_company_links' AND column_name = 'data_handoff_notes'
+                ) THEN
+                    ALTER TABLE broker_company_links ADD COLUMN data_handoff_notes TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'broker_company_links' AND column_name = 'current_transition_id'
+                ) THEN
+                    ALTER TABLE broker_company_links ADD COLUMN current_transition_id UUID;
+                END IF;
+            END $$;
+        """)
+
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'broker_company_links_transition_state_check') THEN
+                    ALTER TABLE broker_company_links DROP CONSTRAINT broker_company_links_transition_state_check;
+                END IF;
+                ALTER TABLE broker_company_links
+                    ADD CONSTRAINT broker_company_links_transition_state_check
+                    CHECK (transition_state IN ('none', 'planned', 'in_progress', 'matcha_managed', 'completed'));
+
+                IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'broker_company_links_data_handoff_status_check') THEN
+                    ALTER TABLE broker_company_links DROP CONSTRAINT broker_company_links_data_handoff_status_check;
+                END IF;
+                ALTER TABLE broker_company_links
+                    ADD CONSTRAINT broker_company_links_data_handoff_status_check
+                    CHECK (data_handoff_status IN ('not_required', 'pending', 'in_progress', 'completed'));
+            EXCEPTION WHEN undefined_column THEN
+                NULL;
+            END $$;
         """)
 
         await conn.execute("""
@@ -2717,6 +2787,136 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_broker_terms_acceptances_lookup
             ON broker_terms_acceptances(broker_id, user_id, terms_version)
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS broker_branding_configs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                broker_id UUID NOT NULL UNIQUE REFERENCES brokers(id) ON DELETE CASCADE,
+                branding_mode VARCHAR(20) NOT NULL DEFAULT 'direct'
+                    CHECK (branding_mode IN ('direct', 'co_branded', 'white_label')),
+                brand_display_name VARCHAR(255),
+                brand_legal_name VARCHAR(255),
+                logo_url TEXT,
+                favicon_url TEXT,
+                primary_color VARCHAR(20),
+                secondary_color VARCHAR(20),
+                login_subdomain VARCHAR(120) UNIQUE,
+                custom_login_url TEXT,
+                support_email VARCHAR(320),
+                support_phone VARCHAR(50),
+                support_url TEXT,
+                email_from_name VARCHAR(255),
+                email_from_address VARCHAR(320),
+                powered_by_badge BOOLEAN NOT NULL DEFAULT true,
+                hide_matcha_identity BOOLEAN NOT NULL DEFAULT false,
+                mobile_branding_enabled BOOLEAN NOT NULL DEFAULT false,
+                theme JSONB DEFAULT '{}'::jsonb,
+                metadata JSONB DEFAULT '{}'::jsonb,
+                created_by UUID REFERENCES users(id),
+                updated_by UUID REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_branding_mode ON broker_branding_configs(branding_mode)
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS broker_company_transitions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                broker_id UUID NOT NULL REFERENCES brokers(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                source_link_id UUID REFERENCES broker_company_links(id) ON DELETE SET NULL,
+                mode VARCHAR(30) NOT NULL
+                    CHECK (mode IN ('convert_to_direct', 'transfer_to_broker', 'sunset', 'matcha_managed')),
+                status VARCHAR(20) NOT NULL DEFAULT 'planned'
+                    CHECK (status IN ('planned', 'in_progress', 'completed', 'cancelled')),
+                transfer_target_broker_id UUID REFERENCES brokers(id),
+                grace_until TIMESTAMPTZ,
+                matcha_managed_until TIMESTAMPTZ,
+                data_handoff_status VARCHAR(20) NOT NULL DEFAULT 'not_required'
+                    CHECK (data_handoff_status IN ('not_required', 'pending', 'in_progress', 'completed')),
+                data_handoff_notes TEXT,
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                metadata JSONB DEFAULT '{}'::jsonb,
+                created_by UUID REFERENCES users(id),
+                updated_by UUID REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_company_transitions_broker_company
+            ON broker_company_transitions(broker_id, company_id, status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_company_transitions_transfer_target
+            ON broker_company_transitions(transfer_target_broker_id)
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_broker_company_transitions_active_single
+            ON broker_company_transitions(broker_id, company_id)
+            WHERE status IN ('planned', 'in_progress')
+        """)
+
+        await conn.execute("""
+            DO $$
+            DECLARE existing_constraint TEXT;
+            BEGIN
+                SELECT c.conname INTO existing_constraint
+                FROM pg_constraint c
+                WHERE c.conrelid = 'brokers'::regclass
+                  AND c.contype = 'c'
+                  AND pg_get_constraintdef(c.oid) ILIKE '%post_termination_mode%';
+                IF existing_constraint IS NOT NULL THEN
+                    EXECUTE format('ALTER TABLE brokers DROP CONSTRAINT %I', existing_constraint);
+                END IF;
+                ALTER TABLE brokers
+                    ADD CONSTRAINT brokers_post_termination_mode_check
+                    CHECK (post_termination_mode IS NULL OR post_termination_mode IN ('convert_to_direct', 'transfer_to_broker', 'sunset', 'matcha_managed'));
+            EXCEPTION WHEN undefined_table THEN
+                NULL;
+            END $$;
+        """)
+
+        await conn.execute("""
+            DO $$
+            DECLARE existing_constraint TEXT;
+            BEGIN
+                SELECT c.conname INTO existing_constraint
+                FROM pg_constraint c
+                WHERE c.conrelid = 'broker_company_links'::regclass
+                  AND c.contype = 'c'
+                  AND pg_get_constraintdef(c.oid) ILIKE '%post_termination_mode%';
+                IF existing_constraint IS NOT NULL THEN
+                    EXECUTE format('ALTER TABLE broker_company_links DROP CONSTRAINT %I', existing_constraint);
+                END IF;
+                ALTER TABLE broker_company_links
+                    ADD CONSTRAINT broker_company_links_post_termination_mode_check
+                    CHECK (post_termination_mode IS NULL OR post_termination_mode IN ('convert_to_direct', 'transfer_to_broker', 'sunset', 'matcha_managed'));
+            EXCEPTION WHEN undefined_table THEN
+                NULL;
+            END $$;
+        """)
+
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'broker_company_links_current_transition_id_fkey'
+                ) THEN
+                    ALTER TABLE broker_company_links
+                        ADD CONSTRAINT broker_company_links_current_transition_id_fkey
+                        FOREIGN KEY (current_transition_id)
+                        REFERENCES broker_company_transitions(id)
+                        ON DELETE SET NULL;
+                END IF;
+            EXCEPTION WHEN undefined_table THEN
+                NULL;
+            END $$;
         """)
 
         await conn.execute("""

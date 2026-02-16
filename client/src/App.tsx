@@ -144,6 +144,7 @@ function App() {
               <Route path="/for-candidates" element={<ForCandidates />} />
               <Route path="/work-with-us" element={<WorkWithUs />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/login/:brokerSlug" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/register/invite/:token" element={<RegisterInvite />} />
               <Route path="/onboarding/resume" element={<ResumeOnboarding />} />

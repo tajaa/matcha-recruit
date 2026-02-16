@@ -184,6 +184,8 @@ class BrokerProfile(BaseModel):
     broker_id: UUID
     broker_name: str
     broker_slug: str
+    branding_mode: Literal["direct", "co_branded", "white_label"] = "direct"
+    brand_display_name: Optional[str] = None
     member_role: str
     broker_status: str
     billing_mode: str
@@ -244,6 +246,31 @@ class BrokerClientInviteAcceptRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     job_title: Optional[str] = None
+
+
+class BrokerBrandingRuntimeResponse(BaseModel):
+    broker_id: UUID
+    broker_slug: str
+    broker_name: str
+    branding_mode: Literal["direct", "co_branded", "white_label"]
+    brand_display_name: str
+    brand_legal_name: Optional[str] = None
+    logo_url: Optional[str] = None
+    favicon_url: Optional[str] = None
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    login_subdomain: Optional[str] = None
+    custom_login_url: Optional[str] = None
+    support_email: Optional[EmailStr] = None
+    support_phone: Optional[str] = None
+    support_url: Optional[str] = None
+    email_from_name: Optional[str] = None
+    email_from_address: Optional[EmailStr] = None
+    powered_by_badge: bool = True
+    hide_matcha_identity: bool = False
+    mobile_branding_enabled: bool = False
+    theme: dict = Field(default_factory=dict)
+    resolved_by: Literal["slug", "subdomain"] = "slug"
 
 
 # Beta access management models

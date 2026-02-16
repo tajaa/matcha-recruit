@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta
 
@@ -15,6 +16,7 @@ from ..models.auth import (
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
     BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
     BrokerClientInviteDetailsResponse, BrokerClientInviteAcceptRequest,
+    BrokerBrandingRuntimeResponse,
     CurrentUser,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
@@ -49,6 +51,20 @@ TEST_ACCOUNT_FEATURES = {
     "time_off": True,
     "accommodations": True,
 }
+
+BROKER_BRANDING_KEY_RE = re.compile(r"^[a-z0-9-]{2,120}$")
+
+
+def _json_object(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
 
 
 def _split_name(full_name: str) -> tuple[str, str]:
@@ -961,6 +977,78 @@ async def validate_business_invite(token: str):
         }
 
 
+@router.get("/broker-branding/{broker_key}", response_model=BrokerBrandingRuntimeResponse)
+async def get_broker_branding_runtime(broker_key: str):
+    """Resolve broker branding config by broker slug or login subdomain."""
+    key = (broker_key or "").strip().lower()
+    if not BROKER_BRANDING_KEY_RE.fullmatch(key):
+        raise HTTPException(status_code=400, detail="broker_key must be 2-120 chars [a-z0-9-]")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                b.id as broker_id,
+                b.slug as broker_slug,
+                b.name as broker_name,
+                COALESCE(cfg.branding_mode, 'direct') as branding_mode,
+                COALESCE(NULLIF(cfg.brand_display_name, ''), b.name) as brand_display_name,
+                cfg.brand_legal_name,
+                cfg.logo_url,
+                cfg.favicon_url,
+                cfg.primary_color,
+                cfg.secondary_color,
+                cfg.login_subdomain,
+                cfg.custom_login_url,
+                cfg.support_email,
+                cfg.support_phone,
+                cfg.support_url,
+                cfg.email_from_name,
+                cfg.email_from_address,
+                COALESCE(cfg.powered_by_badge, true) as powered_by_badge,
+                COALESCE(cfg.hide_matcha_identity, false) as hide_matcha_identity,
+                COALESCE(cfg.mobile_branding_enabled, false) as mobile_branding_enabled,
+                COALESCE(cfg.theme, '{}'::jsonb) as theme,
+                CASE WHEN cfg.login_subdomain = $1 THEN 'subdomain' ELSE 'slug' END as resolved_by
+            FROM brokers b
+            LEFT JOIN broker_branding_configs cfg ON cfg.broker_id = b.id
+            WHERE b.status = 'active'
+              AND (b.slug = $1 OR cfg.login_subdomain = $1)
+            ORDER BY CASE WHEN cfg.login_subdomain = $1 THEN 0 ELSE 1 END, b.created_at ASC
+            LIMIT 1
+            """,
+            key,
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Broker branding not found")
+
+    return BrokerBrandingRuntimeResponse(
+        broker_id=row["broker_id"],
+        broker_slug=row["broker_slug"],
+        broker_name=row["broker_name"],
+        branding_mode=row["branding_mode"],
+        brand_display_name=row["brand_display_name"],
+        brand_legal_name=row["brand_legal_name"],
+        logo_url=row["logo_url"],
+        favicon_url=row["favicon_url"],
+        primary_color=row["primary_color"],
+        secondary_color=row["secondary_color"],
+        login_subdomain=row["login_subdomain"],
+        custom_login_url=row["custom_login_url"],
+        support_email=row["support_email"],
+        support_phone=row["support_phone"],
+        support_url=row["support_url"],
+        email_from_name=row["email_from_name"],
+        email_from_address=row["email_from_address"],
+        powered_by_badge=bool(row["powered_by_badge"]),
+        hide_matcha_identity=bool(row["hide_matcha_identity"]),
+        mobile_branding_enabled=bool(row["mobile_branding_enabled"]),
+        theme=_json_object(row["theme"]),
+        resolved_by="subdomain" if row["resolved_by"] == "subdomain" else "slug",
+    )
+
+
 @router.get("/broker-client-invite/{token}", response_model=BrokerClientInviteDetailsResponse)
 async def validate_broker_client_invite(token: str):
     """Validate a broker-generated client onboarding invite token."""
@@ -1644,10 +1732,13 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     bm.id, bm.user_id, bm.broker_id, bm.role as member_role, bm.created_at,
                     b.name as broker_name, b.slug as broker_slug, b.status as broker_status,
                     b.billing_mode, b.invoice_owner, b.support_routing,
+                    COALESCE(bb.branding_mode, 'direct') as branding_mode,
+                    COALESCE(NULLIF(bb.brand_display_name, ''), b.name) as brand_display_name,
                     COALESCE(b.terms_required_version, 'v1') as terms_required_version,
                     ta.accepted_at as terms_accepted_at
                 FROM broker_members bm
                 JOIN brokers b ON bm.broker_id = b.id
+                LEFT JOIN broker_branding_configs bb ON bb.broker_id = bm.broker_id
                 LEFT JOIN broker_terms_acceptances ta
                     ON ta.broker_id = bm.broker_id
                     AND ta.user_id = bm.user_id
@@ -1667,6 +1758,8 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "broker_id": str(profile["broker_id"]),
                     "broker_name": profile["broker_name"],
                     "broker_slug": profile["broker_slug"],
+                    "branding_mode": profile["branding_mode"],
+                    "brand_display_name": profile["brand_display_name"],
                     "member_role": profile["member_role"],
                     "broker_status": profile["broker_status"],
                     "billing_mode": profile["billing_mode"],

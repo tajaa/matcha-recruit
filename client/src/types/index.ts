@@ -559,6 +559,8 @@ export interface BrokerAuthProfile {
   broker_id: string;
   broker_name: string;
   broker_slug: string;
+  branding_mode: 'direct' | 'co_branded' | 'white_label';
+  brand_display_name: string;
   member_role: string;
   broker_status: string;
   billing_mode: string;
@@ -568,6 +570,31 @@ export interface BrokerAuthProfile {
   terms_accepted: boolean;
   terms_accepted_at: string | null;
   created_at: string;
+}
+
+export interface BrokerBrandingRuntime {
+  broker_id: string;
+  broker_slug: string;
+  broker_name: string;
+  branding_mode: 'direct' | 'co_branded' | 'white_label';
+  brand_display_name: string;
+  brand_legal_name: string | null;
+  logo_url: string | null;
+  favicon_url: string | null;
+  primary_color: string | null;
+  secondary_color: string | null;
+  login_subdomain: string | null;
+  custom_login_url: string | null;
+  support_email: string | null;
+  support_phone: string | null;
+  support_url: string | null;
+  email_from_name: string | null;
+  email_from_address: string | null;
+  powered_by_badge: boolean;
+  hide_matcha_identity: boolean;
+  mobile_branding_enabled: boolean;
+  theme: Record<string, unknown>;
+  resolved_by: 'slug' | 'subdomain';
 }
 
 export interface CurrentUserResponse {

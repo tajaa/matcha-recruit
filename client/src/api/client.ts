@@ -29,6 +29,7 @@ import type {
   TestAccountRegister,
   TestAccountProvisionResponse,
   CurrentUserResponse,
+  BrokerBrandingRuntime,
   BrokerClientSetup,
   BrokerClientSetupListResponse,
   BrokerClientSetupCreateRequest,
@@ -331,6 +332,15 @@ export const auth = {
         body: JSON.stringify({ terms_version }),
       }
     ),
+
+  getBrokerBranding: async (brokerKey: string): Promise<BrokerBrandingRuntime> => {
+    const response = await fetch(`${API_BASE}/auth/broker-branding/${encodeURIComponent(brokerKey.trim().toLowerCase())}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Broker branding lookup failed' }));
+      throw new Error(error.detail || 'Broker branding lookup failed');
+    }
+    return response.json();
+  },
 };
 
 // Companies
