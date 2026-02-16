@@ -6,6 +6,7 @@ import { Building2 } from 'lucide-react';
 const FEATURE_CONFIG: { key: string; label: string; section: string }[] = [
   { key: 'offer_letters', label: 'Offer Letters', section: 'Recruiting' },
   { key: 'policies', label: 'Policies', section: 'Recruiting' },
+  { key: 'handbooks', label: 'Handbooks', section: 'Recruiting' },
   { key: 'compliance', label: 'Compliance', section: 'Recruiting' },
   { key: 'compliance_plus', label: 'Compliance Plus', section: 'HR Tools' },
   { key: 'employees', label: 'Employees', section: 'Recruiting' },

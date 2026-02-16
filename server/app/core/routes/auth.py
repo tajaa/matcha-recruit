@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 TEST_ACCOUNT_FEATURES = {
     "offer_letters": True,
     "policies": True,
+    "handbooks": True,
     "compliance": True,
     "compliance_plus": True,
     "employees": True,

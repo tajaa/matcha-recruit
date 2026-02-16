@@ -6,6 +6,7 @@ from .auth import router as auth_router
 from .admin import router as admin_router
 from .blog import router as blog_router
 from .policies import router as policies_router
+from .handbooks import router as handbooks_router
 from .public_signatures import router as public_signatures_router
 from .compliance import router as compliance_router
 from .bulk_import import router as bulk_import_router
@@ -27,6 +28,8 @@ core_router.include_router(admin_router, prefix="/admin", tags=["admin"])
 core_router.include_router(blog_router, prefix="/blogs", tags=["blog"])
 core_router.include_router(policies_router, tags=["policies"],
                            dependencies=[Depends(require_feature("policies"))])
+core_router.include_router(handbooks_router, tags=["handbooks"],
+                           dependencies=[Depends(require_feature("handbooks"))])
 core_router.include_router(public_signatures_router, tags=["public-signatures"])
 core_router.include_router(compliance_router, prefix="/compliance", tags=["compliance"],
                            dependencies=[Depends(require_feature("compliance"))])
@@ -47,6 +50,7 @@ __all__ = [
     "admin_router",
     "blog_router",
     "policies_router",
+    "handbooks_router",
     "public_signatures_router",
     "compliance_router",
     "bulk_import_router",

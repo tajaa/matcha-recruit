@@ -1570,6 +1570,140 @@ export interface SignatureSubmit {
   accepted: boolean;
 }
 
+export type HandbookStatus = 'draft' | 'active' | 'archived';
+export type HandbookMode = 'single_state' | 'multi_state';
+export type HandbookSourceType = 'template' | 'upload';
+export type HandbookSectionType = 'core' | 'state' | 'custom' | 'uploaded';
+export type HandbookChangeStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface CompanyHandbookProfile {
+  company_id?: string;
+  legal_name: string;
+  dba: string | null;
+  ceo_or_president: string;
+  headcount: number | null;
+  remote_workers: boolean;
+  minors: boolean;
+  tipped_employees: boolean;
+  union_employees: boolean;
+  federal_contracts: boolean;
+  group_health_insurance: boolean;
+  background_checks: boolean;
+  hourly_employees: boolean;
+  salaried_employees: boolean;
+  commissioned_employees: boolean;
+  tip_pooling: boolean;
+  updated_by?: string | null;
+  updated_at?: string;
+}
+
+export interface HandbookScope {
+  id?: string;
+  state: string;
+  city: string | null;
+  zipcode: string | null;
+  location_id: string | null;
+}
+
+export interface HandbookSection {
+  id?: string;
+  section_key: string;
+  title: string;
+  content: string;
+  section_order: number;
+  section_type: HandbookSectionType;
+  jurisdiction_scope?: Record<string, unknown>;
+}
+
+export interface HandbookListItem {
+  id: string;
+  title: string;
+  status: HandbookStatus;
+  mode: HandbookMode;
+  source_type: HandbookSourceType;
+  active_version: number;
+  scope_states: string[];
+  pending_changes_count: number;
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+}
+
+export interface HandbookDetail {
+  id: string;
+  company_id: string;
+  title: string;
+  status: HandbookStatus;
+  mode: HandbookMode;
+  source_type: HandbookSourceType;
+  active_version: number;
+  file_url: string | null;
+  file_name: string | null;
+  scopes: HandbookScope[];
+  profile: CompanyHandbookProfile;
+  sections: HandbookSection[];
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+  created_by: string | null;
+}
+
+export interface HandbookCreate {
+  title: string;
+  mode: HandbookMode;
+  source_type: HandbookSourceType;
+  scopes: Omit<HandbookScope, 'id'>[];
+  profile: CompanyHandbookProfile;
+  custom_sections?: HandbookSection[];
+  file_url?: string | null;
+  file_name?: string | null;
+  create_from_template?: boolean;
+}
+
+export interface HandbookUpdate {
+  title?: string;
+  mode?: HandbookMode;
+  scopes?: Omit<HandbookScope, 'id'>[];
+  profile?: CompanyHandbookProfile;
+  sections?: HandbookSection[];
+  file_url?: string | null;
+  file_name?: string | null;
+}
+
+export interface HandbookChangeRequest {
+  id: string;
+  handbook_id: string;
+  handbook_version_id: string;
+  alert_id: string | null;
+  section_key: string | null;
+  old_content: string | null;
+  proposed_content: string;
+  rationale: string | null;
+  source_url: string | null;
+  effective_date: string | null;
+  status: HandbookChangeStatus;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export interface HandbookDistributionResult {
+  handbook_id: string;
+  handbook_version: number;
+  assigned_count: number;
+  skipped_existing_count: number;
+  distributed_at: string;
+}
+
+export interface HandbookAcknowledgementSummary {
+  handbook_id: string;
+  handbook_version: number;
+  assigned_count: number;
+  signed_count: number;
+  pending_count: number;
+  expired_count: number;
+}
+
 
 export interface IRAuditLogResponse {
   entries: IRAuditLogEntry[];

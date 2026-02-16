@@ -102,6 +102,14 @@ import type {
   PolicyUpdate,
   PolicySignature,
   SignatureRequest,
+  HandbookListItem,
+  HandbookDetail,
+  HandbookCreate,
+  HandbookUpdate,
+  CompanyHandbookProfile,
+  HandbookChangeRequest,
+  HandbookDistributionResult,
+  HandbookAcknowledgementSummary,
   OfferLetter,
   OfferLetterCreate,
   OfferLetterUpdate,
@@ -1866,6 +1874,124 @@ export const policies = {
       }),
 };
 
+export const handbooks = {
+  list: () =>
+    request<HandbookListItem[]>(`/handbooks`),
+
+  getProfile: () =>
+    request<CompanyHandbookProfile>(`/handbooks/profile`),
+
+  updateProfile: (data: CompanyHandbookProfile) =>
+    request<CompanyHandbookProfile>(`/handbooks/profile`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  uploadFile: async (file: File): Promise<{ url: string; filename: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/handbooks/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return response.json();
+  },
+
+  create: (data: HandbookCreate) =>
+    request<HandbookDetail>(`/handbooks`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  get: (id: string) =>
+    request<HandbookDetail>(`/handbooks/${id}`),
+
+  update: (id: string, data: HandbookUpdate) =>
+    request<HandbookDetail>(`/handbooks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  publish: (id: string) =>
+    request<{ id: string; status: string; active_version: number; published_at: string | null }>(`/handbooks/${id}/publish`, {
+      method: 'POST',
+    }),
+
+  archive: (id: string) =>
+    request<{ message: string }>(`/handbooks/${id}/archive`, {
+      method: 'POST',
+    }),
+
+  listChanges: (id: string) =>
+    request<HandbookChangeRequest[]>(`/handbooks/${id}/changes`),
+
+  acceptChange: (id: string, changeId: string) =>
+    request<HandbookChangeRequest>(`/handbooks/${id}/changes/${changeId}/accept`, {
+      method: 'POST',
+    }),
+
+  rejectChange: (id: string, changeId: string) =>
+    request<HandbookChangeRequest>(`/handbooks/${id}/changes/${changeId}/reject`, {
+      method: 'POST',
+    }),
+
+  distribute: (id: string) =>
+    request<HandbookDistributionResult>(`/handbooks/${id}/distribute`, {
+      method: 'POST',
+    }),
+
+  acknowledgements: (id: string) =>
+    request<HandbookAcknowledgementSummary>(`/handbooks/${id}/acknowledgements`),
+
+  downloadPdf: async (id: string, title: string): Promise<void> => {
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/handbooks/${id}/pdf`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Failed to download handbook' }));
+      throw new Error(err.detail || 'Failed to download handbook');
+    }
+
+    const blob = await response.blob();
+    const contentDisposition = response.headers.get('Content-Disposition') || '';
+    const filenameMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|")?([^\";]+)/i);
+    const responseFilename = filenameMatch
+      ? decodeURIComponent(filenameMatch[1].replace(/"/g, '').trim())
+      : null;
+
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = responseFilename || `${title.replace(/\s+/g, '-').toLowerCase() || 'handbook'}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  },
+};
+
 // Offer Letters API
 export const offerLetters = {
   list: () => request<OfferLetter[]>('/offer-letters'),
@@ -2232,6 +2358,7 @@ export const api = {
   adminSchedulers,
   blogs,
   policies,
+  handbooks,
   offerLetters,
   leadsAgent,
   aiChat,

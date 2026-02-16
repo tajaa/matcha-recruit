@@ -28,8 +28,11 @@ const ERCaseDetail = lazy(() => import('./pages/ERCaseDetail'));
 const OfferLetters = lazy(() => import('./pages/OfferLetters'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Policies = lazy(() => import('./pages/Policies'));
+const Handbooks = lazy(() => import('./pages/Handbooks'));
 const PolicyDetail = lazy(() => import('./pages/PolicyDetail'));
 const PolicyForm = lazy(() => import('./pages/PolicyForm'));
+const HandbookDetail = lazy(() => import('./pages/HandbookDetail'));
+const HandbookForm = lazy(() => import('./pages/HandbookForm'));
 const PolicySign = lazy(() => import('./pages/PolicySign'));
 const Compliance = lazy(() => import('./pages/Compliance'));
 const IRDashboard = lazy(() => import('./pages/IRDashboard'));
@@ -115,6 +118,16 @@ function LeaveRequestRedirect() {
   const { leaveId } = useParams<{ leaveId: string }>();
   const query = leaveId ? `?leaveId=${encodeURIComponent(leaveId)}` : '';
   return <Navigate to={`/app/matcha/leave${query}`} replace />;
+}
+
+function HandbookAliasDetailRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/app/matcha/handbook/${id}`} replace />;
+}
+
+function HandbookAliasEditRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/app/matcha/handbook/${id}/edit`} replace />;
 }
 
 function App() {
@@ -227,6 +240,43 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="matcha/handbook"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="handbooks">
+                    <Handbooks />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/handbook/new"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="handbooks">
+                    <HandbookForm />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/handbook/:id"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="handbooks">
+                    <HandbookDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/handbook/:id/edit"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="handbooks">
+                    <HandbookForm />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Legacy alias */}
+              <Route path="matcha/hand-book" element={<Navigate to="/app/matcha/handbook" replace />} />
+              <Route path="matcha/hand-book/new" element={<Navigate to="/app/matcha/handbook/new" replace />} />
+              <Route path="matcha/hand-book/:id" element={<HandbookAliasDetailRedirect />} />
+              <Route path="matcha/hand-book/:id/edit" element={<HandbookAliasEditRedirect />} />
               <Route
                 path="matcha/policies/new"
                 element={
