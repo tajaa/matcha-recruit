@@ -141,7 +141,7 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
                     """
                     INSERT INTO er_evidence_chunks
                     (document_id, case_id, chunk_index, content, speaker, page_number, line_start, line_end, embedding, metadata)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
                     """,
                     document_id,
                     case_id,
@@ -152,7 +152,7 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
                     chunk.get("line_start"),
                     chunk.get("line_end"),
                     embedding_str,
-                    {"char_start": chunk.get("char_start")},
+                    json.dumps({"char_start": chunk.get("char_start")}),
                 )
                 chunks_created += 1
 
