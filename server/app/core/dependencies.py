@@ -83,6 +83,7 @@ def require_roles(*roles):
 # Core role dependencies
 require_admin = require_roles("admin")
 require_candidate = require_roles("candidate")
+require_broker = require_roles("broker")
 
 
 async def get_optional_user(

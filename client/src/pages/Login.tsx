@@ -23,6 +23,8 @@ export function Login() {
         return '/app/jobs';
       case 'employee':
         return '/app/portal';
+      case 'broker':
+        return '/app/settings';
       case 'admin':
       case 'client':
       default:

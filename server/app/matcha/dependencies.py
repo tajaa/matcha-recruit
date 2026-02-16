@@ -12,22 +12,60 @@ from ..database import get_connection
 require_client = require_roles("client")
 require_employee = require_roles("employee")
 require_admin_or_client = require_roles("admin", "client")
+require_admin_or_client_or_broker = require_roles("admin", "client", "broker")
 require_admin_or_employee = require_roles("admin", "employee")
+require_broker = require_roles("broker")
+
+BROKER_ACTIVE_LINK_STATUSES = ("active", "grace")
 
 
-async def get_client_company_id(
-    current_user=Depends(get_current_user)
-) -> Optional[UUID]:
-    """Get the company_id for a client user. For admins, returns the first company."""
+def _ensure_company_is_accessible(company_status: Optional[str], rejection_reason: Optional[str]) -> None:
+    """Raise an HTTP 403 if a company status blocks access."""
+    status_value = company_status or "approved"
+    if status_value == "pending":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your business registration is pending approval. You will be notified once it's reviewed."
+        )
+    if status_value == "rejected":
+        reason = rejection_reason or "No reason provided"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your business registration was not approved. Reason: {reason}"
+        )
+
+
+async def resolve_accessible_company_scope(
+    current_user,
+    requested_company_id: Optional[UUID] = None,
+) -> dict:
+    """
+    Centralized tenant access resolver.
+
+    Returns scope metadata used by company-scoped routes and dependencies.
+    """
     async with get_connection() as conn:
         if current_user.role == "admin":
-            # Admin users: default to first company
-            # TODO: Add company selector for admins to switch between companies
-            company_id = await conn.fetchval("SELECT id FROM companies ORDER BY created_at LIMIT 1")
-            return company_id
+            selected_company_id = requested_company_id
+            if selected_company_id is not None:
+                exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1)", selected_company_id)
+                if not exists:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+            else:
+                selected_company_id = await conn.fetchval("SELECT id FROM companies ORDER BY created_at LIMIT 1")
+
+            company_ids = [selected_company_id] if selected_company_id else []
+            return {
+                "company_id": selected_company_id,
+                "company_ids": company_ids,
+                "actor_role": "admin",
+                "broker_id": None,
+                "broker_member_role": None,
+                "link_permissions": {},
+                "terms_accepted": True,
+            }
 
         if current_user.role == "client":
-            # Get company with status check
             company = await conn.fetchrow(
                 """
                 SELECT c.company_id, comp.status, comp.rejection_reason
@@ -37,29 +75,219 @@ async def get_client_company_id(
                 """,
                 current_user.id
             )
-
             if not company:
-                return None
+                return {
+                    "company_id": None,
+                    "company_ids": [],
+                    "actor_role": "client",
+                    "broker_id": None,
+                    "broker_member_role": None,
+                    "link_permissions": {},
+                    "terms_accepted": True,
+                }
 
-            # Check company approval status
-            company_status = company["status"] or "approved"
+            _ensure_company_is_accessible(company["status"], company["rejection_reason"])
+            company_id = company["company_id"]
+            if requested_company_id and requested_company_id != company_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for requested company")
 
-            if company_status == "pending":
+            return {
+                "company_id": company_id,
+                "company_ids": [company_id],
+                "actor_role": "client",
+                "broker_id": None,
+                "broker_member_role": None,
+                "link_permissions": {},
+                "terms_accepted": True,
+            }
+
+        if current_user.role == "employee":
+            company = await conn.fetchrow(
+                """
+                SELECT e.org_id as company_id, comp.status, comp.rejection_reason
+                FROM employees e
+                JOIN companies comp ON e.org_id = comp.id
+                WHERE e.user_id = $1
+                """,
+                current_user.id
+            )
+            if not company:
+                return {
+                    "company_id": None,
+                    "company_ids": [],
+                    "actor_role": "employee",
+                    "broker_id": None,
+                    "broker_member_role": None,
+                    "link_permissions": {},
+                    "terms_accepted": True,
+                }
+
+            _ensure_company_is_accessible(company["status"], company["rejection_reason"])
+            company_id = company["company_id"]
+            if requested_company_id and requested_company_id != company_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for requested company")
+
+            return {
+                "company_id": company_id,
+                "company_ids": [company_id],
+                "actor_role": "employee",
+                "broker_id": None,
+                "broker_member_role": None,
+                "link_permissions": {},
+                "terms_accepted": True,
+            }
+
+        if current_user.role == "broker":
+            membership = await conn.fetchrow(
+                """
+                SELECT
+                    bm.broker_id,
+                    bm.role as member_role,
+                    bm.is_active as member_active,
+                    b.status as broker_status,
+                    COALESCE(b.terms_required_version, 'v1') as terms_required_version
+                FROM broker_members bm
+                JOIN brokers b ON b.id = bm.broker_id
+                WHERE bm.user_id = $1
+                ORDER BY bm.created_at ASC
+                LIMIT 1
+                """,
+                current_user.id,
+            )
+            if not membership or not membership["member_active"]:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Your business registration is pending approval. You will be notified once it's reviewed."
+                    detail="No active broker membership found for this account",
                 )
 
-            if company_status == "rejected":
-                reason = company["rejection_reason"] or "No reason provided"
+            if membership["broker_status"] != "active":
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Your business registration was not approved. Reason: {reason}"
+                    detail="Broker account is not active",
                 )
 
-            return company["company_id"]
+            required_terms = membership["terms_required_version"]
+            terms_accepted = await conn.fetchval(
+                """
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM broker_terms_acceptances
+                    WHERE broker_id = $1
+                      AND user_id = $2
+                      AND terms_version = $3
+                )
+                """,
+                membership["broker_id"],
+                current_user.id,
+                required_terms,
+            )
+            if not terms_accepted:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Broker partner terms must be accepted before accessing client companies",
+                )
 
-        return None
+            if requested_company_id:
+                row = await conn.fetchrow(
+                    """
+                    SELECT
+                        l.company_id,
+                        l.permissions,
+                        comp.status as company_status,
+                        comp.rejection_reason
+                    FROM broker_company_links l
+                    JOIN companies comp ON comp.id = l.company_id
+                    WHERE l.broker_id = $1
+                      AND l.company_id = $2
+                      AND l.status = ANY($3::text[])
+                    """,
+                    membership["broker_id"],
+                    requested_company_id,
+                    list(BROKER_ACTIVE_LINK_STATUSES),
+                )
+                if not row:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Broker does not have access to the requested company",
+                    )
+                _ensure_company_is_accessible(row["company_status"], row["rejection_reason"])
+                link_permissions = row["permissions"] if isinstance(row["permissions"], dict) else {}
+                return {
+                    "company_id": row["company_id"],
+                    "company_ids": [row["company_id"]],
+                    "actor_role": "broker",
+                    "broker_id": membership["broker_id"],
+                    "broker_member_role": membership["member_role"],
+                    "link_permissions": link_permissions,
+                    "terms_accepted": True,
+                }
+
+            rows = await conn.fetch(
+                """
+                SELECT
+                    l.company_id,
+                    l.permissions,
+                    comp.status as company_status,
+                    comp.rejection_reason
+                FROM broker_company_links l
+                JOIN companies comp ON comp.id = l.company_id
+                WHERE l.broker_id = $1
+                  AND l.status = ANY($2::text[])
+                ORDER BY l.activated_at NULLS LAST, l.created_at
+                """,
+                membership["broker_id"],
+                list(BROKER_ACTIVE_LINK_STATUSES),
+            )
+
+            valid_company_ids: list[UUID] = []
+            selected_permissions: dict = {}
+            for row in rows:
+                # Pending/rejected client registrations are not accessible
+                if (row["company_status"] or "approved") in {"pending", "rejected"}:
+                    continue
+                valid_company_ids.append(row["company_id"])
+                if not selected_permissions:
+                    selected_permissions = row["permissions"] if isinstance(row["permissions"], dict) else {}
+
+            selected_company_id = valid_company_ids[0] if valid_company_ids else None
+            return {
+                "company_id": selected_company_id,
+                "company_ids": valid_company_ids,
+                "actor_role": "broker",
+                "broker_id": membership["broker_id"],
+                "broker_member_role": membership["member_role"],
+                "link_permissions": selected_permissions,
+                "terms_accepted": True,
+            }
+
+    return {
+        "company_id": None,
+        "company_ids": [],
+        "actor_role": current_user.role,
+        "broker_id": None,
+        "broker_member_role": None,
+        "link_permissions": {},
+        "terms_accepted": True,
+    }
+
+
+async def get_accessible_company_scope(
+    current_user=Depends(get_current_user),
+) -> dict:
+    """Dependency that returns centralized company access scope."""
+    return await resolve_accessible_company_scope(current_user)
+
+
+async def get_client_company_id(
+    current_user=Depends(get_current_user)
+) -> Optional[UUID]:
+    """
+    Backwards-compatible accessor for legacy company-scoped routes.
+
+    This now delegates to the centralized resolver.
+    """
+    scope = await resolve_accessible_company_scope(current_user)
+    return scope.get("company_id")
 
 
 async def get_employee_info(
@@ -147,52 +375,30 @@ def require_feature(feature_name: str):
         if current_user.role == "admin":
             return current_user
 
+        scope = await resolve_accessible_company_scope(current_user)
+        company_id = scope.get("company_id")
+        if not company_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No company associated with this account"
+            )
+
         async with get_connection() as conn:
-            company_row = None
-
-            if current_user.role == "client":
-                company_row = await conn.fetchrow(
-                    """
-                    SELECT comp.id, comp.status, comp.rejection_reason,
-                           COALESCE(comp.enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features
-                    FROM clients c
-                    JOIN companies comp ON c.company_id = comp.id
-                    WHERE c.user_id = $1
-                    """,
-                    current_user.id
-                )
-            elif current_user.role == "employee":
-                company_row = await conn.fetchrow(
-                    """
-                    SELECT comp.id, comp.status, comp.rejection_reason,
-                           COALESCE(comp.enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features
-                    FROM employees e
-                    JOIN companies comp ON e.org_id = comp.id
-                    WHERE e.user_id = $1
-                    """,
-                    current_user.id
-                )
-
-            if not company_row:
+            enabled_features = await conn.fetchval(
+                """
+                SELECT COALESCE(enabled_features, '{"offer_letters": true}'::jsonb)
+                FROM companies
+                WHERE id = $1
+                """,
+                company_id,
+            )
+            if enabled_features is None:
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="No company associated with this account"
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Company not found",
                 )
 
-            # Check company approval status
-            company_status = company_row["status"] or "approved"
-            if company_status == "pending":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Your business registration is pending approval."
-                )
-            if company_status == "rejected":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Your business registration was not approved."
-                )
-
-            features = merge_company_features(company_row["enabled_features"])
+            features = merge_company_features(enabled_features)
 
             if not features.get(feature_name, False):
                 raise HTTPException(

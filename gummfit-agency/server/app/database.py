@@ -51,7 +51,7 @@ async def init_db():
                     ALTER TABLE users DROP CONSTRAINT users_role_check;
                 END IF;
                 ALTER TABLE users ADD CONSTRAINT users_role_check
-                    CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency', 'gumfit_admin'));
+                    CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'broker', 'creator', 'agency', 'gumfit_admin'));
             EXCEPTION WHEN others THEN
                 NULL;
             END $$;

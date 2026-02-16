@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
@@ -10,7 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, Query, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ from ..services.compliance_service import (
     _jurisdiction_row_to_dict,
 )
 from ..services.rate_limiter import get_rate_limiter
+from ..services.auth import hash_password
 from ...config import get_settings
 
 router = APIRouter()
@@ -548,6 +550,478 @@ class SchedulerUpdateRequest(BaseModel):
     """Request model for updating scheduler settings."""
     enabled: Optional[bool] = None
     max_per_cycle: Optional[int] = None
+
+
+# =============================================================================
+# Broker Channel Management
+# =============================================================================
+
+VALID_BROKER_STATUSES = {"pending", "active", "suspended", "terminated"}
+VALID_BROKER_SUPPORT_ROUTING = {"broker_first", "matcha_first", "shared"}
+VALID_BROKER_BILLING_MODES = {"direct", "reseller", "hybrid"}
+VALID_INVOICE_OWNERS = {"matcha", "broker"}
+VALID_BROKER_CONTRACT_STATUSES = {"draft", "active", "suspended", "terminated"}
+VALID_BROKER_LINK_STATUSES = {"pending", "active", "suspending", "grace", "terminated", "transferred"}
+VALID_POST_TERMINATION_MODES = {"convert_to_direct", "transfer_to_broker", "sunset"}
+
+
+def _slugify_broker_name(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return slug[:120] or "broker"
+
+
+class BrokerCreateRequest(BaseModel):
+    broker_name: str = Field(..., min_length=2, max_length=255)
+    owner_email: EmailStr
+    owner_name: str = Field(..., min_length=2, max_length=255)
+    owner_password: Optional[str] = Field(default=None, min_length=8)
+    slug: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    support_routing: str = Field(default="shared")
+    billing_mode: str = Field(default="direct")
+    invoice_owner: str = Field(default="matcha")
+    terms_required_version: str = Field(default="v1", min_length=1, max_length=50)
+
+
+class BrokerUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    support_routing: Optional[str] = None
+    terms_required_version: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    terminated_at: Optional[datetime] = None
+    grace_until: Optional[datetime] = None
+    post_termination_mode: Optional[str] = None
+
+
+class BrokerContractRequest(BaseModel):
+    status: str = Field(default="active")
+    billing_mode: str
+    invoice_owner: str
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    base_platform_fee: float = 0.0
+    pepm_rate: float = 0.0
+    minimum_monthly_commit: float = 0.0
+    pricing_rules: dict = {}
+
+
+class BrokerCompanyLinkRequest(BaseModel):
+    status: str = Field(default="active")
+    permissions: dict = {}
+    post_termination_mode: Optional[str] = None
+    grace_until: Optional[datetime] = None
+
+
+def _validate_broker_enums(*, status_value: Optional[str] = None, support_routing: Optional[str] = None,
+                           billing_mode: Optional[str] = None, invoice_owner: Optional[str] = None,
+                           contract_status: Optional[str] = None,
+                           link_status: Optional[str] = None, post_termination_mode: Optional[str] = None):
+    if status_value is not None and status_value not in VALID_BROKER_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid broker status '{status_value}'")
+    if support_routing is not None and support_routing not in VALID_BROKER_SUPPORT_ROUTING:
+        raise HTTPException(status_code=400, detail=f"Invalid support_routing '{support_routing}'")
+    if billing_mode is not None and billing_mode not in VALID_BROKER_BILLING_MODES:
+        raise HTTPException(status_code=400, detail=f"Invalid billing_mode '{billing_mode}'")
+    if invoice_owner is not None and invoice_owner not in VALID_INVOICE_OWNERS:
+        raise HTTPException(status_code=400, detail=f"Invalid invoice_owner '{invoice_owner}'")
+    if contract_status is not None and contract_status not in VALID_BROKER_CONTRACT_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid contract status '{contract_status}'")
+    if link_status is not None and link_status not in VALID_BROKER_LINK_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid link status '{link_status}'")
+    if post_termination_mode is not None and post_termination_mode not in VALID_POST_TERMINATION_MODES:
+        raise HTTPException(status_code=400, detail=f"Invalid post_termination_mode '{post_termination_mode}'")
+
+
+@router.post("/brokers", dependencies=[Depends(require_admin)])
+async def create_broker(
+    request: BrokerCreateRequest,
+    current_user=Depends(require_admin),
+):
+    """Create a broker org, owner user, owner membership, and initial active contract."""
+    _validate_broker_enums(
+        support_routing=request.support_routing,
+        billing_mode=request.billing_mode,
+        invoice_owner=request.invoice_owner,
+    )
+
+    slug_base = _slugify_broker_name(request.slug or request.broker_name)
+    generated_password = not bool(request.owner_password and request.owner_password.strip())
+    owner_password = request.owner_password.strip() if request.owner_password else secrets.token_urlsafe(12)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.owner_email)
+            if existing:
+                raise HTTPException(status_code=400, detail="Owner email is already registered")
+
+            slug = slug_base
+            suffix = 2
+            while await conn.fetchval("SELECT EXISTS(SELECT 1 FROM brokers WHERE slug = $1)", slug):
+                slug = f"{slug_base}-{suffix}"
+                suffix += 1
+
+            user = await conn.fetchrow(
+                """
+                INSERT INTO users (email, password_hash, role)
+                VALUES ($1, $2, 'broker')
+                RETURNING id, email, role, created_at
+                """,
+                request.owner_email,
+                hash_password(owner_password),
+            )
+
+            broker = await conn.fetchrow(
+                """
+                INSERT INTO brokers (
+                    name, slug, status, support_routing, billing_mode, invoice_owner,
+                    terms_required_version, created_by
+                )
+                VALUES ($1, $2, 'active', $3, $4, $5, $6, $7)
+                RETURNING id, name, slug, status, support_routing, billing_mode, invoice_owner, terms_required_version, created_at
+                """,
+                request.broker_name.strip(),
+                slug,
+                request.support_routing,
+                request.billing_mode,
+                request.invoice_owner,
+                request.terms_required_version.strip(),
+                current_user.id,
+            )
+
+            await conn.execute(
+                """
+                INSERT INTO broker_members (broker_id, user_id, role, permissions, is_active)
+                VALUES ($1, $2, 'owner', $3::jsonb, true)
+                """,
+                broker["id"],
+                user["id"],
+                json.dumps({"can_manage_team": True, "can_manage_contracts": True, "can_manage_clients": True}),
+            )
+
+            contract = await conn.fetchrow(
+                """
+                INSERT INTO broker_contracts (
+                    broker_id, status, billing_mode, invoice_owner, currency,
+                    base_platform_fee, pepm_rate, minimum_monthly_commit,
+                    pricing_rules, effective_at, created_by
+                )
+                VALUES ($1, 'active', $2, $3, 'USD', 0, 0, 0, '{}'::jsonb, NOW(), $4)
+                RETURNING id
+                """,
+                broker["id"],
+                request.billing_mode,
+                request.invoice_owner,
+                current_user.id,
+            )
+
+    return {
+        "status": "created",
+        "broker": {
+            "id": str(broker["id"]),
+            "name": broker["name"],
+            "slug": broker["slug"],
+            "status": broker["status"],
+            "support_routing": broker["support_routing"],
+            "billing_mode": broker["billing_mode"],
+            "invoice_owner": broker["invoice_owner"],
+            "terms_required_version": broker["terms_required_version"],
+            "created_at": broker["created_at"].isoformat() if broker["created_at"] else None,
+        },
+        "owner": {
+            "user_id": str(user["id"]),
+            "email": user["email"],
+            "name": request.owner_name,
+            "generated_password": generated_password,
+            "password": owner_password,
+        },
+        "contract_id": str(contract["id"]),
+    }
+
+
+@router.get("/brokers", dependencies=[Depends(require_admin)])
+async def list_brokers():
+    """List brokers with contract, member, and linked-company counts."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                b.id, b.name, b.slug, b.status, b.support_routing, b.billing_mode,
+                b.invoice_owner, b.terms_required_version, b.created_at,
+                COUNT(DISTINCT bm.user_id) FILTER (WHERE bm.is_active = true) AS active_member_count,
+                COUNT(DISTINCT bcl.company_id) FILTER (WHERE bcl.status IN ('active', 'grace')) AS active_company_count,
+                bc.id AS active_contract_id,
+                bc.currency,
+                bc.base_platform_fee,
+                bc.pepm_rate,
+                bc.minimum_monthly_commit
+            FROM brokers b
+            LEFT JOIN broker_members bm ON bm.broker_id = b.id
+            LEFT JOIN broker_company_links bcl ON bcl.broker_id = b.id
+            LEFT JOIN LATERAL (
+                SELECT id, currency, base_platform_fee, pepm_rate, minimum_monthly_commit
+                FROM broker_contracts
+                WHERE broker_id = b.id AND status = 'active'
+                ORDER BY effective_at DESC
+                LIMIT 1
+            ) bc ON true
+            GROUP BY
+                b.id, b.name, b.slug, b.status, b.support_routing, b.billing_mode,
+                b.invoice_owner, b.terms_required_version, b.created_at,
+                bc.id, bc.currency, bc.base_platform_fee, bc.pepm_rate, bc.minimum_monthly_commit
+            ORDER BY b.created_at DESC
+            """
+        )
+
+        return {
+            "brokers": [
+                {
+                    "id": str(row["id"]),
+                    "name": row["name"],
+                    "slug": row["slug"],
+                    "status": row["status"],
+                    "support_routing": row["support_routing"],
+                    "billing_mode": row["billing_mode"],
+                    "invoice_owner": row["invoice_owner"],
+                    "terms_required_version": row["terms_required_version"],
+                    "active_member_count": row["active_member_count"],
+                    "active_company_count": row["active_company_count"],
+                    "active_contract": {
+                        "id": str(row["active_contract_id"]) if row["active_contract_id"] else None,
+                        "currency": row["currency"],
+                        "base_platform_fee": float(row["base_platform_fee"]) if row["base_platform_fee"] is not None else None,
+                        "pepm_rate": float(row["pepm_rate"]) if row["pepm_rate"] is not None else None,
+                        "minimum_monthly_commit": float(row["minimum_monthly_commit"]) if row["minimum_monthly_commit"] is not None else None,
+                    },
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                }
+                for row in rows
+            ],
+            "total": len(rows),
+        }
+
+
+@router.patch("/brokers/{broker_id}", dependencies=[Depends(require_admin)])
+async def update_broker(broker_id: UUID, request: BrokerUpdateRequest):
+    """Update broker governance fields (status, routing, terms, lifecycle controls)."""
+    _validate_broker_enums(
+        status_value=request.status,
+        support_routing=request.support_routing,
+        post_termination_mode=request.post_termination_mode,
+    )
+
+    updates = []
+    values: list = []
+    if request.status is not None:
+        updates.append(f"status = ${len(values) + 1}")
+        values.append(request.status)
+    if request.support_routing is not None:
+        updates.append(f"support_routing = ${len(values) + 1}")
+        values.append(request.support_routing)
+    if request.terms_required_version is not None:
+        updates.append(f"terms_required_version = ${len(values) + 1}")
+        values.append(request.terms_required_version.strip())
+    if request.terminated_at is not None:
+        updates.append(f"terminated_at = ${len(values) + 1}")
+        values.append(request.terminated_at)
+    if request.grace_until is not None:
+        updates.append(f"grace_until = ${len(values) + 1}")
+        values.append(request.grace_until)
+    if request.post_termination_mode is not None:
+        updates.append(f"post_termination_mode = ${len(values) + 1}")
+        values.append(request.post_termination_mode)
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields provided for update")
+
+    updates.append("updated_at = NOW()")
+    values.append(broker_id)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"""
+            UPDATE brokers
+            SET {', '.join(updates)}
+            WHERE id = ${len(values)}
+            RETURNING id, name, slug, status, support_routing, billing_mode, invoice_owner, terms_required_version,
+                     terminated_at, grace_until, post_termination_mode, updated_at
+            """,
+            *values,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Broker not found")
+
+    return {
+        "status": "updated",
+        "broker": {
+            "id": str(row["id"]),
+            "name": row["name"],
+            "slug": row["slug"],
+            "status": row["status"],
+            "support_routing": row["support_routing"],
+            "billing_mode": row["billing_mode"],
+            "invoice_owner": row["invoice_owner"],
+            "terms_required_version": row["terms_required_version"],
+            "terminated_at": row["terminated_at"].isoformat() if row["terminated_at"] else None,
+            "grace_until": row["grace_until"].isoformat() if row["grace_until"] else None,
+            "post_termination_mode": row["post_termination_mode"],
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        },
+    }
+
+
+@router.put("/brokers/{broker_id}/contract", dependencies=[Depends(require_admin)])
+async def upsert_broker_contract(
+    broker_id: UUID,
+    request: BrokerContractRequest,
+    current_user=Depends(require_admin),
+):
+    """Create a new broker contract version and optionally replace active contract."""
+    _validate_broker_enums(
+        contract_status=request.status,
+        billing_mode=request.billing_mode,
+        invoice_owner=request.invoice_owner,
+    )
+    currency = request.currency.upper().strip()
+    if len(currency) != 3:
+        raise HTTPException(status_code=400, detail="Currency must be a 3-letter ISO code")
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM brokers WHERE id = $1)", broker_id)
+            if not exists:
+                raise HTTPException(status_code=404, detail="Broker not found")
+
+            if request.status == "active":
+                await conn.execute(
+                    """
+                    UPDATE broker_contracts
+                    SET status = 'suspended', updated_at = NOW()
+                    WHERE broker_id = $1 AND status = 'active'
+                    """,
+                    broker_id,
+                )
+
+            contract = await conn.fetchrow(
+                """
+                INSERT INTO broker_contracts (
+                    broker_id, status, billing_mode, invoice_owner, currency,
+                    base_platform_fee, pepm_rate, minimum_monthly_commit,
+                    pricing_rules, effective_at, created_by
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW(), $10)
+                RETURNING id, broker_id, status, billing_mode, invoice_owner, currency,
+                          base_platform_fee, pepm_rate, minimum_monthly_commit, pricing_rules, effective_at, created_at
+                """,
+                broker_id,
+                request.status,
+                request.billing_mode,
+                request.invoice_owner,
+                currency,
+                request.base_platform_fee,
+                request.pepm_rate,
+                request.minimum_monthly_commit,
+                json.dumps(request.pricing_rules or {}),
+                current_user.id,
+            )
+
+            await conn.execute(
+                """
+                UPDATE brokers
+                SET billing_mode = $1, invoice_owner = $2, updated_at = NOW()
+                WHERE id = $3
+                """,
+                request.billing_mode,
+                request.invoice_owner,
+                broker_id,
+            )
+
+    return {
+        "status": "saved",
+        "contract": {
+            "id": str(contract["id"]),
+            "broker_id": str(contract["broker_id"]),
+            "status": contract["status"],
+            "billing_mode": contract["billing_mode"],
+            "invoice_owner": contract["invoice_owner"],
+            "currency": contract["currency"],
+            "base_platform_fee": float(contract["base_platform_fee"]),
+            "pepm_rate": float(contract["pepm_rate"]),
+            "minimum_monthly_commit": float(contract["minimum_monthly_commit"]),
+            "pricing_rules": contract["pricing_rules"] if isinstance(contract["pricing_rules"], dict) else {},
+            "effective_at": contract["effective_at"].isoformat() if contract["effective_at"] else None,
+            "created_at": contract["created_at"].isoformat() if contract["created_at"] else None,
+        },
+    }
+
+
+@router.put("/brokers/{broker_id}/companies/{company_id}", dependencies=[Depends(require_admin)])
+async def upsert_broker_company_link(
+    broker_id: UUID,
+    company_id: UUID,
+    request: BrokerCompanyLinkRequest,
+    current_user=Depends(require_admin),
+):
+    """Create/update broker-to-company linkage and delegated permissions."""
+    _validate_broker_enums(link_status=request.status, post_termination_mode=request.post_termination_mode)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            broker_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM brokers WHERE id = $1)", broker_id)
+            if not broker_exists:
+                raise HTTPException(status_code=404, detail="Broker not found")
+
+            company_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1)", company_id)
+            if not company_exists:
+                raise HTTPException(status_code=404, detail="Company not found")
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO broker_company_links (
+                    broker_id, company_id, status, permissions, linked_at, activated_at,
+                    grace_until, post_termination_mode, created_by, updated_at
+                )
+                VALUES (
+                    $1, $2, $3, $4::jsonb, NOW(),
+                    CASE WHEN $3 IN ('active', 'grace') THEN NOW() ELSE NULL END,
+                    $5, $6, $7, NOW()
+                )
+                ON CONFLICT (broker_id, company_id)
+                DO UPDATE SET
+                    status = EXCLUDED.status,
+                    permissions = EXCLUDED.permissions,
+                    activated_at = CASE
+                        WHEN broker_company_links.activated_at IS NULL
+                             AND EXCLUDED.status IN ('active', 'grace') THEN NOW()
+                        ELSE broker_company_links.activated_at
+                    END,
+                    grace_until = EXCLUDED.grace_until,
+                    post_termination_mode = EXCLUDED.post_termination_mode,
+                    updated_at = NOW()
+                RETURNING id, broker_id, company_id, status, permissions, linked_at, activated_at, terminated_at,
+                          grace_until, post_termination_mode, updated_at
+                """,
+                broker_id,
+                company_id,
+                request.status,
+                json.dumps(request.permissions or {}),
+                request.grace_until,
+                request.post_termination_mode,
+                current_user.id,
+            )
+
+    return {
+        "status": "linked",
+        "link": {
+            "id": str(row["id"]),
+            "broker_id": str(row["broker_id"]),
+            "company_id": str(row["company_id"]),
+            "status": row["status"],
+            "permissions": row["permissions"] if isinstance(row["permissions"], dict) else {},
+            "linked_at": row["linked_at"].isoformat() if row["linked_at"] else None,
+            "activated_at": row["activated_at"].isoformat() if row["activated_at"] else None,
+            "terminated_at": row["terminated_at"].isoformat() if row["terminated_at"] else None,
+            "grace_until": row["grace_until"].isoformat() if row["grace_until"] else None,
+            "post_termination_mode": row["post_termination_mode"],
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        },
+    }
 
 
 # =============================================================================

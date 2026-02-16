@@ -415,7 +415,7 @@ export interface SavedJob extends SavedJobCreate {
 }
 
 // Auth types
-export type UserRole = 'admin' | 'client' | 'candidate' | 'employee';
+export type UserRole = 'admin' | 'client' | 'candidate' | 'employee' | 'broker';
 
 export interface User {
   id: string;
@@ -552,6 +552,23 @@ export interface CandidateAuthProfile {
   created_at: string;
 }
 
+export interface BrokerAuthProfile {
+  id: string;
+  user_id: string;
+  broker_id: string;
+  broker_name: string;
+  broker_slug: string;
+  member_role: string;
+  broker_status: string;
+  billing_mode: string;
+  invoice_owner: string;
+  support_routing: string;
+  terms_required_version: string;
+  terms_accepted: boolean;
+  terms_accepted_at: string | null;
+  created_at: string;
+}
+
 export interface CurrentUserResponse {
   user: {
     id: string;
@@ -561,7 +578,7 @@ export interface CurrentUserResponse {
     interview_prep_tokens?: number;
     allowed_interview_roles?: string[];
   };
-  profile: AdminProfile | ClientProfile | CandidateAuthProfile | null;
+  profile: AdminProfile | ClientProfile | CandidateAuthProfile | BrokerAuthProfile | null;
   onboarding_needed?: Record<string, boolean>;
 }
 

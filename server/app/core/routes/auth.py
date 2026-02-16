@@ -3,7 +3,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, Request, status
 
 from ...database import get_connection
 from uuid import UUID
@@ -13,6 +13,7 @@ from ..models.auth import (
     AdminRegister, ClientRegister, CandidateRegister, EmployeeRegister,
     BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
+    BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
     CurrentUser,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
@@ -22,7 +23,7 @@ from ..services.auth import (
     hash_password, verify_password,
     create_access_token, create_refresh_token, decode_token
 )
-from ..dependencies import get_current_user, require_admin
+from ..dependencies import get_current_user, require_admin, require_broker
 from ..feature_flags import (
     default_company_features_json,
     merge_company_features,
@@ -1417,7 +1418,109 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                 } if profile else None
             }
 
+        elif current_user.role == "broker":
+            profile = await conn.fetchrow(
+                """
+                SELECT
+                    bm.id, bm.user_id, bm.broker_id, bm.role as member_role, bm.created_at,
+                    b.name as broker_name, b.slug as broker_slug, b.status as broker_status,
+                    b.billing_mode, b.invoice_owner, b.support_routing,
+                    COALESCE(b.terms_required_version, 'v1') as terms_required_version,
+                    ta.accepted_at as terms_accepted_at
+                FROM broker_members bm
+                JOIN brokers b ON bm.broker_id = b.id
+                LEFT JOIN broker_terms_acceptances ta
+                    ON ta.broker_id = bm.broker_id
+                    AND ta.user_id = bm.user_id
+                    AND ta.terms_version = COALESCE(b.terms_required_version, 'v1')
+                WHERE bm.user_id = $1 AND bm.is_active = true
+                ORDER BY bm.created_at ASC
+                LIMIT 1
+                """,
+                current_user.id
+            )
+            return {
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
+                "profile": {
+                    "id": str(profile["id"]),
+                    "user_id": str(profile["user_id"]),
+                    "broker_id": str(profile["broker_id"]),
+                    "broker_name": profile["broker_name"],
+                    "broker_slug": profile["broker_slug"],
+                    "member_role": profile["member_role"],
+                    "broker_status": profile["broker_status"],
+                    "billing_mode": profile["billing_mode"],
+                    "invoice_owner": profile["invoice_owner"],
+                    "support_routing": profile["support_routing"],
+                    "terms_required_version": profile["terms_required_version"],
+                    "terms_accepted": profile["terms_accepted_at"] is not None,
+                    "terms_accepted_at": profile["terms_accepted_at"].isoformat() if profile["terms_accepted_at"] else None,
+                    "created_at": profile["created_at"].isoformat(),
+                } if profile else None
+            }
+
     return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role}, "profile": None}
+
+
+@router.post("/broker/accept-terms", response_model=BrokerTermsAcceptanceResponse)
+async def accept_broker_terms(
+    payload: BrokerTermsAcceptanceRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(require_broker),
+):
+    """Record broker partner terms acceptance for the active broker membership."""
+    async with get_connection() as conn:
+        membership = await conn.fetchrow(
+            """
+            SELECT
+                bm.broker_id,
+                b.status,
+                COALESCE(b.terms_required_version, 'v1') as terms_required_version
+            FROM broker_members bm
+            JOIN brokers b ON bm.broker_id = b.id
+            WHERE bm.user_id = $1 AND bm.is_active = true
+            ORDER BY bm.created_at ASC
+            LIMIT 1
+            """,
+            current_user.id,
+        )
+
+        if not membership:
+            raise HTTPException(status_code=404, detail="Broker membership not found")
+
+        if membership["status"] != "active":
+            raise HTTPException(status_code=403, detail="Broker account is not active")
+
+        terms_version = (payload.terms_version or membership["terms_required_version"] or "v1").strip() or "v1"
+        ip_address = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+
+        accepted_at = await conn.fetchval(
+            """
+            INSERT INTO broker_terms_acceptances (
+                broker_id, user_id, terms_version, ip_address, user_agent
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (broker_id, user_id, terms_version)
+            DO UPDATE SET
+                accepted_at = NOW(),
+                ip_address = EXCLUDED.ip_address,
+                user_agent = EXCLUDED.user_agent
+            RETURNING accepted_at
+            """,
+            membership["broker_id"],
+            current_user.id,
+            terms_version,
+            ip_address,
+            user_agent,
+        )
+
+    return BrokerTermsAcceptanceResponse(
+        status="accepted",
+        broker_id=membership["broker_id"],
+        terms_version=terms_version,
+        accepted_at=accepted_at,
+    )
 
 
 @router.post("/logout")

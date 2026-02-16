@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 from decimal import Decimal
 
-UserRole = Literal["admin", "client", "candidate", "employee"]
+UserRole = Literal["admin", "client", "candidate", "employee", "broker"]
 
 
 class UserBase(BaseModel):
@@ -178,11 +178,28 @@ class EmployeeProfile(BaseModel):
     created_at: datetime
 
 
+class BrokerProfile(BaseModel):
+    id: UUID  # broker_members.id
+    user_id: UUID
+    broker_id: UUID
+    broker_name: str
+    broker_slug: str
+    member_role: str
+    broker_status: str
+    billing_mode: str
+    invoice_owner: str
+    support_routing: str
+    terms_required_version: str
+    terms_accepted: bool = False
+    terms_accepted_at: Optional[datetime] = None
+    created_at: datetime
+
+
 class CurrentUser(BaseModel):
     id: UUID
     email: str
     role: UserRole
-    profile: Optional[AdminProfile | ClientProfile | CandidateProfile | EmployeeProfile] = None
+    profile: Optional[AdminProfile | ClientProfile | CandidateProfile | EmployeeProfile | BrokerProfile] = None
     beta_features: dict = {}
     interview_prep_tokens: int = 0
     allowed_interview_roles: list[str] = []
@@ -201,6 +218,17 @@ class ChangeEmailRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
+
+
+class BrokerTermsAcceptanceRequest(BaseModel):
+    terms_version: Optional[str] = None
+
+
+class BrokerTermsAcceptanceResponse(BaseModel):
+    status: str
+    broker_id: UUID
+    terms_version: str
+    accepted_at: datetime
 
 
 # Beta access management models

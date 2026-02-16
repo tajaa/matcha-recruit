@@ -3,7 +3,7 @@ from typing import Optional, Literal
 from uuid import UUID
 from pydantic import BaseModel, EmailStr
 
-UserRole = Literal["admin", "client", "candidate", "employee", "creator", "agency", "gumfit_admin"]
+UserRole = Literal["admin", "client", "candidate", "employee", "broker", "creator", "agency", "gumfit_admin"]
 
 
 class UserBase(BaseModel):

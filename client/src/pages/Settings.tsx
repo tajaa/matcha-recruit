@@ -42,6 +42,7 @@ function getRoleDisplayName(role: string | undefined): string {
     client: 'Company Admin',
     employee: 'Employee',
     candidate: 'Candidate',
+    broker: 'Broker Partner',
     creator: 'Creator',
     agency: 'Agency',
   };
