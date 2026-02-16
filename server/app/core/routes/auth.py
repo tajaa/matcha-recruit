@@ -1,5 +1,6 @@
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends, status
@@ -10,7 +11,7 @@ from uuid import UUID
 from ..models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
     AdminRegister, ClientRegister, CandidateRegister, EmployeeRegister,
-    BusinessRegister, TestAccountRegister,
+    BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
     CurrentUser,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
@@ -1022,10 +1023,18 @@ async def register_business(request: BusinessRegister):
             }
 
 
-@router.post("/register/test-account", response_model=TokenResponse)
-async def register_test_account(request: TestAccountRegister):
-    """Register an approved client account with seeded demo data for feature testing."""
+@router.post("/register/test-account", response_model=TestAccountProvisionResponse)
+async def register_test_account(
+    request: TestAccountRegister,
+    current_admin: CurrentUser = Depends(require_admin),
+):
+    """Provision an approved client test account with seeded data (admin only)."""
     company_name = (request.company_name or "").strip() or f"{request.name.strip() or 'Test User'} Test Account"
+    generated_password = not bool(request.password and request.password.strip())
+    password = request.password.strip() if request.password else secrets.token_urlsafe(12)
+
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -1046,7 +1055,7 @@ async def register_test_account(request: TestAccountRegister):
             )
             company_id = company["id"]
 
-            password_hash = hash_password(request.password)
+            password_hash = hash_password(password)
             user = await conn.fetchrow(
                 """
                 INSERT INTO users (email, password_hash, role)
@@ -1084,24 +1093,22 @@ async def register_test_account(request: TestAccountRegister):
                 company_name=company_name,
             )
 
-            logger.info("Created seeded test account for %s (company=%s)", request.email, company_id)
+            logger.info(
+                "Admin %s created seeded test account for %s (company=%s)",
+                current_admin.email,
+                request.email,
+                company_id,
+            )
 
-        settings = get_settings()
-        access_token = create_access_token(user["id"], user["email"], user["role"])
-        refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
-
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_in=settings.jwt_access_token_expire_minutes * 60,
-            user=UserResponse(
-                id=user["id"],
-                email=user["email"],
-                role=user["role"],
-                is_active=user["is_active"],
-                created_at=user["created_at"],
-                last_login=None,
-            ),
+        return TestAccountProvisionResponse(
+            status="created",
+            message="Test account created with seeded feature data",
+            company_id=company_id,
+            company_name=company_name,
+            user_id=user["id"],
+            email=user["email"],
+            password=password,
+            generated_password=generated_password,
         )
 
 

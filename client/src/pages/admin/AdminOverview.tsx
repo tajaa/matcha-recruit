@@ -1,8 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { adminOverview } from '../../api/client';
+import { adminOverview, adminTestAccounts } from '../../api/client';
 import type { AdminOverviewCompany, AdminOverviewTotals } from '../../api/client';
-import { Building2, Users, UserCheck, UserPlus, Calendar } from 'lucide-react';
+import type { TestAccountProvisionResponse } from '../../types';
+import { Building2, Users, UserCheck, UserPlus, Calendar, KeyRound } from 'lucide-react';
+
+const COMPANY_SIZE_OPTIONS = [
+  { value: '1-10', label: '1-10 employees' },
+  { value: '11-50', label: '11-50 employees' },
+  { value: '51-200', label: '51-200 employees' },
+  { value: '201-500', label: '201-500 employees' },
+  { value: '500+', label: '500+ employees' },
+];
 
 export function AdminOverview() {
   const navigate = useNavigate();
@@ -10,6 +19,17 @@ export function AdminOverview() {
   const [totals, setTotals] = useState<AdminOverviewTotals | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [testAccountError, setTestAccountError] = useState<string | null>(null);
+  const [creatingTestAccount, setCreatingTestAccount] = useState(false);
+  const [createdTestAccount, setCreatedTestAccount] = useState<TestAccountProvisionResponse | null>(null);
+  const [testAccountForm, setTestAccountForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    company_name: '',
+    industry: '',
+    company_size: '',
+  });
 
   useEffect(() => {
     async function fetch() {
@@ -67,6 +87,50 @@ export function AdminOverview() {
     }
   };
 
+  const handleCreateTestAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTestAccountError(null);
+    setCreatedTestAccount(null);
+
+    if (!testAccountForm.name.trim()) {
+      setTestAccountError('Owner name is required');
+      return;
+    }
+    if (!testAccountForm.email.trim()) {
+      setTestAccountError('Email is required');
+      return;
+    }
+    if (testAccountForm.password && testAccountForm.password.length < 8) {
+      setTestAccountError('Password must be at least 8 characters');
+      return;
+    }
+
+    try {
+      setCreatingTestAccount(true);
+      const created = await adminTestAccounts.create({
+        name: testAccountForm.name.trim(),
+        email: testAccountForm.email.trim(),
+        password: testAccountForm.password.trim() || undefined,
+        company_name: testAccountForm.company_name.trim() || undefined,
+        industry: testAccountForm.industry.trim() || undefined,
+        company_size: testAccountForm.company_size || undefined,
+      });
+      setCreatedTestAccount(created);
+      setTestAccountForm({
+        name: '',
+        email: '',
+        password: '',
+        company_name: '',
+        industry: '',
+        company_size: '',
+      });
+    } catch (err) {
+      setTestAccountError(err instanceof Error ? err.message : 'Failed to create test account');
+    } finally {
+      setCreatingTestAccount(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto flex items-center justify-center py-24">
@@ -91,6 +155,99 @@ export function AdminOverview() {
           {error}
         </div>
       )}
+
+      <div className="border border-white/10 bg-zinc-900/30 p-4 md:p-6">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-8 h-8 bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+            <KeyRound size={15} className="text-zinc-300" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-white uppercase tracking-wider">Provision Test Account</h2>
+            <p className="text-[11px] text-zinc-500 font-mono uppercase tracking-wide mt-1">
+              Admin-only account with all features enabled and seeded demo data
+            </p>
+          </div>
+        </div>
+
+        <form className="space-y-4" onSubmit={handleCreateTestAccount}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input
+              type="text"
+              placeholder="Owner name"
+              value={testAccountForm.name}
+              onChange={(e) => setTestAccountForm(prev => ({ ...prev, name: e.target.value }))}
+              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
+            />
+            <input
+              type="email"
+              placeholder="Owner email"
+              value={testAccountForm.email}
+              onChange={(e) => setTestAccountForm(prev => ({ ...prev, email: e.target.value }))}
+              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
+            />
+            <input
+              type="text"
+              placeholder="Password (optional, auto-generate if blank)"
+              value={testAccountForm.password}
+              onChange={(e) => setTestAccountForm(prev => ({ ...prev, password: e.target.value }))}
+              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input
+              type="text"
+              placeholder="Company name (optional)"
+              value={testAccountForm.company_name}
+              onChange={(e) => setTestAccountForm(prev => ({ ...prev, company_name: e.target.value }))}
+              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
+            />
+            <input
+              type="text"
+              placeholder="Industry (optional)"
+              value={testAccountForm.industry}
+              onChange={(e) => setTestAccountForm(prev => ({ ...prev, industry: e.target.value }))}
+              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
+            />
+            <select
+              value={testAccountForm.company_size}
+              onChange={(e) => setTestAccountForm(prev => ({ ...prev, company_size: e.target.value }))}
+              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
+            >
+              <option value="">Company size (optional)</option>
+              {COMPANY_SIZE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {testAccountError && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+              {testAccountError}
+            </div>
+          )}
+
+          {createdTestAccount && (
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 space-y-1 font-mono">
+              <div>Created: {createdTestAccount.company_name}</div>
+              <div>Email: {createdTestAccount.email}</div>
+              <div>Password: {createdTestAccount.password}</div>
+            </div>
+          )}
+
+          <div>
+            <button
+              type="submit"
+              disabled={creatingTestAccount}
+              className="px-4 py-2 bg-white text-black border border-white text-xs uppercase tracking-wider font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {creatingTestAccount ? 'Creating...' : 'Create Test Account'}
+            </button>
+          </div>
+        </form>
+      </div>
 
       {/* Stat Cards */}
       {totals && (

@@ -27,6 +27,7 @@ import type {
   CandidateRegister,
   BusinessRegister,
   TestAccountRegister,
+  TestAccountProvisionResponse,
   CurrentUserResponse,
   Project,
   ProjectCreate,
@@ -290,23 +291,6 @@ export const auth = {
 
   registerBusiness: async (data: BusinessRegister): Promise<TokenResponse> => {
     const response = await fetch(`${API_BASE}/auth/register/business`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
-      throw new Error(error.detail || 'Registration failed');
-    }
-
-    const result: TokenResponse = await response.json();
-    setTokens(result.access_token, result.refresh_token);
-    return result;
-  },
-
-  registerTestAccount: async (data: TestAccountRegister): Promise<TokenResponse> => {
-    const response = await fetch(`${API_BASE}/auth/register/test-account`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -1450,6 +1434,14 @@ export const adminBusinessRegistrations = {
     request<{ status: string; message: string }>(`/admin/business-registrations/${companyId}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    }),
+};
+
+export const adminTestAccounts = {
+  create: (data: TestAccountRegister): Promise<TestAccountProvisionResponse> =>
+    request<TestAccountProvisionResponse>('/auth/register/test-account', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
 };
 

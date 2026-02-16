@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Clock, Mail } from 'lucide-react';
 
@@ -37,9 +37,8 @@ export function Register() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [registrationPending, setRegistrationPending] = useState(false);
-  const navigate = useNavigate();
 
-  const { registerBusiness, registerTestAccount } = useAuth();
+  const { registerBusiness } = useAuth();
 
   const validateRegistrationInput = (requireCompanyName = true) => {
     if (!name.trim()) {
@@ -91,30 +90,6 @@ export function Register() {
       setRegistrationPending(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleCreateTestAccount = async () => {
-    setError('');
-    if (!validateRegistrationInput(false)) return;
-
-    setIsLoading(true);
-    try {
-      await registerTestAccount({
-        company_name: companyName.trim() || `${name.trim()} Test Account`,
-        industry: industry || undefined,
-        company_size: companySize || undefined,
-        email,
-        password,
-        name,
-        phone: phone || undefined,
-        job_title: jobTitle || undefined,
-      });
-      navigate('/app', { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Test account registration failed');
     } finally {
       setIsLoading(false);
     }
@@ -351,21 +326,13 @@ export function Register() {
               </div>
             </div>
 
-            <div className="space-y-3">
+            <div>
               <button
                 type="submit"
                 disabled={isLoading}
                 className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-sm shadow-sm text-xs font-medium uppercase tracking-wider text-white bg-zinc-900 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isLoading ? 'Creating Account...' : 'Create Account'}
-              </button>
-              <button
-                type="button"
-                disabled={isLoading}
-                onClick={handleCreateTestAccount}
-                className="w-full flex justify-center py-2.5 px-4 border border-zinc-200 rounded-sm text-xs font-medium uppercase tracking-wider text-zinc-700 bg-white hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {isLoading ? 'Creating Account...' : 'Create Test Account (Preloaded)'}
               </button>
             </div>
           </form>

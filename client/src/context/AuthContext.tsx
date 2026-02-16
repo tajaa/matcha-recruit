@@ -5,7 +5,6 @@ import type {
   LoginRequest,
   BusinessRegister,
   CandidateRegister,
-  TestAccountRegister,
   UserRole,
   EnabledFeatures,
 } from '../types';
@@ -24,7 +23,6 @@ interface AuthContextType {
   login: (data: LoginRequest) => Promise<User>;
   logout: () => Promise<void>;
   registerBusiness: (data: BusinessRegister) => Promise<void>;
-  registerTestAccount: (data: TestAccountRegister) => Promise<void>;
   registerCandidate: (data: CandidateRegister) => Promise<void>;
   hasRole: (...roles: UserRole[]) => boolean;
   hasBetaFeature: (feature: string) => boolean;
@@ -178,17 +176,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const registerTestAccount = async (data: TestAccountRegister) => {
-    const result = await auth.registerTestAccount(data);
-    setUser(result.user);
-    // Try to load full profile, but don't fail registration if this errors
-    try {
-      await loadUser();
-    } catch (err) {
-      console.warn('Failed to load full profile after test account registration:', err);
-    }
-  };
-
   const hasRole = (...roles: UserRole[]) => {
     if (!user) return false;
     return roles.includes(user.role);
@@ -223,7 +210,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         registerBusiness,
-        registerTestAccount,
         registerCandidate,
         hasRole,
         hasBetaFeature,

@@ -478,10 +478,21 @@ export interface TestAccountRegister {
   industry?: string;
   company_size?: string;
   email: string;
-  password: string;
+  password?: string;
   name: string;
   phone?: string;
   job_title?: string;
+}
+
+export interface TestAccountProvisionResponse {
+  status: string;
+  message: string;
+  company_id: string;
+  company_name: string;
+  user_id: string;
+  email: string;
+  password: string;
+  generated_password: boolean;
 }
 
 export interface BusinessInvite {

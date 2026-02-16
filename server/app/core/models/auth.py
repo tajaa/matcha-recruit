@@ -113,10 +113,21 @@ class TestAccountRegister(BaseModel):
     industry: Optional[str] = None
     company_size: Optional[str] = None
     email: EmailStr
-    password: str
+    password: Optional[str] = None
     name: str
     phone: Optional[str] = None
     job_title: Optional[str] = None
+
+
+class TestAccountProvisionResponse(BaseModel):
+    status: str
+    message: str
+    company_id: UUID
+    company_name: str
+    user_id: UUID
+    email: str
+    password: str
+    generated_password: bool = False
 
 
 # Profile models
