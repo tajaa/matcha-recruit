@@ -42,6 +42,7 @@ export function RegisterInvite() {
   const [companyName, setCompanyName] = useState('');
   const [industry, setIndustry] = useState('');
   const [companySize, setCompanySize] = useState('');
+  const [headcount, setHeadcount] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -84,6 +85,12 @@ export function RegisterInvite() {
       return;
     }
 
+    const parsedHeadcount = Number(headcount);
+    if (!Number.isInteger(parsedHeadcount) || parsedHeadcount < 1) {
+      setError('Please enter a valid headcount (1 or more)');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -91,6 +98,7 @@ export function RegisterInvite() {
         company_name: companyName,
         industry: industry || undefined,
         company_size: companySize || undefined,
+        headcount: Number(headcount),
         email,
         password,
         name,
@@ -245,7 +253,7 @@ export function RegisterInvite() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div>
                 <label className="block text-[10px] uppercase tracking-wider font-medium text-zinc-500 mb-1.5">
                   Industry <span className="text-zinc-400 font-normal normal-case ml-1">(Optional)</span>
@@ -280,6 +288,22 @@ export function RegisterInvite() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider font-medium text-zinc-500 mb-1.5">
+                  Headcount
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={headcount}
+                  onChange={(e) => setHeadcount(e.target.value)}
+                  required
+                  className={inputClasses}
+                  placeholder="25"
+                />
               </div>
             </div>
 

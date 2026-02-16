@@ -78,6 +78,54 @@ async def _column_exists(conn, table_name: str, column_name: str) -> bool:
     )
 
 
+async def _upsert_business_headcount_profile(
+    conn,
+    *,
+    company_id: UUID,
+    company_name: str,
+    owner_name: str,
+    headcount: int,
+    updated_by: UUID,
+) -> None:
+    if not await _table_exists(conn, "company_handbook_profiles"):
+        logger.warning(
+            "Skipping headcount profile seed for company %s because company_handbook_profiles table is missing",
+            company_id,
+        )
+        return
+
+    legal_name = company_name.strip() or "Company"
+    ceo_or_president = owner_name.strip() or "Company Leadership"
+
+    await conn.execute(
+        """
+        INSERT INTO company_handbook_profiles (
+            company_id, legal_name, dba, ceo_or_president, headcount,
+            remote_workers, minors, tipped_employees, union_employees, federal_contracts,
+            group_health_insurance, background_checks, hourly_employees,
+            salaried_employees, commissioned_employees, tip_pooling, updated_by, updated_at
+        )
+        VALUES (
+            $1, $2, NULL, $3, $4,
+            false, false, false, false, false,
+            false, false, true,
+            false, false, false, $5, NOW()
+        )
+        ON CONFLICT (company_id)
+        DO UPDATE SET
+            legal_name = EXCLUDED.legal_name,
+            headcount = EXCLUDED.headcount,
+            updated_by = EXCLUDED.updated_by,
+            updated_at = NOW()
+        """,
+        company_id,
+        legal_name,
+        ceo_or_president,
+        headcount,
+        updated_by,
+    )
+
+
 async def _seed_test_account_data(
     conn,
     *,
@@ -979,6 +1027,16 @@ async def register_business(request: BusinessRegister):
             await conn.execute(
                 "UPDATE companies SET owner_id = $1 WHERE id = $2",
                 user["id"], company_id
+            )
+
+            # Seed profile data used by handbook/compliance flows.
+            await _upsert_business_headcount_profile(
+                conn,
+                company_id=company_id,
+                company_name=request.company_name,
+                owner_name=request.name,
+                headcount=request.headcount,
+                updated_by=user["id"],
             )
 
             # Step 5: Link invitation to the new company

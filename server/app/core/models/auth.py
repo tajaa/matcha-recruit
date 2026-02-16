@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from typing import Optional, Literal
 from uuid import UUID
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from decimal import Decimal
 
 UserRole = Literal["admin", "client", "candidate", "employee"]
@@ -92,6 +92,7 @@ class BusinessRegister(BaseModel):
     company_name: str
     industry: Optional[str] = None
     company_size: Optional[str] = None  # e.g., "1-10", "11-50", etc.
+    headcount: int = Field(..., ge=1)
 
     # First admin user info
     email: EmailStr

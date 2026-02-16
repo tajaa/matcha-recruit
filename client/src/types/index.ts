@@ -465,6 +465,7 @@ export interface BusinessRegister {
   company_name: string;
   industry?: string;
   company_size?: string;
+  headcount: number;
   email: string;
   password: string;
   name: string;

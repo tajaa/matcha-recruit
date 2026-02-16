@@ -12,8 +12,12 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  localStorage.clear();
-  sessionStorage.clear();
+  if (typeof localStorage?.clear === 'function') {
+    localStorage.clear();
+  }
+  if (typeof sessionStorage?.clear === 'function') {
+    sessionStorage.clear();
+  }
 
   // Restore original fetch if it was mocked
   global.fetch = originalFetch;
