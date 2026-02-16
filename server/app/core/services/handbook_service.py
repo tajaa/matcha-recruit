@@ -292,6 +292,55 @@ def _build_state_sections(states: list[str], profile: dict[str, Any]) -> list[di
     return state_sections
 
 
+def _slugify_key(value: str, max_len: int = 100) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in (value or ""))
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    cleaned = cleaned.strip("_")
+    return cleaned[:max_len]
+
+
+def _normalize_custom_sections(custom_sections: list[HandbookSectionInput]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    used_keys: set[str] = set()
+    for index, section in enumerate(custom_sections):
+        base_candidate = section.section_key or section.title or f"custom_{index + 1}"
+        base_key = _slugify_key(base_candidate, max_len=110)
+        if not base_key:
+            base_key = f"custom_{index + 1}"
+
+        key = base_key
+        suffix = 2
+        while key in used_keys:
+            suffix_token = f"_{suffix}"
+            key = f"{base_key[: max(1, 120 - len(suffix_token))]}{suffix_token}"
+            suffix += 1
+        used_keys.add(key)
+
+        normalized.append(
+            {
+                "section_key": key,
+                "title": section.title.strip(),
+                "section_order": section.section_order,
+                "section_type": "custom",
+                "jurisdiction_scope": section.jurisdiction_scope or {},
+                "content": section.content,
+            }
+        )
+    return normalized
+
+
+def _translate_handbook_db_error(exc: Exception) -> Optional[str]:
+    message = str(exc).lower()
+    if "handbook_sections_handbook_version_id_section_key_key" in message:
+        return "Duplicate handbook section keys were detected. Update section titles and try again."
+    if "value too long for type character varying" in message:
+        return "One or more handbook fields are too long. Shorten the text and try again."
+    if 'relation "handbooks"' in message or 'relation "handbook_' in message:
+        return "Handbook tables are not available yet. Run migrations and restart the API."
+    return None
+
+
 def _build_template_sections(
     mode: str,
     scopes: list[dict[str, Any]],
@@ -301,17 +350,7 @@ def _build_template_sections(
     unique_states = sorted({scope["state"] for scope in scopes})
     base_sections = _build_core_sections(profile, mode, unique_states)
     state_sections = _build_state_sections(unique_states, profile)
-    custom = [
-        {
-            "section_key": section.section_key,
-            "title": section.title,
-            "section_order": section.section_order,
-            "section_type": section.section_type,
-            "jurisdiction_scope": section.jurisdiction_scope or {},
-            "content": section.content,
-        }
-        for section in custom_sections
-    ]
+    custom = _normalize_custom_sections(custom_sections)
     return sorted(base_sections + state_sections + custom, key=lambda item: item["section_order"])
 
 
@@ -504,97 +543,103 @@ class HandbookService:
         profile_row: Optional[CompanyHandbookProfileResponse] = None
         _validate_handbook_file_reference(data.file_url)
 
-        async with get_connection() as conn:
-            async with conn.transaction():
-                profile_row = await HandbookService._upsert_profile_with_conn(
-                    conn,
-                    company_id,
-                    data.profile,
-                    created_by,
-                )
-                handbook_id = await conn.fetchval(
-                    """
-                    INSERT INTO handbooks (
-                        company_id, title, status, mode, source_type, active_version,
-                        file_url, file_name, created_by, created_at, updated_at
+        try:
+            async with get_connection() as conn:
+                async with conn.transaction():
+                    profile_row = await HandbookService._upsert_profile_with_conn(
+                        conn,
+                        company_id,
+                        data.profile,
+                        created_by,
                     )
-                    VALUES ($1, $2, 'draft', $3, $4, 1, $5, $6, $7, NOW(), NOW())
-                    RETURNING id
-                    """,
-                    company_id,
-                    data.title,
-                    data.mode,
-                    data.source_type,
-                    data.file_url,
-                    data.file_name,
-                    created_by,
-                )
-
-                for scope in normalized_scopes:
-                    await conn.execute(
+                    handbook_id = await conn.fetchval(
                         """
-                        INSERT INTO handbook_scopes (handbook_id, state, city, zipcode, location_id, created_at)
-                        VALUES ($1, $2, $3, $4, $5, NOW())
+                        INSERT INTO handbooks (
+                            company_id, title, status, mode, source_type, active_version,
+                            file_url, file_name, created_by, created_at, updated_at
+                        )
+                        VALUES ($1, $2, 'draft', $3, $4, 1, $5, $6, $7, NOW(), NOW())
+                        RETURNING id
+                        """,
+                        company_id,
+                        data.title,
+                        data.mode,
+                        data.source_type,
+                        data.file_url,
+                        data.file_name,
+                        created_by,
+                    )
+
+                    for scope in normalized_scopes:
+                        await conn.execute(
+                            """
+                            INSERT INTO handbook_scopes (handbook_id, state, city, zipcode, location_id, created_at)
+                            VALUES ($1, $2, $3, $4, $5, NOW())
+                            """,
+                            handbook_id,
+                            scope["state"],
+                            scope["city"],
+                            scope["zipcode"],
+                            scope["location_id"],
+                        )
+
+                    version_id = await conn.fetchval(
+                        """
+                        INSERT INTO handbook_versions (
+                            handbook_id, version_number, summary, is_published, created_by, created_at
+                        )
+                        VALUES ($1, 1, $2, false, $3, NOW())
+                        RETURNING id
                         """,
                         handbook_id,
-                        scope["state"],
-                        scope["city"],
-                        scope["zipcode"],
-                        scope["location_id"],
+                        "Initial handbook draft",
+                        created_by,
                     )
 
-                version_id = await conn.fetchval(
-                    """
-                    INSERT INTO handbook_versions (
-                        handbook_id, version_number, summary, is_published, created_by, created_at
-                    )
-                    VALUES ($1, 1, $2, false, $3, NOW())
-                    RETURNING id
-                    """,
-                    handbook_id,
-                    "Initial handbook draft",
-                    created_by,
-                )
-
-                if data.source_type == "template":
-                    sections = _build_template_sections(
-                        data.mode,
-                        normalized_scopes,
-                        profile,
-                        data.custom_sections,
-                    )
-                else:
-                    sections = [
-                        {
-                            "section_key": "uploaded_handbook",
-                            "title": "Uploaded Employee Handbook",
-                            "section_order": 10,
-                            "section_type": "uploaded",
-                            "jurisdiction_scope": {},
-                            "content": (
-                                "This handbook was uploaded as a company-authored document. "
-                                "Use the file attachment for the canonical text."
-                            ),
-                        }
-                    ]
-
-                for section in sections:
-                    await conn.execute(
-                        """
-                        INSERT INTO handbook_sections (
-                            handbook_version_id, section_key, title, section_order,
-                            section_type, jurisdiction_scope, content, created_at, updated_at
+                    if data.source_type == "template":
+                        sections = _build_template_sections(
+                            data.mode,
+                            normalized_scopes,
+                            profile,
+                            data.custom_sections,
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW())
-                        """,
-                        version_id,
-                        section["section_key"],
-                        section["title"],
-                        section["section_order"],
-                        section["section_type"],
-                        section["jurisdiction_scope"],
-                        section["content"],
-                    )
+                    else:
+                        sections = [
+                            {
+                                "section_key": "uploaded_handbook",
+                                "title": "Uploaded Employee Handbook",
+                                "section_order": 10,
+                                "section_type": "uploaded",
+                                "jurisdiction_scope": {},
+                                "content": (
+                                    "This handbook was uploaded as a company-authored document. "
+                                    "Use the file attachment for the canonical text."
+                                ),
+                            }
+                        ]
+
+                    for section in sections:
+                        await conn.execute(
+                            """
+                            INSERT INTO handbook_sections (
+                                handbook_version_id, section_key, title, section_order,
+                                section_type, jurisdiction_scope, content, created_at, updated_at
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW())
+                            """,
+                            version_id,
+                            section["section_key"],
+                            section["title"],
+                            section["section_order"],
+                            section["section_type"],
+                            section["jurisdiction_scope"],
+                            section["content"],
+                        )
+        except Exception as exc:
+            translated = _translate_handbook_db_error(exc)
+            if translated:
+                raise ValueError(translated) from exc
+            raise
 
         handbook = await HandbookService.get_handbook_by_id(str(handbook_id), company_id)
         if handbook is None:
@@ -697,133 +742,146 @@ class HandbookService:
         data: HandbookUpdateRequest,
         updated_by: Optional[str] = None,
     ) -> Optional[HandbookDetailResponse]:
-        async with get_connection() as conn:
-            async with conn.transaction():
-                current = await conn.fetchrow(
-                    """
-                    SELECT *
-                    FROM handbooks
-                    WHERE id = $1 AND company_id = $2
-                    """,
-                    handbook_id,
-                    company_id,
-                )
-                if not current:
-                    return None
-
-                if data.mode is not None or data.scopes is not None:
-                    next_mode = data.mode or current["mode"]
-                    if data.scopes is None:
-                        scope_count = await conn.fetchval(
-                            "SELECT COUNT(*) FROM handbook_scopes WHERE handbook_id = $1",
-                            handbook_id,
-                        )
-                        scope_count = int(scope_count or 0)
-                    else:
-                        scope_count = len(data.scopes)
-                    if next_mode == "single_state" and scope_count != 1:
-                        raise ValueError("Single-state handbooks must have exactly one scope")
-                    if next_mode == "multi_state" and scope_count < 2:
-                        raise ValueError("Multi-state handbooks must include at least two scopes")
-
-                _validate_handbook_file_reference(data.file_url)
-                should_invalidate_cached_file = (
-                    current["source_type"] == "template"
-                    and any(
-                        value is not None
-                        for value in (data.title, data.mode, data.scopes, data.sections, data.profile)
-                    )
-                    and data.file_url is None
-                    and data.file_name is None
-                )
-
-                updates: list[str] = []
-                params: list[Any] = []
-                idx = 3
-
-                if data.title is not None:
-                    updates.append(f"title = ${idx}")
-                    params.append(data.title)
-                    idx += 1
-                if data.mode is not None:
-                    updates.append(f"mode = ${idx}")
-                    params.append(data.mode)
-                    idx += 1
-                if data.file_url is not None:
-                    updates.append(f"file_url = ${idx}")
-                    params.append(data.file_url)
-                    idx += 1
-                if data.file_name is not None:
-                    updates.append(f"file_name = ${idx}")
-                    params.append(data.file_name)
-                    idx += 1
-                if should_invalidate_cached_file:
-                    updates.append("file_url = NULL")
-                    updates.append("file_name = NULL")
-
-                if updates:
-                    updates.append("updated_at = NOW()")
-                    query = f"UPDATE handbooks SET {', '.join(updates)} WHERE id = $1 AND company_id = $2"
-                    await conn.execute(query, handbook_id, company_id, *params)
-                else:
-                    await conn.execute(
-                        "UPDATE handbooks SET updated_at = NOW() WHERE id = $1 AND company_id = $2",
+        try:
+            async with get_connection() as conn:
+                async with conn.transaction():
+                    current = await conn.fetchrow(
+                        """
+                        SELECT *
+                        FROM handbooks
+                        WHERE id = $1 AND company_id = $2
+                        """,
                         handbook_id,
                         company_id,
                     )
+                    if not current:
+                        return None
 
-                if data.scopes is not None:
-                    await conn.execute("DELETE FROM handbook_scopes WHERE handbook_id = $1", handbook_id)
-                    for scope in data.scopes:
-                        normalized = _normalize_scope(scope)
-                        await conn.execute(
-                            """
-                            INSERT INTO handbook_scopes (handbook_id, state, city, zipcode, location_id, created_at)
-                            VALUES ($1, $2, $3, $4, $5, NOW())
-                            """,
-                            handbook_id,
-                            normalized["state"],
-                            normalized["city"],
-                            normalized["zipcode"],
-                            normalized["location_id"],
+                    if data.mode is not None or data.scopes is not None:
+                        next_mode = data.mode or current["mode"]
+                        if data.scopes is None:
+                            scope_count = await conn.fetchval(
+                                "SELECT COUNT(*) FROM handbook_scopes WHERE handbook_id = $1",
+                                handbook_id,
+                            )
+                            scope_count = int(scope_count or 0)
+                        else:
+                            scope_count = len(data.scopes)
+                        if next_mode == "single_state" and scope_count != 1:
+                            raise ValueError("Single-state handbooks must have exactly one scope")
+                        if next_mode == "multi_state" and scope_count < 2:
+                            raise ValueError("Multi-state handbooks must include at least two scopes")
+
+                    _validate_handbook_file_reference(data.file_url)
+                    should_invalidate_cached_file = (
+                        current["source_type"] == "template"
+                        and any(
+                            value is not None
+                            for value in (data.title, data.mode, data.scopes, data.sections, data.profile)
                         )
-
-                if data.sections is not None:
-                    version_id = await HandbookService._get_active_version_id(
-                        conn,
-                        handbook_id,
-                        current["active_version"],
+                        and data.file_url is None
+                        and data.file_name is None
                     )
-                    if version_id:
+
+                    updates: list[str] = []
+                    params: list[Any] = []
+                    idx = 3
+
+                    if data.title is not None:
+                        updates.append(f"title = ${idx}")
+                        params.append(data.title)
+                        idx += 1
+                    if data.mode is not None:
+                        updates.append(f"mode = ${idx}")
+                        params.append(data.mode)
+                        idx += 1
+                    if data.file_url is not None:
+                        updates.append(f"file_url = ${idx}")
+                        params.append(data.file_url)
+                        idx += 1
+                    if data.file_name is not None:
+                        updates.append(f"file_name = ${idx}")
+                        params.append(data.file_name)
+                        idx += 1
+                    if should_invalidate_cached_file:
+                        updates.append("file_url = NULL")
+                        updates.append("file_name = NULL")
+
+                    if updates:
+                        updates.append("updated_at = NOW()")
+                        query = f"UPDATE handbooks SET {', '.join(updates)} WHERE id = $1 AND company_id = $2"
+                        await conn.execute(query, handbook_id, company_id, *params)
+                    else:
                         await conn.execute(
-                            "DELETE FROM handbook_sections WHERE handbook_version_id = $1",
-                            version_id,
+                            "UPDATE handbooks SET updated_at = NOW() WHERE id = $1 AND company_id = $2",
+                            handbook_id,
+                            company_id,
                         )
-                        for section in data.sections:
+
+                    if data.scopes is not None:
+                        await conn.execute("DELETE FROM handbook_scopes WHERE handbook_id = $1", handbook_id)
+                        for scope in data.scopes:
+                            normalized = _normalize_scope(scope)
                             await conn.execute(
                                 """
-                                INSERT INTO handbook_sections (
-                                    handbook_version_id, section_key, title, content, section_order,
-                                    section_type, jurisdiction_scope, created_at, updated_at
-                                )
-                                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW(), NOW())
+                                INSERT INTO handbook_scopes (handbook_id, state, city, zipcode, location_id, created_at)
+                                VALUES ($1, $2, $3, $4, $5, NOW())
                                 """,
-                                version_id,
-                                section.section_key,
-                                section.title,
-                                section.content,
-                                section.section_order,
-                                section.section_type,
-                                section.jurisdiction_scope or {},
+                                handbook_id,
+                                normalized["state"],
+                                normalized["city"],
+                                normalized["zipcode"],
+                                normalized["location_id"],
                             )
 
-                if data.profile is not None:
-                    await HandbookService._upsert_profile_with_conn(
-                        conn,
-                        company_id,
-                        data.profile,
-                        updated_by,
-                    )
+                    if data.sections is not None:
+                        seen_keys: set[str] = set()
+                        for section in data.sections:
+                            key = section.section_key.strip()
+                            if key in seen_keys:
+                                raise ValueError(f"Duplicate section key '{key}' in handbook update")
+                            seen_keys.add(key)
+
+                        version_id = await HandbookService._get_active_version_id(
+                            conn,
+                            handbook_id,
+                            current["active_version"],
+                        )
+                        if version_id:
+                            await conn.execute(
+                                "DELETE FROM handbook_sections WHERE handbook_version_id = $1",
+                                version_id,
+                            )
+                            for section in data.sections:
+                                await conn.execute(
+                                    """
+                                    INSERT INTO handbook_sections (
+                                        handbook_version_id, section_key, title, content, section_order,
+                                        section_type, jurisdiction_scope, created_at, updated_at
+                                    )
+                                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW(), NOW())
+                                    """,
+                                    version_id,
+                                    section.section_key,
+                                    section.title,
+                                    section.content,
+                                    section.section_order,
+                                    section.section_type,
+                                    section.jurisdiction_scope or {},
+                                )
+
+                    if data.profile is not None:
+                        await HandbookService._upsert_profile_with_conn(
+                            conn,
+                            company_id,
+                            data.profile,
+                            updated_by,
+                        )
+        except Exception as exc:
+            translated = _translate_handbook_db_error(exc)
+            if translated:
+                raise ValueError(translated) from exc
+            raise
 
         return await HandbookService.get_handbook_by_id(handbook_id, company_id)
 

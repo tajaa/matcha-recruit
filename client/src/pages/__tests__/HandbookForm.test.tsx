@@ -91,6 +91,7 @@ describe('HandbookForm (edit mode)', () => {
     await waitFor(() => expect(screen.getByDisplayValue('Employee Handbook')).toBeInTheDocument());
 
     expect(screen.getByText('Template Builder')).toBeInTheDocument();
+    expect(screen.getByText('Answer each question with Yes or No')).toBeInTheDocument();
     expect(screen.getAllByRole('combobox')).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: 'Update Handbook' }));

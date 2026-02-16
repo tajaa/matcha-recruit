@@ -84,8 +84,8 @@ export function HandbookForm() {
 
         const states = Array.from(new Set((locations || []).map((loc) => (loc.state || '').toUpperCase()).filter(Boolean))).sort();
         setLocationsStates(states);
-      } catch (err) {
-        console.error('Failed to load handbook defaults:', err);
+      } catch {
+        // Non-blocking defaults fetch; keep wizard usable with static state list.
       }
     };
     loadDefaults();
@@ -446,18 +446,37 @@ export function HandbookForm() {
 
   const renderWorkforceStep = () => (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-white/10 bg-zinc-900/40 p-4">
+      <div className="space-y-3">
+        <p className="text-[10px] uppercase tracking-widest text-zinc-500">
+          Answer each question with Yes or No
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-white/10 bg-zinc-900/40 p-4">
         {boolFields.map((field) => (
           <label key={field.key} className="flex items-center justify-between text-xs text-zinc-300">
             <span>{field.label}</span>
-            <input
-              type="checkbox"
-              checked={Boolean(profile[field.key])}
-              onChange={(e) => setProfileField(field.key, e.target.checked)}
-              className="h-4 w-4 accent-white"
-            />
+            <div className="inline-flex border border-white/20 text-[10px] uppercase tracking-wider">
+              <button
+                type="button"
+                onClick={() => setProfileField(field.key, false)}
+                className={`px-2 py-1 transition-colors ${
+                  !Boolean(profile[field.key]) ? 'bg-white text-black' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={() => setProfileField(field.key, true)}
+                className={`px-2 py-1 transition-colors ${
+                  Boolean(profile[field.key]) ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Yes
+              </button>
+            </div>
           </label>
         ))}
+        </div>
       </div>
 
       {sourceType === 'upload' && (

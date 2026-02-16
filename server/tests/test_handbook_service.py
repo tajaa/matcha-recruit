@@ -7,7 +7,7 @@ import pytest
 
 from app.core.models.handbook import HandbookUpdateRequest
 from app.core.services import handbook_service as handbook_service_module
-from app.core.services.handbook_service import HandbookService
+from app.core.services.handbook_service import HandbookService, _normalize_custom_sections
 
 
 class _FakeTransaction:
@@ -162,3 +162,28 @@ def test_generate_handbook_pdf_bytes_escapes_html(monkeypatch):
     assert "<script>" not in rendered_html
     assert "&lt;script&gt;bad()&lt;/script&gt;" in rendered_html
     assert "&lt;b&gt;Acme&lt;/b&gt;" in rendered_html
+
+
+def test_normalize_custom_sections_produces_unique_safe_keys():
+    sections = [
+        SimpleNamespace(
+            section_key="",
+            title="My Custom Policy!!!",
+            content="A",
+            section_order=300,
+            jurisdiction_scope={},
+        ),
+        SimpleNamespace(
+            section_key="my custom policy",
+            title="My Custom Policy",
+            content="B",
+            section_order=301,
+            jurisdiction_scope={},
+        ),
+    ]
+
+    normalized = _normalize_custom_sections(sections)  # type: ignore[arg-type]
+    keys = [item["section_key"] for item in normalized]
+    assert len(keys) == 2
+    assert keys[0] != keys[1]
+    assert all(len(key) <= 120 for key in keys)

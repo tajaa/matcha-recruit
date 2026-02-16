@@ -29,9 +29,9 @@ class HandbookSectionInput(BaseModel):
 
 
 class CompanyHandbookProfileInput(BaseModel):
-    legal_name: str
-    dba: Optional[str] = None
-    ceo_or_president: str
+    legal_name: str = Field(..., min_length=1, max_length=255)
+    dba: Optional[str] = Field(default=None, max_length=255)
+    ceo_or_president: str = Field(..., min_length=1, max_length=255)
     headcount: Optional[int] = None
     remote_workers: bool = False
     minors: bool = False
