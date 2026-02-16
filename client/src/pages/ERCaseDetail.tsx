@@ -98,6 +98,14 @@ function formatIntakeObjective(value?: string): string {
   return 'General guidance';
 }
 
+function formatCaseNoteType(value: ERCaseNote['note_type']): string {
+  if (value === 'question') return 'Question';
+  if (value === 'answer') return 'Answer';
+  if (value === 'guidance') return 'Guidance';
+  if (value === 'system') return 'System';
+  return 'General';
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -588,41 +596,62 @@ export function ERCaseDetail() {
       const violationCount = policyResult?.analysis?.violations?.length ?? 0;
       const reviewSucceeded = timelineOk && policyOk && (!shouldRunDiscrepancies || discrepanciesOk);
 
-      const guidanceLines = [
+      const reviewSummaryLines = [
         `Auto-review processed ${completedNonPolicyDocs.length} completed evidence document(s).`,
       ];
 
       if (timelineResult?.analysis?.timeline_summary) {
-        guidanceLines.push(`Timeline summary: ${timelineResult.analysis.timeline_summary}`);
+        reviewSummaryLines.push(`Timeline summary: ${timelineResult.analysis.timeline_summary}`);
       }
 
       if (shouldRunDiscrepancies) {
-        guidanceLines.push(
+        reviewSummaryLines.push(
           discrepancyCount > 0
             ? `Discrepancy analysis found ${discrepancyCount} potential inconsistency${discrepancyCount === 1 ? '' : 'ies'}.`
             : 'Discrepancy analysis did not find major inconsistencies in current evidence.'
         );
       } else {
-        guidanceLines.push('Upload at least one more witness/evidence document to enable discrepancy analysis.');
+        reviewSummaryLines.push('Upload at least one more witness/evidence document to enable discrepancy analysis.');
       }
 
       if (policyResult?.analysis?.summary) {
-        guidanceLines.push(`Policy review: ${policyResult.analysis.summary}`);
+        reviewSummaryLines.push(`Policy review: ${policyResult.analysis.summary}`);
       }
 
-      if (violationCount > 0) {
-        guidanceLines.push('Recommended next step: prioritize policy-risk follow-up interviews and preserve supporting evidence.');
-      } else {
-        guidanceLines.push('Recommended next step: conduct follow-up interviews and upload transcripts for iterative guidance.');
-      }
+      const suggestedGuidanceLines = [
+        'Suggested Guidance',
+        '1. Create follow-up interviews with each involved employee/witness.',
+        '2. Ask for specifics in each interview: What happened? When did it happen? Who was present? What evidence exists? What outcome is requested?',
+        '3. Keep the interview tone neutral and non-accusatory. Remind participants retaliation is not tolerated and document any retaliation concerns immediately.',
+        violationCount > 0
+          ? '4. Prioritize follow-ups tied to the highest policy-risk findings and preserve supporting evidence before concluding.'
+          : '4. Compare accounts for consistency and close timeline gaps before concluding.',
+        !shouldRunDiscrepancies
+          ? '5. Upload at least one more witness/evidence document so discrepancy analysis can run.'
+          : '5. Upload interview notes/transcripts for updated guidance and next-step recommendations.',
+      ];
 
-      guidanceLines.push('Suggested interview follow-ups: What happened? Who was present? What evidence exists? What outcome is requested?');
+      await erCopilot.createCaseNote(id, {
+        note_type: 'general',
+        content: reviewSummaryLines.join('\n'),
+        metadata: {
+          source: 'assistance_auto_review',
+          note_purpose: 'review_summary',
+          reviewed_doc_ids: reviewedDocIds,
+          timeline_ok: timelineOk,
+          discrepancies_ok: shouldRunDiscrepancies ? discrepanciesOk : null,
+          policy_ok: policyOk,
+          violation_count: violationCount,
+          discrepancy_count: discrepancyCount,
+        },
+      });
 
       await erCopilot.createCaseNote(id, {
         note_type: 'guidance',
-        content: guidanceLines.join('\n'),
+        content: suggestedGuidanceLines.join('\n'),
         metadata: {
           source: 'assistance_auto_review',
+          note_purpose: 'next_steps',
           reviewed_doc_ids: reviewedDocIds,
           timeline_ok: timelineOk,
           discrepancies_ok: shouldRunDiscrepancies ? discrepanciesOk : null,
@@ -732,6 +761,8 @@ export function ERCaseDetail() {
   const intakeContext = normalizeIntakeContext(erCase.intake_context);
   const assistanceAnswers = intakeContext?.answers;
   const showAssistancePanel = Boolean(intakeContext?.assistance_requested) || autoAssistStatus !== 'idle';
+  const latestGuidanceNote = [...notes].reverse().find((note) => note.note_type === 'guidance') || null;
+  const nonGuidanceNotes = notes.filter((note) => note.note_type !== 'guidance');
 
   return (
     <div className="max-w-5xl mx-auto space-y-12">
@@ -893,15 +924,39 @@ export function ERCaseDetail() {
 
           {showAssistancePanel && (
             <div className="pt-4 border-t border-zinc-200">
+              <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Suggested Guidance</h3>
+              {latestGuidanceNote ? (
+                <div className="border border-emerald-200 bg-emerald-50 p-2.5 rounded-sm">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] uppercase tracking-wide text-emerald-700">Next Steps</span>
+                    <span className="text-[10px] text-zinc-400">
+                      {new Date(latestGuidanceNote.created_at).toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-700 whitespace-pre-wrap leading-relaxed">{latestGuidanceNote.content}</p>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-400">No guidance yet. Complete assistance intake and analysis to generate next steps.</p>
+              )}
+            </div>
+          )}
+
+          {showAssistancePanel && (
+            <div className="pt-4 border-t border-zinc-200">
               <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Case Notes</h3>
-              {notes.length === 0 ? (
+              {nonGuidanceNotes.length === 0 ? (
                 <p className="text-xs text-zinc-400">No notes yet.</p>
               ) : (
                 <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
-                  {notes.slice(-10).reverse().map((note) => (
+                  {nonGuidanceNotes.slice(-10).reverse().map((note) => (
                     <div key={note.id} className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] uppercase tracking-wide text-zinc-500">{note.note_type}</span>
+                        <span className="text-[10px] uppercase tracking-wide text-zinc-500">{formatCaseNoteType(note.note_type)}</span>
                         <span className="text-[10px] text-zinc-400">
                           {new Date(note.created_at).toLocaleString('en-US', {
                             month: 'short',
