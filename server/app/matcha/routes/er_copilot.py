@@ -29,6 +29,8 @@ from ..models.er_case import (
     ERCaseResponse,
     ERCaseListResponse,
     ERCaseStatus,
+    ERCaseNoteCreate,
+    ERCaseNoteResponse,
     ERDocumentResponse,
     ERDocumentUploadResponse,
     TimelineAnalysis,
@@ -121,6 +123,20 @@ def _normalize_search_metadata(raw_value: Any) -> Optional[dict]:
     return None
 
 
+def _normalize_json_dict(raw_value: Any) -> Optional[dict]:
+    """Normalize JSON/JSONB payloads to dict for API response compatibility."""
+    if isinstance(raw_value, dict):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return None
+    return None
+
+
 def _normalize_document_type(raw_value: Any) -> str:
     """Normalize legacy/invalid document types to a supported value."""
     if isinstance(raw_value, str):
@@ -128,6 +144,11 @@ def _normalize_document_type(raw_value: Any) -> str:
         if value in {"transcript", "policy", "email", "other"}:
             return value
     return "other"
+
+
+def _normalize_intake_context(raw_value: Any) -> Optional[dict]:
+    """Normalize intake_context payloads to a dict for API response compatibility."""
+    return _normalize_json_dict(raw_value)
 
 
 # ===========================================
@@ -150,13 +171,14 @@ async def create_case(
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO er_cases (case_number, title, description, created_by, company_id)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, case_number, title, description, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at
+            INSERT INTO er_cases (case_number, title, description, intake_context, created_by, company_id)
+            VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at
             """,
             case_number,
             case.title,
             case.description,
+            json.dumps(case.intake_context) if case.intake_context is not None else None,
             str(current_user.id),
             company_id,
         )
@@ -178,6 +200,7 @@ async def create_case(
             case_number=row["case_number"],
             title=row["title"],
             description=row["description"],
+            intake_context=_normalize_intake_context(row["intake_context"]),
             status=row["status"],
             company_id=row["company_id"],
             created_by=row["created_by"],
@@ -222,6 +245,7 @@ async def list_cases(
                 case_number=row["case_number"],
                 title=row["title"],
                 description=row["description"],
+                intake_context=_normalize_intake_context(row["intake_context"]),
                 status=row["status"],
                 company_id=row["company_id"],
                 created_by=row["created_by"],
@@ -270,6 +294,7 @@ async def get_case(
             case_number=row["case_number"],
             title=row["title"],
             description=row["description"],
+            intake_context=_normalize_intake_context(row["intake_context"]),
             status=row["status"],
             company_id=row["company_id"],
             created_by=row["created_by"],
@@ -325,6 +350,11 @@ async def update_case(
             params.append(case.assigned_to)
             param_count += 1
 
+        if case.intake_context is not None:
+            updates.append(f"intake_context = ${param_count}::jsonb")
+            params.append(json.dumps(case.intake_context))
+            param_count += 1
+
         if not updates:
             raise HTTPException(status_code=400, detail="No updates provided")
 
@@ -338,7 +368,7 @@ async def update_case(
             UPDATE er_cases
             SET {', '.join(updates)}
             WHERE id = ${param_count - 1} AND {company_filter}
-            RETURNING id, case_number, title, description, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at
+            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at
         """
 
         row = await conn.fetchrow(query, *params)
@@ -369,6 +399,7 @@ async def update_case(
             case_number=row["case_number"],
             title=row["title"],
             description=row["description"],
+            intake_context=_normalize_intake_context(row["intake_context"]),
             status=row["status"],
             company_id=row["company_id"],
             created_by=row["created_by"],
@@ -425,6 +456,99 @@ async def delete_case(
         )
 
         return {"status": "deleted", "case_id": str(case_id)}
+
+
+# ===========================================
+# Case Notes
+# ===========================================
+
+@router.get("/{case_id}/notes", response_model=list[ERCaseNoteResponse])
+async def list_case_notes(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List notes for a case."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+        rows = await conn.fetch(
+            """
+            SELECT id, case_id, note_type, content, metadata, created_by, created_at
+            FROM er_case_notes
+            WHERE case_id = $1
+            ORDER BY created_at ASC
+            """,
+            case_id,
+        )
+
+        return [
+            ERCaseNoteResponse(
+                id=row["id"],
+                case_id=row["case_id"],
+                note_type=row["note_type"],
+                content=row["content"],
+                metadata=_normalize_json_dict(row["metadata"]),
+                created_by=row["created_by"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+
+@router.post("/{case_id}/notes", response_model=ERCaseNoteResponse)
+async def create_case_note(
+    case_id: UUID,
+    note: ERCaseNoteCreate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create a note for a case."""
+    content = note.content.strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="Note content cannot be empty")
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+        row = await conn.fetchrow(
+            """
+            INSERT INTO er_case_notes (case_id, note_type, content, metadata, created_by)
+            VALUES ($1, $2, $3, $4::jsonb, $5)
+            RETURNING id, case_id, note_type, content, metadata, created_by, created_at
+            """,
+            case_id,
+            note.note_type,
+            content,
+            json.dumps(note.metadata) if note.metadata is not None else None,
+            str(current_user.id),
+        )
+
+        await log_audit(
+            conn,
+            str(case_id),
+            str(current_user.id),
+            "case_note_created",
+            "note",
+            str(row["id"]),
+            {"note_type": note.note_type},
+            request.client.host if request.client else None,
+        )
+
+        return ERCaseNoteResponse(
+            id=row["id"],
+            case_id=row["case_id"],
+            note_type=row["note_type"],
+            content=row["content"],
+            metadata=_normalize_json_dict(row["metadata"]),
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+        )
 
 
 # ===========================================
@@ -1032,14 +1156,19 @@ async def generate_discrepancies(
     async with get_connection() as conn:
         await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         doc_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM er_case_documents WHERE case_id = $1 AND processing_status = 'completed'",
+            """
+            SELECT COUNT(*) FROM er_case_documents
+            WHERE case_id = $1
+              AND processing_status = 'completed'
+              AND document_type != 'policy'
+            """,
             case_id,
         )
 
-        if not doc_count:
+        if doc_count < 2:
             raise HTTPException(
                 status_code=400,
-                detail="No processed documents found.",
+                detail="Upload at least 2 completed non-policy documents for discrepancy analysis.",
             )
 
         await log_audit(

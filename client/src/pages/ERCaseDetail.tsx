@@ -1,12 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Button, FileUpload } from '../components';
 import { erCopilot } from '../api/client';
 import type {
   ERCase,
   ERCaseStatus,
+  ERCaseNote,
   ERDocument,
   ERDocumentType,
+  ERCaseIntakeContext,
   TimelineEvent,
   Discrepancy,
   PolicyViolation,
@@ -70,6 +72,39 @@ function normalizeDiscrepancies(payload: unknown): Discrepancy[] {
     }));
 }
 
+function normalizeIntakeContext(payload: unknown): ERCaseIntakeContext | null {
+  if (!payload) return null;
+  if (typeof payload === 'string') {
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed && typeof parsed === 'object') {
+        return parsed as ERCaseIntakeContext;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+  if (typeof payload === 'object') {
+    return payload as ERCaseIntakeContext;
+  }
+  return null;
+}
+
+function formatIntakeObjective(value?: string): string {
+  if (value === 'timeline') return 'Timeline reconstruction';
+  if (value === 'discrepancies') return 'Discrepancy detection';
+  if (value === 'policy') return 'Policy risk review';
+  return 'General guidance';
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
+}
+
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
   open: 'text-zinc-900',
   in_review: 'text-amber-600',
@@ -103,6 +138,7 @@ type AnalysisTab = 'timeline' | 'discrepancies' | 'policy' | 'search';
 export function ERCaseDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // State
   const [erCase, setCase] = useState<ERCase | null>(null);
@@ -127,6 +163,11 @@ export function ERCaseDetail() {
   const [analysisLoading, setAnalysisLoading] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState<{ step: string; detail?: string } | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [autoAssistStatus, setAutoAssistStatus] = useState<'idle' | 'running' | 'completed' | 'needs_docs'>('idle');
+  const [autoAssistMessage, setAutoAssistMessage] = useState<string | null>(null);
+  const [notes, setNotes] = useState<ERCaseNote[]>([]);
+  const [autoReviewRunning, setAutoReviewRunning] = useState(false);
+  const autoReviewSignatureRef = useRef<string | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -150,6 +191,16 @@ export function ERCaseDetail() {
       setDocuments(docs);
     } catch (err) {
       console.error('Failed to fetch documents:', err);
+    }
+  }, [id]);
+
+  const fetchNotes = useCallback(async () => {
+    if (!id) return;
+    try {
+      const entries = await erCopilot.listCaseNotes(id);
+      setNotes(entries);
+    } catch (err) {
+      console.error('Failed to fetch case notes:', err);
     }
   }, [id]);
 
@@ -194,15 +245,22 @@ export function ERCaseDetail() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      await Promise.all([fetchCase(), fetchDocuments()]);
+      await Promise.all([fetchCase(), fetchDocuments(), fetchNotes()]);
       setLoading(false);
     };
     load();
-  }, [fetchCase, fetchDocuments]);
+  }, [fetchCase, fetchDocuments, fetchNotes]);
 
   useEffect(() => {
     fetchAnalysis(activeTab);
   }, [activeTab, fetchAnalysis]);
+
+  useEffect(() => {
+    autoReviewSignatureRef.current = null;
+    setAutoAssistStatus('idle');
+    setAutoAssistMessage(null);
+    setNotes([]);
+  }, [id]);
 
   // WebSocket subscription for real-time analysis updates
   useEffect(() => {
@@ -339,6 +397,20 @@ export function ERCaseDetail() {
 
   const hasUnprocessedDocs = documents.some(d => d.processing_status === 'pending' || d.processing_status === 'failed');
 
+  useEffect(() => {
+    if (!id) return;
+    const hasProcessingDocs = documents.some(
+      (d) => d.processing_status === 'pending' || d.processing_status === 'processing'
+    );
+    if (!hasProcessingDocs) return;
+
+    const interval = setInterval(() => {
+      void fetchDocuments();
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [id, documents, fetchDocuments]);
+
   const pollForAnalysis = useCallback(async (type: AnalysisTab, maxAttempts = 60) => {
     // Poll every 2 seconds for up to 2 minutes.
     for (let i = 0; i < maxAttempts; i++) {
@@ -377,8 +449,8 @@ export function ERCaseDetail() {
     return false;
   }, [id]);
 
-  const handleGenerateTimeline = async () => {
-    if (!id) return;
+  const handleGenerateTimeline = useCallback(async (): Promise<boolean> => {
+    if (!id) return false;
     setAnalysisLoading('timeline');
     setAnalysisProgress({ step: 'Starting analysis...' });
     setAnalysisError(null);
@@ -391,17 +463,20 @@ export function ERCaseDetail() {
         setAnalysisError('Timeline analysis timed out. Please try again.');
         setAnalysisLoading(null);
         setAnalysisProgress(null);
+        return false;
       }
-    } catch (err: any) {
+      return true;
+    } catch (err: unknown) {
       console.error('Failed to generate timeline:', err);
-      setAnalysisError(err?.message || 'Failed to generate timeline. Please try again.');
+      setAnalysisError(getErrorMessage(err, 'Failed to generate timeline. Please try again.'));
       setAnalysisLoading(null);
       setAnalysisProgress(null);
+      return false;
     }
-  };
+  }, [id, pollForAnalysis]);
 
-  const handleGenerateDiscrepancies = async () => {
-    if (!id) return;
+  const handleGenerateDiscrepancies = useCallback(async (): Promise<boolean> => {
+    if (!id) return false;
     setAnalysisLoading('discrepancies');
     setAnalysisProgress({ step: 'Starting analysis...' });
     setAnalysisError(null);
@@ -414,17 +489,20 @@ export function ERCaseDetail() {
         setAnalysisError('Discrepancy analysis timed out. Please try again.');
         setAnalysisLoading(null);
         setAnalysisProgress(null);
+        return false;
       }
-    } catch (err: any) {
+      return true;
+    } catch (err: unknown) {
       console.error('Failed to generate discrepancies:', err);
-      setAnalysisError(err?.message || 'Failed to analyze discrepancies. Please try again.');
+      setAnalysisError(getErrorMessage(err, 'Failed to analyze discrepancies. Please try again.'));
       setAnalysisLoading(null);
       setAnalysisProgress(null);
+      return false;
     }
-  };
+  }, [id, pollForAnalysis]);
 
-  const handleRunPolicyCheck = async () => {
-    if (!id) return;
+  const handleRunPolicyCheck = useCallback(async (): Promise<boolean> => {
+    if (!id) return false;
     setAnalysisLoading('policy');
     setAnalysisProgress({ step: 'Starting analysis...' });
     setAnalysisError(null);
@@ -437,14 +515,17 @@ export function ERCaseDetail() {
         setAnalysisError('Policy check timed out. Please try again.');
         setAnalysisLoading(null);
         setAnalysisProgress(null);
+        return false;
       }
-    } catch (err: any) {
+      return true;
+    } catch (err: unknown) {
       console.error('Failed to run policy check:', err);
-      setAnalysisError(err?.message || 'Failed to run policy check. Please try again.');
+      setAnalysisError(getErrorMessage(err, 'Failed to run policy check. Please try again.'));
       setAnalysisLoading(null);
       setAnalysisProgress(null);
+      return false;
     }
-  };
+  }, [id, pollForAnalysis]);
 
   const handleSearch = async () => {
     if (!id || !searchQuery.trim()) return;
@@ -453,9 +534,9 @@ export function ERCaseDetail() {
     try {
       const data = await erCopilot.searchEvidence(id, searchQuery);
       setSearchResults(data.results);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Search failed:', err);
-      setAnalysisError(err?.message || 'Search failed. Please try again.');
+      setAnalysisError(getErrorMessage(err, 'Search failed. Please try again.'));
       setSearchResults([]);
     } finally {
       setSearching(false);
@@ -477,6 +558,165 @@ export function ERCaseDetail() {
     }
   };
 
+  const runAssistanceReview = useCallback(async (
+    intakeContext: ERCaseIntakeContext | null,
+    completedNonPolicyDocs: ERDocument[]
+  ) => {
+    if (!id) return;
+
+    setAutoReviewRunning(true);
+    setAutoAssistStatus('running');
+    setAutoAssistMessage('Reviewing uploaded evidence and updating guidance...');
+    setActiveTab('timeline');
+
+    const reviewedDocIds = completedNonPolicyDocs.map((doc) => doc.id).sort();
+    const reviewedSignature = reviewedDocIds.join(',');
+    const shouldRunDiscrepancies = completedNonPolicyDocs.length >= 2;
+
+    try {
+      const timelineOk = await handleGenerateTimeline();
+      const discrepanciesOk = shouldRunDiscrepancies ? await handleGenerateDiscrepancies() : false;
+      const policyOk = await handleRunPolicyCheck();
+
+      const timelineResult = timelineOk ? await erCopilot.getTimeline(id).catch(() => null) : null;
+      const discrepancyResult = shouldRunDiscrepancies && discrepanciesOk
+        ? await erCopilot.getDiscrepancies(id).catch(() => null)
+        : null;
+      const policyResult = policyOk ? await erCopilot.getPolicyCheck(id).catch(() => null) : null;
+
+      const discrepancyCount = discrepancyResult?.analysis?.discrepancies?.length ?? 0;
+      const violationCount = policyResult?.analysis?.violations?.length ?? 0;
+      const reviewSucceeded = timelineOk && policyOk && (!shouldRunDiscrepancies || discrepanciesOk);
+
+      const guidanceLines = [
+        `Auto-review processed ${completedNonPolicyDocs.length} completed evidence document(s).`,
+      ];
+
+      if (timelineResult?.analysis?.timeline_summary) {
+        guidanceLines.push(`Timeline summary: ${timelineResult.analysis.timeline_summary}`);
+      }
+
+      if (shouldRunDiscrepancies) {
+        guidanceLines.push(
+          discrepancyCount > 0
+            ? `Discrepancy analysis found ${discrepancyCount} potential inconsistency${discrepancyCount === 1 ? '' : 'ies'}.`
+            : 'Discrepancy analysis did not find major inconsistencies in current evidence.'
+        );
+      } else {
+        guidanceLines.push('Upload at least one more witness/evidence document to enable discrepancy analysis.');
+      }
+
+      if (policyResult?.analysis?.summary) {
+        guidanceLines.push(`Policy review: ${policyResult.analysis.summary}`);
+      }
+
+      if (violationCount > 0) {
+        guidanceLines.push('Recommended next step: prioritize policy-risk follow-up interviews and preserve supporting evidence.');
+      } else {
+        guidanceLines.push('Recommended next step: conduct follow-up interviews and upload transcripts for iterative guidance.');
+      }
+
+      guidanceLines.push('Suggested interview follow-ups: What happened? Who was present? What evidence exists? What outcome is requested?');
+
+      await erCopilot.createCaseNote(id, {
+        note_type: 'guidance',
+        content: guidanceLines.join('\n'),
+        metadata: {
+          source: 'assistance_auto_review',
+          reviewed_doc_ids: reviewedDocIds,
+          timeline_ok: timelineOk,
+          discrepancies_ok: shouldRunDiscrepancies ? discrepanciesOk : null,
+          policy_ok: policyOk,
+          violation_count: violationCount,
+          discrepancy_count: discrepancyCount,
+        },
+      });
+
+      const nextIntakeContext: ERCaseIntakeContext = {
+        ...(intakeContext || {}),
+        assistance_requested: true,
+        assistance: {
+          ...(intakeContext?.assistance || {}),
+          mode: 'auto',
+          last_reviewed_signature: reviewedSignature,
+          last_reviewed_doc_ids: reviewedDocIds,
+          last_reviewed_at: new Date().toISOString(),
+          last_run_status: reviewSucceeded ? 'completed' : 'partial',
+        },
+      };
+
+      const updatedCase = await erCopilot.updateCase(id, { intake_context: nextIntakeContext });
+      setCase(updatedCase);
+      await fetchNotes();
+
+      setAutoAssistStatus('completed');
+      setAutoAssistMessage(
+        reviewSucceeded
+          ? 'Assistance review completed and guidance notes were updated.'
+          : 'Assistance review partially completed. Check notes and retry any failed analysis.'
+      );
+    } catch (err) {
+      console.error('Auto assistance review failed:', err);
+      setAutoAssistStatus('needs_docs');
+      setAutoAssistMessage('Auto assistance review failed. You can retry from the analysis tabs.');
+    } finally {
+      setAutoReviewRunning(false);
+    }
+  }, [id, handleGenerateTimeline, handleGenerateDiscrepancies, handleRunPolicyCheck, fetchNotes]);
+
+  useEffect(() => {
+    if (!id || loading || !erCase) return;
+
+    const params = new URLSearchParams(location.search);
+    const assistanceParam = params.get('assistance') === 'auto';
+    if (assistanceParam) {
+      navigate(location.pathname, { replace: true });
+    }
+
+    const intakeContext = normalizeIntakeContext(erCase.intake_context);
+    const assistanceEnabled = Boolean(intakeContext?.assistance_requested);
+    if (!assistanceEnabled) return;
+
+    const completedNonPolicyDocs = documents.filter(
+      (doc) => doc.processing_status === 'completed' && doc.document_type !== 'policy'
+    );
+    const currentSignature = completedNonPolicyDocs
+      .map((doc) => doc.id)
+      .sort()
+      .join(',');
+    const lastReviewedSignature = intakeContext?.assistance?.last_reviewed_signature || '';
+
+    if (!currentSignature) {
+      setAutoAssistStatus('needs_docs');
+      setAutoAssistMessage('Assistance enabled. Upload and process evidence documents to receive updated guidance.');
+      return;
+    }
+
+    if (currentSignature === lastReviewedSignature) {
+      if (assistanceParam) {
+        setAutoAssistStatus('completed');
+        setAutoAssistMessage('Assistance guidance is already up to date for current uploads.');
+      }
+      return;
+    }
+
+    if (autoReviewRunning) return;
+    if (autoReviewSignatureRef.current === currentSignature) return;
+
+    autoReviewSignatureRef.current = currentSignature;
+    void runAssistanceReview(intakeContext, completedNonPolicyDocs);
+  }, [
+    id,
+    loading,
+    erCase,
+    documents,
+    autoReviewRunning,
+    location.search,
+    location.pathname,
+    navigate,
+    runAssistanceReview,
+  ]);
+
   if (loading) {
     return <div className="text-center py-12 text-zinc-500 text-xs uppercase tracking-wider">Loading...</div>;
   }
@@ -485,7 +725,13 @@ export function ERCaseDetail() {
     return <div className="text-center py-12 text-zinc-500 text-xs uppercase tracking-wider">Case not found</div>;
   }
 
-  const uploadedDocs = documents.filter(d => d.processing_status !== 'failed');
+  const completedDocs = documents.filter(d => d.processing_status === 'completed');
+  const completedNonPolicyDocs = documents.filter(
+    d => d.processing_status === 'completed' && d.document_type !== 'policy'
+  );
+  const intakeContext = normalizeIntakeContext(erCase.intake_context);
+  const assistanceAnswers = intakeContext?.answers;
+  const showAssistancePanel = Boolean(intakeContext?.assistance_requested) || autoAssistStatus !== 'idle';
 
   return (
     <div className="max-w-5xl mx-auto space-y-12">
@@ -522,6 +768,46 @@ export function ERCaseDetail() {
           </select>
         </div>
       </div>
+
+      {showAssistancePanel && (
+        <div className="border border-zinc-200 bg-zinc-50/70 p-4 space-y-2">
+          <p className="text-[10px] uppercase tracking-widest text-zinc-500">Investigation Assistance Intake</p>
+          {assistanceAnswers && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs text-zinc-600">
+              <div>
+                <span className="text-zinc-400 uppercase tracking-wide text-[10px]">Complaint Format</span>
+                <p className="mt-1">{assistanceAnswers.complaint_format || 'unknown'}</p>
+              </div>
+              <div>
+                <span className="text-zinc-400 uppercase tracking-wide text-[10px]">Immediate Risk</span>
+                <p className="mt-1">{assistanceAnswers.immediate_risk || 'unsure'}</p>
+              </div>
+              <div>
+                <span className="text-zinc-400 uppercase tracking-wide text-[10px]">Primary Goal</span>
+                <p className="mt-1">{formatIntakeObjective(assistanceAnswers.objective)}</p>
+              </div>
+              <div>
+                <span className="text-zinc-400 uppercase tracking-wide text-[10px]">Witnesses</span>
+                <p className="mt-1">{assistanceAnswers.witnesses || 'Not provided'}</p>
+              </div>
+            </div>
+          )}
+          {assistanceAnswers?.additional_notes && (
+            <p className="text-xs text-zinc-600">Notes: {assistanceAnswers.additional_notes}</p>
+          )}
+          {autoAssistMessage && (
+            <p className={`text-xs ${
+              autoAssistStatus === 'completed'
+                ? 'text-emerald-700'
+                : autoAssistStatus === 'running'
+                  ? 'text-amber-700'
+                  : 'text-zinc-600'
+            }`}>
+              {autoAssistMessage}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
         {/* Left: Documents */}
@@ -604,6 +890,34 @@ export function ERCaseDetail() {
               </div>
             )}
           </div>
+
+          {showAssistancePanel && (
+            <div className="pt-4 border-t border-zinc-200">
+              <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Case Notes</h3>
+              {notes.length === 0 ? (
+                <p className="text-xs text-zinc-400">No notes yet.</p>
+              ) : (
+                <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                  {notes.slice(-10).reverse().map((note) => (
+                    <div key={note.id} className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] uppercase tracking-wide text-zinc-500">{note.note_type}</span>
+                        <span className="text-[10px] text-zinc-400">
+                          {new Date(note.created_at).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-700 whitespace-pre-wrap">{note.content}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right: Analysis */}
@@ -649,7 +963,7 @@ export function ERCaseDetail() {
                 <div className="flex justify-end">
                   <button
                     onClick={handleGenerateTimeline}
-                    disabled={analysisLoading === 'timeline' || uploadedDocs.length === 0}
+                    disabled={analysisLoading === 'timeline' || completedNonPolicyDocs.length === 0}
                     className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
                   >
                     {analysisLoading === 'timeline' ? 'Generating...' : 'Regenerate Analysis'}
@@ -740,7 +1054,7 @@ export function ERCaseDetail() {
                 <div className="flex justify-end">
                   <button
                     onClick={handleGenerateDiscrepancies}
-                    disabled={analysisLoading === 'discrepancies' || uploadedDocs.filter(d => d.document_type !== 'policy').length < 2}
+                    disabled={analysisLoading === 'discrepancies' || completedNonPolicyDocs.length < 2}
                     className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
                   >
                     {analysisLoading === 'discrepancies' ? 'Analyzing...' : 'Analyze Documents'}
@@ -767,11 +1081,11 @@ export function ERCaseDetail() {
                       <div>
                         <p className="mb-2">No conflicting statements detected.</p>
                         <p className="text-[10px] text-zinc-500">
-                          Analyzed {uploadedDocs.filter(d => d.document_type !== 'policy').length} documents.
+                          Analyzed {completedNonPolicyDocs.length} documents.
                           All witness accounts appear consistent on key facts.
                         </p>
                       </div>
-                    ) : uploadedDocs.filter(d => d.document_type !== 'policy').length < 2 ? (
+                    ) : completedNonPolicyDocs.length < 2 ? (
                       <div>
                         <p className="mb-2">Upload at least 2 non-policy documents to run analysis.</p>
                         <p className="text-[10px] text-zinc-500">
@@ -840,7 +1154,7 @@ export function ERCaseDetail() {
                 <div className="flex justify-end">
                   <button
                     onClick={handleRunPolicyCheck}
-                    disabled={analysisLoading === 'policy'}
+                    disabled={analysisLoading === 'policy' || completedNonPolicyDocs.length === 0}
                     className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
                   >
                     {analysisLoading === 'policy' ? 'Checking...' : 'Run Policy Check'}
@@ -972,7 +1286,7 @@ export function ERCaseDetail() {
                   </div>
                 ) : (
                   <div className="text-center py-12 text-zinc-500 text-sm">
-                    {uploadedDocs.length === 0
+                    {completedDocs.length === 0
                       ? 'Upload documents first.'
                       : 'Enter a query to search through case evidence using semantic similarity.'}
                   </div>

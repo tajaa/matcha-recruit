@@ -65,6 +65,8 @@ import type {
   ERCaseUpdate,
   ERCaseListResponse,
   ERCaseStatus,
+  ERCaseNote,
+  ERCaseNoteCreate,
   ERDocument,
   ERDocumentType,
   ERDocumentUploadResponse,
@@ -1147,6 +1149,16 @@ export const erCopilot = {
       method: 'DELETE',
     }),
 
+  // Notes
+  listCaseNotes: (caseId: string): Promise<ERCaseNote[]> =>
+    request<ERCaseNote[]>(`/er/cases/${caseId}/notes`),
+
+  createCaseNote: (caseId: string, data: ERCaseNoteCreate): Promise<ERCaseNote> =>
+    request<ERCaseNote>(`/er/cases/${caseId}/notes`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   // Documents
   uploadDocument: async (
     caseId: string,
@@ -1931,7 +1943,8 @@ export const offerLetters = {
 export const leadsAgent = {
   search: (params: SearchRequest & { preview?: boolean }) => {
     const preview = params.preview ? '?preview=true' : '';
-    const { preview: _, ...body } = params as any;
+    const { preview: previewFlag, ...body } = params;
+    void previewFlag;
     return request<SearchResult>(`/leads-agent/search${preview}`, {
       method: 'POST',
       body: JSON.stringify(body),

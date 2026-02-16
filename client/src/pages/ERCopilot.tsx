@@ -1,8 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { erCopilot } from '../api/client';
-import type { ERCase, ERCaseStatus, ERCaseCreate } from '../types';
-import { X, ChevronRight } from 'lucide-react';
+import type {
+  ERCase,
+  ERCaseCreate,
+  ERCaseIntakeContext,
+  ERCaseStatus,
+  ERDocumentType,
+  ERIntakeImmediateRisk,
+  ERIntakeObjective,
+} from '../types';
+import { FileUpload } from '../components';
+import { X, ChevronRight, ArrowLeft } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const STATUS_TABS: { label: string; value: ERCaseStatus | 'all' }[] = [
@@ -34,19 +43,84 @@ const STATUS_LABELS: Record<ERCaseStatus, string> = {
   closed: 'Closed',
 };
 
+const DOC_TYPE_OPTIONS: { value: ERDocumentType; label: string }[] = [
+  { value: 'transcript', label: 'Interview Transcript' },
+  { value: 'policy', label: 'Policy Document' },
+  { value: 'email', label: 'Email/Communication' },
+  { value: 'other', label: 'Other Evidence' },
+];
+
+type CreateStep = 'details' | 'documents_prompt' | 'documents_upload' | 'assistance_prompt' | 'assistance_questions';
+
+const DEFAULT_FORM: ERCaseCreate = {
+  title: '',
+  description: '',
+};
+
+const DEFAULT_ASSISTANCE = {
+  immediateRisk: 'unsure' as ERIntakeImmediateRisk,
+  objective: 'general' as ERIntakeObjective,
+  complaintFormat: 'unknown' as 'verbal' | 'written' | 'both' | 'unknown',
+  witnesses: '',
+  notes: '',
+};
+
+const STEP_TITLES: Record<CreateStep, string> = {
+  details: 'New Investigation Case',
+  documents_prompt: 'Next Step',
+  documents_upload: 'Upload Documents',
+  assistance_prompt: 'Investigation Assistance',
+  assistance_questions: 'Assistance Intake',
+};
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
+}
+
+function getPrimaryAssistanceQuestion(description: string): string {
+  const text = description.toLowerCase();
+  if (text.includes('harass') || text.includes('discrimin') || text.includes('retaliat')) {
+    return 'Was the complaint made verbally or in writing?';
+  }
+  return 'How was the concern initially reported (verbally, in writing, or both)?';
+}
+
+function formatComplaintFormat(value: 'verbal' | 'written' | 'both' | 'unknown'): string {
+  if (value === 'written') return 'In writing';
+  if (value === 'verbal') return 'Verbally';
+  if (value === 'both') return 'Both verbal and written';
+  return 'Unknown';
+}
+
+function buildInitialGuidance(description: string): string {
+  return [
+    `Intake summary: ${description.trim()}`,
+    'Initial recommendation: Preserve evidence and collect the original complaint document if available.',
+    'Next step: Upload the complaint and any related communications so ER Copilot can provide targeted follow-up guidance.',
+  ].join('\n');
+}
+
 export function ERCopilot() {
   const navigate = useNavigate();
   const [cases, setCases] = useState<ERCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ERCaseStatus | 'all'>('all');
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [creating, setCreating] = useState(false);
 
-  // Form state
-  const [formData, setFormData] = useState<ERCaseCreate>({
-    title: '',
-    description: '',
-  });
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createStep, setCreateStep] = useState<CreateStep>('details');
+  const [creating, setCreating] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [savingAssistance, setSavingAssistance] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createdCaseId, setCreatedCaseId] = useState<string | null>(null);
+  const [uploadedCount, setUploadedCount] = useState(0);
+
+  const [formData, setFormData] = useState<ERCaseCreate>(DEFAULT_FORM);
+  const [uploadDocType, setUploadDocType] = useState<ERDocumentType>('transcript');
+  const [assistanceData, setAssistanceData] = useState(DEFAULT_ASSISTANCE);
 
   const fetchCases = useCallback(async () => {
     try {
@@ -65,19 +139,208 @@ export function ERCopilot() {
     fetchCases();
   }, [fetchCases]);
 
-  const handleCreate = async () => {
-    if (!formData.title.trim()) return;
+  const resetCreateFlow = () => {
+    setShowCreateModal(false);
+    setCreateStep('details');
+    setCreateError(null);
+    setCreatedCaseId(null);
+    setUploadedCount(0);
+    setFormData(DEFAULT_FORM);
+    setUploadDocType('transcript');
+    setAssistanceData(DEFAULT_ASSISTANCE);
+    setCreating(false);
+    setUploading(false);
+    setSavingAssistance(false);
+  };
+
+  const openCreateModal = () => {
+    setCreateStep('details');
+    setCreateError(null);
+    setCreatedCaseId(null);
+    setUploadedCount(0);
+    setFormData(DEFAULT_FORM);
+    setUploadDocType('transcript');
+    setAssistanceData(DEFAULT_ASSISTANCE);
+    setShowCreateModal(true);
+  };
+
+  const handleCreateDetails = async () => {
+    if (!formData.title?.trim() || !formData.description?.trim()) {
+      return;
+    }
 
     setCreating(true);
+    setCreateError(null);
     try {
-      const created = await erCopilot.createCase(formData);
-      setShowCreateModal(false);
-      setFormData({ title: '', description: '' });
-      navigate(`/app/matcha/er-copilot/${created.id}`);
-    } catch (err) {
+      const created = await erCopilot.createCase({
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+      });
+      setCreatedCaseId(created.id);
+      setCreateStep('documents_prompt');
+      await fetchCases();
+    } catch (err: unknown) {
       console.error('Failed to create case:', err);
+      setCreateError(getErrorMessage(err, 'Failed to create case. Please try again.'));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleGoToCase = async (withAssistance: boolean) => {
+    if (!createdCaseId) return;
+    await fetchCases();
+    const caseId = createdCaseId;
+    resetCreateFlow();
+    navigate(withAssistance
+      ? `/app/matcha/er-copilot/${caseId}?assistance=auto`
+      : `/app/matcha/er-copilot/${caseId}`);
+  };
+
+  const handleUploadDocuments = async (files: File[]) => {
+    if (!createdCaseId || files.length === 0) return;
+
+    setUploading(true);
+    setCreateError(null);
+    try {
+      for (const file of files) {
+        await erCopilot.uploadDocument(createdCaseId, file, uploadDocType);
+      }
+      setUploadedCount((prev) => prev + files.length);
+      setCreateStep('assistance_prompt');
+    } catch (err: unknown) {
+      console.error('Failed to upload documents:', err);
+      setCreateError(getErrorMessage(err, 'Upload failed. Please try again.'));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSaveAssistanceIntake = async () => {
+    if (!createdCaseId) return;
+    const primaryQuestion = getPrimaryAssistanceQuestion(formData.description || '');
+
+    const intakeContext: ERCaseIntakeContext = {
+      assistance_requested: true,
+      no_documents_at_intake: uploadedCount === 0,
+      captured_at: new Date().toISOString(),
+      assistance: {
+        mode: 'auto',
+        last_reviewed_signature: '',
+        last_reviewed_doc_ids: [],
+      },
+      answers: {
+        immediate_risk: assistanceData.immediateRisk,
+        objective: assistanceData.objective,
+        complaint_format: assistanceData.complaintFormat,
+        witnesses: assistanceData.witnesses.trim() || undefined,
+        additional_notes: assistanceData.notes.trim() || undefined,
+      },
+    };
+
+    setSavingAssistance(true);
+    setCreateError(null);
+    try {
+      await erCopilot.updateCase(createdCaseId, { intake_context: intakeContext });
+      const intakeNotes = [
+        {
+          note_type: 'question' as const,
+          content: primaryQuestion,
+          metadata: { source: 'assistance_intake', question_key: 'complaint_format' },
+        },
+        {
+          note_type: 'answer' as const,
+          content: formatComplaintFormat(assistanceData.complaintFormat),
+          metadata: { source: 'assistance_intake', question_key: 'complaint_format' },
+        },
+        {
+          note_type: 'question' as const,
+          content: 'Is there any immediate safety risk or retaliation concern?',
+          metadata: { source: 'assistance_intake', question_key: 'immediate_risk' },
+        },
+        {
+          note_type: 'answer' as const,
+          content: assistanceData.immediateRisk,
+          metadata: { source: 'assistance_intake', question_key: 'immediate_risk' },
+        },
+        {
+          note_type: 'question' as const,
+          content: 'What is your primary objective for assistance?',
+          metadata: { source: 'assistance_intake', question_key: 'objective' },
+        },
+        {
+          note_type: 'answer' as const,
+          content: assistanceData.objective,
+          metadata: { source: 'assistance_intake', question_key: 'objective' },
+        },
+      ];
+
+      if (assistanceData.witnesses.trim()) {
+        intakeNotes.push(
+          {
+            note_type: 'question',
+            content: 'Who are known witnesses at intake?',
+            metadata: { source: 'assistance_intake', question_key: 'witnesses' },
+          },
+          {
+            note_type: 'answer',
+            content: assistanceData.witnesses.trim(),
+            metadata: { source: 'assistance_intake', question_key: 'witnesses' },
+          }
+        );
+      }
+
+      if (assistanceData.notes.trim()) {
+        intakeNotes.push(
+          {
+            note_type: 'question',
+            content: 'Additional intake notes',
+            metadata: { source: 'assistance_intake', question_key: 'additional_notes' },
+          },
+          {
+            note_type: 'answer',
+            content: assistanceData.notes.trim(),
+            metadata: { source: 'assistance_intake', question_key: 'additional_notes' },
+          }
+        );
+      }
+
+      for (const note of intakeNotes) {
+        await erCopilot.createCaseNote(createdCaseId, note);
+      }
+
+      if (uploadedCount === 0 && formData.description?.trim()) {
+        await erCopilot.createCaseNote(createdCaseId, {
+          note_type: 'guidance',
+          content: buildInitialGuidance(formData.description),
+          metadata: { source: 'assistance_initial', auto_generated: true },
+        });
+      }
+
+      await handleGoToCase(true);
+    } catch (err: unknown) {
+      console.error('Failed to save assistance intake:', err);
+      setCreateError(getErrorMessage(err, 'Could not start investigation assistance. Please try again.'));
+    } finally {
+      setSavingAssistance(false);
+    }
+  };
+
+  const handleBackStep = () => {
+    if (createStep === 'documents_prompt') {
+      setCreateStep('details');
+      return;
+    }
+    if (createStep === 'documents_upload') {
+      setCreateStep('documents_prompt');
+      return;
+    }
+    if (createStep === 'assistance_prompt') {
+      setCreateStep('documents_prompt');
+      return;
+    }
+    if (createStep === 'assistance_questions') {
+      setCreateStep('assistance_prompt');
     }
   };
 
@@ -85,9 +348,10 @@ export function ERCopilot() {
     return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
+  const isBusy = creating || uploading || savingAssistance;
+
   return (
     <div className="max-w-5xl mx-auto">
-      {/* Header */}
       <div className="flex justify-between items-start mb-12 border-b border-white/10 pb-8">
         <div>
           <div className="flex items-center gap-3">
@@ -98,14 +362,13 @@ export function ERCopilot() {
         </div>
         <button
           data-tour="er-new-case"
-          onClick={() => setShowCreateModal(true)}
+          onClick={openCreateModal}
           className="px-6 py-2 bg-white text-black text-xs font-bold hover:bg-zinc-200 uppercase tracking-wider transition-colors"
         >
           New Case
         </button>
       </div>
 
-      {/* Tabs */}
       <div data-tour="er-tabs" className="flex gap-8 mb-px border-b border-white/10">
         {STATUS_TABS.map((tab) => (
           <button
@@ -124,13 +387,13 @@ export function ERCopilot() {
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[20vh]">
-           <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading...</div>
+          <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading...</div>
         </div>
       ) : cases.length === 0 ? (
         <div className="text-center py-24 border border-dashed border-white/10 bg-white/5 mt-8">
           <div className="text-xs text-zinc-500 mb-4 font-mono uppercase tracking-wider">No cases found</div>
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={openCreateModal}
             className="text-xs text-white hover:text-zinc-300 font-bold uppercase tracking-wider underline underline-offset-4"
           >
             Create first case
@@ -138,15 +401,14 @@ export function ERCopilot() {
         </div>
       ) : (
         <div data-tour="er-case-list" className="space-y-px bg-white/10 border border-white/10 mt-8">
-           {/* List Header */}
-           <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950 border-b border-white/10">
-             <div className="w-8"></div>
-             <div className="w-24">ID</div>
-             <div className="flex-1">Title</div>
-             <div className="w-32">Status</div>
-             <div className="w-24 text-right">Created</div>
-             <div className="w-8"></div>
-           </div>
+          <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950 border-b border-white/10">
+            <div className="w-8"></div>
+            <div className="w-24">ID</div>
+            <div className="flex-1">Title</div>
+            <div className="w-32">Status</div>
+            <div className="w-24 text-right">Created</div>
+            <div className="w-8"></div>
+          </div>
 
           {cases.map((erCase) => (
             <div
@@ -156,91 +418,314 @@ export function ERCopilot() {
               onClick={() => navigate(`/app/matcha/er-copilot/${erCase.id}`)}
             >
               <div className="w-8 flex justify-center">
-                 <div className={`w-1.5 h-1.5 rounded-full ${STATUS_DOTS[erCase.status] || 'bg-zinc-700'}`} />
+                <div className={`w-1.5 h-1.5 rounded-full ${STATUS_DOTS[erCase.status] || 'bg-zinc-700'}`} />
               </div>
-              
+
               <div className="w-24 text-[10px] text-zinc-500 font-mono group-hover:text-zinc-400">
-                 {erCase.case_number}
+                {erCase.case_number}
               </div>
 
               <div className="flex-1 min-w-0">
-                 <h3 className="text-sm font-bold text-white truncate group-hover:text-zinc-300">
-                   {erCase.title}
-                 </h3>
-                 {erCase.description && (
-                   <p className="text-[10px] text-zinc-500 mt-1 truncate max-w-lg font-mono">{erCase.description}</p>
-                 )}
+                <h3 className="text-sm font-bold text-white truncate group-hover:text-zinc-300">
+                  {erCase.title}
+                </h3>
+                {erCase.description && (
+                  <p className="text-[10px] text-zinc-500 mt-1 truncate max-w-lg font-mono">{erCase.description}</p>
+                )}
               </div>
 
               <div data-tour="er-status-col" className={`w-32 text-[10px] font-bold uppercase tracking-wider ${STATUS_COLORS[erCase.status]}`}>
-                 {STATUS_LABELS[erCase.status]}
+                {STATUS_LABELS[erCase.status]}
               </div>
 
               <div className="w-24 text-right text-[10px] text-zinc-500 font-mono">
-                 {formatDate(erCase.created_at)}
+                {formatDate(erCase.created_at)}
               </div>
-              
+
               <div className="w-8 flex justify-center text-zinc-600 group-hover:text-white">
-                 <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-4 h-4" />
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Create Modal - Inline implementation */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 shadow-2xl flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-white/10">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider">New Investigation Case</h3>
-              <button 
-                onClick={() => setShowCreateModal(false)}
-                className="text-zinc-500 hover:text-white transition-colors"
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider">{STEP_TITLES[createStep]}</h3>
+              <button
+                onClick={resetCreateFlow}
+                className="text-zinc-500 hover:text-white transition-colors disabled:opacity-40"
+                disabled={isBusy}
               >
                 <X size={20} />
               </button>
             </div>
-            
-            <div className="p-8 space-y-6">
-              <div>
-                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Case Title</label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder="e.g., Harassment Allegation - Sales Team"
-                  className="w-full px-0 py-2 bg-transparent border-b border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-white transition-colors"
-                  autoFocus
-                />
-              </div>
 
-              <div>
-                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Description</label>
-                <textarea
-                  value={formData.description || ''}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Brief summary of the allegation or incident..."
-                  rows={4}
-                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-white/20 resize-none transition-colors"
-                />
+            {createError && (
+              <div className="px-6 pt-4 text-xs text-red-400 uppercase tracking-wide">
+                {createError}
               </div>
+            )}
+
+            <div className="p-8 space-y-6">
+              {createStep === 'details' && (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Case Title</label>
+                    <input
+                      type="text"
+                      value={formData.title}
+                      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                      placeholder="e.g., Harassment Allegation - Sales Team"
+                      className="w-full px-0 py-2 bg-transparent border-b border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-white transition-colors"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Description</label>
+                    <textarea
+                      value={formData.description || ''}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                      placeholder="Brief summary of the allegation or incident..."
+                      rows={4}
+                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-white/20 resize-none transition-colors"
+                    />
+                  </div>
+                </>
+              )}
+
+              {createStep === 'documents_prompt' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-zinc-200">Do you have any documents to upload?</p>
+                  <p className="text-xs text-zinc-500 uppercase tracking-wide">
+                    You can upload interviews, emails, policies, or other evidence now.
+                  </p>
+                </div>
+              )}
+
+              {createStep === 'documents_upload' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Document Type</label>
+                    <select
+                      value={uploadDocType}
+                      onChange={(e) => setUploadDocType(e.target.value as ERDocumentType)}
+                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500"
+                      disabled={uploading}
+                    >
+                      {DOC_TYPE_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <FileUpload
+                    accept=".pdf,.docx,.doc,.txt,.csv,.json"
+                    onUpload={handleUploadDocuments}
+                    multiple={true}
+                    disabled={uploading}
+                    label={uploading ? 'Uploading...' : 'Drop files here or click to select'}
+                    description="Supports PDF, DOCX, TXT, CSV, JSON"
+                  />
+
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide">
+                    Upload now, then choose whether to start investigation assistance.
+                  </p>
+                  {uploadedCount > 0 && (
+                    <p className="text-[10px] text-emerald-400 uppercase tracking-wide">
+                      Uploaded {uploadedCount} file{uploadedCount === 1 ? '' : 's'}.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {createStep === 'assistance_prompt' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-zinc-200">Would you like investigation assistance?</p>
+                  <p className="text-xs text-zinc-500 uppercase tracking-wide">
+                    {uploadedCount > 0
+                      ? 'We can auto-review uploaded evidence and keep updating guidance as new documents are added.'
+                      : 'We can start from your description and keep updating guidance as documents are uploaded later.'}
+                  </p>
+                </div>
+              )}
+
+              {createStep === 'assistance_questions' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                      {getPrimaryAssistanceQuestion(formData.description || '')}
+                    </label>
+                    <select
+                      value={assistanceData.complaintFormat}
+                      onChange={(e) => setAssistanceData({
+                        ...assistanceData,
+                        complaintFormat: e.target.value as 'verbal' | 'written' | 'both' | 'unknown',
+                      })}
+                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500"
+                    >
+                      <option value="unknown">Unknown</option>
+                      <option value="written">In writing</option>
+                      <option value="verbal">Verbally</option>
+                      <option value="both">Both</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                      Immediate Safety Risk?
+                    </label>
+                    <select
+                      value={assistanceData.immediateRisk}
+                      onChange={(e) => setAssistanceData({
+                        ...assistanceData,
+                        immediateRisk: e.target.value as ERIntakeImmediateRisk,
+                      })}
+                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500"
+                    >
+                      <option value="unsure">Unsure</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                      Primary Goal
+                    </label>
+                    <select
+                      value={assistanceData.objective}
+                      onChange={(e) => setAssistanceData({
+                        ...assistanceData,
+                        objective: e.target.value as ERIntakeObjective,
+                      })}
+                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500"
+                    >
+                      <option value="general">General guidance</option>
+                      <option value="timeline">Build timeline first</option>
+                      <option value="discrepancies">Find inconsistencies</option>
+                      <option value="policy">Check policy risks</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                      Known Witnesses (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={assistanceData.witnesses}
+                      onChange={(e) => setAssistanceData({ ...assistanceData, witnesses: e.target.value })}
+                      placeholder="Names or roles"
+                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-zinc-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                      Notes (Optional)
+                    </label>
+                    <textarea
+                      value={assistanceData.notes}
+                      onChange={(e) => setAssistanceData({ ...assistanceData, notes: e.target.value })}
+                      rows={3}
+                      placeholder="Anything the copilot should prioritize"
+                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-zinc-500 resize-none"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-between items-center p-6 border-t border-white/10 bg-zinc-900/50">
-              <button
-                 onClick={() => setShowCreateModal(false)}
-                 className="px-4 py-2 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                 onClick={handleCreate} 
-                 disabled={creating || !formData.title.trim()}
-                 className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {creating ? 'Creating...' : 'Create Case'}
-              </button>
+              <div>
+                {createStep !== 'details' ? (
+                  <button
+                    onClick={handleBackStep}
+                    disabled={isBusy}
+                    className="px-4 py-2 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40 flex items-center gap-1"
+                  >
+                    <ArrowLeft size={12} />
+                    Back
+                  </button>
+                ) : (
+                  <button
+                    onClick={resetCreateFlow}
+                    disabled={isBusy}
+                    className="px-4 py-2 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+
+              {createStep === 'details' && (
+                <button
+                  onClick={handleCreateDetails}
+                  disabled={creating || !formData.title?.trim() || !formData.description?.trim()}
+                  className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {creating ? 'Creating...' : 'Continue'}
+                </button>
+              )}
+
+              {createStep === 'documents_prompt' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCreateStep('assistance_prompt')}
+                    className="px-4 py-2 text-zinc-300 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors"
+                  >
+                    No
+                  </button>
+                  <button
+                    onClick={() => setCreateStep('documents_upload')}
+                    className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+                  >
+                    Yes, Upload
+                  </button>
+                </div>
+              )}
+
+              {createStep === 'documents_upload' && (
+                <button
+                  onClick={() => setCreateStep('assistance_prompt')}
+                  disabled={uploading}
+                  className="px-4 py-2 text-zinc-300 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
+                >
+                  Skip Upload
+                </button>
+              )}
+
+              {createStep === 'assistance_prompt' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleGoToCase(false)}
+                    className="px-4 py-2 text-zinc-300 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors"
+                  >
+                    No
+                  </button>
+                  <button
+                    onClick={() => setCreateStep('assistance_questions')}
+                    className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+                  >
+                    Yes
+                  </button>
+                </div>
+              )}
+
+              {createStep === 'assistance_questions' && (
+                <button
+                  onClick={handleSaveAssistanceIntake}
+                  disabled={savingAssistance}
+                  className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {savingAssistance ? 'Starting...' : 'Start Assistance'}
+                </button>
+              )}
             </div>
           </div>
         </div>

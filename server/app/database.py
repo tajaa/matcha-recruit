@@ -737,6 +737,7 @@ async def init_db():
                 case_number VARCHAR(50) NOT NULL UNIQUE,
                 title VARCHAR(255) NOT NULL,
                 description TEXT,
+                intake_context JSONB,
                 status VARCHAR(50) DEFAULT 'open' CHECK (status IN ('open', 'in_review', 'pending_determination', 'closed')),
                 created_by UUID REFERENCES users(id),
                 assigned_to UUID REFERENCES users(id),
@@ -744,6 +745,10 @@ async def init_db():
                 updated_at TIMESTAMP DEFAULT NOW(),
                 closed_at TIMESTAMP
             )
+        """)
+        await conn.execute("""
+            ALTER TABLE er_cases
+            ADD COLUMN IF NOT EXISTS intake_context JSONB
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_er_cases_status ON er_cases(status)
@@ -843,6 +848,26 @@ async def init_db():
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_er_audit_log_action ON er_audit_log(action)
+        """)
+
+        # ER Case Notes table (assistant/user notes and guidance timeline)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS er_case_notes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                case_id UUID NOT NULL REFERENCES er_cases(id) ON DELETE CASCADE,
+                note_type VARCHAR(50) NOT NULL DEFAULT 'general'
+                    CHECK (note_type IN ('general', 'question', 'answer', 'guidance', 'system')),
+                content TEXT NOT NULL,
+                metadata JSONB,
+                created_by UUID REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_case_notes_case_id ON er_case_notes(case_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_case_notes_created_at ON er_case_notes(created_at DESC)
         """)
 
         # ===========================================

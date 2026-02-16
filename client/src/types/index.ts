@@ -1077,9 +1077,32 @@ export type ERCaseStatus = 'open' | 'in_review' | 'pending_determination' | 'clo
 export type ERDocumentType = 'transcript' | 'policy' | 'email' | 'other';
 export type ERProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
 export type ERAnalysisType = 'timeline' | 'discrepancies' | 'policy_check' | 'summary' | 'determination';
+export type ERCaseNoteType = 'general' | 'question' | 'answer' | 'guidance' | 'system';
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 export type SeverityLevel = 'high' | 'medium' | 'low';
 export type ViolationSeverity = 'major' | 'minor';
+export type ERIntakeObjective = 'timeline' | 'discrepancies' | 'policy' | 'general';
+export type ERIntakeImmediateRisk = 'yes' | 'no' | 'unsure';
+
+export interface ERCaseIntakeContext {
+  assistance_requested?: boolean;
+  no_documents_at_intake?: boolean;
+  captured_at?: string;
+  assistance?: {
+    mode?: 'auto' | 'manual';
+    last_reviewed_signature?: string;
+    last_reviewed_doc_ids?: string[];
+    last_reviewed_at?: string;
+    last_run_status?: 'completed' | 'partial' | 'failed';
+  };
+  answers?: {
+    immediate_risk?: ERIntakeImmediateRisk;
+    objective?: ERIntakeObjective;
+    complaint_format?: 'verbal' | 'written' | 'both' | 'unknown';
+    witnesses?: string;
+    additional_notes?: string;
+  };
+}
 
 // Case types
 export interface ERCase {
@@ -1087,6 +1110,7 @@ export interface ERCase {
   case_number: string;
   title: string;
   description: string | null;
+  intake_context: ERCaseIntakeContext | null;
   status: ERCaseStatus;
   created_by: string | null;
   assigned_to: string | null;
@@ -1099,6 +1123,7 @@ export interface ERCase {
 export interface ERCaseCreate {
   title: string;
   description?: string;
+  intake_context?: ERCaseIntakeContext | null;
 }
 
 export interface ERCaseUpdate {
@@ -1106,11 +1131,28 @@ export interface ERCaseUpdate {
   description?: string;
   status?: ERCaseStatus;
   assigned_to?: string;
+  intake_context?: ERCaseIntakeContext | null;
 }
 
 export interface ERCaseListResponse {
   cases: ERCase[];
   total: number;
+}
+
+export interface ERCaseNote {
+  id: string;
+  case_id: string;
+  note_type: ERCaseNoteType;
+  content: string;
+  metadata: Record<string, unknown> | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface ERCaseNoteCreate {
+  note_type?: ERCaseNoteType;
+  content: string;
+  metadata?: Record<string, unknown>;
 }
 
 // Document types

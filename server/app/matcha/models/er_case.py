@@ -1,7 +1,7 @@
 """Pydantic models for ER Copilot (Employee Relations Investigation)."""
 
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Any, Optional, Literal
 from uuid import UUID
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,7 @@ ERCaseStatus = Literal["open", "in_review", "pending_determination", "closed"]
 ERDocumentType = Literal["transcript", "policy", "email", "other"]
 ERProcessingStatus = Literal["pending", "processing", "completed", "failed"]
 ERAnalysisType = Literal["timeline", "discrepancies", "policy_check", "summary", "determination"]
+ERCaseNoteType = Literal["general", "question", "answer", "guidance", "system"]
 ConfidenceLevel = Literal["high", "medium", "low"]
 SeverityLevel = Literal["high", "medium", "low"]
 ViolationSeverity = Literal["major", "minor"]
@@ -24,6 +25,7 @@ class ERCaseCreate(BaseModel):
     """Request model for creating a new ER case."""
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
+    intake_context: Optional[dict[str, Any]] = None
 
 
 class ERCaseUpdate(BaseModel):
@@ -32,6 +34,7 @@ class ERCaseUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=5000)
     status: Optional[ERCaseStatus] = None
     assigned_to: Optional[UUID] = None
+    intake_context: Optional[dict[str, Any]] = None
 
 
 class ERCaseResponse(BaseModel):
@@ -40,6 +43,7 @@ class ERCaseResponse(BaseModel):
     case_number: str
     title: str
     description: Optional[str] = None
+    intake_context: Optional[dict[str, Any]] = None
     status: ERCaseStatus
     company_id: Optional[UUID] = None
     created_by: Optional[UUID] = None
@@ -54,6 +58,24 @@ class ERCaseListResponse(BaseModel):
     """Response model for listing ER cases."""
     cases: list[ERCaseResponse]
     total: int
+
+
+class ERCaseNoteCreate(BaseModel):
+    """Request model for creating an ER case note."""
+    note_type: ERCaseNoteType = "general"
+    content: str = Field(..., min_length=1, max_length=10000)
+    metadata: Optional[dict[str, Any]] = None
+
+
+class ERCaseNoteResponse(BaseModel):
+    """Response model for an ER case note."""
+    id: UUID
+    case_id: UUID
+    note_type: ERCaseNoteType = "general"
+    content: str
+    metadata: Optional[dict[str, Any]] = None
+    created_by: Optional[UUID] = None
+    created_at: datetime
 
 
 # ===========================================
