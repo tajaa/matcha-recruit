@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 from ...database import get_connection
 from ..dependencies import require_admin
+from ..feature_flags import default_company_features_json, merge_company_features
 from ..services.email import get_email_service
 from ..models.compliance import AutoCheckSettings
 from ..services.compliance_service import (
@@ -499,7 +500,7 @@ async def list_company_features():
                 "industry": row["industry"],
                 "size": row["size"],
                 "status": row["status"] or "approved",
-                "enabled_features": json.loads(row["enabled_features"]) if isinstance(row["enabled_features"], str) else row["enabled_features"],
+                "enabled_features": merge_company_features(row["enabled_features"]),
             }
             for row in rows
         ]
@@ -520,7 +521,7 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
             """
             UPDATE companies
             SET enabled_features = jsonb_set(
-                COALESCE(enabled_features, '{"offer_letters": true}'::jsonb),
+                COALESCE(enabled_features, $4::jsonb),
                 $1::text[],
                 $2::jsonb
             )
@@ -530,11 +531,12 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
             [request.feature],
             json.dumps(request.enabled),
             company_id,
+            default_company_features_json(),
         )
         if updated is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
-        features = json.loads(updated) if isinstance(updated, str) else updated
+        features = merge_company_features(updated)
         return {"enabled_features": features}
 
 

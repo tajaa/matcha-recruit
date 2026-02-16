@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+import html
 from typing import Any, Optional
 from uuid import UUID
 
@@ -333,6 +334,14 @@ async def _get_employee_document_columns(conn) -> set[str]:
     return {row["column_name"] for row in rows}
 
 
+def _validate_handbook_file_reference(file_url: Optional[str]) -> None:
+    if not file_url:
+        return
+    storage = get_storage()
+    if not storage.is_supported_storage_path(file_url):
+        raise ValueError("Invalid handbook file reference")
+
+
 class HandbookService:
     @staticmethod
     async def _upsert_profile_with_conn(
@@ -493,6 +502,7 @@ class HandbookService:
         normalized_scopes = [_normalize_scope(scope) for scope in data.scopes]
         profile = _normalize_profile(data.profile)
         profile_row: Optional[CompanyHandbookProfileResponse] = None
+        _validate_handbook_file_reference(data.file_url)
 
         async with get_connection() as conn:
             async with conn.transaction():
@@ -701,6 +711,32 @@ class HandbookService:
                 if not current:
                     return None
 
+                if data.mode is not None or data.scopes is not None:
+                    next_mode = data.mode or current["mode"]
+                    if data.scopes is None:
+                        scope_count = await conn.fetchval(
+                            "SELECT COUNT(*) FROM handbook_scopes WHERE handbook_id = $1",
+                            handbook_id,
+                        )
+                        scope_count = int(scope_count or 0)
+                    else:
+                        scope_count = len(data.scopes)
+                    if next_mode == "single_state" and scope_count != 1:
+                        raise ValueError("Single-state handbooks must have exactly one scope")
+                    if next_mode == "multi_state" and scope_count < 2:
+                        raise ValueError("Multi-state handbooks must include at least two scopes")
+
+                _validate_handbook_file_reference(data.file_url)
+                should_invalidate_cached_file = (
+                    current["source_type"] == "template"
+                    and any(
+                        value is not None
+                        for value in (data.title, data.mode, data.scopes, data.sections, data.profile)
+                    )
+                    and data.file_url is None
+                    and data.file_name is None
+                )
+
                 updates: list[str] = []
                 params: list[Any] = []
                 idx = 3
@@ -721,6 +757,9 @@ class HandbookService:
                     updates.append(f"file_name = ${idx}")
                     params.append(data.file_name)
                     idx += 1
+                if should_invalidate_cached_file:
+                    updates.append("file_url = NULL")
+                    updates.append("file_name = NULL")
 
                 if updates:
                     updates.append("updated_at = NOW()")
@@ -923,6 +962,7 @@ class HandbookService:
                 if not change:
                     return None
 
+                accepted_content_change = False
                 if new_status == "accepted" and change["section_key"]:
                     version_id = await HandbookService._get_active_version_id(
                         conn,
@@ -940,6 +980,7 @@ class HandbookService:
                             version_id,
                             change["section_key"],
                         )
+                        accepted_content_change = True
 
                 updated = await conn.fetchrow(
                     """
@@ -952,10 +993,16 @@ class HandbookService:
                     resolved_by,
                     change_id,
                 )
-                await conn.execute(
-                    "UPDATE handbooks SET updated_at = NOW() WHERE id = $1",
-                    handbook_id,
-                )
+                if accepted_content_change:
+                    await conn.execute(
+                        "UPDATE handbooks SET updated_at = NOW(), file_url = NULL, file_name = NULL WHERE id = $1",
+                        handbook_id,
+                    )
+                else:
+                    await conn.execute(
+                        "UPDATE handbooks SET updated_at = NOW() WHERE id = $1",
+                        handbook_id,
+                    )
 
         return HandbookChangeRequestResponse(**dict(updated)) if updated else None
 
@@ -969,6 +1016,7 @@ class HandbookService:
             raise ValueError("Handbook not found")
 
         if handbook.file_url:
+            _validate_handbook_file_reference(handbook.file_url)
             return handbook.file_url, (handbook.file_name or ""), handbook.active_version
 
         pdf_bytes, filename = await HandbookService.generate_handbook_pdf_bytes(handbook_id, company_id)
@@ -1021,8 +1069,23 @@ class HandbookService:
                     """,
                     company_id,
                 )
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    f"handbook-distribute:{company_id}:{doc_type}",
+                )
 
                 columns = await _get_employee_document_columns(conn)
+                existing_employee_rows = await conn.fetch(
+                    """
+                    SELECT employee_id
+                    FROM employee_documents
+                    WHERE org_id = $1 AND doc_type = $2
+                      AND status IN ('pending_signature', 'signed')
+                    """,
+                    company_id,
+                    doc_type,
+                )
+                existing_employee_ids = {row["employee_id"] for row in existing_employee_rows}
                 insertable = {
                     "org_id": UUID(company_id),
                     "doc_type": doc_type,
@@ -1039,18 +1102,7 @@ class HandbookService:
                 assigned = 0
                 skipped = 0
                 for employee in employee_rows:
-                    exists = await conn.fetchval(
-                        """
-                        SELECT 1
-                        FROM employee_documents
-                        WHERE employee_id = $1 AND doc_type = $2
-                          AND status IN ('pending_signature', 'signed')
-                        LIMIT 1
-                        """,
-                        employee["id"],
-                        doc_type,
-                    )
-                    if exists:
+                    if employee["id"] in existing_employee_ids:
                         skipped += 1
                         continue
 
@@ -1060,11 +1112,18 @@ class HandbookService:
                     values = [record[col] for col in cols]
                     placeholders = ", ".join(f"${idx}" for idx in range(1, len(cols) + 1))
                     col_sql = ", ".join(cols)
-                    await conn.execute(
-                        f"INSERT INTO employee_documents ({col_sql}) VALUES ({placeholders})",
+                    result = await conn.execute(
+                        (
+                            f"INSERT INTO employee_documents ({col_sql}) VALUES ({placeholders}) "
+                            "ON CONFLICT (employee_id, doc_type) "
+                            "WHERE status IN ('pending_signature', 'signed') DO NOTHING"
+                        ),
                         *values,
                     )
-                    assigned += 1
+                    if result == "INSERT 0 1":
+                        assigned += 1
+                    else:
+                        skipped += 1
 
                 await conn.execute(
                     """
@@ -1144,8 +1203,8 @@ class HandbookService:
         section_html = "".join(
             f"""
             <section class="section">
-                <h2>{section.title}</h2>
-                <div class="content">{section.content.replace("\n", "<br/>")}</div>
+                <h2>{html.escape(section.title)}</h2>
+                <div class="content">{html.escape(section.content).replace("\n", "<br/>")}</div>
             </section>
             """
             for section in handbook.sections
@@ -1197,13 +1256,13 @@ class HandbookService:
             </style>
         </head>
         <body>
-            <h1>{handbook.title}</h1>
-            <div class="meta">Version {handbook.active_version} • Scope: {scope_label} • Status: {handbook.status}</div>
+            <h1>{html.escape(handbook.title)}</h1>
+            <div class="meta">Version {handbook.active_version} • Scope: {html.escape(scope_label)} • Status: {html.escape(handbook.status)}</div>
             <div class="profile">
-                <div><strong>Legal Name:</strong> {handbook.profile.legal_name}</div>
-                <div><strong>DBA:</strong> {handbook.profile.dba or "N/A"}</div>
-                <div><strong>CEO/President:</strong> {handbook.profile.ceo_or_president}</div>
-                <div><strong>Headcount:</strong> {handbook.profile.headcount if handbook.profile.headcount is not None else "N/A"}</div>
+                <div><strong>Legal Name:</strong> {html.escape(handbook.profile.legal_name)}</div>
+                <div><strong>DBA:</strong> {html.escape(handbook.profile.dba or "N/A")}</div>
+                <div><strong>CEO/President:</strong> {html.escape(handbook.profile.ceo_or_president)}</div>
+                <div><strong>Headcount:</strong> {html.escape(str(handbook.profile.headcount) if handbook.profile.headcount is not None else "N/A")}</div>
             </div>
             {section_html}
         </body>

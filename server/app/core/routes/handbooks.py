@@ -127,12 +127,15 @@ async def update_handbook(
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    handbook = await HandbookService.update_handbook(
-        handbook_id,
-        str(company_id),
-        data,
-        str(current_user.id),
-    )
+    try:
+        handbook = await HandbookService.update_handbook(
+            handbook_id,
+            str(company_id),
+            data,
+            str(current_user.id),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if handbook is None:
         raise HTTPException(status_code=404, detail="Handbook not found")
     return handbook
@@ -177,6 +180,9 @@ async def list_handbook_changes(
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
+    handbook = await HandbookService.get_handbook_by_id(handbook_id, str(company_id))
+    if handbook is None:
+        raise HTTPException(status_code=404, detail="Handbook not found")
     return await HandbookService.list_change_requests(handbook_id, str(company_id))
 
 
@@ -275,19 +281,21 @@ async def download_handbook_pdf(
     if handbook is None:
         raise HTTPException(status_code=404, detail="Handbook not found")
 
-    # If this handbook is upload-sourced, return the original uploaded document.
-    if handbook.source_type == "upload" and handbook.file_url:
+    # Upload-sourced handbooks must serve the original uploaded document.
+    if handbook.source_type == "upload":
+        if not handbook.file_url:
+            raise HTTPException(status_code=409, detail="Uploaded handbook file is missing")
         try:
             file_bytes = await get_storage().download_file(handbook.file_url)
-            filename = handbook.file_name or "employee-handbook"
-            content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-            return StreamingResponse(
-                BytesIO(file_bytes),
-                media_type=content_type,
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-            )
-        except Exception:
-            pass
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="Failed to download uploaded handbook file") from exc
+        filename = handbook.file_name or "employee-handbook"
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return StreamingResponse(
+            BytesIO(file_bytes),
+            media_type=content_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     try:
         pdf_bytes, filename = await HandbookService.generate_handbook_pdf_bytes(handbook_id, str(company_id))
@@ -301,4 +309,3 @@ async def download_handbook_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-

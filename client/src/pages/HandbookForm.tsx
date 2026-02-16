@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Upload, X, Plus, CheckCircle2 } from 'lucide-react';
 import { handbooks } from '../api/client';
 import { complianceAPI } from '../api/compliance';
-import type { CompanyHandbookProfile, HandbookMode, HandbookSourceType } from '../types';
+import type { CompanyHandbookProfile, HandbookMode, HandbookScope, HandbookSourceType } from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const US_STATES = [
@@ -56,6 +56,7 @@ export function HandbookForm() {
   const [sourceType, setSourceType] = useState<HandbookSourceType>('template');
   const [selectedStates, setSelectedStates] = useState<string[]>([]);
   const [profile, setProfile] = useState<CompanyHandbookProfile>(DEFAULT_PROFILE);
+  const [existingScopes, setExistingScopes] = useState<HandbookScope[]>([]);
   const [customSections, setCustomSections] = useState<CustomSectionDraft[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
@@ -99,6 +100,7 @@ export function HandbookForm() {
         setTitle(data.title);
         setMode(data.mode);
         setSourceType(data.source_type);
+        setExistingScopes(data.scopes || []);
         setSelectedStates(Array.from(new Set((data.scopes || []).map((scope) => (scope.state || '').toUpperCase()))));
         setProfile({
           ...data.profile,
@@ -228,12 +230,35 @@ export function HandbookForm() {
 
     try {
       setLoading(true);
-      const scopes = selectedStates.map((state) => ({
-        state,
-        city: null,
-        zipcode: null,
-        location_id: null,
-      }));
+      const normalizedSelectedStates = selectedStates.map((state) => state.toUpperCase());
+      const scopes = isEditing
+        ? (() => {
+            const selectedStateSet = new Set(normalizedSelectedStates);
+            const retainedScopes = (existingScopes || [])
+              .filter((scope) => selectedStateSet.has((scope.state || '').toUpperCase()))
+              .map((scope) => ({
+                state: (scope.state || '').toUpperCase(),
+                city: scope.city ?? null,
+                zipcode: scope.zipcode ?? null,
+                location_id: scope.location_id ?? null,
+              }));
+            const retainedStates = new Set(retainedScopes.map((scope) => scope.state));
+            const newStateScopes = normalizedSelectedStates
+              .filter((state) => !retainedStates.has(state))
+              .map((state) => ({
+                state,
+                city: null,
+                zipcode: null,
+                location_id: null,
+              }));
+            return [...retainedScopes, ...newStateScopes];
+          })()
+        : normalizedSelectedStates.map((state) => ({
+            state,
+            city: null,
+            zipcode: null,
+            location_id: null,
+          }));
 
       const normalizedProfile: CompanyHandbookProfile = {
         ...profile,
@@ -249,8 +274,7 @@ export function HandbookForm() {
           mode,
           scopes,
           profile: normalizedProfile,
-          file_url: uploadedFileUrl,
-          file_name: uploadedFilename,
+          ...(sourceType === 'upload' ? { file_url: uploadedFileUrl, file_name: uploadedFilename } : {}),
         });
         navigate(`/app/matcha/handbook/${id}`);
       } else {
@@ -327,14 +351,20 @@ export function HandbookForm() {
 
         <div className="space-y-2">
           <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Source</label>
-          <select
-            value={sourceType}
-            onChange={(e) => setSourceType(e.target.value as HandbookSourceType)}
-            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
-          >
-            <option value="template">Template Builder</option>
-            <option value="upload">Upload Existing Handbook</option>
-          </select>
+          {isEditing ? (
+            <div className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-zinc-300 text-sm">
+              {sourceType === 'template' ? 'Template Builder' : 'Uploaded File'}
+            </div>
+          ) : (
+            <select
+              value={sourceType}
+              onChange={(e) => setSourceType(e.target.value as HandbookSourceType)}
+              className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+            >
+              <option value="template">Template Builder</option>
+              <option value="upload">Upload Existing Handbook</option>
+            </select>
+          )}
         </div>
       </div>
     </>

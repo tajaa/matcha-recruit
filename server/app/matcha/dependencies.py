@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 
+from ..core.feature_flags import merge_company_features
 from ..core.dependencies import get_current_user, require_roles
 from ..database import get_connection
 
@@ -191,11 +192,7 @@ def require_feature(feature_name: str):
                     detail="Your business registration was not approved."
                 )
 
-            features = company_row["enabled_features"]
-            if isinstance(features, str):
-                import json
-                features = json.loads(features)
-            features = features or {}
+            features = merge_company_features(company_row["enabled_features"])
 
             if not features.get(feature_name, False):
                 raise HTTPException(

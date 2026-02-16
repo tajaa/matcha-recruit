@@ -23,6 +23,10 @@ from ..services.auth import (
     create_access_token, create_refresh_token, decode_token
 )
 from ..dependencies import get_current_user, require_admin
+from ..feature_flags import (
+    default_company_features_json,
+    merge_company_features,
+)
 from ...config import get_settings
 
 router = APIRouter()
@@ -946,11 +950,12 @@ async def register_business(request: BusinessRegister):
             # Step 1: Create company
             company = await conn.fetchrow(
                 """INSERT INTO companies (name, industry, size, status, approved_at, enabled_features)
-                   VALUES ($1, $2, $3, $4, $5, '{"offer_letters": true}'::jsonb)
+                   VALUES ($1, $2, $3, $4, $5, $6::jsonb)
                    RETURNING id, name""",
                 request.company_name, request.industry, request.company_size,
                 company_status,
                 datetime.utcnow() if invitation else None,
+                default_company_features_json(),
             )
             company_id = company["id"]
 
@@ -1262,7 +1267,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
             # Compute which enabled features still need onboarding setup
             onboarding_needed = {}
             if profile:
-                enabled_features = json.loads(profile["enabled_features"]) if isinstance(profile["enabled_features"], str) else profile["enabled_features"]
+                enabled_features = merge_company_features(profile["enabled_features"])
                 company_id = profile["company_id"]
 
                 if enabled_features.get("compliance"):
@@ -1282,7 +1287,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "company_name": profile["company_name"],
                     "company_status": profile["company_status"] or "approved",
                     "rejection_reason": profile["rejection_reason"],
-                    "enabled_features": json.loads(profile["enabled_features"]) if isinstance(profile["enabled_features"], str) else profile["enabled_features"],
+                    "enabled_features": merge_company_features(profile["enabled_features"]),
                     "name": profile["name"],
                     "phone": profile["phone"],
                     "job_title": profile["job_title"],
@@ -1342,7 +1347,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "user_id": str(profile["user_id"]),
                     "company_id": str(profile["org_id"]),
                     "company_name": profile["company_name"],
-                    "enabled_features": json.loads(profile["enabled_features"]) if isinstance(profile["enabled_features"], str) else profile["enabled_features"],
+                    "enabled_features": merge_company_features(profile["enabled_features"]),
                     "first_name": profile["first_name"],
                     "last_name": profile["last_name"],
                     "email": profile["email"],

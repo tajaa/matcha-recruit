@@ -16,6 +16,8 @@ class StorageService:
         self.bucket = settings.s3_bucket
         self.region = settings.s3_region
         self.cloudfront_domain = settings.cloudfront_domain
+        self.app_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        self.uploads_root = os.path.join(self.app_root, "uploads")
 
         if self.bucket:
             self.s3_client = boto3.client(
@@ -28,9 +30,8 @@ class StorageService:
             self.s3_client = None
             # Fall back to local storage
             self.local_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                "uploads",
-                "resumes"
+                self.uploads_root,
+                "resumes",
             )
             os.makedirs(self.local_dir, exist_ok=True)
 
@@ -45,6 +46,38 @@ class StorageService:
         if self.cloudfront_domain:
             return f"https://{self.cloudfront_domain}/{key}"
         return f"s3://{self.bucket}/{key}"
+
+    def _resolve_local_upload_path(self, path: str) -> str:
+        """Resolve and validate a local storage path under app/uploads."""
+        if path.startswith("/uploads/"):
+            candidate = os.path.join(self.app_root, path.lstrip("/"))
+        elif path.startswith("uploads/"):
+            candidate = os.path.join(self.app_root, path)
+        elif os.path.isabs(path):
+            candidate = path
+        else:
+            raise RuntimeError("Unsupported local storage path")
+
+        resolved = os.path.realpath(candidate)
+        uploads_root = os.path.realpath(self.uploads_root)
+        if resolved != uploads_root and not resolved.startswith(f"{uploads_root}{os.sep}"):
+            raise RuntimeError("Local storage path is outside uploads directory")
+        return resolved
+
+    def is_supported_storage_path(self, path: Optional[str]) -> bool:
+        """Return True when path is a supported storage reference."""
+        if not path or not isinstance(path, str):
+            return False
+
+        if self.cloudfront_domain and path.startswith(f"https://{self.cloudfront_domain}/"):
+            return True
+        if path.startswith("s3://"):
+            return True
+        try:
+            self._resolve_local_upload_path(path)
+            return True
+        except RuntimeError:
+            return False
 
     async def upload_file(
         self,
@@ -120,15 +153,10 @@ class StorageService:
                 return response["Body"].read()
             except ClientError as e:
                 raise RuntimeError(f"Failed to download from S3: {e}")
-        else:
-            # Local file — resolve URL-style path to filesystem
-            if path.startswith("/uploads/"):
-                path = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                    path.lstrip("/"),
-                )
-            with open(path, "rb") as f:
-                return f.read()
+
+        local_path = self._resolve_local_upload_path(path)
+        with open(local_path, "rb") as f:
+            return f.read()
 
     async def delete_file(self, path: str) -> bool:
         """Delete a file from storage.
@@ -160,17 +188,15 @@ class StorageService:
                 return True
             except ClientError:
                 return False
-        else:
-            # Local file — resolve URL-style path to filesystem
-            if path.startswith("/uploads/"):
-                path = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                    path.lstrip("/"),
-                )
-            if os.path.exists(path):
-                os.unlink(path)
-                return True
+
+        try:
+            local_path = self._resolve_local_upload_path(path)
+        except RuntimeError:
             return False
+        if os.path.exists(local_path):
+            os.unlink(local_path)
+            return True
+        return False
 
     def get_presigned_url(self, path: str, expires_in: int = 3600) -> Optional[str]:
         """Get a presigned URL for downloading a file.

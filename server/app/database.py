@@ -1375,6 +1375,18 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_handbook_distribution_runs_handbook_id
             ON handbook_distribution_runs(handbook_id)
         """)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF to_regclass('employee_documents') IS NOT NULL THEN
+                    EXECUTE '
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_employee_documents_active_doc_unique
+                        ON employee_documents(employee_id, doc_type)
+                        WHERE status IN (''pending_signature'', ''signed'')
+                    ';
+                END IF;
+            END$$;
+        """)
 
         # ===========================================
         # Compliance Tracking Tables

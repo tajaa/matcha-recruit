@@ -33,6 +33,7 @@ function HandbookDetailPage() {
     expired_count: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [distributionLoading, setDistributionLoading] = useState(false);
 
@@ -40,6 +41,7 @@ function HandbookDetailPage() {
     if (!id) return;
     try {
       setLoading(true);
+      setLoadError(null);
       const [detail, changeRows, ack] = await Promise.all([
         handbooks.get(id),
         handbooks.listChanges(id).catch(() => []),
@@ -51,6 +53,7 @@ function HandbookDetailPage() {
       setAckSummary(ack);
     } catch (error) {
       console.error('Failed to load handbook detail:', error);
+      setLoadError(error instanceof Error ? error.message : 'Failed to load handbook');
     } finally {
       setLoading(false);
     }
@@ -148,10 +151,40 @@ function HandbookDetailPage() {
     }
   };
 
-  if (loading || !handbook) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-xs text-zinc-500 uppercase tracking-wider">Loading handbook...</div>
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-4 py-8">
+        <div className="border border-red-500/30 bg-red-500/10 p-4 text-red-300 text-sm">
+          {loadError}
+        </div>
+        <button
+          onClick={() => navigate('/app/matcha/handbook')}
+          className="text-xs text-zinc-400 hover:text-white uppercase tracking-wider"
+        >
+          Back to Handbooks
+        </button>
+      </div>
+    );
+  }
+  if (!handbook) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-4 py-8">
+        <div className="border border-white/10 bg-zinc-900/40 p-4 text-zinc-300 text-sm">
+          Handbook not found.
+        </div>
+        <button
+          onClick={() => navigate('/app/matcha/handbook')}
+          className="text-xs text-zinc-400 hover:text-white uppercase tracking-wider"
+        >
+          Back to Handbooks
+        </button>
       </div>
     );
   }
