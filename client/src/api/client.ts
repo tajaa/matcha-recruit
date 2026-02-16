@@ -29,6 +29,11 @@ import type {
   TestAccountRegister,
   TestAccountProvisionResponse,
   CurrentUserResponse,
+  BrokerClientSetup,
+  BrokerClientSetupListResponse,
+  BrokerClientSetupCreateRequest,
+  BrokerClientSetupUpdateRequest,
+  BrokerPortfolioReportResponse,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -317,6 +322,15 @@ export const auth = {
   },
 
   me: () => request<CurrentUserResponse>('/auth/me'),
+
+  acceptBrokerTerms: (terms_version?: string) =>
+    request<{ status: string; broker_id: string; terms_version: string; accepted_at: string }>(
+      '/auth/broker/accept-terms',
+      {
+        method: 'POST',
+        body: JSON.stringify({ terms_version }),
+      }
+    ),
 };
 
 // Companies
@@ -347,6 +361,44 @@ export const companies = {
       `/companies/${id}/aggregate-culture`,
       { method: 'POST' }
     ),
+};
+
+export const brokerPortal = {
+  listSetups: (statusFilter?: string) => {
+    const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return request<BrokerClientSetupListResponse>(`/brokers/client-setups${query}`);
+  },
+
+  createSetup: (data: BrokerClientSetupCreateRequest) =>
+    request<{ status: string; setup: BrokerClientSetup }>('/brokers/client-setups', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateSetup: (setupId: string, data: BrokerClientSetupUpdateRequest) =>
+    request<{ status: string; setup: BrokerClientSetup }>(`/brokers/client-setups/${setupId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  sendInvite: (setupId: string, expiresDays = 14) =>
+    request<{ status: string; setup: BrokerClientSetup }>(`/brokers/client-setups/${setupId}/send-invite`, {
+      method: 'POST',
+      body: JSON.stringify({ expires_days: expiresDays }),
+    }),
+
+  cancelSetup: (setupId: string) =>
+    request<{ status: string }>(`/brokers/client-setups/${setupId}/cancel`, {
+      method: 'POST',
+    }),
+
+  expireStale: () =>
+    request<{ status: string; expired_count: number }>('/brokers/client-setups/expire-stale', {
+      method: 'POST',
+    }),
+
+  getPortfolioReport: () =>
+    request<BrokerPortfolioReportResponse>('/brokers/reporting/portfolio'),
 };
 
 // Interviews

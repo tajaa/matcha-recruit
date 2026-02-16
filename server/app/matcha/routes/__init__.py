@@ -20,6 +20,7 @@ from .job_search import router as job_search_router
 from .public_jobs import router as public_jobs_router
 from .xp_admin import router as xp_admin_router
 from .dashboard import router as dashboard_router
+from .brokers import router as brokers_router
 from ..dependencies import require_feature
 
 # Create main Matcha router
@@ -53,6 +54,7 @@ matcha_router.include_router(job_search_router, prefix="/jobs", tags=["job-searc
 matcha_router.include_router(public_jobs_router, prefix="/job-board", tags=["public-jobs"])
 matcha_router.include_router(xp_admin_router, tags=["employee-experience"])
 matcha_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
+matcha_router.include_router(brokers_router, prefix="/brokers", tags=["brokers"])
 
 # Export individual routers for backwards compatibility
 __all__ = [
@@ -77,4 +79,5 @@ __all__ = [
     "xp_admin_router",
     "dashboard_router",
     "accommodations_router",
+    "brokers_router",
 ]

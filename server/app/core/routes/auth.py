@@ -14,6 +14,7 @@ from ..models.auth import (
     BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
     BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
+    BrokerClientInviteDetailsResponse, BrokerClientInviteAcceptRequest,
     CurrentUser,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
@@ -960,6 +961,224 @@ async def validate_business_invite(token: str):
         }
 
 
+@router.get("/broker-client-invite/{token}", response_model=BrokerClientInviteDetailsResponse)
+async def validate_broker_client_invite(token: str):
+    """Validate a broker-generated client onboarding invite token."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                s.id, s.broker_id, s.company_id, s.status, s.invite_expires_at, s.contact_email,
+                c.name as company_name,
+                b.name as broker_name
+            FROM broker_client_setups s
+            JOIN companies c ON c.id = s.company_id
+            JOIN brokers b ON b.id = s.broker_id
+            WHERE s.invite_token = $1
+            """,
+            token,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Invite not found or invalid")
+
+        if row["status"] != "invited":
+            raise HTTPException(status_code=400, detail=f"Invite is no longer valid (status: {row['status']})")
+
+        if not row["invite_expires_at"] or row["invite_expires_at"] < datetime.utcnow():
+            await conn.execute(
+                """
+                UPDATE broker_client_setups
+                SET status = 'expired',
+                    expired_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = $1
+                """,
+                row["id"],
+            )
+            await conn.execute(
+                """
+                UPDATE broker_company_links
+                SET status = 'terminated',
+                    terminated_at = COALESCE(terminated_at, NOW()),
+                    updated_at = NOW()
+                WHERE broker_id = $1
+                  AND company_id = $2
+                  AND status = 'pending'
+                """,
+                row["broker_id"],
+                row["company_id"],
+            )
+            raise HTTPException(status_code=400, detail="Invite has expired")
+
+        if not row["contact_email"]:
+            raise HTTPException(status_code=400, detail="Invite is missing contact email")
+
+        return BrokerClientInviteDetailsResponse(
+            valid=True,
+            broker_name=row["broker_name"],
+            company_name=row["company_name"],
+            contact_email=row["contact_email"],
+            invite_expires_at=row["invite_expires_at"],
+        )
+
+
+@router.post("/broker-client-invite/{token}/accept")
+async def accept_broker_client_invite(token: str, request: BrokerClientInviteAcceptRequest):
+    """Accept a broker client invite and provision the first company client admin user."""
+    if len(request.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            invite = await conn.fetchrow(
+                """
+                SELECT
+                    s.id, s.broker_id, s.company_id, s.status, s.invite_expires_at,
+                    s.contact_name, s.contact_email, s.contact_phone,
+                    c.name as company_name,
+                    b.name as broker_name
+                FROM broker_client_setups s
+                JOIN companies c ON c.id = s.company_id
+                JOIN brokers b ON b.id = s.broker_id
+                WHERE s.invite_token = $1
+                FOR UPDATE
+                """,
+                token,
+            )
+            if not invite:
+                raise HTTPException(status_code=404, detail="Invite not found or invalid")
+
+            if invite["status"] != "invited":
+                raise HTTPException(status_code=400, detail=f"Invite is no longer valid (status: {invite['status']})")
+
+            if not invite["invite_expires_at"] or invite["invite_expires_at"] < datetime.utcnow():
+                await conn.execute(
+                    """
+                    UPDATE broker_client_setups
+                    SET status = 'expired',
+                        expired_at = NOW(),
+                        updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    invite["id"],
+                )
+                await conn.execute(
+                    """
+                    UPDATE broker_company_links
+                    SET status = 'terminated',
+                        terminated_at = COALESCE(terminated_at, NOW()),
+                        updated_at = NOW()
+                    WHERE broker_id = $1
+                      AND company_id = $2
+                      AND status = 'pending'
+                    """,
+                    invite["broker_id"],
+                    invite["company_id"],
+                )
+                raise HTTPException(status_code=400, detail="Invite has expired")
+
+            email = invite["contact_email"]
+            if not email:
+                raise HTTPException(status_code=400, detail="Invite is missing contact email")
+
+            existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", email)
+            if existing:
+                raise HTTPException(
+                    status_code=400,
+                    detail="An account with this email already exists. Please sign in or contact support.",
+                )
+
+            display_name = (request.name or invite["contact_name"] or email.split("@")[0]).strip()
+            password_hash = hash_password(request.password)
+            user = await conn.fetchrow(
+                """
+                INSERT INTO users (email, password_hash, role)
+                VALUES ($1, $2, 'client')
+                RETURNING id, email, role, is_active, created_at
+                """,
+                email,
+                password_hash,
+            )
+
+            await conn.execute(
+                """
+                INSERT INTO clients (user_id, company_id, name, phone, job_title)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                user["id"],
+                invite["company_id"],
+                display_name,
+                request.phone or invite["contact_phone"],
+                request.job_title,
+            )
+
+            await conn.execute(
+                """
+                UPDATE companies
+                SET owner_id = $1,
+                    status = 'approved',
+                    approved_at = COALESCE(approved_at, NOW()),
+                    rejection_reason = NULL
+                WHERE id = $2
+                """,
+                user["id"],
+                invite["company_id"],
+            )
+
+            await conn.execute(
+                """
+                UPDATE broker_client_setups
+                SET status = 'activated',
+                    activated_at = NOW(),
+                    updated_at = NOW(),
+                    updated_by = $1
+                WHERE id = $2
+                """,
+                user["id"],
+                invite["id"],
+            )
+
+            await conn.execute(
+                """
+                INSERT INTO broker_company_links (
+                    broker_id, company_id, status, linked_at, activated_at, created_by, updated_at
+                )
+                VALUES ($1, $2, 'active', NOW(), NOW(), $3, NOW())
+                ON CONFLICT (broker_id, company_id)
+                DO UPDATE SET
+                    status = 'active',
+                    activated_at = COALESCE(broker_company_links.activated_at, NOW()),
+                    terminated_at = NULL,
+                    updated_at = NOW()
+                """,
+                invite["broker_id"],
+                invite["company_id"],
+                user["id"],
+            )
+
+            settings = get_settings()
+            access_token = create_access_token(user["id"], user["email"], user["role"])
+            refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+
+            return {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "expires_in": settings.jwt_access_token_expire_minutes * 60,
+                "user": {
+                    "id": str(user["id"]),
+                    "email": user["email"],
+                    "role": user["role"],
+                    "is_active": user["is_active"],
+                    "created_at": user["created_at"].isoformat() if user["created_at"] else None,
+                    "last_login": None,
+                },
+                "company_status": "approved",
+                "company_name": invite["company_name"],
+                "broker_name": invite["broker_name"],
+                "message": "Welcome! Your company onboarding has been activated.",
+            }
+
+
 @router.post("/register/business")
 async def register_business(request: BusinessRegister):
     """
@@ -1439,6 +1658,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                 """,
                 current_user.id
             )
+            terms_accepted = bool(profile and profile["terms_accepted_at"] is not None)
             return {
                 "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
                 "profile": {
@@ -1453,10 +1673,11 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "invoice_owner": profile["invoice_owner"],
                     "support_routing": profile["support_routing"],
                     "terms_required_version": profile["terms_required_version"],
-                    "terms_accepted": profile["terms_accepted_at"] is not None,
+                    "terms_accepted": terms_accepted,
                     "terms_accepted_at": profile["terms_accepted_at"].isoformat() if profile["terms_accepted_at"] else None,
                     "created_at": profile["created_at"].isoformat(),
-                } if profile else None
+                } if profile else None,
+                "onboarding_needed": {"broker_terms": not terms_accepted} if profile else {},
             }
 
     return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role}, "profile": None}

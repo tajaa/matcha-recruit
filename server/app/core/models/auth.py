@@ -231,6 +231,21 @@ class BrokerTermsAcceptanceResponse(BaseModel):
     accepted_at: datetime
 
 
+class BrokerClientInviteDetailsResponse(BaseModel):
+    valid: bool
+    broker_name: str
+    company_name: str
+    contact_email: EmailStr
+    invite_expires_at: datetime
+
+
+class BrokerClientInviteAcceptRequest(BaseModel):
+    password: str
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    job_title: Optional[str] = None
+
+
 # Beta access management models
 class CandidateBetaInfo(BaseModel):
     user_id: UUID

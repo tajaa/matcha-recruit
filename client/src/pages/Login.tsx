@@ -24,7 +24,7 @@ export function Login() {
       case 'employee':
         return '/app/portal';
       case 'broker':
-        return '/app/settings';
+        return '/app/broker/clients';
       case 'admin':
       case 'client':
       default:

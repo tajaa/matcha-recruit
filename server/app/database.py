@@ -2719,6 +2719,47 @@ async def init_db():
             ON broker_terms_acceptances(broker_id, user_id, terms_version)
         """)
 
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS broker_client_setups (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                broker_id UUID NOT NULL REFERENCES brokers(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                status VARCHAR(20) NOT NULL DEFAULT 'draft'
+                    CHECK (status IN ('draft', 'invited', 'activated', 'expired', 'cancelled')),
+                contact_name VARCHAR(255),
+                contact_email VARCHAR(320),
+                contact_phone VARCHAR(50),
+                company_size_hint VARCHAR(50),
+                headcount_hint INTEGER,
+                preconfigured_features JSONB DEFAULT '{}'::jsonb,
+                onboarding_template JSONB DEFAULT '{}'::jsonb,
+                invite_token VARCHAR(128) UNIQUE,
+                invite_expires_at TIMESTAMPTZ,
+                invited_at TIMESTAMPTZ,
+                activated_at TIMESTAMPTZ,
+                expired_at TIMESTAMPTZ,
+                cancelled_at TIMESTAMPTZ,
+                created_by UUID REFERENCES users(id),
+                updated_by UUID REFERENCES users(id),
+                metadata JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE (broker_id, company_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_client_setups_broker_status
+            ON broker_client_setups(broker_id, status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_client_setups_invite_token
+            ON broker_client_setups(invite_token)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_client_setups_invite_expires_at
+            ON broker_client_setups(invite_expires_at)
+        """)
+
         # ===========================================
         # HR News Articles Table
         # ===========================================

@@ -555,6 +555,7 @@ export interface CandidateAuthProfile {
 export interface BrokerAuthProfile {
   id: string;
   user_id: string;
+  name?: string;
   broker_id: string;
   broker_name: string;
   broker_slug: string;
@@ -580,6 +581,98 @@ export interface CurrentUserResponse {
   };
   profile: AdminProfile | ClientProfile | CandidateAuthProfile | BrokerAuthProfile | null;
   onboarding_needed?: Record<string, boolean>;
+}
+
+export interface BrokerClientSetup {
+  id: string;
+  broker_id: string;
+  company_id: string;
+  company_name: string;
+  company_status: string;
+  industry: string | null;
+  company_size: string | null;
+  status: 'draft' | 'invited' | 'activated' | 'expired' | 'cancelled';
+  link_status: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  headcount_hint: number | null;
+  preconfigured_features: Record<string, boolean>;
+  onboarding_template: Record<string, unknown>;
+  link_permissions: Record<string, unknown>;
+  invite_token: string | null;
+  invite_url: string | null;
+  invite_expires_at: string | null;
+  invited_at: string | null;
+  activated_at: string | null;
+  expired_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BrokerClientSetupListResponse {
+  setups: BrokerClientSetup[];
+  total: number;
+  expired_count: number;
+}
+
+export interface BrokerClientSetupCreateRequest {
+  company_name: string;
+  industry?: string;
+  company_size?: string;
+  headcount?: number;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  preconfigured_features?: Record<string, boolean>;
+  onboarding_template?: Record<string, unknown>;
+  link_permissions?: Record<string, unknown>;
+  invite_immediately?: boolean;
+  invite_expires_days?: number;
+}
+
+export interface BrokerClientSetupUpdateRequest {
+  company_name?: string;
+  industry?: string;
+  company_size?: string;
+  headcount?: number;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  preconfigured_features?: Record<string, boolean>;
+  onboarding_template?: Record<string, unknown>;
+}
+
+export interface BrokerPortfolioCompanyMetric {
+  company_id: string;
+  company_name: string;
+  link_status: string;
+  setup_status: string;
+  policy_compliance_rate: number;
+  open_action_items: number;
+  active_employee_count: number;
+  risk_signal: 'healthy' | 'watch' | 'at_risk';
+}
+
+export interface BrokerPortfolioReportResponse {
+  summary: {
+    total_linked_companies: number;
+    active_link_count: number;
+    pending_setup_count: number;
+    expired_setup_count: number;
+    healthy_companies: number;
+    at_risk_companies: number;
+    average_policy_compliance_rate: number;
+    open_action_item_total: number;
+  };
+  setup_status_counts: Record<string, number>;
+  companies: BrokerPortfolioCompanyMetric[];
+  redaction: {
+    employee_level_pii_included: boolean;
+    incident_detail_included: boolean;
+    note: string;
+  };
 }
 
 // Beta access management types

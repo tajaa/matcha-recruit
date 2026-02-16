@@ -79,6 +79,8 @@ const PortalOnboarding = lazy(() => import('./pages/portal/PortalOnboarding'));
 const PortalVibeCheck = lazy(() => import('./pages/portal/PortalVibeCheck'));
 const PortalENPS = lazy(() => import('./pages/portal/PortalENPS'));
 const PortalReviews = lazy(() => import('./pages/portal/PortalReviews'));
+const BrokerClients = lazy(() => import('./pages/broker/BrokerClients'));
+const BrokerReporting = lazy(() => import('./pages/broker/BrokerReporting'));
 
 // Chat Pages (separate auth system)
 const ChatLogin = lazy(() => import('./pages/chat/ChatLogin'));
@@ -624,6 +626,22 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Settings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="broker/clients"
+                element={
+                  <ProtectedRoute roles={['broker']}>
+                    <BrokerClients />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="broker/reporting"
+                element={
+                  <ProtectedRoute roles={['broker']}>
+                    <BrokerReporting />
                   </ProtectedRoute>
                 }
               />
