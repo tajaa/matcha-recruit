@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Seed one IR-focused test account (1 admin + 3 employees + incident data).
+"""Seed one IR-focused test account (1 client admin + 3 employees + incident data).
 
 This script is idempotent and safe to rerun.
 
 What it does:
 1. Selects a target company (first existing by default, or via --company-id/--company-name).
-2. Creates/updates one admin user and maps them to the company context.
+2. Creates/updates one client user and maps them to the company context.
 3. Creates/updates three employee users and employee records mapped to the same org.
 4. Ensures one business location exists for the company.
-5. Enables the `incidents` feature flag for the company (if enabled_features exists).
+5. Restricts company features to only: incidents, er_copilot, offer_letters, policies.
 6. Seeds realistic IR incidents, documents, and cached analysis entries.
 
 Usage:
@@ -37,7 +37,7 @@ from app.core.services.auth import hash_password
 from app.database import close_pool, get_connection, init_pool
 
 
-DEFAULT_ADMIN_EMAIL = "ir.admin@matcha-seed.com"
+DEFAULT_CLIENT_EMAIL = "ir.admin@matcha-seed.com"
 DEFAULT_PASSWORD = os.getenv("IR_TEST_SEED_PASSWORD", "ir_seed_123")
 DEFAULT_LOCATION_NAME = "IR Seed HQ"
 DEFAULT_COMPANY_NAME = "IR Seed Company"
@@ -430,8 +430,8 @@ async def ensure_company(conn, company_id: str | None, company_name: str | None)
     return str(created["id"]), created["name"]
 
 
-async def enable_incidents_feature(conn, company_id: str) -> bool:
-    """Enable incidents feature if enabled_features column exists."""
+async def set_limited_feature_set(conn, company_id: str) -> bool:
+    """Set company features to only IR, ER Copilot, Offer Letters, and Policies."""
     has_column = await conn.fetchval(
         """
         SELECT EXISTS (
@@ -444,40 +444,37 @@ async def enable_incidents_feature(conn, company_id: str) -> bool:
     if not has_column:
         return False
 
+    feature_payload = {
+        "offer_letters": True,
+        "policies": True,
+        "compliance": False,
+        "compliance_plus": False,
+        "employees": False,
+        "vibe_checks": False,
+        "enps": False,
+        "performance_reviews": False,
+        "er_copilot": True,
+        "incidents": True,
+        "time_off": False,
+        "accommodations": False,
+    }
+
     await conn.execute(
-        """
-        UPDATE companies
-        SET enabled_features = jsonb_set(
-            COALESCE(enabled_features, '{}'::jsonb),
-            '{incidents}',
-            'true'::jsonb,
-            true
-        )
-        WHERE id = $1
-        """,
+        "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
+        json.dumps(feature_payload),
         company_id,
     )
     return True
 
 
-async def ensure_admin_mapping(
+async def ensure_client_mapping(
     conn,
     company_id: str,
-    admin_user_id: str,
-    admin_email: str,
+    client_user_id: str,
+    client_email: str,
 ) -> None:
-    """Ensure admin user has admin profile and company mapping."""
-    await conn.execute(
-        """
-        INSERT INTO admins (user_id, name)
-        VALUES ($1, $2)
-        ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name
-        """,
-        admin_user_id,
-        "IR Seed Admin",
-    )
-
-    # Company mapping for the admin test user.
+    """Ensure client user has company mapping."""
+    # Company mapping for the seeded client user.
     await conn.execute(
         """
         UPDATE companies
@@ -486,12 +483,12 @@ async def ensure_admin_mapping(
             approved_at = COALESCE(approved_at, NOW())
         WHERE id = $2
         """,
-        admin_user_id,
+        client_user_id,
         company_id,
     )
 
     # Keep an explicit company-user mapping record for notification targets.
-    client_row = await conn.fetchrow("SELECT id FROM clients WHERE user_id = $1", admin_user_id)
+    client_row = await conn.fetchrow("SELECT id FROM clients WHERE user_id = $1", client_user_id)
     if client_row:
         await conn.execute(
             """
@@ -501,8 +498,8 @@ async def ensure_admin_mapping(
             WHERE user_id = $3
             """,
             company_id,
-            "IR Seed Admin",
-            admin_user_id,
+            "IR Seed Client Admin",
+            client_user_id,
         )
     else:
         await conn.execute(
@@ -510,12 +507,12 @@ async def ensure_admin_mapping(
             INSERT INTO clients (user_id, company_id, name)
             VALUES ($1, $2, $3)
             """,
-            admin_user_id,
+            client_user_id,
             company_id,
-            "IR Seed Admin",
+            "IR Seed Client Admin",
         )
 
-    print(f"Mapped admin user {admin_email} to company {company_id}")
+    print(f"Mapped client user {client_email} to company {company_id}")
 
 
 async def ensure_location(conn, company_id: str, location_name: str) -> tuple[str, str]:
@@ -857,15 +854,15 @@ async def seed_ir_test_account(args: argparse.Namespace) -> None:
         async with get_connection() as conn:
             async with conn.transaction():
                 company_id, company_name = await ensure_company(conn, args.company_id, args.company_name)
-                admin_user_id, admin_action = await ensure_user(conn, args.admin_email, "admin", args.password)
-                print(f"Admin {args.admin_email}: {admin_action}")
+                client_user_id, client_action = await ensure_user(conn, args.client_email, "client", args.password)
+                print(f"Client {args.client_email}: {client_action}")
 
-                await ensure_admin_mapping(conn, company_id, admin_user_id, args.admin_email)
-                incidents_enabled = await enable_incidents_feature(conn, company_id)
-                if incidents_enabled:
-                    print("Enabled company feature: incidents=true")
+                await ensure_client_mapping(conn, company_id, client_user_id, args.client_email)
+                features_set = await set_limited_feature_set(conn, company_id)
+                if features_set:
+                    print("Set limited features: incidents, er_copilot, offer_letters, policies")
                 else:
-                    print("Skipped feature toggle: companies.enabled_features column not found")
+                    print("Skipped feature set: companies.enabled_features column not found")
 
                 location_id, location_name = await ensure_location(conn, company_id, args.location_name)
                 print(f"Using location: {location_name} ({location_id})")
@@ -878,7 +875,7 @@ async def seed_ir_test_account(args: argparse.Namespace) -> None:
                         conn,
                         company_id=company_id,
                         location_id=location_id,
-                        admin_user_id=admin_user_id,
+                        admin_user_id=client_user_id,
                         incident_data=incident_data,
                     )
                     summary[f"incidents_{action}"] += 1
@@ -886,7 +883,7 @@ async def seed_ir_test_account(args: argparse.Namespace) -> None:
                     docs_created, docs_updated = await ensure_incident_documents(
                         conn,
                         incident_id=incident_id,
-                        admin_user_id=admin_user_id,
+                        admin_user_id=client_user_id,
                         documents=incident_data.get("documents", []),
                     )
                     summary["docs_created"] += docs_created
@@ -895,7 +892,7 @@ async def seed_ir_test_account(args: argparse.Namespace) -> None:
                     await ensure_incident_analysis(
                         conn,
                         incident_id=incident_id,
-                        admin_user_id=admin_user_id,
+                        admin_user_id=client_user_id,
                         analysis_map=incident_data.get("analysis", {}),
                     )
 
@@ -905,7 +902,7 @@ async def seed_ir_test_account(args: argparse.Namespace) -> None:
                         VALUES ($1, $2, $3, 'incident', $1, $4)
                         """,
                         incident_id,
-                        admin_user_id,
+                        client_user_id,
                         "incident_seeded",
                         json.dumps({"title": incident_data["title"], "seed_action": action}),
                     )
@@ -914,7 +911,7 @@ async def seed_ir_test_account(args: argparse.Namespace) -> None:
         print("IR TEST ACCOUNT SEED COMPLETE")
         print("=" * 64)
         print(f"Company: {company_name} ({company_id})")
-        print(f"Admin login: {args.admin_email}")
+        print(f"Client login: {args.client_email}")
         print(f"Password: {args.password}")
         print(f"Employees: {', '.join(e.email for e in EMPLOYEES)}")
         print(f"Incidents created: {summary['incidents_created']}")
@@ -934,8 +931,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--company-name",
         help="Target company name. If not found, it will be created. Ignored when --company-id is provided.",
     )
-    parser.add_argument("--admin-email", default=DEFAULT_ADMIN_EMAIL, help="Admin login email to create/update.")
-    parser.add_argument("--password", default=DEFAULT_PASSWORD, help="Password applied to admin + employee users.")
+    parser.add_argument("--client-email", default=DEFAULT_CLIENT_EMAIL, help="Client login email to create/update.")
+    parser.add_argument("--password", default=DEFAULT_PASSWORD, help="Password applied to client + employee users.")
     parser.add_argument("--location-name", default=DEFAULT_LOCATION_NAME, help="Business location name to create/use.")
     return parser
 
