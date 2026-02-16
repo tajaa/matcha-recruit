@@ -721,6 +721,9 @@ export function ERCaseDetail() {
       .sort()
       .join(',');
     const lastReviewedSignature = intakeContext?.assistance?.last_reviewed_signature || '';
+    const hasNextStepsGuidance = notes.some(
+      (note) => note.note_type === 'guidance' && getCaseNotePurpose(note) === 'next_steps'
+    );
 
     if (!currentSignature) {
       setAutoAssistStatus('needs_docs');
@@ -728,7 +731,7 @@ export function ERCaseDetail() {
       return;
     }
 
-    if (currentSignature === lastReviewedSignature) {
+    if (currentSignature === lastReviewedSignature && hasNextStepsGuidance) {
       if (assistanceParam) {
         setAutoAssistStatus('completed');
         setAutoAssistMessage('Assistance guidance is already up to date for current uploads.');
@@ -737,7 +740,7 @@ export function ERCaseDetail() {
     }
 
     if (autoReviewRunning) return;
-    if (autoReviewSignatureRef.current === currentSignature) return;
+    if (hasNextStepsGuidance && autoReviewSignatureRef.current === currentSignature) return;
 
     autoReviewSignatureRef.current = currentSignature;
     void runAssistanceReview(intakeContext, completedNonPolicyDocs);
@@ -746,6 +749,7 @@ export function ERCaseDetail() {
     loading,
     erCase,
     documents,
+    notes,
     autoReviewRunning,
     location.search,
     location.pathname,
