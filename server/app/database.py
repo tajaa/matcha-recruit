@@ -1242,6 +1242,78 @@ async def init_db():
                 updated_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS legal_name VARCHAR(255)
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS dba VARCHAR(255)
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS ceo_or_president VARCHAR(255)
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS headcount INTEGER
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS remote_workers BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS minors BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS tipped_employees BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS union_employees BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS federal_contracts BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS group_health_insurance BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS background_checks BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS hourly_employees BOOLEAN NOT NULL DEFAULT true
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS salaried_employees BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS commissioned_employees BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS tip_pooling BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES users(id)
+        """)
+        await conn.execute("""
+            ALTER TABLE company_handbook_profiles
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_company_handbook_profiles_company_id
+            ON company_handbook_profiles(company_id)
+        """)
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS handbooks (
@@ -1262,6 +1334,34 @@ async def init_db():
                 updated_at TIMESTAMP DEFAULT NOW(),
                 published_at TIMESTAMP
             )
+        """)
+        await conn.execute("""
+            ALTER TABLE handbooks
+            ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'single_state'
+        """)
+        await conn.execute("""
+            ALTER TABLE handbooks
+            ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) NOT NULL DEFAULT 'template'
+        """)
+        await conn.execute("""
+            ALTER TABLE handbooks
+            ADD COLUMN IF NOT EXISTS active_version INTEGER NOT NULL DEFAULT 1
+        """)
+        await conn.execute("""
+            ALTER TABLE handbooks
+            ADD COLUMN IF NOT EXISTS file_url VARCHAR(1000)
+        """)
+        await conn.execute("""
+            ALTER TABLE handbooks
+            ADD COLUMN IF NOT EXISTS file_name VARCHAR(255)
+        """)
+        await conn.execute("""
+            ALTER TABLE handbooks
+            ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id)
+        """)
+        await conn.execute("""
+            ALTER TABLE handbooks
+            ADD COLUMN IF NOT EXISTS published_at TIMESTAMP
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_handbooks_company_id ON handbooks(company_id)
@@ -1288,6 +1388,22 @@ async def init_db():
             )
         """)
         await conn.execute("""
+            ALTER TABLE handbook_versions
+            ADD COLUMN IF NOT EXISTS summary TEXT
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_versions
+            ADD COLUMN IF NOT EXISTS is_published BOOLEAN NOT NULL DEFAULT false
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_versions
+            ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id)
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_handbook_versions_unique_version
+            ON handbook_versions(handbook_id, version_number)
+        """)
+        await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_handbook_versions_handbook_id
             ON handbook_versions(handbook_id)
         """)
@@ -1302,6 +1418,18 @@ async def init_db():
                 location_id UUID,
                 created_at TIMESTAMP DEFAULT NOW()
             )
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_scopes
+            ADD COLUMN IF NOT EXISTS city VARCHAR(100)
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_scopes
+            ADD COLUMN IF NOT EXISTS zipcode VARCHAR(10)
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_scopes
+            ADD COLUMN IF NOT EXISTS location_id UUID
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_handbook_scopes_handbook_id
@@ -1327,6 +1455,18 @@ async def init_db():
                 updated_at TIMESTAMP DEFAULT NOW(),
                 UNIQUE(handbook_version_id, section_key)
             )
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_sections
+            ADD COLUMN IF NOT EXISTS section_order INTEGER NOT NULL DEFAULT 0
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_sections
+            ADD COLUMN IF NOT EXISTS section_type VARCHAR(20) NOT NULL DEFAULT 'core'
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_sections
+            ADD COLUMN IF NOT EXISTS jurisdiction_scope JSONB DEFAULT '{}'::jsonb
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_handbook_sections_version_id

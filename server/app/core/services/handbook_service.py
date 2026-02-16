@@ -336,6 +336,18 @@ def _translate_handbook_db_error(exc: Exception) -> Optional[str]:
         return "Duplicate handbook section keys were detected. Update section titles and try again."
     if "value too long for type character varying" in message:
         return "One or more handbook fields are too long. Shorten the text and try again."
+    if 'relation "company_handbook_profiles"' in message:
+        return "Handbook tables are out of date. Restart the API to apply schema updates."
+    if (
+        "column" in message
+        and "does not exist" in message
+        and (
+            "company_handbook_profiles" in message
+            or "handbooks" in message
+            or "handbook_" in message
+        )
+    ):
+        return "Handbook tables are out of date. Restart the API to apply schema updates."
     if 'relation "handbooks"' in message or 'relation "handbook_' in message:
         return "Handbook tables are not available yet. Run migrations and restart the API."
     return None

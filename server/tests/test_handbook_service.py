@@ -7,7 +7,11 @@ import pytest
 
 from app.core.models.handbook import HandbookUpdateRequest
 from app.core.services import handbook_service as handbook_service_module
-from app.core.services.handbook_service import HandbookService, _normalize_custom_sections
+from app.core.services.handbook_service import (
+    HandbookService,
+    _normalize_custom_sections,
+    _translate_handbook_db_error,
+)
 
 
 class _FakeTransaction:
@@ -187,3 +191,9 @@ def test_normalize_custom_sections_produces_unique_safe_keys():
     assert len(keys) == 2
     assert keys[0] != keys[1]
     assert all(len(key) <= 120 for key in keys)
+
+
+def test_translate_handbook_db_error_handles_profile_schema_drift():
+    err = Exception('column "tip_pooling" of relation "company_handbook_profiles" does not exist')
+    translated = _translate_handbook_db_error(err)
+    assert translated == "Handbook tables are out of date. Restart the API to apply schema updates."
