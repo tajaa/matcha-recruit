@@ -33,11 +33,17 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
     storage = get_storage()
     parser = ERDocumentParser()
     scrubber = PIIScrubber()
-    embedding_service = EmbeddingService(
-        api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-    )
+    embedding_service = None
+    embedding_warning = None
+    try:
+        embedding_service = EmbeddingService(
+            api_key=settings.gemini_api_key,
+            vertex_project=settings.vertex_project,
+            vertex_location=settings.vertex_location,
+        )
+    except Exception as e:
+        # Embeddings are optional for case analysis; keep processing and fall back to keyword search.
+        embedding_warning = f"Embeddings unavailable: {e}"
 
     conn = await get_db_connection()
     try:
@@ -92,19 +98,25 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
                 "pii_scrubbed": bool(pii_map),
             }
 
-        # Publish progress
-        publish_task_progress(
-            channel=f"er_case:{case_id}",
-            task_type="document_processing",
-            entity_id=document_id,
-            progress=0,
-            total=len(chunks),
-            message="Generating embeddings...",
-        )
+        embeddings: list[list[float]] | None = None
+        if embedding_service is not None:
+            try:
+                # Publish progress
+                publish_task_progress(
+                    channel=f"er_case:{case_id}",
+                    task_type="document_processing",
+                    entity_id=document_id,
+                    progress=0,
+                    total=len(chunks),
+                    message="Generating embeddings...",
+                )
 
-        # Generate embeddings for all chunks
-        chunk_contents = [c["content"] for c in chunks]
-        embeddings = embedding_service.embed_batch_sync(chunk_contents)
+                # Generate embeddings for all chunks
+                chunk_contents = [c["content"] for c in chunks]
+                embeddings = embedding_service.embed_batch_sync(chunk_contents)
+            except Exception as e:
+                embedding_warning = f"Embeddings failed: {e}"
+                embeddings = None
 
         # Add speaker and temporal info to chunks if detected
         speaker_turns = parsed.speaker_turns
@@ -113,44 +125,47 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
             for line in range(turn.line_start, turn.line_end + 1):
                 speaker_map[line] = turn.speaker
 
-        # Store chunks with embeddings
-        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            # Try to find speaker for this chunk
-            speaker = None
-            if chunk.get("line_start") in speaker_map:
-                speaker = speaker_map[chunk["line_start"]]
+        chunks_created = 0
+        # Store chunks only when embeddings are available.
+        if embeddings and len(embeddings) == len(chunks):
+            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+                # Try to find speaker for this chunk
+                speaker = None
+                if chunk.get("line_start") in speaker_map:
+                    speaker = speaker_map[chunk["line_start"]]
 
-            # Store chunk with embedding
-            # Convert embedding list to string format for pgvector
-            embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-            await conn.execute(
-                """
-                INSERT INTO er_evidence_chunks
-                (document_id, case_id, chunk_index, content, speaker, page_number, line_start, line_end, embedding, metadata)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                """,
-                document_id,
-                case_id,
-                chunk["chunk_index"],
-                chunk["content"],
-                speaker,
-                None,  # page_number - could be extracted from PDF
-                chunk.get("line_start"),
-                chunk.get("line_end"),
-                embedding_str,
-                {"char_start": chunk.get("char_start")},
-            )
-
-            # Publish progress periodically
-            if (i + 1) % 10 == 0:
-                publish_task_progress(
-                    channel=f"er_case:{case_id}",
-                    task_type="document_processing",
-                    entity_id=document_id,
-                    progress=i + 1,
-                    total=len(chunks),
-                    message=f"Stored {i + 1}/{len(chunks)} chunks",
+                # Store chunk with embedding
+                # Convert embedding list to string format for pgvector
+                embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+                await conn.execute(
+                    """
+                    INSERT INTO er_evidence_chunks
+                    (document_id, case_id, chunk_index, content, speaker, page_number, line_start, line_end, embedding, metadata)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    """,
+                    document_id,
+                    case_id,
+                    chunk["chunk_index"],
+                    chunk["content"],
+                    speaker,
+                    None,  # page_number - could be extracted from PDF
+                    chunk.get("line_start"),
+                    chunk.get("line_end"),
+                    embedding_str,
+                    {"char_start": chunk.get("char_start")},
                 )
+                chunks_created += 1
+
+                # Publish progress periodically
+                if (i + 1) % 10 == 0:
+                    publish_task_progress(
+                        channel=f"er_case:{case_id}",
+                        task_type="document_processing",
+                        entity_id=document_id,
+                        progress=i + 1,
+                        total=len(chunks),
+                        message=f"Stored {i + 1}/{len(chunks)} chunks",
+                    )
 
         # Update status to completed
         await conn.execute(
@@ -160,11 +175,12 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
 
         return {
             "document_id": document_id,
-            "chunks_created": len(chunks),
+            "chunks_created": chunks_created,
             "pii_scrubbed": bool(pii_map),
             "text_length": len(parsed.text),
             "speaker_turns_detected": len(speaker_turns),
             "temporal_refs_detected": len(parsed.temporal_refs),
+            "embedding_warning": embedding_warning,
         }
 
     except Exception as e:

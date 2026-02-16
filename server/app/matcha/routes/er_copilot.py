@@ -689,11 +689,14 @@ async def upload_document(
                 )
             except Exception as sync_error:
                 logger.error(f"Document {row['id']} processing failed: {sync_error}", exc_info=True)
+                error_detail = str(sync_error).strip() or "Document processing failed"
+                if len(error_detail) > 1000:
+                    error_detail = error_detail[:997] + "..."
                 await conn.execute(
                     """UPDATE er_case_documents
                        SET processing_status = 'failed', processing_error = $1
                        WHERE id = $2""",
-                    "Document processing failed",
+                    error_detail,
                     row["id"],
                 )
                 # Refresh document data after failure
@@ -888,12 +891,15 @@ async def reprocess_document(
             )
         except Exception as sync_error:
             logger.error(f"Reprocess failed: {sync_error}", exc_info=True)
+            error_detail = str(sync_error).strip() or "Document reprocessing failed"
+            if len(error_detail) > 1000:
+                error_detail = error_detail[:997] + "..."
             async with get_connection() as err_conn:
                 await err_conn.execute(
                     """UPDATE er_case_documents
                        SET processing_status = 'failed', processing_error = $1
                        WHERE id = $2""",
-                    "Document reprocessing failed",
+                    error_detail,
                     doc_id,
                 )
             return TaskStatusResponse(
@@ -951,9 +957,12 @@ async def reprocess_all_documents(
                 results.append({"id": str(doc_id), "filename": doc["filename"], "status": "completed"})
             except Exception as e:
                 logger.error(f"Failed to reprocess document {doc_id}: {e}", exc_info=True)
+                error_detail = str(e).strip() or "Document processing failed"
+                if len(error_detail) > 1000:
+                    error_detail = error_detail[:997] + "..."
                 await conn.execute(
                     "UPDATE er_case_documents SET processing_status = 'failed', processing_error = $1 WHERE id = $2",
-                    "Document processing failed",
+                    error_detail,
                     doc_id,
                 )
                 results.append({"id": str(doc_id), "filename": doc["filename"], "status": "failed"})
