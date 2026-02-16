@@ -106,6 +106,13 @@ function formatCaseNoteType(value: ERCaseNote['note_type']): string {
   return 'General';
 }
 
+function getCaseNotePurpose(note: ERCaseNote): string | null {
+  const metadata = note.metadata;
+  if (!metadata || typeof metadata !== 'object') return null;
+  const purpose = metadata.note_purpose;
+  return typeof purpose === 'string' ? purpose : null;
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -761,8 +768,12 @@ export function ERCaseDetail() {
   const intakeContext = normalizeIntakeContext(erCase.intake_context);
   const assistanceAnswers = intakeContext?.answers;
   const showAssistancePanel = Boolean(intakeContext?.assistance_requested) || autoAssistStatus !== 'idle';
-  const latestGuidanceNote = [...notes].reverse().find((note) => note.note_type === 'guidance') || null;
-  const nonGuidanceNotes = notes.filter((note) => note.note_type !== 'guidance');
+  const latestGuidanceNote = [...notes].reverse().find(
+    (note) => note.note_type === 'guidance' && getCaseNotePurpose(note) === 'next_steps'
+  ) || null;
+  const caseNotes = notes.filter(
+    (note) => !(note.note_type === 'guidance' && getCaseNotePurpose(note) === 'next_steps')
+  );
 
   return (
     <div className="max-w-5xl mx-auto space-y-12">
@@ -949,11 +960,11 @@ export function ERCaseDetail() {
           {showAssistancePanel && (
             <div className="pt-4 border-t border-zinc-200">
               <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Case Notes</h3>
-              {nonGuidanceNotes.length === 0 ? (
+              {caseNotes.length === 0 ? (
                 <p className="text-xs text-zinc-400">No notes yet.</p>
               ) : (
                 <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
-                  {nonGuidanceNotes.slice(-10).reverse().map((note) => (
+                  {caseNotes.slice(-10).reverse().map((note) => (
                     <div key={note.id} className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[10px] uppercase tracking-wide text-zinc-500">{formatCaseNoteType(note.note_type)}</span>
