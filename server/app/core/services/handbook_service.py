@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+import json
 import html
 from typing import Any, Optional
 from uuid import UUID
@@ -336,6 +337,8 @@ def _translate_handbook_db_error(exc: Exception) -> Optional[str]:
         return "Duplicate handbook section keys were detected. Update section titles and try again."
     if "value too long for type character varying" in message:
         return "One or more handbook fields are too long. Shorten the text and try again."
+    if "invalid input for query argument" in message and "expected str, got dict" in message:
+        return "Failed to encode handbook section metadata. Please retry."
     if 'relation "company_handbook_profiles"' in message:
         return "Handbook tables are out of date. Restart the API to apply schema updates."
     if (
@@ -644,7 +647,7 @@ class HandbookService:
                             section["title"],
                             section["section_order"],
                             section["section_type"],
-                            section["jurisdiction_scope"],
+                            json.dumps(section["jurisdiction_scope"] or {}),
                             section["content"],
                         )
         except Exception as exc:
@@ -879,7 +882,7 @@ class HandbookService:
                                     section.content,
                                     section.section_order,
                                     section.section_type,
-                                    section.jurisdiction_scope or {},
+                                    json.dumps(section.jurisdiction_scope or {}),
                                 )
 
                     if data.profile is not None:

@@ -197,3 +197,11 @@ def test_translate_handbook_db_error_handles_profile_schema_drift():
     err = Exception('column "tip_pooling" of relation "company_handbook_profiles" does not exist')
     translated = _translate_handbook_db_error(err)
     assert translated == "Handbook tables are out of date. Restart the API to apply schema updates."
+
+
+def test_translate_handbook_db_error_handles_jsonb_dict_binding_error():
+    err = Exception(
+        "invalid input for query argument $6: {'mode': 'multi_state'} (expected str, got dict)"
+    )
+    translated = _translate_handbook_db_error(err)
+    assert translated == "Failed to encode handbook section metadata. Please retry."
