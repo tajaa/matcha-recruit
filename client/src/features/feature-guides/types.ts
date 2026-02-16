@@ -20,6 +20,8 @@ export interface WalkthroughConfig {
 export type GuideKey =
   | 'compliance'
   | 'policies'
+  | 'handbooks'
+  | 'handbook-create'
   | 'offer-letters'
   | 'ir-list'
   | 'ir-dashboard'

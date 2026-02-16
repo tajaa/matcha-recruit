@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { handbooks } from '../api/client';
 import type { HandbookListItem, HandbookStatus } from '../types';
 import { BookOpen, ChevronRight, Plus, Pencil, CheckCircle, Send } from 'lucide-react';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 export function Handbooks() {
   const navigate = useNavigate();
@@ -64,10 +65,14 @@ export function Handbooks() {
     <div className="max-w-6xl mx-auto space-y-12">
       <div className="flex justify-between items-start border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Handbooks</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Handbooks</h1>
+            <FeatureGuideTrigger guideId="handbooks" />
+          </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Employee Handbook Builder</p>
         </div>
         <button
+          data-tour="handbooks-create-btn"
           onClick={() => navigate('/app/matcha/handbook/new')}
           className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
         >
@@ -76,7 +81,7 @@ export function Handbooks() {
         </button>
       </div>
 
-      <div className="flex gap-8 border-b border-white/10 pb-px">
+      <div data-tour="handbooks-tabs" className="flex gap-8 border-b border-white/10 pb-px">
         {[
           { label: 'All', value: '' },
           { label: 'Active', value: 'active' },
@@ -115,7 +120,7 @@ export function Handbooks() {
           </button>
         </div>
       ) : (
-        <div className="space-y-px bg-white/10 border border-white/10">
+        <div data-tour="handbooks-list" className="space-y-px bg-white/10 border border-white/10">
           <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950 border-b border-white/10">
             <div className="flex-1">Handbook</div>
             <div className="w-28 text-center">Scope</div>
@@ -171,6 +176,7 @@ export function Handbooks() {
                 </button>
                 {item.status !== 'active' && (
                   <button
+                    data-tour="handbooks-publish-btn"
                     onClick={(e) => handlePublish(e, item.id)}
                     className="p-1.5 text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors rounded"
                     title="Publish handbook"
@@ -180,6 +186,7 @@ export function Handbooks() {
                 )}
                 {item.status === 'active' && (
                   <button
+                    data-tour="handbooks-distribute-btn"
                     onClick={(e) => handleDistribute(e, item.id)}
                     className="p-1.5 text-sky-500 hover:text-sky-400 hover:bg-sky-500/10 transition-colors rounded"
                     title="Send for e-signature"
@@ -201,4 +208,3 @@ export function Handbooks() {
 }
 
 export default Handbooks;
-

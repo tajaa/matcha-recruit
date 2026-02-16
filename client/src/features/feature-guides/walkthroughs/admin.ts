@@ -93,6 +93,95 @@ export const policiesWalkthrough: WalkthroughConfig = {
   ],
 };
 
+export const handbooksWalkthrough: WalkthroughConfig = {
+  id: 'handbooks',
+  title: 'Handbooks',
+  category: 'admin',
+  steps: [
+    {
+      target: 'handbooks-create-btn',
+      title: 'Create Handbook',
+      content: 'Start the handbook setup wizard to generate a new employee handbook from a template or upload.',
+      placement: 'bottom',
+      action: 'Click to open the handbook wizard.',
+    },
+    {
+      target: 'handbooks-tabs',
+      title: 'Status Filters',
+      content: 'Filter handbook records by lifecycle state: Active, Draft, and Archived.',
+      placement: 'bottom',
+      action: 'Click a tab to narrow the list.',
+    },
+    {
+      target: 'handbooks-list',
+      title: 'Handbook List',
+      content: 'Open any handbook to edit sections, review legal updates, download PDF, and distribute acknowledgements.',
+      placement: 'top',
+      action: 'Click a row to open handbook details.',
+      expect: 'Rows with title, scope, version, pending changes, and status.',
+      ifMissing: 'No handbooks exist yet. Use Create Handbook to start one.',
+    },
+    {
+      target: 'handbooks-publish-btn',
+      title: 'Publish',
+      content: 'Publishing makes this handbook active and automatically archives any other active handbook.',
+      placement: 'left',
+      ifMissing: 'Publish appears on draft/archived rows.',
+    },
+    {
+      target: 'handbooks-distribute-btn',
+      title: 'Send for E-Sign',
+      content: 'Send the active handbook to all current employees for acknowledgement signatures.',
+      placement: 'left',
+      ifMissing: 'Distribution appears only on active handbooks.',
+    },
+  ],
+};
+
+export const handbookCreateWalkthrough: WalkthroughConfig = {
+  id: 'handbook-create',
+  title: 'Handbook Setup Wizard',
+  category: 'admin',
+  steps: [
+    {
+      target: 'handbook-wizard-progress',
+      title: 'Step Progress',
+      content: 'This bar tracks progress through setup. You can move between steps before final creation.',
+      placement: 'bottom',
+    },
+    {
+      target: 'handbook-step-pill-basics',
+      title: 'Basics',
+      content: 'Define handbook title, single-state vs multi-state mode, and source type (template or upload).',
+      placement: 'top',
+    },
+    {
+      target: 'handbook-step-pill-scope',
+      title: 'State Scope',
+      content: 'Select the covered states. Multi-state mode requires at least two states.',
+      placement: 'top',
+    },
+    {
+      target: 'handbook-step-pill-profile',
+      title: 'Company Profile',
+      content: 'Provide legal identity fields used to generate handbook language and headers.',
+      placement: 'top',
+    },
+    {
+      target: 'handbook-step-pill-workforce',
+      title: 'Workforce Setup',
+      content: 'Answer workforce questions and add upload/custom sections based on your source type.',
+      placement: 'top',
+    },
+    {
+      target: 'handbook-step-pill-review',
+      title: 'Review and Create',
+      content: 'Confirm all selections, then create the handbook to generate editable sections.',
+      placement: 'top',
+    },
+  ],
+};
+
 export const offerLettersWalkthrough: WalkthroughConfig = {
   id: 'offer-letters',
   title: 'Offer Letters',
