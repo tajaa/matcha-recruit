@@ -16,8 +16,19 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("er_cases", sa.Column("intake_context", sa.dialects.postgresql.JSONB(astext_type=sa.Text()), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {col["name"] for col in inspector.get_columns("er_cases")}
+    if "intake_context" not in columns:
+        op.add_column(
+            "er_cases",
+            sa.Column("intake_context", sa.dialects.postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        )
 
 
 def downgrade():
-    op.drop_column("er_cases", "intake_context")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {col["name"] for col in inspector.get_columns("er_cases")}
+    if "intake_context" in columns:
+        op.drop_column("er_cases", "intake_context")
