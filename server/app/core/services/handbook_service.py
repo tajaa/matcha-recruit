@@ -331,6 +331,19 @@ def _normalize_custom_sections(custom_sections: list[HandbookSectionInput]) -> l
     return normalized
 
 
+def _coerce_jurisdiction_scope(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
 def _translate_handbook_db_error(exc: Exception) -> Optional[str]:
     message = str(exc).lower()
     if "handbook_sections_handbook_version_id_section_key_key" in message:
@@ -731,6 +744,14 @@ class HandbookService:
 
             profile = await HandbookService.get_or_default_profile(company_id)
 
+            section_models: list[HandbookSectionResponse] = []
+            for section in section_rows:
+                section_dict = dict(section)
+                section_dict["jurisdiction_scope"] = _coerce_jurisdiction_scope(
+                    section_dict.get("jurisdiction_scope")
+                )
+                section_models.append(HandbookSectionResponse(**section_dict))
+
             return HandbookDetailResponse(
                 id=row["id"],
                 company_id=row["company_id"],
@@ -743,7 +764,7 @@ class HandbookService:
                 file_name=row["file_name"],
                 scopes=[HandbookScopeResponse(**dict(scope)) for scope in scope_rows],
                 profile=profile,
-                sections=[HandbookSectionResponse(**dict(section)) for section in section_rows],
+                sections=section_models,
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 published_at=row["published_at"],

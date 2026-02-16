@@ -9,6 +9,7 @@ from app.core.models.handbook import HandbookUpdateRequest
 from app.core.services import handbook_service as handbook_service_module
 from app.core.services.handbook_service import (
     HandbookService,
+    _coerce_jurisdiction_scope,
     _normalize_custom_sections,
     _translate_handbook_db_error,
 )
@@ -205,3 +206,15 @@ def test_translate_handbook_db_error_handles_jsonb_dict_binding_error():
     )
     translated = _translate_handbook_db_error(err)
     assert translated == "Failed to encode handbook section metadata. Please retry."
+
+
+def test_coerce_jurisdiction_scope_parses_json_string():
+    value = '{"mode":"multi_state","states":["CA","NV"]}'
+    assert _coerce_jurisdiction_scope(value) == {
+        "mode": "multi_state",
+        "states": ["CA", "NV"],
+    }
+
+
+def test_coerce_jurisdiction_scope_rejects_non_dict_json():
+    assert _coerce_jurisdiction_scope('["CA"]') == {}
