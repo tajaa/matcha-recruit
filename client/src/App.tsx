@@ -333,7 +333,7 @@ function App() {
               <Route
                 path="matcha/google-workspace"
                 element={
-                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="employees">
+                  <ProtectedRoute roles={['admin', 'client']}>
                     <GoogleWorkspaceProvisioning />
                   </ProtectedRoute>
                 }
