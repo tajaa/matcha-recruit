@@ -152,6 +152,7 @@ export interface InterviewCreate {
 export interface InterviewStart {
   interview_id: string;
   websocket_url: string;
+  ws_auth_token?: string | null;
 }
 
 // Candidate types
@@ -731,6 +732,7 @@ export interface OutreachInterestResponse {
 export interface OutreachInterviewStart {
   interview_id: string;
   websocket_url: string;
+  ws_auth_token?: string | null;
 }
 
 export interface ScreeningPublicInfo {

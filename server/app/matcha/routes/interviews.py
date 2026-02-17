@@ -2,10 +2,9 @@ from typing import Optional
 from uuid import UUID
 import json
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, Query
 
-from ...core.dependencies import get_current_user
-from ..dependencies import require_interview_prep_access
+from ...core.dependencies import get_current_user, require_admin
 from ...core.models.auth import CurrentUser
 
 from ...database import get_connection
@@ -26,6 +25,11 @@ from ..models.interview import (
     VocabularySuggestion,
 )
 from ...core.services.gemini_session import GeminiLiveSession
+from ...core.services.auth import (
+    create_interview_ws_token,
+    decode_interview_ws_token,
+    decode_token,
+)
 from ..services.culture_analyzer import CultureAnalyzer
 from ..services.conversation_analyzer import ConversationAnalyzer
 from ...protocol import (
@@ -81,6 +85,7 @@ async def create_interview(company_id: UUID, interview: InterviewCreate):
         return InterviewStart(
             interview_id=interview_id,
             websocket_url=f"/api/ws/interview/{interview_id}",
+            ws_auth_token=create_interview_ws_token(interview_id),
         )
 
 
@@ -90,6 +95,13 @@ async def create_tutor_session(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Create a new tutor session for interview prep or language practice."""
+    # Validate required mode-specific fields first
+    if request.mode == "interview_prep" and not request.interview_role:
+        raise HTTPException(status_code=400, detail="Interview role must be specified for interview prep mode")
+
+    if request.mode == "language_test" and not request.language:
+        raise HTTPException(status_code=400, detail="Language must be specified for language test mode")
+
     # For candidates: only allow interview_prep mode and require beta + tokens
     if current_user.role == "candidate":
         if request.mode == "language_test":
@@ -109,17 +121,18 @@ async def create_tutor_session(
                 status_code=403,
                 detail="You have no interview prep tokens remaining."
             )
-
-    # Validate language is provided for language test mode
-    if request.mode == "language_test" and not request.language:
-        raise HTTPException(status_code=400, detail="Language must be specified for language test mode")
+        # Enforce role allowlist server-side (frontend checks are insufficient)
+        if request.interview_role not in current_user.allowed_interview_roles:
+            raise HTTPException(
+                status_code=403,
+                detail="This interview role is not available for your account."
+            )
 
     # Map mode to interview type
     interview_type = "tutor_interview" if request.mode == "interview_prep" else "tutor_language"
 
-    # For interview prep, store the role being practiced for in interviewer_name
-    # For language test, store the language in interviewer_role
-    # Also store user email in interviewer_name for tracking
+    # interviewer_name always stores user email for ownership checks.
+    # interviewer_role stores either interview role (prep) or language (language test).
     if request.mode == "interview_prep":
         interviewer_name = current_user.email  # Store user email for session tracking
         interviewer_role = request.interview_role  # Store the role being practiced
@@ -128,25 +141,36 @@ async def create_tutor_session(
         interviewer_role = request.language
 
     async with get_connection() as conn:
-        # For candidates using interview prep, consume a token
-        if current_user.role == "candidate" and request.mode == "interview_prep":
-            await conn.execute(
-                "UPDATE users SET interview_prep_tokens = interview_prep_tokens - 1 WHERE id = $1",
-                current_user.id
-            )
+        async with conn.transaction():
+            # For candidates using interview prep, consume a token atomically.
+            if current_user.role == "candidate" and request.mode == "interview_prep":
+                token_row = await conn.fetchrow(
+                    """
+                    UPDATE users
+                    SET interview_prep_tokens = interview_prep_tokens - 1
+                    WHERE id = $1 AND interview_prep_tokens > 0
+                    RETURNING interview_prep_tokens
+                    """,
+                    current_user.id,
+                )
+                if not token_row:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You have no interview prep tokens remaining."
+                    )
 
-        # Create interview record (company_id is NULL for tutor sessions)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO interviews (company_id, interviewer_name, interviewer_role, interview_type, status)
-            VALUES (NULL, $1, $2, $3, 'pending')
-            RETURNING id
-            """,
-            interviewer_name,
-            interviewer_role,
-            interview_type,
-        )
-        interview_id = row["id"]
+            # Create interview record (company_id is NULL for tutor sessions)
+            row = await conn.fetchrow(
+                """
+                INSERT INTO interviews (company_id, interviewer_name, interviewer_role, interview_type, status)
+                VALUES (NULL, $1, $2, $3, 'pending')
+                RETURNING id
+                """,
+                interviewer_name,
+                interviewer_role,
+                interview_type,
+            )
+            interview_id = row["id"]
 
         # Calculate duration in seconds
         # Default: 5 min for interview prep, 2 min for language test
@@ -158,6 +182,7 @@ async def create_tutor_session(
         return InterviewStart(
             interview_id=interview_id,
             websocket_url=f"/api/ws/interview/{interview_id}",
+            ws_auth_token=create_interview_ws_token(interview_id),
             max_session_duration_seconds=duration_seconds,
         )
 
@@ -169,6 +194,7 @@ async def list_tutor_sessions(
     mode: Optional[str] = None,  # "interview_prep" or "language_test"
     limit: int = 50,
     offset: int = 0,
+    _current_user: CurrentUser = Depends(require_admin),
 ):
     """List all tutor sessions (admin only)."""
     # Map mode to interview_type
@@ -234,7 +260,10 @@ async def list_tutor_sessions(
 
 
 @router.get("/tutor/sessions/{session_id}", response_model=TutorSessionDetail)
-async def get_tutor_session(session_id: UUID):
+async def get_tutor_session(
+    session_id: UUID,
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Get a single tutor session with full analysis (admin only)."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -266,7 +295,10 @@ async def get_tutor_session(session_id: UUID):
 
 
 @router.delete("/tutor/sessions/{session_id}")
-async def delete_tutor_session(session_id: UUID):
+async def delete_tutor_session(
+    session_id: UUID,
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Delete a tutor session (admin only)."""
     async with get_connection() as conn:
         # Verify session exists and is a tutor session
@@ -290,7 +322,9 @@ async def delete_tutor_session(session_id: UUID):
 
 
 @router.get("/tutor/metrics/aggregate", response_model=TutorMetricsAggregate)
-async def get_tutor_aggregate_metrics():
+async def get_tutor_aggregate_metrics(
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Get aggregate metrics across all tutor sessions (admin only)."""
     async with get_connection() as conn:
         # Get interview prep stats
@@ -403,7 +437,11 @@ async def get_tutor_aggregate_metrics():
 
 
 @router.get("/tutor/progress", response_model=TutorProgressResponse)
-async def get_tutor_progress(language: Optional[str] = None, limit: int = 20):
+async def get_tutor_progress(
+    language: Optional[str] = None,
+    limit: int = 20,
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Get session scores over time for progress tracking."""
     async with get_connection() as conn:
         query = """
@@ -443,7 +481,10 @@ async def get_tutor_progress(language: Optional[str] = None, limit: int = 20):
 
 
 @router.get("/tutor/sessions/{session_id}/comparison", response_model=TutorSessionComparison)
-async def get_session_comparison(session_id: UUID):
+async def get_session_comparison(
+    session_id: UUID,
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Get comparison of this session with previous sessions."""
     async with get_connection() as conn:
         # Get the current session
@@ -516,7 +557,11 @@ async def get_session_comparison(session_id: UUID):
 
 
 @router.get("/tutor/vocabulary", response_model=TutorVocabularyStats)
-async def get_vocabulary_stats(language: str = "es", limit: int = 10):
+async def get_vocabulary_stats(
+    language: str = "es",
+    limit: int = 10,
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Get vocabulary statistics across all language sessions."""
     async with get_connection() as conn:
         # Get all completed language sessions for this language
@@ -889,7 +934,11 @@ async def analyze_interview(interview_id: UUID):
 
 # WebSocket endpoint for voice interviews
 @router.websocket("/ws/interview/{interview_id}")
-async def interview_websocket(websocket: WebSocket, interview_id: UUID):
+async def interview_websocket(
+    websocket: WebSocket,
+    interview_id: UUID,
+    token: str = Query(...),
+):
     """WebSocket endpoint for voice interview sessions."""
     await websocket.accept()
 
@@ -918,10 +967,50 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
             await websocket.close(code=4004, reason="Interview not found")
             return
 
+        interview_type = row["interview_type"] or "culture"
+
+        # Allow either:
+        # 1) short-lived interview websocket token (for public invite flows), or
+        # 2) authenticated app access token (for internal flows).
+        ws_token_interview_id = decode_interview_ws_token(token)
+        if ws_token_interview_id:
+            if ws_token_interview_id != interview_id:
+                await websocket.close(code=4003, reason="Token not valid for this interview")
+                return
+        else:
+            user_payload = decode_token(token)
+            if not user_payload:
+                await websocket.close(code=4001, reason="Invalid or expired token")
+                return
+
+            try:
+                user_id = UUID(user_payload.sub)
+            except ValueError:
+                await websocket.close(code=4001, reason="Invalid token subject")
+                return
+
+            user_row = await conn.fetchrow(
+                """
+                SELECT id, email, role, is_active
+                FROM users
+                WHERE id = $1
+                """,
+                user_id,
+            )
+            if not user_row or not user_row["is_active"]:
+                await websocket.close(code=4001, reason="Invalid or inactive user")
+                return
+
+            # Tutor sessions are private to their owner (or admin).
+            if interview_type in ("tutor_interview", "tutor_language") and user_row["role"] != "admin":
+                owner_email = (row["interviewer_name"] or "").strip().lower()
+                if owner_email != (user_row["email"] or "").strip().lower():
+                    await websocket.close(code=4003, reason="Not authorized for this tutor session")
+                    return
+
         company_name = row["company_name"] or "Practice Session"
         interviewer_name = row["interviewer_name"] or "HR Representative"
         interviewer_role = row["interviewer_role"]  # May contain language for tutor sessions
-        interview_type = row["interview_type"] or "culture"
 
         # For tutor sessions, extract the appropriate fields
         tutor_language = None
@@ -930,7 +1019,7 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
             tutor_language = interviewer_role  # "en" or "es"
             interviewer_role = "Tutor"
         elif interview_type == "tutor_interview":
-            tutor_interview_role = interviewer_name  # The role being practiced for
+            tutor_interview_role = interviewer_role  # The role being practiced for
 
         # For candidate interviews, fetch the company's culture profile
         culture_profile = None

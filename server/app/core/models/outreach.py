@@ -71,6 +71,7 @@ class InterviewStartResponse(BaseModel):
     """Response when starting a screening interview."""
     interview_id: UUID
     websocket_url: str
+    ws_auth_token: Optional[str] = None
 
 
 class ScreeningPublicInfo(BaseModel):

@@ -45,6 +45,7 @@ export function Tutor() {
 
   // Session state
   const [interviewId, setInterviewId] = useState<string | null>(null);
+  const [wsAuthToken, setWsAuthToken] = useState<string | null>(null);
   const [maxSessionDurationMs, setMaxSessionDurationMs] = useState<number | undefined>(undefined);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,10 +58,10 @@ export function Tutor() {
     messages,
     sessionTimeRemaining,
     connect,
-    cancelSession,
+    disconnect,
     startRecording,
     stopRecording,
-  } = useAudioInterview(interviewId || '', { maxSessionDurationMs });
+  } = useAudioInterview(interviewId || '', { maxSessionDurationMs, wsAuthToken });
 
   // Scroll to bottom of messages
   useEffect(() => {
@@ -79,6 +80,7 @@ export function Tutor() {
         interview_role: mode === 'interview_prep' ? role : undefined,
       });
       setInterviewId(result.interview_id);
+      setWsAuthToken(result.ws_auth_token || null);
       setMaxSessionDurationMs(result.max_session_duration_seconds * 1000);
       setSelectedMode(mode);
       if (language) setSelectedLanguage(language);
@@ -95,15 +97,17 @@ export function Tutor() {
     }
   };
 
-  // End the session (cancel — skip analysis, return to mode selection)
+  // End the session and allow analysis to run.
   const handleEnd = () => {
-    cancelSession();
-    handleReset();
+    disconnect();
+    setCompleted(true);
   };
 
   // Reset to mode selection
   const handleReset = () => {
+    disconnect();
     setInterviewId(null);
+    setWsAuthToken(null);
     setSelectedMode(null);
     setCompleted(false);
     setError(null);
@@ -142,12 +146,14 @@ export function Tutor() {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button 
-               onClick={() => navigate(`/app/admin/tutor-metrics/${interviewId}`)}
-               className="bg-white text-black hover:bg-zinc-200 font-bold uppercase tracking-wider"
-            >
-              View Analysis
-            </Button>
+            {user?.role === 'admin' && (
+              <Button
+                onClick={() => navigate(`/app/admin/tutor-metrics/${interviewId}`)}
+                className="bg-white text-black hover:bg-zinc-200 font-bold uppercase tracking-wider"
+              >
+                View Analysis
+              </Button>
+            )}
             <Button 
                variant="secondary" 
                onClick={handleReset}
@@ -158,11 +164,13 @@ export function Tutor() {
           </div>
         </div>
         
-        <div className="text-center">
-           <Link to="/app/admin/tutor-metrics" className="text-xs text-zinc-500 hover:text-white uppercase tracking-widest border-b border-transparent hover:border-white pb-0.5 transition-all">
-             View All Sessions
-           </Link>
-        </div>
+        {user?.role === 'admin' && (
+          <div className="text-center">
+            <Link to="/app/admin/tutor-metrics" className="text-xs text-zinc-500 hover:text-white uppercase tracking-widest border-b border-transparent hover:border-white pb-0.5 transition-all">
+              View All Sessions
+            </Link>
+          </div>
+        )}
       </div>
     );
   }
@@ -246,7 +254,7 @@ export function Tutor() {
                           </Button>
                        )}
                        <Button onClick={handleEnd} variant="secondary" className="px-6 bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white uppercase tracking-widest text-xs font-bold">
-                          End
+                          End Session
                        </Button>
                     </div>
                  )}

@@ -238,15 +238,20 @@ export function TutorMetrics() {
     try {
       setLoading(true);
       const mode = activeTab === 'all' ? undefined : activeTab;
+      const shouldLoadLanguageInsights = activeTab === 'all' || activeTab === 'language_test';
       const [sessionsData, aggregateData, progressData, vocabData] = await Promise.all([
         tutorMetrics.listSessions({ mode, limit: 100 }),
         tutorMetrics.getAggregateMetrics(),
-        tutorMetrics.getProgress('es', 15),
-        tutorMetrics.getVocabularyStats('es', 10).catch(() => null),
+        shouldLoadLanguageInsights
+          ? tutorMetrics.getProgress('es', 15)
+          : Promise.resolve({ sessions: [] }),
+        shouldLoadLanguageInsights
+          ? tutorMetrics.getVocabularyStats('es', 10).catch(() => null)
+          : Promise.resolve(null),
       ]);
       setSessions(sessionsData);
       setAggregate(aggregateData);
-      setProgress(progressData.sessions);
+      setProgress(progressData.sessions ?? []);
       setVocabulary(vocabData);
     } catch (err) {
       console.error('Failed to fetch tutor metrics:', err);

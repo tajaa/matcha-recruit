@@ -970,14 +970,12 @@ export const screening = {
     return response.json();
   },
 
-  start: async (token: string, userEmail: string): Promise<OutreachInterviewStart> => {
+  start: async (token: string): Promise<OutreachInterviewStart> => {
     const response = await fetch(`${API_BASE}/screening/${token}/start`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${getAccessToken()}`,
-        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ user_email: userEmail }),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Failed to start screening' }));
@@ -998,6 +996,7 @@ export interface TutorSessionCreate {
 export interface TutorSessionStart {
   interview_id: string;
   websocket_url: string;
+  ws_auth_token?: string | null;
   max_session_duration_seconds: number;
 }
 

@@ -229,6 +229,7 @@ class InterviewStart(BaseModel):
     """Response when starting a new interview session."""
     interview_id: UUID
     websocket_url: str
+    ws_auth_token: Optional[str] = None
     max_session_duration_seconds: Optional[int] = None  # Session time limit
 
 
