@@ -22,6 +22,10 @@ from ...core.dependencies import get_current_user
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
 from ...core.services.email import EmailService
+from ..services.onboarding_orchestrator import (
+    PROVIDER_GOOGLE_WORKSPACE,
+    start_google_workspace_onboarding,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +218,28 @@ async def send_single_invitation(
             await conn.close()
 
 
+async def _run_google_workspace_auto_provisioning(
+    *,
+    company_id: UUID,
+    employee_id: UUID,
+    triggered_by: UUID,
+) -> None:
+    """Fire-and-forget provisioning kickoff for employee creation flow."""
+    try:
+        await start_google_workspace_onboarding(
+            company_id=company_id,
+            employee_id=employee_id,
+            triggered_by=triggered_by,
+            trigger_source="employee_create",
+        )
+    except Exception:
+        logger.exception(
+            "Failed Google Workspace auto-provisioning for employee %s in company %s",
+            employee_id,
+            company_id,
+        )
+
+
 # ================================
 # Endpoints
 # ================================
@@ -321,6 +347,7 @@ async def list_employees(
 @router.post("", response_model=EmployeeDetailResponse)
 async def create_employee(
     request: EmployeeCreateRequest,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new employee record (without user account yet)."""
@@ -356,7 +383,27 @@ async def create_employee(
             request.work_state, request.employment_type, start_date, request.manager_id
         )
 
-        return EmployeeDetailResponse(
+        google_workspace_connected = False
+        try:
+            google_workspace_connected = bool(
+                await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM integration_connections
+                        WHERE company_id = $1
+                          AND provider = $2
+                          AND status = 'connected'
+                    )
+                    """,
+                    company_id,
+                    PROVIDER_GOOGLE_WORKSPACE,
+                )
+            )
+        except Exception:
+            logger.exception("Unable to evaluate Google Workspace connection status for company %s", company_id)
+
+        response = EmployeeDetailResponse(
             id=row["id"],
             email=row["email"],
             first_name=row["first_name"],
@@ -375,6 +422,16 @@ async def create_employee(
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+        if google_workspace_connected:
+            background_tasks.add_task(
+                _run_google_workspace_auto_provisioning,
+                company_id=row["org_id"],
+                employee_id=row["id"],
+                triggered_by=current_user.id,
+            )
+
+        return response
 
 
 @router.get("/{employee_id}", response_model=EmployeeDetailResponse)

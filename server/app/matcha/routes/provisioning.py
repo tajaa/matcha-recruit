@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 
 from ...core.models.auth import CurrentUser
+from ...core.services.secret_crypto import decrypt_secret, encrypt_secret
 from ...database import get_connection
 from ..dependencies import get_client_company_id, require_admin_or_client
 from ..services.google_workspace_service import GoogleWorkspaceService
@@ -206,6 +207,13 @@ async def connect_google_workspace(
             PROVIDER_GOOGLE_WORKSPACE,
         )
         existing_secrets = _json_object(existing["secrets"]) if existing else {}
+        existing_access_token_plain: Optional[str] = None
+        existing_access_token_unreadable = False
+        if existing_secrets.get("access_token"):
+            try:
+                existing_access_token_plain = decrypt_secret(existing_secrets.get("access_token"))
+            except ValueError:
+                existing_access_token_unreadable = True
 
         default_groups = [str(item).strip() for item in request.default_groups if str(item).strip()]
         config = {
@@ -216,24 +224,35 @@ async def connect_google_workspace(
             "default_groups": default_groups,
         }
 
-        secrets = dict(existing_secrets)
-        if request.access_token:
-            secrets["access_token"] = request.access_token
-        if request.mode == "mock":
-            secrets.pop("access_token", None)
+        requested_access_token = request.access_token.strip() if request.access_token else None
+        access_token_plain = requested_access_token or existing_access_token_plain
 
-        if request.mode == "api_token" and not secrets.get("access_token"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="access_token is required when mode is api_token",
-            )
+        secrets_for_storage = dict(existing_secrets)
+        secrets_for_test: dict = {}
+        if request.mode == "mock":
+            secrets_for_storage.pop("access_token", None)
+        else:
+            if not access_token_plain:
+                message = "access_token is required when mode is api_token"
+                if existing_access_token_unreadable and not requested_access_token:
+                    message = "Stored Google Workspace access token is unreadable. Provide a new access_token."
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=message,
+                )
+            secrets_for_test["access_token"] = access_token_plain
+            secrets_for_storage["access_token"] = encrypt_secret(access_token_plain)
+
+        # Normalize older plaintext stored tokens into encrypted format on save.
+        if request.mode == "api_token" and existing_access_token_plain and not requested_access_token:
+            secrets_for_storage["access_token"] = encrypt_secret(existing_access_token_plain)
 
         status_value = "connected" if request.mode == "mock" else "needs_action"
         last_error = None
         last_tested_at = None
 
         if request.test_connection:
-            ok, error = await service.test_connection(config, secrets)
+            ok, error = await service.test_connection(config, secrets_for_test)
             last_tested_at = datetime.utcnow()
             if ok:
                 status_value = "connected"
@@ -262,7 +281,7 @@ async def connect_google_workspace(
             PROVIDER_GOOGLE_WORKSPACE,
             status_value,
             json.dumps(config),
-            json.dumps(secrets),
+            json.dumps(secrets_for_storage),
             last_tested_at,
             last_error,
             current_user.id,

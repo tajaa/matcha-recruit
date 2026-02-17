@@ -6,6 +6,7 @@ import json
 from typing import Any, Optional
 from uuid import UUID
 
+from ...core.services.secret_crypto import decrypt_secret
 from ...database import get_connection
 from .google_workspace_service import GoogleWorkspaceProvisioningError, GoogleWorkspaceService
 
@@ -228,6 +229,45 @@ async def start_google_workspace_onboarding(
 
         config = _json_object(connection["config"])
         secrets = _json_object(connection["secrets"])
+        access_token = secrets.get("access_token")
+        if access_token:
+            try:
+                secrets["access_token"] = decrypt_secret(access_token)
+            except ValueError:
+                message = "Stored Google Workspace access token is unreadable"
+                await conn.execute(
+                    """
+                    UPDATE onboarding_steps
+                    SET status = 'needs_action', attempts = attempts + 1, last_error = $2, completed_at = NOW(), updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    step_id,
+                    message,
+                )
+                await conn.execute(
+                    """
+                    UPDATE onboarding_runs
+                    SET status = 'needs_action', last_error = $2, completed_at = NOW(), updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    run_id,
+                    message,
+                )
+                await _insert_audit_log(
+                    conn,
+                    company_id=company_id,
+                    employee_id=employee_id,
+                    run_id=run_id,
+                    step_id=step_id,
+                    actor_user_id=triggered_by,
+                    provider=PROVIDER_GOOGLE_WORKSPACE,
+                    action="provision_user",
+                    status="error",
+                    detail=message,
+                    error_code="invalid_stored_token",
+                )
+                return await _fetch_run_payload(conn, run_id)
+
         mode = config.get("mode") or "mock"
         if mode == "api_token" and not secrets.get("access_token"):
             message = "Google Workspace access token is missing"
