@@ -98,8 +98,36 @@ def _to_dict(value) -> dict:
     return {}
 
 
+def _coerce_bool(value, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
 def _serialize_setup(row, *, invite_base_url: str) -> dict:
     invite_token = row["invite_token"]
+    google_workspace_status = row["google_workspace_status"]
+    google_workspace = None
+    if google_workspace_status:
+        google_workspace_config = _to_dict(row["google_workspace_config"])
+        google_workspace = {
+            "connected": google_workspace_status == "connected",
+            "status": google_workspace_status,
+            "auto_provision_on_employee_create": _coerce_bool(
+                google_workspace_config.get("auto_provision_on_employee_create"),
+                True,
+            ),
+        }
     return {
         "id": str(row["id"]),
         "broker_id": str(row["broker_id"]),
@@ -126,6 +154,7 @@ def _serialize_setup(row, *, invite_base_url: str) -> dict:
         "cancelled_at": row["cancelled_at"].isoformat() if row["cancelled_at"] else None,
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        "google_workspace": google_workspace,
     }
 
 
@@ -353,13 +382,18 @@ async def create_broker_client_setup(
                 c.size as company_size,
                 b.name as broker_name,
                 l.status as link_status,
-                l.permissions as link_permissions
+                l.permissions as link_permissions,
+                ic.status as google_workspace_status,
+                ic.config as google_workspace_config
             FROM broker_client_setups s
             JOIN companies c ON c.id = s.company_id
             JOIN brokers b ON b.id = s.broker_id
             LEFT JOIN broker_company_links l
                 ON l.broker_id = s.broker_id
                AND l.company_id = s.company_id
+            LEFT JOIN integration_connections ic
+                ON ic.company_id = s.company_id
+               AND ic.provider = 'google_workspace'
             WHERE s.id = $1
             """,
             setup["id"],
@@ -399,12 +433,17 @@ async def list_broker_client_setups(
                 c.industry,
                 c.size as company_size,
                 l.status as link_status,
-                l.permissions as link_permissions
+                l.permissions as link_permissions,
+                ic.status as google_workspace_status,
+                ic.config as google_workspace_config
             FROM broker_client_setups s
             JOIN companies c ON c.id = s.company_id
             LEFT JOIN broker_company_links l
                 ON l.broker_id = s.broker_id
                AND l.company_id = s.company_id
+            LEFT JOIN integration_connections ic
+                ON ic.company_id = s.company_id
+               AND ic.provider = 'google_workspace'
             WHERE s.broker_id = $1
         """
         params: list = [membership["broker_id"]]
@@ -539,12 +578,17 @@ async def update_broker_client_setup(
                 c.industry,
                 c.size as company_size,
                 l.status as link_status,
-                l.permissions as link_permissions
+                l.permissions as link_permissions,
+                ic.status as google_workspace_status,
+                ic.config as google_workspace_config
             FROM broker_client_setups s
             JOIN companies c ON c.id = s.company_id
             LEFT JOIN broker_company_links l
                 ON l.broker_id = s.broker_id
                AND l.company_id = s.company_id
+            LEFT JOIN integration_connections ic
+                ON ic.company_id = s.company_id
+               AND ic.provider = 'google_workspace'
             WHERE s.id = $1
             """,
             setup_id,
@@ -615,13 +659,18 @@ async def send_broker_client_invite(
                 c.size as company_size,
                 b.name as broker_name,
                 l.status as link_status,
-                l.permissions as link_permissions
+                l.permissions as link_permissions,
+                ic.status as google_workspace_status,
+                ic.config as google_workspace_config
             FROM broker_client_setups s
             JOIN companies c ON c.id = s.company_id
             JOIN brokers b ON b.id = s.broker_id
             LEFT JOIN broker_company_links l
                 ON l.broker_id = s.broker_id
                AND l.company_id = s.company_id
+            LEFT JOIN integration_connections ic
+                ON ic.company_id = s.company_id
+               AND ic.provider = 'google_workspace'
             WHERE s.id = $1
             """,
             setup_id,

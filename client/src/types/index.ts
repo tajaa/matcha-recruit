@@ -636,6 +636,11 @@ export interface BrokerClientSetup {
   cancelled_at: string | null;
   created_at: string;
   updated_at: string;
+  google_workspace: {
+    connected: boolean;
+    status: 'disconnected' | 'connected' | 'error' | 'needs_action' | string;
+    auto_provision_on_employee_create: boolean;
+  } | null;
 }
 
 export interface BrokerClientSetupListResponse {

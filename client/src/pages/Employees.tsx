@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAccessToken } from '../api/client';
+import { getAccessToken, provisioning } from '../api/client';
 import { Plus, X, Search, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
+import type { GoogleWorkspaceConnectionStatus } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -63,6 +64,8 @@ export default function Employees() {
   const [newEmployeeName, setNewEmployeeName] = useState<string>('');
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   const [assigningOnboarding, setAssigningOnboarding] = useState(false);
+  const [googleWorkspaceStatus, setGoogleWorkspaceStatus] = useState<GoogleWorkspaceConnectionStatus | null>(null);
+  const [googleWorkspaceStatusLoading, setGoogleWorkspaceStatusLoading] = useState(false);
 
   // Bulk upload state
   const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
@@ -116,10 +119,65 @@ export default function Employees() {
     }
   };
 
+  const fetchGoogleWorkspaceStatus = async () => {
+    setGoogleWorkspaceStatusLoading(true);
+    try {
+      const status = await provisioning.getGoogleWorkspaceStatus();
+      setGoogleWorkspaceStatus(status);
+    } catch (err) {
+      console.error('Failed to fetch Google Workspace provisioning status:', err);
+      setGoogleWorkspaceStatus(null);
+    } finally {
+      setGoogleWorkspaceStatusLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchEmployees();
     fetchOnboardingProgress();
   }, [filter]);
+
+  useEffect(() => {
+    fetchGoogleWorkspaceStatus();
+  }, []);
+
+  const googleAutoProvisionBadge = () => {
+    if (googleWorkspaceStatusLoading) {
+      return {
+        label: 'Loading',
+        tone: 'bg-zinc-800 text-zinc-400 border-zinc-700',
+      };
+    }
+    if (
+      !googleWorkspaceStatus ||
+      !googleWorkspaceStatus.connected ||
+      googleWorkspaceStatus.status === 'disconnected'
+    ) {
+      return {
+        label: 'Disconnected',
+        tone: 'bg-zinc-800 text-zinc-400 border-zinc-700',
+      };
+    }
+    if (
+      googleWorkspaceStatus.status === 'error' ||
+      googleWorkspaceStatus.status === 'needs_action'
+    ) {
+      return {
+        label: 'Needs Attention',
+        tone: 'bg-red-900/30 text-red-300 border-red-500/30',
+      };
+    }
+    if (googleWorkspaceStatus.auto_provision_on_employee_create) {
+      return {
+        label: 'ON',
+        tone: 'bg-emerald-900/30 text-emerald-300 border-emerald-500/30',
+      };
+    }
+    return {
+      label: 'OFF',
+      tone: 'bg-amber-900/30 text-amber-300 border-amber-500/30',
+    };
+  };
 
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -352,6 +410,8 @@ export default function Employees() {
     );
   }
 
+  const googleBadge = googleAutoProvisionBadge();
+
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       {/* Header */}
@@ -364,6 +424,14 @@ export default function Employees() {
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
             Manage personnel and access rights
           </p>
+          <button
+            onClick={() => navigate('/app/matcha/google-workspace')}
+            className="mt-4 inline-flex items-center gap-2 border border-white/10 bg-zinc-900/60 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-300 hover:text-white hover:border-white/20 transition-colors"
+            title="Open Google Workspace provisioning settings"
+          >
+            <span className="text-zinc-500">Google Auto-Provision</span>
+            <span className={`rounded border px-2 py-0.5 ${googleBadge.tone}`}>{googleBadge.label}</span>
+          </button>
         </div>
         <div className="flex items-center gap-3">
           <button

@@ -12,6 +12,32 @@ function asBrokerProfile(profile: unknown): BrokerAuthProfile | null {
   return profile as BrokerAuthProfile;
 }
 
+function googleProvisioningBadge(setup: BrokerClientSetup): { label: string; tone: string } {
+  const googleWorkspace = setup.google_workspace;
+  if (!googleWorkspace || !googleWorkspace.connected || googleWorkspace.status === 'disconnected') {
+    return {
+      label: 'Google Disconnected',
+      tone: 'border-zinc-700 bg-zinc-900 text-zinc-400',
+    };
+  }
+  if (googleWorkspace.status === 'error' || googleWorkspace.status === 'needs_action') {
+    return {
+      label: 'Google Needs Attention',
+      tone: 'border-red-600/40 bg-red-950/20 text-red-300',
+    };
+  }
+  if (googleWorkspace.auto_provision_on_employee_create) {
+    return {
+      label: 'Google Auto-Provision ON',
+      tone: 'border-emerald-600/40 bg-emerald-950/20 text-emerald-300',
+    };
+  }
+  return {
+    label: 'Google Auto-Provision OFF',
+    tone: 'border-amber-600/40 bg-amber-950/20 text-amber-300',
+  };
+}
+
 export default function BrokerClients() {
   const { profile, refreshUser } = useAuth();
   const brokerProfile = asBrokerProfile(profile);
@@ -346,37 +372,47 @@ export default function BrokerClients() {
           <div className="p-4 text-sm text-zinc-400">No setups yet.</div>
         ) : (
           <div className="divide-y divide-zinc-800">
-            {setups.map((setup) => (
-              <div key={setup.id} className="p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div>
-                  <p className="text-sm text-white">{setup.company_name}</p>
-                  <p className="text-xs text-zinc-400">
-                    {setup.status.toUpperCase()} | {setup.contact_email || 'No contact email'}
-                  </p>
-                  {setup.invite_url && (
-                    <p className="text-xs text-zinc-500 mt-1 break-all">{setup.invite_url}</p>
-                  )}
+            {setups.map((setup) => {
+              const provisioningBadge = googleProvisioningBadge(setup);
+              return (
+                <div key={setup.id} className="p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-white">{setup.company_name}</p>
+                    <p className="text-xs text-zinc-400">
+                      {setup.status.toUpperCase()} | {setup.contact_email || 'No contact email'}
+                    </p>
+                    <p className="mt-1">
+                      <span
+                        className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] uppercase tracking-wider ${provisioningBadge.tone}`}
+                      >
+                        {provisioningBadge.label}
+                      </span>
+                    </p>
+                    {setup.invite_url && (
+                      <p className="text-xs text-zinc-500 mt-1 break-all">{setup.invite_url}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {(setup.status === 'draft' || setup.status === 'invited') && (
+                      <button
+                        onClick={() => handleSendInvite(setup.id)}
+                        className="px-2 py-1 text-[10px] uppercase tracking-wide border border-zinc-700 text-zinc-300"
+                      >
+                        Send Invite
+                      </button>
+                    )}
+                    {(setup.status === 'draft' || setup.status === 'invited') && (
+                      <button
+                        onClick={() => handleCancel(setup.id)}
+                        className="px-2 py-1 text-[10px] uppercase tracking-wide border border-red-700 text-red-300"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {(setup.status === 'draft' || setup.status === 'invited') && (
-                    <button
-                      onClick={() => handleSendInvite(setup.id)}
-                      className="px-2 py-1 text-[10px] uppercase tracking-wide border border-zinc-700 text-zinc-300"
-                    >
-                      Send Invite
-                    </button>
-                  )}
-                  {(setup.status === 'draft' || setup.status === 'invited') && (
-                    <button
-                      onClick={() => handleCancel(setup.id)}
-                      className="px-2 py-1 text-[10px] uppercase tracking-wide border border-red-700 text-red-300"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
