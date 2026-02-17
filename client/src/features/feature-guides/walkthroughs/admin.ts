@@ -620,7 +620,7 @@ export const googleWorkspaceWalkthrough: WalkthroughConfig = {
       target: 'google-workspace-save',
       title: 'Save Configuration',
       content: 'Save to persist settings and optionally run a connection test to verify credentials immediately.',
-      placement: 'left',
+      placement: 'top',
       action: 'Click Save Connection after entering required fields.',
     },
   ],
