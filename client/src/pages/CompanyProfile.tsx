@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building, Upload, Check, AlertTriangle, MapPin } from 'lucide-react';
+import { Building, Upload, Check, AlertTriangle, MapPin, Settings } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getAccessToken } from '../api/client';
-import type { ClientProfile } from '../types';
+import { getAccessToken, provisioning } from '../api/client';
+import { FeatureGuideTrigger } from '../features/feature-guides';
+import type { ClientProfile, GoogleWorkspaceConnectionStatus } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -27,6 +28,22 @@ interface CompanyData {
   logo_url: string | null;
 }
 
+function getGoogleBadge(status: GoogleWorkspaceConnectionStatus | null, loading: boolean) {
+  if (loading) {
+    return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
+  }
+  if (!status || status.status === 'disconnected') {
+    return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
+  }
+  if (status.status === 'connected') {
+    return { label: 'Connected', tone: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200' };
+  }
+  if (status.status === 'error') {
+    return { label: 'Needs Attention', tone: 'border-red-500/40 bg-red-950/30 text-red-200' };
+  }
+  return { label: status.status.toUpperCase(), tone: 'border-amber-500/40 bg-amber-950/30 text-amber-200' };
+}
+
 export function CompanyProfile() {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -38,6 +55,9 @@ export function CompanyProfile() {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadingGoogle, setLoadingGoogle] = useState(true);
+  const [googleStatus, setGoogleStatus] = useState<GoogleWorkspaceConnectionStatus | null>(null);
+  const [googleStatusError, setGoogleStatusError] = useState<string | null>(null);
 
   // Form fields
   const [name, setName] = useState('');
@@ -50,8 +70,42 @@ export function CompanyProfile() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId) {
+      setLoading(false);
+      return;
+    }
     fetchCompany();
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId) {
+      setLoadingGoogle(false);
+      return;
+    }
+
+    let mounted = true;
+    const loadGoogleStatus = async () => {
+      setLoadingGoogle(true);
+      setGoogleStatusError(null);
+      try {
+        const status = await provisioning.getGoogleWorkspaceStatus();
+        if (mounted) {
+          setGoogleStatus(status);
+        }
+      } catch (err) {
+        if (!mounted) return;
+        setGoogleStatusError(err instanceof Error ? err.message : 'Could not load Google status');
+      } finally {
+        if (mounted) {
+          setLoadingGoogle(false);
+        }
+      }
+    };
+
+    loadGoogleStatus();
+    return () => {
+      mounted = false;
+    };
   }, [companyId]);
 
   const fetchCompany = async () => {
@@ -173,6 +227,7 @@ export function CompanyProfile() {
     name !== (company?.name || '') ||
     industry !== (company?.industry || '') ||
     size !== (company?.size || '');
+  const googleBadge = getGoogleBadge(googleStatus, loadingGoogle);
 
   if (loading) {
     return (
@@ -199,6 +254,9 @@ export function CompanyProfile() {
             {company?.name || 'Company'}
           </h1>
         </div>
+        <div data-tour="company-setup-guide">
+          <FeatureGuideTrigger guideId="company-setup" />
+        </div>
       </div>
 
       {/* Error banner */}
@@ -215,7 +273,7 @@ export function CompanyProfile() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Company Info */}
         <div className="lg:col-span-2 space-y-8">
-          <div className="border border-white/10 bg-zinc-900/30">
+          <div data-tour="company-info-form" className="border border-white/10 bg-zinc-900/30">
             <div className="p-6 border-b border-white/10 flex items-center gap-3">
               <Building className="w-4 h-4 text-zinc-500" />
               <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Company Information</h2>
@@ -317,11 +375,46 @@ export function CompanyProfile() {
               </p>
             </div>
           </div>
+
+          <div data-tour="company-setup-card" className="border border-white/10 bg-zinc-900/30">
+            <div className="p-6 border-b border-white/10 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Settings className="w-4 h-4 text-zinc-500" />
+                <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Setup & Integrations</h2>
+              </div>
+              <span className={`rounded border px-2 py-1 text-[10px] uppercase tracking-wider ${googleBadge.tone}`}>
+                {googleBadge.label}
+              </span>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-zinc-500">
+                Configure Google Workspace once here, then automatically provision employee accounts during onboarding.
+              </p>
+
+              {googleStatusError && (
+                <p className="text-xs text-red-300">Status check failed: {googleStatusError}</p>
+              )}
+
+              <div data-tour="company-google-status" className="space-y-1 text-[11px] text-zinc-400">
+                <p>Mode: <span className="text-zinc-200">{googleStatus?.mode || 'not configured'}</span></p>
+                <p>Domain: <span className="text-zinc-200">{googleStatus?.domain || 'not set'}</span></p>
+                <p>Auto-provision: <span className="text-zinc-200">{googleStatus?.auto_provision_on_employee_create ? 'on' : 'off'}</span></p>
+              </div>
+
+              <button
+                data-tour="company-google-configure-btn"
+                onClick={() => navigate('/app/matcha/google-workspace')}
+                className="px-4 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+              >
+                Configure Google Workspace
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Logo Sidebar */}
         <div className="space-y-8">
-          <div className="border border-white/10 bg-zinc-900/30">
+          <div data-tour="company-logo-card" className="border border-white/10 bg-zinc-900/30">
             <div className="p-6 border-b border-white/10">
               <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Company Logo</h2>
             </div>

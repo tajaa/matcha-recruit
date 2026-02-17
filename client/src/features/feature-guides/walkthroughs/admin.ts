@@ -496,6 +496,50 @@ export const employeesWalkthrough: WalkthroughConfig = {
   ],
 };
 
+export const companySetupWalkthrough: WalkthroughConfig = {
+  id: 'company-setup',
+  title: 'Company Setup',
+  category: 'admin',
+  steps: [
+    {
+      target: 'company-setup-guide',
+      title: 'Setup Walkthrough',
+      content: 'Use this guided flow to configure your company profile and external integrations from one page.',
+      placement: 'left',
+      action: 'Click Show Me anytime to replay this guide.',
+    },
+    {
+      target: 'company-info-form',
+      title: 'Company Information',
+      content: 'Keep your core profile accurate so downstream modules use the right company details.',
+      placement: 'right',
+      action: 'Update company name, industry, and size, then save changes.',
+    },
+    {
+      target: 'company-logo-card',
+      title: 'Company Logo',
+      content: 'Upload your logo to keep internal documents and workflows branded consistently.',
+      placement: 'left',
+      action: 'Upload a PNG, JPG, or SVG under 5MB.',
+    },
+    {
+      target: 'company-setup-card',
+      title: 'Integrations Setup',
+      content: 'This section centralizes onboarding integrations for your company account.',
+      placement: 'top',
+      expect: 'Google Workspace status, mode, and domain details.',
+    },
+    {
+      target: 'company-google-configure-btn',
+      title: 'Configure Google Workspace',
+      content: 'Open full Google Workspace provisioning settings to connect credentials and test the integration.',
+      placement: 'left',
+      action: 'Click to open Google Workspace configuration.',
+      ifMissing: 'This action appears for admin and client users on the company page.',
+    },
+  ],
+};
+
 export const brokerClientsWalkthrough: WalkthroughConfig = {
   id: 'broker-clients',
   title: 'Broker Client Onboarding',
