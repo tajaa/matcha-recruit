@@ -986,8 +986,11 @@ export const screening = {
 };
 
 // Tutor API
+export type TutorSessionMode = 'interview_prep' | 'language_test' | 'culture' | 'screening' | 'candidate';
+
 export interface TutorSessionCreate {
-  mode: 'interview_prep' | 'language_test';
+  mode: TutorSessionMode;
+  company_id?: string; // Required for culture/screening/candidate
   language?: 'en' | 'es';
   duration_minutes?: 2 | 5 | 8;
   interview_role?: string;  // For interview_prep: role being practiced for (e.g., "CTO")
@@ -1010,7 +1013,7 @@ export const tutor = {
 
 // Tutor Metrics API (admin only)
 export const tutorMetrics = {
-  listSessions: (filters?: { mode?: string; limit?: number; offset?: number }) => {
+  listSessions: (filters?: { mode?: 'interview_prep' | 'language_test' | 'company_tool' | 'culture' | 'screening' | 'candidate'; limit?: number; offset?: number }) => {
     const params = new URLSearchParams();
     if (filters?.mode) params.append('mode', filters.mode);
     if (filters?.limit) params.append('limit', filters.limit.toString());

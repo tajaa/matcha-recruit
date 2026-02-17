@@ -514,7 +514,7 @@ function App() {
               <Route
                 path="tutor"
                 element={
-                  <ProtectedRoute roles={['admin', 'candidate']}>
+                  <ProtectedRoute roles={['admin', 'client', 'candidate']}>
                     <Tutor />
                   </ProtectedRoute>
                 }

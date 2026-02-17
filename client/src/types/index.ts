@@ -797,7 +797,7 @@ export interface ApplicationSubmitResponse {
 }
 
 // Tutor Analysis types
-export type TutorInterviewType = 'tutor_interview' | 'tutor_language';
+export type TutorInterviewType = 'tutor_interview' | 'tutor_language' | 'culture' | 'candidate' | 'screening';
 
 // Tutor Interview Analysis (for interview prep mode)
 export interface TutorResponseBreakdown {
@@ -977,6 +977,8 @@ export interface TutorLanguageAnalysis {
 export interface TutorSessionSummary {
   id: string;
   interview_type: TutorInterviewType;
+  company_id: string | null;
+  company_name: string | null;
   language: string | null;
   status: string;
   overall_score: number | null;
@@ -1011,9 +1013,30 @@ export interface TutorLanguageTestStats {
   common_grammar_errors: { type: string; count: number }[];
 }
 
+export interface TutorCompanyInterviewStats {
+  total_sessions: number;
+  avg_coverage_score: number;
+  avg_response_depth: number;
+  common_missed_dimensions: { dimension: string; count: number }[];
+}
+
+export interface TutorCompanyScreeningStats {
+  total_sessions: number;
+  avg_overall_score: number;
+  avg_communication_score: number;
+  recommendation_breakdown: Record<string, number>;
+}
+
+export interface TutorCompanyInterviewAggregate {
+  culture: TutorCompanyInterviewStats;
+  candidate: TutorCompanyInterviewStats;
+  screening: TutorCompanyScreeningStats;
+}
+
 export interface TutorMetricsAggregate {
   interview_prep: TutorInterviewPrepStats;
   language_test: TutorLanguageTestStats;
+  company_interviews: TutorCompanyInterviewAggregate;
 }
 
 // Progress tracking types

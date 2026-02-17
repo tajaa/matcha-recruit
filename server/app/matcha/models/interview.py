@@ -235,7 +235,8 @@ class InterviewStart(BaseModel):
 
 class TutorSessionCreate(BaseModel):
     """Request to create a tutor session."""
-    mode: Literal["interview_prep", "language_test"]
+    mode: Literal["interview_prep", "language_test", "culture", "candidate", "screening"]
+    company_id: Optional[UUID] = None  # Required for company interview modes
     language: Optional[Literal["en", "es"]] = None  # Required for language_test mode
     duration_minutes: Optional[Literal[2, 5, 8]] = None  # Session duration: 2, 5, or 8 minutes
     interview_role: Optional[str] = None  # For interview_prep: role being interviewed for
@@ -244,7 +245,9 @@ class TutorSessionCreate(BaseModel):
 class TutorSessionSummary(BaseModel):
     """Summary of a tutor session for list views."""
     id: UUID
-    interview_type: Literal["tutor_interview", "tutor_language"]
+    interview_type: Literal["tutor_interview", "tutor_language", "culture", "candidate", "screening"]
+    company_id: Optional[UUID] = None
+    company_name: Optional[str] = None
     language: Optional[str] = None  # For tutor_language sessions
     status: str
     overall_score: Optional[int] = None  # Extracted from tutor_analysis
@@ -268,6 +271,7 @@ class TutorMetricsAggregate(BaseModel):
     """Aggregate metrics across tutor sessions."""
     interview_prep: dict[str, Any]  # Stats for tutor_interview
     language_test: dict[str, Any]  # Stats for tutor_language
+    company_interviews: dict[str, Any]  # Stats for culture/screening/candidate
 
 
 class TutorProgressDataPoint(BaseModel):

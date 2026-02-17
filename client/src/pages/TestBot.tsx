@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAudioInterview } from '../hooks/useAudioInterview';
-import { companies, interviews } from '../api/client';
+import { companies, tutor } from '../api/client';
 import type { Company, InterviewType } from '../types';
 import { Mic, Square, RefreshCcw, Radio, Users, Search, Target } from 'lucide-react';
 
@@ -11,6 +11,7 @@ export function TestBot() {
   const [companiesList, setCompaniesList] = useState<Company[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<string>('');
   const [interviewId, setInterviewId] = useState<string | null>(null);
+  const [wsAuthToken, setWsAuthToken] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -23,7 +24,7 @@ export function TestBot() {
     disconnect,
     startRecording,
     stopRecording,
-  } = useAudioInterview(interviewId || '');
+  } = useAudioInterview(interviewId || '', { wsAuthToken });
 
   useEffect(() => {
     loadCompanies();
@@ -55,12 +56,13 @@ export function TestBot() {
     setError(null);
 
     try {
-      const result = await interviews.create(selectedCompany, {
-        interviewer_name: mode === 'culture' ? 'Test HR Rep' : undefined,
-        interviewer_role: mode === 'culture' ? 'HR Director' : undefined,
-        interview_type: mode,
+      const result = await tutor.createSession({
+        mode,
+        company_id: selectedCompany,
+        duration_minutes: 8,
       });
       setInterviewId(result.interview_id);
+      setWsAuthToken(result.ws_auth_token || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create interview session');
     } finally {
@@ -74,11 +76,13 @@ export function TestBot() {
       navigate(`/app/analysis/${interviewId}`);
     }
     setInterviewId(null);
+    setWsAuthToken(null);
   };
 
   const handleReset = () => {
     disconnect();
     setInterviewId(null);
+    setWsAuthToken(null);
     setError(null);
   };
 
