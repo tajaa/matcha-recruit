@@ -12,6 +12,7 @@ export function OutreachScreening() {
 
   const [info, setInfo] = useState<OutreachPublicInfo | null>(null);
   const [interviewId, setInterviewId] = useState<string | null>(null);
+  const [wsAuthToken, setWsAuthToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -27,7 +28,7 @@ export function OutreachScreening() {
     disconnect,
     startRecording,
     stopRecording,
-  } = useAudioInterview(interviewId || '');
+  } = useAudioInterview(interviewId || '', { wsAuthToken });
 
   // Scroll to bottom of messages
   useEffect(() => {
@@ -68,6 +69,7 @@ export function OutreachScreening() {
     try {
       const result = await outreachApi.startInterview(token);
       setInterviewId(result.interview_id);
+      setWsAuthToken(result.ws_auth_token || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start interview');
     } finally {

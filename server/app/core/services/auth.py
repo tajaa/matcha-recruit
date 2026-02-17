@@ -70,6 +70,37 @@ def create_refresh_token(user_id: UUID, email: str, role: UserRole) -> str:
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
+def create_interview_ws_token(
+    interview_id: UUID,
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """Create a short-lived JWT token scoped to a specific interview websocket."""
+    settings = get_settings()
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(hours=2))
+    payload = {
+        "sub": str(interview_id),
+        "exp": expire,
+        "type": "interview_ws",
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_interview_ws_token(token: str) -> Optional[UUID]:
+    """Decode an interview websocket token and return the interview ID."""
+    settings = get_settings()
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        if payload.get("type") != "interview_ws":
+            return None
+        return UUID(payload["sub"])
+    except (JWTError, ValueError, TypeError):
+        return None
+
+
 def decode_token(token: str) -> Optional[TokenPayload]:
     """Decode and validate a JWT token."""
     settings = get_settings()
@@ -86,5 +117,5 @@ def decode_token(token: str) -> Optional[TokenPayload]:
             role=payload["role"],
             exp=payload["exp"]
         )
-    except JWTError:
+    except (JWTError, KeyError, TypeError):
         return None

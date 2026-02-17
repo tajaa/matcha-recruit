@@ -130,12 +130,12 @@ const navSections: NavSection[] = [
 
   {
     title: 'Practice',
-    roles: ['admin', 'candidate'],
+    roles: ['admin', 'client', 'candidate'],
     items: [
       {
         path: '/app/tutor',
-        label: 'Interview Prep',
-        roles: ['admin'],
+        label: 'Tutor',
+        roles: ['admin', 'client'],
         betaFeature: 'interview_prep',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

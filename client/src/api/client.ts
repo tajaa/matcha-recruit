@@ -1131,14 +1131,12 @@ export const screening = {
     return response.json();
   },
 
-  start: async (token: string, userEmail: string): Promise<OutreachInterviewStart> => {
+  start: async (token: string): Promise<OutreachInterviewStart> => {
     const response = await fetch(`${API_BASE}/screening/${token}/start`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${getAccessToken()}`,
-        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ user_email: userEmail }),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Failed to start screening' }));
@@ -1149,8 +1147,11 @@ export const screening = {
 };
 
 // Tutor API
+export type TutorSessionMode = 'interview_prep' | 'language_test' | 'culture' | 'screening' | 'candidate';
+
 export interface TutorSessionCreate {
-  mode: 'interview_prep' | 'language_test';
+  mode: TutorSessionMode;
+  company_id?: string; // Required for culture/screening/candidate
   language?: 'en' | 'es';
   duration_minutes?: 2 | 5 | 8;
   interview_role?: string;  // For interview_prep: role being practiced for (e.g., "CTO")
@@ -1159,6 +1160,7 @@ export interface TutorSessionCreate {
 export interface TutorSessionStart {
   interview_id: string;
   websocket_url: string;
+  ws_auth_token?: string | null;
   max_session_duration_seconds: number;
 }
 
@@ -1172,7 +1174,7 @@ export const tutor = {
 
 // Tutor Metrics API (admin only)
 export const tutorMetrics = {
-  listSessions: (filters?: { mode?: string; limit?: number; offset?: number }) => {
+  listSessions: (filters?: { mode?: 'interview_prep' | 'language_test' | 'company_tool' | 'culture' | 'screening' | 'candidate'; limit?: number; offset?: number }) => {
     const params = new URLSearchParams();
     if (filters?.mode) params.append('mode', filters.mode);
     if (filters?.limit) params.append('limit', filters.limit.toString());

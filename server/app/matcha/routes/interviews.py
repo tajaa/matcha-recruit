@@ -2,10 +2,9 @@ from typing import Optional
 from uuid import UUID
 import json
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, Query
 
-from ...core.dependencies import get_current_user
-from ..dependencies import require_interview_prep_access
+from ...core.dependencies import get_current_user, require_admin
 from ...core.models.auth import CurrentUser
 
 from ...database import get_connection
@@ -26,6 +25,11 @@ from ..models.interview import (
     VocabularySuggestion,
 )
 from ...core.services.gemini_session import GeminiLiveSession
+from ...core.services.auth import (
+    create_interview_ws_token,
+    decode_interview_ws_token,
+    decode_token,
+)
 from ..services.culture_analyzer import CultureAnalyzer
 from ..services.conversation_analyzer import ConversationAnalyzer
 from ...protocol import (
@@ -81,6 +85,7 @@ async def create_interview(company_id: UUID, interview: InterviewCreate):
         return InterviewStart(
             interview_id=interview_id,
             websocket_url=f"/api/ws/interview/{interview_id}",
+            ws_auth_token=create_interview_ws_token(interview_id),
         )
 
 
@@ -89,13 +94,26 @@ async def create_tutor_session(
     request: TutorSessionCreate,
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Create a new tutor session for interview prep or language practice."""
-    # For candidates: only allow interview_prep mode and require beta + tokens
+    """Create a unified practice/interview session."""
+    company_modes = {"culture", "candidate", "screening"}
+    is_company_mode = request.mode in company_modes
+
+    # Validate required mode-specific fields first
+    if request.mode == "interview_prep" and not request.interview_role:
+        raise HTTPException(status_code=400, detail="Interview role must be specified for interview prep mode")
+
+    if request.mode == "language_test" and not request.language:
+        raise HTTPException(status_code=400, detail="Language must be specified for language test mode")
+
+    if is_company_mode and not request.company_id:
+        raise HTTPException(status_code=400, detail="Company ID must be specified for company interview modes")
+
+    # For candidates: only allow interview_prep mode and require beta + tokens.
     if current_user.role == "candidate":
-        if request.mode == "language_test":
+        if request.mode != "interview_prep":
             raise HTTPException(
                 status_code=403,
-                detail="Language test is not available for your account."
+                detail="This interview mode is not available for your account."
             )
         # Check beta access and tokens
         has_beta = current_user.beta_features.get("interview_prep", False)
@@ -109,55 +127,119 @@ async def create_tutor_session(
                 status_code=403,
                 detail="You have no interview prep tokens remaining."
             )
-
-    # Validate language is provided for language test mode
-    if request.mode == "language_test" and not request.language:
-        raise HTTPException(status_code=400, detail="Language must be specified for language test mode")
-
-    # Map mode to interview type
-    interview_type = "tutor_interview" if request.mode == "interview_prep" else "tutor_language"
-
-    # For interview prep, store the role being practiced for in interviewer_name
-    # For language test, store the language in interviewer_role
-    # Also store user email in interviewer_name for tracking
-    if request.mode == "interview_prep":
-        interviewer_name = current_user.email  # Store user email for session tracking
-        interviewer_role = request.interview_role  # Store the role being practiced
-    else:
-        interviewer_name = current_user.email
-        interviewer_role = request.language
-
-    async with get_connection() as conn:
-        # For candidates using interview prep, consume a token
-        if current_user.role == "candidate" and request.mode == "interview_prep":
-            await conn.execute(
-                "UPDATE users SET interview_prep_tokens = interview_prep_tokens - 1 WHERE id = $1",
-                current_user.id
+        # Enforce role allowlist server-side (frontend checks are insufficient)
+        if request.interview_role not in current_user.allowed_interview_roles:
+            raise HTTPException(
+                status_code=403,
+                detail="This interview role is not available for your account."
             )
 
-        # Create interview record (company_id is NULL for tutor sessions)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO interviews (company_id, interviewer_name, interviewer_role, interview_type, status)
-            VALUES (NULL, $1, $2, $3, 'pending')
-            RETURNING id
-            """,
-            interviewer_name,
-            interviewer_role,
-            interview_type,
+    if is_company_mode and current_user.role not in ("admin", "client"):
+        raise HTTPException(
+            status_code=403,
+            detail="Company interview modes are only available for admin and client users."
         )
-        interview_id = row["id"]
+
+    # interviewer_name always stores user email for ownership checks.
+    interviewer_name = current_user.email
+    if request.mode == "interview_prep":
+        interview_type = "tutor_interview"
+        interviewer_role = request.interview_role  # Store the role being practiced
+        company_id = None
+    elif request.mode == "language_test":
+        interview_type = "tutor_language"
+        interviewer_role = request.language  # Store the language for language mode
+        company_id = None
+    else:
+        interview_type = request.mode
+        interviewer_role = None
+        company_id = request.company_id
+
+    async with get_connection() as conn:
+        if is_company_mode:
+            company = await conn.fetchrow(
+                "SELECT id FROM companies WHERE id = $1",
+                request.company_id,
+            )
+            if not company:
+                raise HTTPException(status_code=404, detail="Company not found")
+
+            if current_user.role == "client":
+                has_access = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM clients
+                        WHERE user_id = $1 AND company_id = $2
+                    )
+                    """,
+                    current_user.id,
+                    request.company_id,
+                )
+                if not has_access:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You do not have access to this company."
+                    )
+
+            # Flow enforcement remains for candidate (culture-fit) interviews.
+            if request.mode == "candidate":
+                culture_profile = await conn.fetchrow(
+                    "SELECT id FROM culture_profiles WHERE company_id = $1",
+                    request.company_id,
+                )
+                if not culture_profile:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Culture interview must be completed first. Complete at least one culture interview and aggregate the culture profile before running candidate interviews."
+                    )
+
+        async with conn.transaction():
+            # For candidates using interview prep, consume a token atomically.
+            if current_user.role == "candidate" and request.mode == "interview_prep":
+                token_row = await conn.fetchrow(
+                    """
+                    UPDATE users
+                    SET interview_prep_tokens = interview_prep_tokens - 1
+                    WHERE id = $1 AND interview_prep_tokens > 0
+                    RETURNING interview_prep_tokens
+                    """,
+                    current_user.id,
+                )
+                if not token_row:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You have no interview prep tokens remaining."
+                    )
+
+            # For tutor sessions, company_id is NULL. For company interview modes, company_id is required.
+            row = await conn.fetchrow(
+                """
+                INSERT INTO interviews (company_id, interviewer_name, interviewer_role, interview_type, status)
+                VALUES ($1, $2, $3, $4, 'pending')
+                RETURNING id
+                """,
+                company_id,
+                interviewer_name,
+                interviewer_role,
+                interview_type,
+            )
+            interview_id = row["id"]
 
         # Calculate duration in seconds
-        # Default: 5 min for interview prep, 2 min for language test
+        # Default: 5 min for interview prep, 2 min for language test, 8 min for company interview modes.
         if request.duration_minutes:
             duration_seconds = request.duration_minutes * 60
+        elif request.mode == "language_test":
+            duration_seconds = 2 * 60
+        elif request.mode == "interview_prep":
+            duration_seconds = 5 * 60
         else:
-            duration_seconds = 5 * 60 if request.mode == "interview_prep" else 2 * 60
+            duration_seconds = 8 * 60
 
         return InterviewStart(
             interview_id=interview_id,
             websocket_url=f"/api/ws/interview/{interview_id}",
+            ws_auth_token=create_interview_ws_token(interview_id),
             max_session_duration_seconds=duration_seconds,
         )
 
@@ -166,66 +248,78 @@ async def create_tutor_session(
 
 @router.get("/tutor/sessions", response_model=list[TutorSessionSummary])
 async def list_tutor_sessions(
-    mode: Optional[str] = None,  # "interview_prep" or "language_test"
+    mode: Optional[str] = None,  # "interview_prep", "language_test", "company_tool", "culture", "screening", "candidate"
     limit: int = 50,
     offset: int = 0,
+    _current_user: CurrentUser = Depends(require_admin),
 ):
-    """List all tutor sessions (admin only)."""
-    # Map mode to interview_type
-    interview_type_filter = None
-    if mode == "interview_prep":
-        interview_type_filter = "tutor_interview"
-    elif mode == "language_test":
-        interview_type_filter = "tutor_language"
+    """List all tutor + company interview sessions (admin only)."""
+    mode_to_types = {
+        "interview_prep": ["tutor_interview"],
+        "language_test": ["tutor_language"],
+        "company_tool": ["culture", "screening", "candidate"],
+        "culture": ["culture"],
+        "screening": ["screening"],
+        "candidate": ["candidate"],
+    }
+    all_types = ["tutor_interview", "tutor_language", "culture", "screening", "candidate"]
+
+    if mode and mode not in mode_to_types:
+        raise HTTPException(status_code=400, detail="Invalid mode filter")
+
+    interview_type_filters = mode_to_types[mode] if mode else all_types
 
     async with get_connection() as conn:
-        if interview_type_filter:
-            rows = await conn.fetch(
-                """
-                SELECT id, interview_type, interviewer_role as language, status,
-                       tutor_analysis, created_at, completed_at
-                FROM interviews
-                WHERE interview_type = $1
-                ORDER BY created_at DESC
-                LIMIT $2 OFFSET $3
-                """,
-                interview_type_filter,
-                limit,
-                offset,
-            )
-        else:
-            rows = await conn.fetch(
-                """
-                SELECT id, interview_type, interviewer_role as language, status,
-                       tutor_analysis, created_at, completed_at
-                FROM interviews
-                WHERE interview_type IN ('tutor_interview', 'tutor_language')
-                ORDER BY created_at DESC
-                LIMIT $1 OFFSET $2
-                """,
-                limit,
-                offset,
-            )
+        rows = await conn.fetch(
+            """
+            SELECT i.id, i.company_id, c.name as company_name, i.interview_type,
+                   i.interviewer_role as language, i.status, i.tutor_analysis,
+                   i.conversation_analysis, i.screening_analysis,
+                   i.created_at, i.completed_at
+            FROM interviews i
+            LEFT JOIN companies c ON i.company_id = c.id
+            WHERE i.interview_type = ANY($1::text[])
+            ORDER BY i.created_at DESC
+            LIMIT $2 OFFSET $3
+            """,
+            interview_type_filters,
+            limit,
+            offset,
+        )
 
         sessions = []
         for row in rows:
-            # Extract overall score from tutor_analysis
+            # Extract mode-appropriate score:
+            # - User tool (language/interview prep): tutor_analysis
+            # - Company tool (culture/screening/candidate): conversation/screening analysis
             overall_score = None
-            if row["tutor_analysis"]:
+            interview_type = row["interview_type"]
+
+            if interview_type in ("tutor_interview", "tutor_language") and row["tutor_analysis"]:
                 analysis = json.loads(row["tutor_analysis"]) if isinstance(row["tutor_analysis"], str) else row["tutor_analysis"]
-                if row["interview_type"] == "tutor_interview":
-                    # For interview prep, use communication_skills overall_score
+                if interview_type == "tutor_interview":
                     overall_score = analysis.get("communication_skills", {}).get("overall_score")
                 else:
-                    # For language test, use fluency_pace overall_score
                     overall_score = analysis.get("fluency_pace", {}).get("overall_score")
+            elif interview_type in ("culture", "candidate") and row["conversation_analysis"]:
+                conv = json.loads(row["conversation_analysis"]) if isinstance(row["conversation_analysis"], str) else row["conversation_analysis"]
+                overall_score = conv.get("coverage_completeness", {}).get("overall_score")
+            elif interview_type == "screening" and row["screening_analysis"]:
+                screening = json.loads(row["screening_analysis"]) if isinstance(row["screening_analysis"], str) else row["screening_analysis"]
+                overall_score = screening.get("overall_score")
+
+            score_value = None
+            if isinstance(overall_score, (int, float)):
+                score_value = int(round(overall_score))
 
             sessions.append(TutorSessionSummary(
                 id=row["id"],
-                interview_type=row["interview_type"],
-                language=row["language"] if row["interview_type"] == "tutor_language" else None,
+                interview_type=interview_type,
+                company_id=row["company_id"],
+                company_name=row["company_name"],
+                language=row["language"] if interview_type == "tutor_language" else None,
                 status=row["status"],
-                overall_score=overall_score,
+                overall_score=score_value,
                 created_at=row["created_at"],
                 completed_at=row["completed_at"],
             ))
@@ -234,7 +328,10 @@ async def list_tutor_sessions(
 
 
 @router.get("/tutor/sessions/{session_id}", response_model=TutorSessionDetail)
-async def get_tutor_session(session_id: UUID):
+async def get_tutor_session(
+    session_id: UUID,
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Get a single tutor session with full analysis (admin only)."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -266,14 +363,18 @@ async def get_tutor_session(session_id: UUID):
 
 
 @router.delete("/tutor/sessions/{session_id}")
-async def delete_tutor_session(session_id: UUID):
-    """Delete a tutor session (admin only)."""
+async def delete_tutor_session(
+    session_id: UUID,
+    _current_user: CurrentUser = Depends(require_admin),
+):
+    """Delete a tutor/company interview session (admin only)."""
     async with get_connection() as conn:
-        # Verify session exists and is a tutor session
+        # Verify session exists and is part of the unified interview system.
         row = await conn.fetchrow(
             """
             SELECT id FROM interviews
-            WHERE id = $1 AND interview_type IN ('tutor_interview', 'tutor_language')
+            WHERE id = $1
+              AND interview_type IN ('tutor_interview', 'tutor_language', 'culture', 'screening', 'candidate')
             """,
             session_id,
         )
@@ -290,8 +391,10 @@ async def delete_tutor_session(session_id: UUID):
 
 
 @router.get("/tutor/metrics/aggregate", response_model=TutorMetricsAggregate)
-async def get_tutor_aggregate_metrics():
-    """Get aggregate metrics across all tutor sessions (admin only)."""
+async def get_tutor_aggregate_metrics(
+    _current_user: CurrentUser = Depends(require_admin),
+):
+    """Get aggregate metrics across user-tool and company-tool interview sessions (admin only)."""
     async with get_connection() as conn:
         # Get interview prep stats
         interview_prep_rows = await conn.fetch(
@@ -396,14 +499,107 @@ async def get_tutor_aggregate_metrics():
             sorted_errors = sorted(grammar_error_types.items(), key=lambda x: x[1], reverse=True)[:5]
             language_test_stats["common_grammar_errors"] = [{"type": t, "count": c} for t, c in sorted_errors]
 
+        # Company interview metrics (kept separate from language/user coaching metrics).
+        company_rows = await conn.fetch(
+            """
+            SELECT interview_type, conversation_analysis, screening_analysis
+            FROM interviews
+            WHERE interview_type IN ('culture', 'candidate', 'screening')
+              AND status = 'completed'
+            """
+        )
+
+        culture_scores: list[float] = []
+        culture_depth_scores: list[float] = []
+        culture_missed_dimensions: dict[str, int] = {}
+
+        candidate_scores: list[float] = []
+        candidate_depth_scores: list[float] = []
+        candidate_missed_dimensions: dict[str, int] = {}
+
+        screening_scores: list[float] = []
+        screening_communication_scores: list[float] = []
+        screening_recommendations: dict[str, int] = {}
+
+        for row in company_rows:
+            interview_type = row["interview_type"]
+            if interview_type in ("culture", "candidate") and row["conversation_analysis"]:
+                analysis = json.loads(row["conversation_analysis"]) if isinstance(row["conversation_analysis"], str) else row["conversation_analysis"]
+                coverage_score = analysis.get("coverage_completeness", {}).get("overall_score")
+                response_depth = analysis.get("response_depth", {}).get("overall_score")
+                missed_dimensions = analysis.get("coverage_completeness", {}).get("dimensions_missed", [])
+
+                if isinstance(coverage_score, (int, float)):
+                    if interview_type == "culture":
+                        culture_scores.append(float(coverage_score))
+                    else:
+                        candidate_scores.append(float(coverage_score))
+
+                if isinstance(response_depth, (int, float)):
+                    if interview_type == "culture":
+                        culture_depth_scores.append(float(response_depth))
+                    else:
+                        candidate_depth_scores.append(float(response_depth))
+
+                target_dimensions = culture_missed_dimensions if interview_type == "culture" else candidate_missed_dimensions
+                for dim in missed_dimensions:
+                    if not isinstance(dim, str):
+                        continue
+                    target_dimensions[dim] = target_dimensions.get(dim, 0) + 1
+
+            elif interview_type == "screening" and row["screening_analysis"]:
+                analysis = json.loads(row["screening_analysis"]) if isinstance(row["screening_analysis"], str) else row["screening_analysis"]
+                overall = analysis.get("overall_score")
+                communication = analysis.get("communication_clarity", {}).get("score")
+                recommendation = analysis.get("recommendation")
+
+                if isinstance(overall, (int, float)):
+                    screening_scores.append(float(overall))
+                if isinstance(communication, (int, float)):
+                    screening_communication_scores.append(float(communication))
+                if isinstance(recommendation, str):
+                    screening_recommendations[recommendation] = screening_recommendations.get(recommendation, 0) + 1
+
+        company_interview_stats = {
+            "culture": {
+                "total_sessions": sum(1 for r in company_rows if r["interview_type"] == "culture"),
+                "avg_coverage_score": round(sum(culture_scores) / len(culture_scores), 1) if culture_scores else 0,
+                "avg_response_depth": round(sum(culture_depth_scores) / len(culture_depth_scores), 1) if culture_depth_scores else 0,
+                "common_missed_dimensions": [
+                    {"dimension": dim, "count": count}
+                    for dim, count in sorted(culture_missed_dimensions.items(), key=lambda x: x[1], reverse=True)[:5]
+                ],
+            },
+            "candidate": {
+                "total_sessions": sum(1 for r in company_rows if r["interview_type"] == "candidate"),
+                "avg_coverage_score": round(sum(candidate_scores) / len(candidate_scores), 1) if candidate_scores else 0,
+                "avg_response_depth": round(sum(candidate_depth_scores) / len(candidate_depth_scores), 1) if candidate_depth_scores else 0,
+                "common_missed_dimensions": [
+                    {"dimension": dim, "count": count}
+                    for dim, count in sorted(candidate_missed_dimensions.items(), key=lambda x: x[1], reverse=True)[:5]
+                ],
+            },
+            "screening": {
+                "total_sessions": sum(1 for r in company_rows if r["interview_type"] == "screening"),
+                "avg_overall_score": round(sum(screening_scores) / len(screening_scores), 1) if screening_scores else 0,
+                "avg_communication_score": round(sum(screening_communication_scores) / len(screening_communication_scores), 1) if screening_communication_scores else 0,
+                "recommendation_breakdown": screening_recommendations,
+            },
+        }
+
         return TutorMetricsAggregate(
             interview_prep=interview_prep_stats,
             language_test=language_test_stats,
+            company_interviews=company_interview_stats,
         )
 
 
 @router.get("/tutor/progress", response_model=TutorProgressResponse)
-async def get_tutor_progress(language: Optional[str] = None, limit: int = 20):
+async def get_tutor_progress(
+    language: Optional[str] = None,
+    limit: int = 20,
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Get session scores over time for progress tracking."""
     async with get_connection() as conn:
         query = """
@@ -443,7 +639,10 @@ async def get_tutor_progress(language: Optional[str] = None, limit: int = 20):
 
 
 @router.get("/tutor/sessions/{session_id}/comparison", response_model=TutorSessionComparison)
-async def get_session_comparison(session_id: UUID):
+async def get_session_comparison(
+    session_id: UUID,
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Get comparison of this session with previous sessions."""
     async with get_connection() as conn:
         # Get the current session
@@ -516,7 +715,11 @@ async def get_session_comparison(session_id: UUID):
 
 
 @router.get("/tutor/vocabulary", response_model=TutorVocabularyStats)
-async def get_vocabulary_stats(language: str = "es", limit: int = 10):
+async def get_vocabulary_stats(
+    language: str = "es",
+    limit: int = 10,
+    _current_user: CurrentUser = Depends(require_admin),
+):
     """Get vocabulary statistics across all language sessions."""
     async with get_connection() as conn:
         # Get all completed language sessions for this language
@@ -889,7 +1092,11 @@ async def analyze_interview(interview_id: UUID):
 
 # WebSocket endpoint for voice interviews
 @router.websocket("/ws/interview/{interview_id}")
-async def interview_websocket(websocket: WebSocket, interview_id: UUID):
+async def interview_websocket(
+    websocket: WebSocket,
+    interview_id: UUID,
+    token: str = Query(...),
+):
     """WebSocket endpoint for voice interview sessions."""
     await websocket.accept()
 
@@ -918,10 +1125,50 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
             await websocket.close(code=4004, reason="Interview not found")
             return
 
+        interview_type = row["interview_type"] or "culture"
+
+        # Allow either:
+        # 1) short-lived interview websocket token (for public invite flows), or
+        # 2) authenticated app access token (for internal flows).
+        ws_token_interview_id = decode_interview_ws_token(token)
+        if ws_token_interview_id:
+            if ws_token_interview_id != interview_id:
+                await websocket.close(code=4003, reason="Token not valid for this interview")
+                return
+        else:
+            user_payload = decode_token(token)
+            if not user_payload:
+                await websocket.close(code=4001, reason="Invalid or expired token")
+                return
+
+            try:
+                user_id = UUID(user_payload.sub)
+            except ValueError:
+                await websocket.close(code=4001, reason="Invalid token subject")
+                return
+
+            user_row = await conn.fetchrow(
+                """
+                SELECT id, email, role, is_active
+                FROM users
+                WHERE id = $1
+                """,
+                user_id,
+            )
+            if not user_row or not user_row["is_active"]:
+                await websocket.close(code=4001, reason="Invalid or inactive user")
+                return
+
+            # Tutor sessions are private to their owner (or admin).
+            if interview_type in ("tutor_interview", "tutor_language") and user_row["role"] != "admin":
+                owner_email = (row["interviewer_name"] or "").strip().lower()
+                if owner_email != (user_row["email"] or "").strip().lower():
+                    await websocket.close(code=4003, reason="Not authorized for this tutor session")
+                    return
+
         company_name = row["company_name"] or "Practice Session"
         interviewer_name = row["interviewer_name"] or "HR Representative"
         interviewer_role = row["interviewer_role"]  # May contain language for tutor sessions
-        interview_type = row["interview_type"] or "culture"
 
         # For tutor sessions, extract the appropriate fields
         tutor_language = None
@@ -930,7 +1177,7 @@ async def interview_websocket(websocket: WebSocket, interview_id: UUID):
             tutor_language = interviewer_role  # "en" or "es"
             interviewer_role = "Tutor"
         elif interview_type == "tutor_interview":
-            tutor_interview_role = interviewer_name  # The role being practiced for
+            tutor_interview_role = interviewer_role  # The role being practiced for
 
         # For candidate interviews, fetch the company's culture profile
         culture_profile = None

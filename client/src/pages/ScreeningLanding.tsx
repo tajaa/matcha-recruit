@@ -14,6 +14,7 @@ export function ScreeningLanding() {
 
   const [info, setInfo] = useState<ScreeningPublicInfo | null>(null);
   const [interviewId, setInterviewId] = useState<string | null>(null);
+  const [wsAuthToken, setWsAuthToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -30,7 +31,7 @@ export function ScreeningLanding() {
     disconnect,
     startRecording,
     stopRecording,
-  } = useAudioInterview(interviewId || '');
+  } = useAudioInterview(interviewId || '', { wsAuthToken });
 
   // Scroll to bottom of messages
   useEffect(() => {
@@ -79,8 +80,9 @@ export function ScreeningLanding() {
     if (!token || !user) return;
     setStarting(true);
     try {
-      const result = await screeningApi.start(token, user.email);
+      const result = await screeningApi.start(token);
       setInterviewId(result.interview_id);
+      setWsAuthToken(result.ws_auth_token || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start interview');
     } finally {

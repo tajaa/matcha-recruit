@@ -93,7 +93,19 @@ final class WebSocketManager: NSObject {
     func connect(interviewId: String) {
         guard state == .disconnected else { return }
 
-        guard let url = URL(string: "\(baseWSURL)/\(interviewId)") else {
+        guard let accessToken = TokenManager.shared.accessToken else {
+            print("Missing access token for WebSocket connection")
+            return
+        }
+
+        guard var components = URLComponents(string: "\(baseWSURL)/\(interviewId)") else {
+            print("Invalid WebSocket URL")
+            return
+        }
+
+        components.queryItems = [URLQueryItem(name: "token", value: accessToken)]
+
+        guard let url = components.url else {
             print("Invalid WebSocket URL")
             return
         }

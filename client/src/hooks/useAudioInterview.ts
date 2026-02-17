@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { WSMessage } from '../types';
+import { getAccessToken } from '../api/client';
 
 const AUDIO_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
@@ -15,6 +16,7 @@ const WARNING_BEFORE_DISCONNECT_MS = 60 * 1000; // Warn 1 minute before auto-dis
 
 interface UseAudioInterviewOptions {
   maxSessionDurationMs?: number; // Custom max session duration (default: 12 minutes)
+  wsAuthToken?: string | null; // Optional scoped websocket token (public invite flows)
 }
 
 // Audio message type prefixes (must match backend protocol)
@@ -40,6 +42,7 @@ export function useAudioInterview(
   options: UseAudioInterviewOptions = {}
 ): UseAudioInterviewReturn {
   const maxSessionDurationMs = options.maxSessionDurationMs ?? DEFAULT_MAX_SESSION_DURATION_MS;
+  const wsAuthToken = options.wsAuthToken ?? null;
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [messages, setMessages] = useState<WSMessage[]>([]);
@@ -221,10 +224,18 @@ export function useAudioInterview(
   // Connect to WebSocket
   const connect = useCallback(() => {
     if (wsRef.current) return;
+    const authToken = wsAuthToken || getAccessToken();
+    if (!authToken) {
+      setMessages((prev) => [
+        ...prev,
+        { type: 'system', content: 'Missing authentication token for interview session', timestamp: Date.now() },
+      ]);
+      return;
+    }
 
     const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
     const wsBase = apiBase.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
-    const ws = new WebSocket(`${wsBase}/ws/interview/${interviewId}`);
+    const ws = new WebSocket(`${wsBase}/ws/interview/${interviewId}?token=${encodeURIComponent(authToken)}`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
@@ -282,7 +293,7 @@ export function useAudioInterview(
     };
 
     wsRef.current = ws;
-  }, [interviewId, playAudio, startSessionTimer, clearAllTimers]);
+  }, [clearAllTimers, interviewId, playAudio, startSessionTimer, wsAuthToken]);
 
   // Disconnect
   const disconnect = useCallback(() => {

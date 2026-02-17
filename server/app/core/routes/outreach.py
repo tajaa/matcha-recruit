@@ -4,10 +4,13 @@ import json
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 
 from ...database import get_connection
 from ...config import get_settings
+from ..dependencies import get_current_user
+from ..models.auth import CurrentUser
+from ..services.auth import create_interview_ws_token
 from ..services.email import get_email_service
 from ..models.outreach import (
     OutreachSendRequest,
@@ -415,8 +418,6 @@ async def respond_to_outreach(token: str, interested: bool = True):
 @router.post("/outreach/{token}/start-interview", response_model=InterviewStartResponse)
 async def start_screening_interview(token: str):
     """Start a screening interview for the outreach candidate."""
-    settings = get_settings()
-
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -448,6 +449,7 @@ async def start_screening_interview(token: str):
             return InterviewStartResponse(
                 interview_id=row["interview_id"],
                 websocket_url=f"/api/ws/interview/{row['interview_id']}",
+                ws_auth_token=create_interview_ws_token(row["interview_id"]),
             )
 
         # Get or create a company for this project (use existing or create temporary)
@@ -481,6 +483,7 @@ async def start_screening_interview(token: str):
         return InterviewStartResponse(
             interview_id=interview_id,
             websocket_url=f"/api/ws/interview/{interview_id}",
+            ws_auth_token=create_interview_ws_token(interview_id),
         )
 
 
@@ -611,14 +614,14 @@ async def get_screening_info(token: str):
 
 
 @router.post("/screening/{token}/start", response_model=InterviewStartResponse)
-async def start_direct_screening(token: str, user_email: str):
+async def start_direct_screening(
+    token: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Start a screening interview for a direct screening invite.
 
     Requires the user to be authenticated and their email to match the candidate.
-    The user_email parameter should be provided by the authenticated frontend.
     """
-    settings = get_settings()
-
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -635,8 +638,8 @@ async def start_direct_screening(token: str, user_email: str):
         if not row:
             raise HTTPException(status_code=404, detail="Invalid or expired link")
 
-        # Verify email matches
-        if row["candidate_email"].lower() != user_email.lower():
+        # Verify the logged-in user matches the candidate on the invite.
+        if row["candidate_email"].lower() != current_user.email.lower():
             raise HTTPException(
                 status_code=403,
                 detail=f"Please login with {row['candidate_email']} to access this screening.",
@@ -657,6 +660,7 @@ async def start_direct_screening(token: str, user_email: str):
             return InterviewStartResponse(
                 interview_id=row["interview_id"],
                 websocket_url=f"/api/ws/interview/{row['interview_id']}",
+                ws_auth_token=create_interview_ws_token(row["interview_id"]),
             )
 
         # Create the screening interview
@@ -686,4 +690,5 @@ async def start_direct_screening(token: str, user_email: str):
         return InterviewStartResponse(
             interview_id=interview_id,
             websocket_url=f"/api/ws/interview/{interview_id}",
+            ws_auth_token=create_interview_ws_token(interview_id),
         )
