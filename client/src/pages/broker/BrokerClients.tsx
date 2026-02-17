@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { auth, brokerPortal } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 import type { BrokerAuthProfile, BrokerClientSetup, BrokerClientSetupCreateRequest } from '../../types';
 
 const FEATURE_KEYS = ['compliance', 'policies', 'handbooks', 'incidents'] as const;
@@ -172,10 +173,14 @@ export default function BrokerClients() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-white">Broker Client Onboarding</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-white">Broker Client Onboarding</h1>
+            <FeatureGuideTrigger guideId="broker-clients" />
+          </div>
           <p className="text-sm text-zinc-400">Pre-configure accounts, invite clients, and monitor activation.</p>
         </div>
         <button
+          data-tour="broker-clients-expire-btn"
           onClick={handleExpireStale}
           className="px-3 py-2 text-xs uppercase tracking-wide border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500"
         >
@@ -184,7 +189,7 @@ export default function BrokerClients() {
       </div>
 
       {!brokerProfile?.terms_accepted && (
-        <div className="border border-amber-600/40 bg-amber-950/20 p-4 rounded-sm">
+        <div data-tour="broker-clients-terms" className="border border-amber-600/40 bg-amber-950/20 p-4 rounded-sm">
           <p className="text-sm text-amber-200 mb-3">
             You must accept broker partner terms ({brokerProfile?.terms_required_version || 'v1'}) before onboarding client companies.
           </p>
@@ -201,7 +206,7 @@ export default function BrokerClients() {
       {error && <div className="border border-red-600/40 bg-red-950/20 p-3 text-sm text-red-300">{error}</div>}
       {message && <div className="border border-emerald-600/40 bg-emerald-950/20 p-3 text-sm text-emerald-300">{message}</div>}
 
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+      <div data-tour="broker-clients-summary" className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <div className="bg-zinc-900 border border-zinc-800 p-3">
           <p className="text-[10px] uppercase tracking-wider text-zinc-500">Total</p>
           <p className="text-lg text-white">{counts.total}</p>
@@ -228,7 +233,7 @@ export default function BrokerClients() {
         </div>
       </div>
 
-      <form onSubmit={handleCreate} className="bg-zinc-900 border border-zinc-800 p-4 space-y-4">
+      <form data-tour="broker-clients-create-form" onSubmit={handleCreate} className="bg-zinc-900 border border-zinc-800 p-4 space-y-4">
         <h2 className="text-sm uppercase tracking-wide text-zinc-300">Create Setup</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <input
@@ -276,7 +281,7 @@ export default function BrokerClients() {
           />
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div data-tour="broker-clients-feature-toggles" className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {FEATURE_KEYS.map((featureKey) => (
             <label key={featureKey} className="flex items-center gap-2 text-xs text-zinc-300">
               <input
@@ -297,7 +302,7 @@ export default function BrokerClients() {
           ))}
         </div>
 
-        <label className="flex items-center gap-2 text-xs text-zinc-300">
+        <label data-tour="broker-clients-invite-toggle" className="flex items-center gap-2 text-xs text-zinc-300">
           <input
             type="checkbox"
             checked={Boolean(form.invite_immediately)}
@@ -315,7 +320,7 @@ export default function BrokerClients() {
         </button>
       </form>
 
-      <div className="bg-zinc-900 border border-zinc-800 overflow-hidden">
+      <div data-tour="broker-clients-setups-list" className="bg-zinc-900 border border-zinc-800 overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-800 text-sm uppercase tracking-wide text-zinc-300">Setups</div>
         {loading ? (
           <div className="p-4 text-sm text-zinc-400">Loading setups...</div>

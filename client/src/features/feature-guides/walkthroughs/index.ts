@@ -20,6 +20,8 @@ import {
   leaveManagementWalkthrough,
   accommodationsWalkthrough,
   employeesWalkthrough,
+  brokerClientsWalkthrough,
+  brokerReportingWalkthrough,
 } from './admin';
 import {
   portalOnboardingWalkthrough,
@@ -47,6 +49,8 @@ export const WALKTHROUGH_CONFIGS: Record<GuideKey, WalkthroughConfig> = {
   'leave-management': leaveManagementWalkthrough,
   accommodations: accommodationsWalkthrough,
   employees: employeesWalkthrough,
+  'broker-clients': brokerClientsWalkthrough,
+  'broker-reporting': brokerReportingWalkthrough,
   'portal-onboarding': portalOnboardingWalkthrough,
   'portal-documents': portalDocumentsWalkthrough,
   'portal-pto': portalPTOWalkthrough,

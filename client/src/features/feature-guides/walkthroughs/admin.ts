@@ -495,3 +495,93 @@ export const employeesWalkthrough: WalkthroughConfig = {
     },
   ],
 };
+
+export const brokerClientsWalkthrough: WalkthroughConfig = {
+  id: 'broker-clients',
+  title: 'Broker Client Onboarding',
+  category: 'admin',
+  steps: [
+    {
+      target: 'broker-clients-expire-btn',
+      title: 'Expire Stale Setups',
+      content: 'Expire setup invites that were never activated so your pipeline and reporting stay clean.',
+      placement: 'left',
+      action: 'Click to expire stale draft/invited records.',
+    },
+    {
+      target: 'broker-clients-terms',
+      title: 'Partner Terms Gate',
+      content: 'Broker partner terms must be accepted before onboarding actions can proceed.',
+      placement: 'bottom',
+      ifMissing: 'This panel only appears when terms have not been accepted yet.',
+    },
+    {
+      target: 'broker-clients-summary',
+      title: 'Setup Funnel Summary',
+      content: 'Track how many client setups are draft, invited, activated, expired, or cancelled.',
+      placement: 'bottom',
+      expect: 'Status cards showing setup funnel counts.',
+    },
+    {
+      target: 'broker-clients-create-form',
+      title: 'Create Client Setup',
+      content: 'Pre-configure company details, contact info, and starter features before the client logs in.',
+      placement: 'top',
+      action: 'Complete this form to create a broker-managed onboarding setup.',
+    },
+    {
+      target: 'broker-clients-feature-toggles',
+      title: 'Preconfigured Features',
+      content: 'Choose which modules should be enabled by default for this client at launch.',
+      placement: 'top',
+    },
+    {
+      target: 'broker-clients-invite-toggle',
+      title: 'Invite Immediately',
+      content: 'Enable this to send an onboarding invite as soon as the setup is created.',
+      placement: 'top',
+    },
+    {
+      target: 'broker-clients-setups-list',
+      title: 'Client Setup Queue',
+      content: 'Review setup status, copy invite links, and trigger invite/cancel actions per company.',
+      placement: 'top',
+      ifMissing: 'No setups exist yet. Create your first setup above.',
+    },
+  ],
+};
+
+export const brokerReportingWalkthrough: WalkthroughConfig = {
+  id: 'broker-reporting',
+  title: 'Broker Portfolio Reporting',
+  category: 'admin',
+  steps: [
+    {
+      target: 'broker-reporting-terms',
+      title: 'Reporting Access Terms',
+      content: 'Reporting remains locked until broker partner terms are accepted.',
+      placement: 'bottom',
+      ifMissing: 'This panel only appears if terms are still pending.',
+    },
+    {
+      target: 'broker-reporting-summary',
+      title: 'Portfolio Summary',
+      content: 'Topline KPIs across your book: linked companies, active links, average compliance, and open actions.',
+      placement: 'bottom',
+      expect: 'Four summary cards with aggregate broker metrics.',
+    },
+    {
+      target: 'broker-reporting-redaction',
+      title: 'Redaction Notice',
+      content: 'This feed is intentionally aggregate and privacy-safe to avoid employee-level PII exposure.',
+      placement: 'bottom',
+    },
+    {
+      target: 'broker-reporting-signals',
+      title: 'Company Signals Table',
+      content: 'Review each client company\'s compliance rate, open items, employee count, and risk signal.',
+      placement: 'top',
+      action: 'Use this table for renewal prep and proactive client retention conversations.',
+    },
+  ],
+};

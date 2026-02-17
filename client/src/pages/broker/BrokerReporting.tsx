@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { auth, brokerPortal } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 import type { BrokerAuthProfile, BrokerPortfolioReportResponse } from '../../types';
 
 function asBrokerProfile(profile: unknown): BrokerAuthProfile | null {
@@ -53,12 +54,15 @@ export default function BrokerReporting() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-white">Broker Portfolio Reporting</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold text-white">Broker Portfolio Reporting</h1>
+          <FeatureGuideTrigger guideId="broker-reporting" />
+        </div>
         <p className="text-sm text-zinc-400">Aggregated, redacted compliance and adoption reporting across your client book.</p>
       </div>
 
       {!brokerProfile?.terms_accepted && (
-        <div className="border border-amber-600/40 bg-amber-950/20 p-4 rounded-sm">
+        <div data-tour="broker-reporting-terms" className="border border-amber-600/40 bg-amber-950/20 p-4 rounded-sm">
           <p className="text-sm text-amber-200 mb-3">
             Accept broker partner terms ({brokerProfile?.terms_required_version || 'v1'}) to unlock reporting.
           </p>
@@ -80,7 +84,7 @@ export default function BrokerReporting() {
         <div className="text-sm text-zinc-400">No report available.</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div data-tour="broker-reporting-summary" className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-zinc-900 border border-zinc-800 p-3">
               <p className="text-[10px] uppercase tracking-wider text-zinc-500">Linked Companies</p>
               <p className="text-lg text-white">{report.summary.total_linked_companies}</p>
@@ -99,11 +103,11 @@ export default function BrokerReporting() {
             </div>
           </div>
 
-          <div className="bg-zinc-900 border border-zinc-800 p-4">
+          <div data-tour="broker-reporting-redaction" className="bg-zinc-900 border border-zinc-800 p-4">
             <p className="text-xs text-zinc-400">{report.redaction.note}</p>
           </div>
 
-          <div className="bg-zinc-900 border border-zinc-800 overflow-hidden">
+          <div data-tour="broker-reporting-signals" className="bg-zinc-900 border border-zinc-800 overflow-hidden">
             <div className="px-4 py-3 border-b border-zinc-800 text-sm uppercase tracking-wide text-zinc-300">Company Signals</div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

@@ -36,6 +36,8 @@ export type GuideKey =
   | 'leave-management'
   | 'accommodations'
   | 'employees'
+  | 'broker-clients'
+  | 'broker-reporting'
   | 'portal-onboarding'
   | 'portal-documents'
   | 'portal-pto'
