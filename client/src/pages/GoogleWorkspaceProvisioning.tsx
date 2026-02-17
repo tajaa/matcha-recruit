@@ -195,7 +195,7 @@ export default function GoogleWorkspaceProvisioning() {
             </select>
           </label>
 
-          <label className="space-y-2">
+          <label data-tour="google-workspace-domain" className="space-y-2">
             <span className="text-[11px] uppercase tracking-wider text-zinc-400">Google Workspace Domain</span>
             <input
               value={form.domain}
@@ -205,7 +205,7 @@ export default function GoogleWorkspaceProvisioning() {
             />
           </label>
 
-          <label className="space-y-2">
+          <label data-tour="google-workspace-admin-email" className="space-y-2">
             <span className="text-[11px] uppercase tracking-wider text-zinc-400">Admin Email</span>
             <input
               type="email"
@@ -214,9 +214,10 @@ export default function GoogleWorkspaceProvisioning() {
               placeholder="admin@example.com"
               className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
             />
+            <p className="text-[10px] text-zinc-500 leading-tight">Must be a Super Admin in your Workspace tenant.</p>
           </label>
 
-          <label className="space-y-2">
+          <label data-tour="google-workspace-delegated-admin-email" className="space-y-2">
             <span className="text-[11px] uppercase tracking-wider text-zinc-400">Delegated Admin Email</span>
             <input
               type="email"
@@ -225,9 +226,10 @@ export default function GoogleWorkspaceProvisioning() {
               placeholder="it-admin@example.com"
               className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
             />
+            <p className="text-[10px] text-zinc-500 leading-tight">The user account impersonated by the Service Account.</p>
           </label>
 
-          <label className="space-y-2">
+          <label data-tour="google-workspace-org-unit" className="space-y-2">
             <span className="text-[11px] uppercase tracking-wider text-zinc-400">Default Org Unit</span>
             <input
               value={form.default_org_unit}
@@ -235,10 +237,11 @@ export default function GoogleWorkspaceProvisioning() {
               placeholder="/employees"
               className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
             />
+            <p className="text-[10px] text-zinc-500 leading-tight">Path for new users (e.g. /Employees). Use / for root.</p>
           </label>
         </div>
 
-        <label className="space-y-2 block">
+        <label data-tour="google-workspace-groups" className="space-y-2 block">
           <span className="text-[11px] uppercase tracking-wider text-zinc-400">Default Groups</span>
           <textarea
             value={form.default_groups}
@@ -251,7 +254,7 @@ export default function GoogleWorkspaceProvisioning() {
         </label>
 
         {form.mode === 'api_token' && (
-          <label className="space-y-2 block">
+          <label data-tour="google-workspace-token" className="space-y-2 block">
             <span className="text-[11px] uppercase tracking-wider text-zinc-400">
               Access Token {status?.has_access_token ? '(leave blank to keep existing)' : '(required)'}
             </span>
@@ -266,7 +269,7 @@ export default function GoogleWorkspaceProvisioning() {
         )}
 
         {form.mode === 'service_account' && (
-          <label className="space-y-2 block">
+          <label data-tour="google-workspace-json" className="space-y-2 block">
             <span className="text-[11px] uppercase tracking-wider text-zinc-400">
               Service Account JSON {status?.has_service_account_credentials ? '(leave blank to keep existing)' : '(required)'}
             </span>
