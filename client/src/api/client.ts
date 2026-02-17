@@ -156,6 +156,59 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 const TOKEN_KEY = 'matcha_access_token';
 const REFRESH_KEY = 'matcha_refresh_token';
 
+type ApiErrorPayload = {
+  detail?: unknown;
+  message?: unknown;
+  error?: unknown;
+};
+
+function detailToMessage(detail: unknown): string | null {
+  if (!detail) return null;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (!item) return null;
+        if (typeof item === 'string') return item;
+        if (typeof item === 'object') {
+          const msg = (item as { msg?: unknown }).msg;
+          const loc = (item as { loc?: unknown }).loc;
+          if (typeof msg === 'string' && Array.isArray(loc) && loc.length > 0) {
+            return `${loc.join('.')}: ${msg}`;
+          }
+          if (typeof msg === 'string') return msg;
+        }
+        return null;
+      })
+      .filter((value): value is string => Boolean(value));
+    if (parts.length > 0) return parts.join(' | ');
+    return null;
+  }
+  if (typeof detail === 'object') {
+    const msg = (detail as { msg?: unknown }).msg;
+    if (typeof msg === 'string') return msg;
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function extractErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const typed = payload as ApiErrorPayload;
+  return (
+    detailToMessage(typed.detail) ||
+    detailToMessage(typed.message) ||
+    detailToMessage(typed.error) ||
+    fallback
+  );
+}
+
 export function getAccessToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -226,7 +279,7 @@ async function request<T>(
       });
       if (!retryResponse.ok) {
         const error = await retryResponse.json().catch(() => ({ detail: 'Request failed' }));
-        throw new Error(error.detail || 'Request failed');
+        throw new Error(extractErrorMessage(error, 'Request failed'));
       }
       return retryResponse.json();
     }
@@ -238,7 +291,7 @@ async function request<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(error.detail || 'Request failed');
+    throw new Error(extractErrorMessage(error, 'Request failed'));
   }
 
   return response.json();
@@ -255,7 +308,7 @@ export const auth = {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Login failed' }));
-      throw new Error(error.detail || 'Login failed');
+      throw new Error(extractErrorMessage(error, 'Login failed'));
     }
 
     const result: TokenResponse = await response.json();
@@ -280,7 +333,7 @@ export const auth = {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
-      throw new Error(error.detail || 'Registration failed');
+      throw new Error(extractErrorMessage(error, 'Registration failed'));
     }
 
     const result: TokenResponse = await response.json();
@@ -297,7 +350,7 @@ export const auth = {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
-      throw new Error(error.detail || 'Registration failed');
+      throw new Error(extractErrorMessage(error, 'Registration failed'));
     }
 
     const result: TokenResponse = await response.json();
@@ -314,7 +367,7 @@ export const auth = {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
-      throw new Error(error.detail || 'Registration failed');
+      throw new Error(extractErrorMessage(error, 'Registration failed'));
     }
 
     const result: TokenResponse = await response.json();
@@ -337,7 +390,7 @@ export const auth = {
     const response = await fetch(`${API_BASE}/auth/broker-branding/${encodeURIComponent(brokerKey.trim().toLowerCase())}`);
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Broker branding lookup failed' }));
-      throw new Error(error.detail || 'Broker branding lookup failed');
+      throw new Error(extractErrorMessage(error, 'Broker branding lookup failed'));
     }
     return response.json();
   },
