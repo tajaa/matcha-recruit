@@ -41,6 +41,7 @@ from ..matcha.routes import (
     ir_incidents_router,
     job_search_router,
     public_jobs_router,
+    provisioning_router,
 )
 
 __all__ = [
@@ -74,4 +75,5 @@ __all__ = [
     "ir_incidents_router",
     "job_search_router",
     "public_jobs_router",
+    "provisioning_router",
 ]

@@ -16,6 +16,7 @@ depends_on = None
 
 def _replace_post_termination_constraint(table_name: str, values: list[str], constraint_name: str) -> None:
     values_sql = ", ".join(f"'{value}'" for value in values)
+    values_sql_escaped = values_sql.replace("'", "''")
     op.execute(
         f"""
         DO $$
@@ -32,7 +33,7 @@ def _replace_post_termination_constraint(table_name: str, values: list[str], con
             END IF;
 
             EXECUTE 'ALTER TABLE {table_name} ADD CONSTRAINT {constraint_name} ' ||
-                    'CHECK (post_termination_mode IS NULL OR post_termination_mode IN ({values_sql}))';
+                    'CHECK (post_termination_mode IS NULL OR post_termination_mode IN ({values_sql_escaped}))';
         EXCEPTION WHEN undefined_table THEN
             NULL;
         END $$;
