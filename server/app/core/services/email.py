@@ -560,6 +560,124 @@ If you have questions, please contact your administrator.
             print(f"[Email] Error sending to {to_email}: {e}")
             return False
 
+    async def send_broker_client_setup_invitation_email(
+        self,
+        to_email: str,
+        to_name: str,
+        broker_name: str,
+        company_name: str,
+        invite_url: str,
+        expires_at: Optional[datetime] = None,
+    ) -> bool:
+        """Send a broker client onboarding invitation email."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        expires_text = (
+            expires_at.strftime('%B %d, %Y at %I:%M %p')
+            if isinstance(expires_at, datetime)
+            else "in a limited time window"
+        )
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .card {{ background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 12px 0; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>{broker_name} invited you to activate your compliance workspace for <strong>{company_name}</strong>.</p>
+
+            <div class="card">
+                <p style="margin: 0 0 8px 0;"><strong>What you'll do:</strong></p>
+                <p style="margin: 0;">Create your account, review your preconfigured setup, and begin compliance onboarding.</p>
+            </div>
+
+            <p style="text-align: center;">
+                <a href="{invite_url}" class="btn">Activate Client Workspace</a>
+            </p>
+
+            <p style="color: #6b7280; font-size: 14px; text-align: center;">
+                This invitation expires on {expires_text}.
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+{broker_name} invited you to activate your compliance workspace for {company_name}.
+
+Use this invite link to activate your client workspace:
+{invite_url}
+
+This invitation expires on {expires_text}.
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_name,
+                }
+            ],
+            "subject": f"{broker_name} invited you to activate {company_name} on Matcha",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent broker client invite to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
     async def send_employee_invitation_email(
         self,
         to_email: str,

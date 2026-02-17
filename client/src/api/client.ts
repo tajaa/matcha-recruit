@@ -433,7 +433,12 @@ export const brokerPortal = {
   },
 
   createSetup: (data: BrokerClientSetupCreateRequest) =>
-    request<{ status: string; setup: BrokerClientSetup }>('/brokers/client-setups', {
+    request<{
+      status: string;
+      setup: BrokerClientSetup;
+      invite_email_sent?: boolean;
+      invite_email_error?: string;
+    }>('/brokers/client-setups', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -445,7 +450,12 @@ export const brokerPortal = {
     }),
 
   sendInvite: (setupId: string, expiresDays = 14) =>
-    request<{ status: string; setup: BrokerClientSetup }>(`/brokers/client-setups/${setupId}/send-invite`, {
+    request<{
+      status: string;
+      setup: BrokerClientSetup;
+      invite_email_sent?: boolean;
+      invite_email_error?: string;
+    }>(`/brokers/client-setups/${setupId}/send-invite`, {
       method: 'POST',
       body: JSON.stringify({ expires_days: expiresDays }),
     }),

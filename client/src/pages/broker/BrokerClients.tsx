@@ -91,8 +91,19 @@ export default function BrokerClients() {
         contact_email: form.contact_email || undefined,
         headcount: form.headcount || undefined,
       };
-      await brokerPortal.createSetup(payload);
-      setMessage('Client setup created');
+      const response = await brokerPortal.createSetup(payload);
+      if (payload.invite_immediately) {
+        if (response.invite_email_sent) {
+          setMessage(`Client setup created and invite email sent to ${response.setup.contact_email}`);
+        } else {
+          setMessage(
+            `Client setup created, but invite email was not sent (${response.invite_email_error || 'delivery unavailable'}). ` +
+              'Share the invite URL from the setup row manually.'
+          );
+        }
+      } else {
+        setMessage('Client setup created');
+      }
       setForm({
         company_name: '',
         industry: '',
@@ -121,7 +132,14 @@ export default function BrokerClients() {
     setMessage('');
     try {
       const response = await brokerPortal.sendInvite(setupId, 14);
-      setMessage(`Invite sent for ${response.setup.company_name}`);
+      if (response.invite_email_sent) {
+        setMessage(`Invite email sent for ${response.setup.company_name}`);
+      } else {
+        setMessage(
+          `Invite link generated for ${response.setup.company_name}, but email was not sent ` +
+            `(${response.invite_email_error || 'delivery unavailable'}). Share the invite URL manually.`
+        );
+      }
       await loadSetups();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send invite');

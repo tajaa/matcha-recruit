@@ -14,6 +14,7 @@ from pydantic import BaseModel, EmailStr, Field
 from ...config import get_settings
 from ...core.feature_flags import default_company_features_json, merge_company_features
 from ...core.models.auth import CurrentUser
+from ...core.services.email import get_email_service
 from ...database import get_connection
 from ..dependencies import require_broker
 
@@ -126,6 +127,28 @@ def _serialize_setup(row, *, invite_base_url: str) -> dict:
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
     }
+
+
+async def _send_broker_client_invite_email(*, row: dict, invite_url: str) -> tuple[bool, Optional[str]]:
+    contact_email = row.get("contact_email")
+    if not contact_email:
+        return False, "missing_contact_email"
+
+    email_service = get_email_service()
+    if not email_service.is_configured():
+        return False, "email_service_not_configured"
+
+    sent = await email_service.send_broker_client_setup_invitation_email(
+        to_email=contact_email,
+        to_name=row.get("contact_name") or row.get("company_name") or contact_email,
+        broker_name=row.get("broker_name") or "Your Broker",
+        company_name=row.get("company_name") or "Your Company",
+        invite_url=invite_url,
+        expires_at=row.get("invite_expires_at"),
+    )
+    if sent:
+        return True, None
+    return False, "delivery_failed"
 
 
 async def _get_broker_membership(conn, *, user_id: UUID):
@@ -328,10 +351,12 @@ async def create_broker_client_setup(
                 c.status as company_status,
                 c.industry,
                 c.size as company_size,
+                b.name as broker_name,
                 l.status as link_status,
                 l.permissions as link_permissions
             FROM broker_client_setups s
             JOIN companies c ON c.id = s.company_id
+            JOIN brokers b ON b.id = s.broker_id
             LEFT JOIN broker_company_links l
                 ON l.broker_id = s.broker_id
                AND l.company_id = s.company_id
@@ -341,7 +366,17 @@ async def create_broker_client_setup(
         )
 
     base_url = get_settings().app_base_url.rstrip("/")
-    return {"status": "created", "setup": _serialize_setup(row, invite_base_url=base_url)}
+    serialized = _serialize_setup(row, invite_base_url=base_url)
+    response = {"status": "created", "setup": serialized}
+    if request.invite_immediately and serialized.get("invite_url"):
+        email_sent, email_error = await _send_broker_client_invite_email(
+            row=dict(row),
+            invite_url=serialized["invite_url"],
+        )
+        response["invite_email_sent"] = email_sent
+        if email_error:
+            response["invite_email_error"] = email_error
+    return response
 
 
 @router.get("/client-setups")
@@ -578,10 +613,12 @@ async def send_broker_client_invite(
                 c.status as company_status,
                 c.industry,
                 c.size as company_size,
+                b.name as broker_name,
                 l.status as link_status,
                 l.permissions as link_permissions
             FROM broker_client_setups s
             JOIN companies c ON c.id = s.company_id
+            JOIN brokers b ON b.id = s.broker_id
             LEFT JOIN broker_company_links l
                 ON l.broker_id = s.broker_id
                AND l.company_id = s.company_id
@@ -591,7 +628,15 @@ async def send_broker_client_invite(
         )
 
     base_url = get_settings().app_base_url.rstrip("/")
-    return {"status": "invited", "setup": _serialize_setup(row, invite_base_url=base_url)}
+    serialized = _serialize_setup(row, invite_base_url=base_url)
+    email_sent, email_error = await _send_broker_client_invite_email(
+        row=dict(row),
+        invite_url=serialized["invite_url"],
+    )
+    response = {"status": "invited", "setup": serialized, "invite_email_sent": email_sent}
+    if email_error:
+        response["invite_email_error"] = email_error
+    return response
 
 
 @router.post("/client-setups/{setup_id}/cancel")
