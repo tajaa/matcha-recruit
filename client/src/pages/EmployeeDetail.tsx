@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAccessToken } from '../api/client';
+import { getAccessToken, provisioning } from '../api/client';
+import type { EmployeeGoogleWorkspaceProvisioningStatus, ProvisioningRunStatus } from '../types';
 import {
   ArrowLeft, Mail, Phone, MapPin, Calendar, Users, CheckCircle, Clock, FileText,
   Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward, RotateCcw
@@ -58,6 +59,19 @@ const CATEGORIES = [
   { value: 'return_to_work', label: 'Return to Work', icon: RotateCcw, color: 'text-emerald-400', bgColor: 'bg-emerald-500/10' },
 ];
 
+function provisioningStatusBadge(status?: string | null): string {
+  if (status === 'connected' || status === 'completed' || status === 'active') {
+    return 'bg-emerald-900/30 text-emerald-300 border border-emerald-600/30';
+  }
+  if (status === 'failed' || status === 'error') {
+    return 'bg-red-900/30 text-red-300 border border-red-600/30';
+  }
+  if (status === 'needs_action' || status === 'running' || status === 'pending' || status === 'disconnected') {
+    return 'bg-amber-900/30 text-amber-300 border border-amber-600/30';
+  }
+  return 'bg-zinc-800 text-zinc-300 border border-zinc-700';
+}
+
 export default function EmployeeDetail() {
   const { employeeId } = useParams<{ employeeId: string }>();
   const navigate = useNavigate();
@@ -69,6 +83,10 @@ export default function EmployeeDetail() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedTemplates, setSelectedTemplates] = useState<string[]>([]);
   const [assigningAll, setAssigningAll] = useState(false);
+  const [provisioningStatus, setProvisioningStatus] = useState<EmployeeGoogleWorkspaceProvisioningStatus | null>(null);
+  const [provisioningLoading, setProvisioningLoading] = useState(false);
+  const [provisioningActionLoading, setProvisioningActionLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const fetchEmployee = async () => {
     if (!employeeId) return;
@@ -114,10 +132,23 @@ export default function EmployeeDetail() {
     }
   };
 
+  const fetchProvisioningStatus = async () => {
+    if (!employeeId) return;
+    setProvisioningLoading(true);
+    try {
+      const data = await provisioning.getEmployeeGoogleWorkspaceStatus(employeeId);
+      setProvisioningStatus(data);
+    } catch (err) {
+      console.error('Failed to fetch provisioning status:', err);
+    } finally {
+      setProvisioningLoading(false);
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await Promise.all([fetchEmployee(), fetchTasks(), fetchTemplates()]);
+      await Promise.all([fetchEmployee(), fetchTasks(), fetchTemplates(), fetchProvisioningStatus()]);
       setLoading(false);
     };
     loadData();
@@ -202,6 +233,37 @@ export default function EmployeeDetail() {
     }
   };
 
+  const handleProvisionGoogleWorkspace = async () => {
+    if (!employeeId) return;
+    setProvisioningActionLoading(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const run = await provisioning.provisionEmployeeGoogleWorkspace(employeeId);
+      await fetchProvisioningStatus();
+      setStatusMessage(`Google Workspace provisioning run started (${run.status}).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to provision Google Workspace account');
+    } finally {
+      setProvisioningActionLoading(false);
+    }
+  };
+
+  const handleRetryProvisioningRun = async (runId: string) => {
+    setProvisioningActionLoading(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const run = await provisioning.retryRun(runId);
+      await fetchProvisioningStatus();
+      setStatusMessage(`Provisioning retry queued (${run.status}).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to retry provisioning run');
+    } finally {
+      setProvisioningActionLoading(false);
+    }
+  };
+
   const groupedTasks = tasks.reduce((acc, task) => {
     const cat = task.category;
     if (!acc[cat]) acc[cat] = [];
@@ -212,6 +274,11 @@ export default function EmployeeDetail() {
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
   const pendingCount = tasks.filter((t) => t.status === 'pending').length;
   const progress = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
+  const googleConnection = provisioningStatus?.connection;
+  const recentProvisioningRuns = provisioningStatus?.runs?.slice(0, 3) || [];
+
+  const latestRetryableRun: ProvisioningRunStatus | null =
+    provisioningStatus?.runs.find((run) => run.status === 'failed' || run.status === 'needs_action') || null;
 
   if (loading) {
     return (
@@ -277,6 +344,17 @@ export default function EmployeeDetail() {
           </button>
         </div>
       )}
+      {statusMessage && (
+        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-4 flex items-center justify-between">
+          <p className="text-sm text-emerald-300 font-mono">{statusMessage}</p>
+          <button
+            onClick={() => setStatusMessage(null)}
+            className="text-xs text-emerald-300 hover:text-emerald-200 uppercase tracking-wider font-bold"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Employee Info */}
@@ -336,6 +414,94 @@ export default function EmployeeDetail() {
                   <span className="text-sm text-zinc-400">
                     Manager: <span className="text-white">{employee.manager_name}</span>
                   </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Google Workspace</h2>
+              <button
+                onClick={() => navigate('/app/matcha/google-workspace')}
+                className="text-[10px] uppercase tracking-wider text-zinc-400 hover:text-white"
+              >
+                Settings
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-zinc-500 uppercase tracking-wider">Connection</span>
+                <span className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(googleConnection?.status)}`}>
+                  {googleConnection?.status || 'disconnected'}
+                </span>
+              </div>
+
+              {provisioningLoading && (
+                <p className="text-xs text-zinc-500 font-mono uppercase tracking-wider">Loading provisioning status...</p>
+              )}
+
+              {googleConnection?.last_error && (
+                <p className="text-xs text-red-300">Last error: {googleConnection.last_error}</p>
+              )}
+
+              {provisioningStatus?.external_identity ? (
+                <div className="space-y-1 border border-white/10 bg-zinc-950/50 p-3">
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider">External Identity</p>
+                  <p className="text-xs text-white">{provisioningStatus.external_identity.external_email || 'No external email returned'}</p>
+                  <p className="text-[10px] text-zinc-500">
+                    Status: <span className="text-zinc-300 uppercase">{provisioningStatus.external_identity.status}</span>
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-500">No Google account provisioned yet.</p>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    if (!googleConnection?.connected) {
+                      navigate('/app/matcha/google-workspace');
+                      return;
+                    }
+                    handleProvisionGoogleWorkspace();
+                  }}
+                  disabled={provisioningActionLoading}
+                  className="px-3 py-1.5 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+                >
+                  {provisioningActionLoading ? 'Working...' : googleConnection?.connected ? 'Provision Now' : 'Connect Google'}
+                </button>
+
+                {latestRetryableRun && (
+                  <button
+                    onClick={() => handleRetryProvisioningRun(latestRetryableRun.run_id)}
+                    disabled={provisioningActionLoading}
+                    className="px-3 py-1.5 border border-white/10 text-zinc-300 hover:text-white hover:border-white/30 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+                  >
+                    Retry Last Run
+                  </button>
+                )}
+              </div>
+
+              {recentProvisioningRuns.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Recent Runs</p>
+                  {recentProvisioningRuns.map((run) => (
+                    <div key={run.run_id} className="border border-white/10 bg-zinc-950/50 p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-zinc-400">
+                          {new Date(run.created_at).toLocaleString()}
+                        </span>
+                        <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(run.status)}`}>
+                          {run.status}
+                        </span>
+                      </div>
+                      {run.last_error && (
+                        <p className="text-[10px] text-red-300 mt-1">{run.last_error}</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

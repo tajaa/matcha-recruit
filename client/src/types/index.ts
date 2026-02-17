@@ -702,6 +702,78 @@ export interface BrokerPortfolioReportResponse {
   };
 }
 
+export interface GoogleWorkspaceConnectionRequest {
+  mode: 'mock' | 'api_token';
+  domain?: string;
+  admin_email?: string;
+  default_org_unit?: string;
+  default_groups?: string[];
+  access_token?: string;
+  test_connection?: boolean;
+}
+
+export interface GoogleWorkspaceConnectionStatus {
+  provider: 'google_workspace';
+  connected: boolean;
+  status: 'disconnected' | 'connected' | 'error' | 'needs_action' | string;
+  mode: 'mock' | 'api_token' | null;
+  domain: string | null;
+  admin_email: string | null;
+  default_org_unit: string | null;
+  default_groups: string[];
+  has_access_token: boolean;
+  last_tested_at: string | null;
+  last_error: string | null;
+  updated_at: string | null;
+}
+
+export interface ProvisioningStepStatus {
+  step_id: string;
+  step_key: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'needs_action' | 'rolled_back' | 'cancelled' | string;
+  attempts: number;
+  last_error: string | null;
+  last_response: Record<string, unknown>;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProvisioningRunStatus {
+  run_id: string;
+  company_id: string;
+  employee_id: string;
+  provider: 'google_workspace' | 'slack' | string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'needs_action' | 'rolled_back' | 'cancelled' | string;
+  trigger_source: 'manual' | 'employee_create' | 'scheduled' | 'retry' | 'api' | string;
+  triggered_by: string | null;
+  retry_of_run_id: string | null;
+  last_error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  steps: ProvisioningStepStatus[];
+}
+
+export interface ExternalIdentity {
+  provider: 'google_workspace' | 'slack' | string;
+  external_user_id: string | null;
+  external_email: string | null;
+  status: 'active' | 'suspended' | 'deprovisioned' | 'error' | string;
+  raw_profile: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmployeeGoogleWorkspaceProvisioningStatus {
+  connection: GoogleWorkspaceConnectionStatus;
+  external_identity: ExternalIdentity | null;
+  runs: ProvisioningRunStatus[];
+}
+
 // Beta access management types
 export interface CandidateBetaInfo {
   user_id: string;

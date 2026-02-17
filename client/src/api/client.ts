@@ -35,6 +35,10 @@ import type {
   BrokerClientSetupCreateRequest,
   BrokerClientSetupUpdateRequest,
   BrokerPortfolioReportResponse,
+  GoogleWorkspaceConnectionRequest,
+  GoogleWorkspaceConnectionStatus,
+  ProvisioningRunStatus,
+  EmployeeGoogleWorkspaceProvisioningStatus,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -472,6 +476,30 @@ export const brokerPortal = {
 
   getPortfolioReport: () =>
     request<BrokerPortfolioReportResponse>('/brokers/reporting/portfolio'),
+};
+
+export const provisioning = {
+  getGoogleWorkspaceStatus: () =>
+    request<GoogleWorkspaceConnectionStatus>('/provisioning/google-workspace/status'),
+
+  connectGoogleWorkspace: (data: GoogleWorkspaceConnectionRequest) =>
+    request<GoogleWorkspaceConnectionStatus>('/provisioning/google-workspace/connect', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  provisionEmployeeGoogleWorkspace: (employeeId: string) =>
+    request<ProvisioningRunStatus>(`/provisioning/employees/${employeeId}/google-workspace`, {
+      method: 'POST',
+    }),
+
+  getEmployeeGoogleWorkspaceStatus: (employeeId: string) =>
+    request<EmployeeGoogleWorkspaceProvisioningStatus>(`/provisioning/employees/${employeeId}/google-workspace`),
+
+  retryRun: (runId: string) =>
+    request<ProvisioningRunStatus>(`/provisioning/runs/${runId}/retry`, {
+      method: 'POST',
+    }),
 };
 
 // Interviews
@@ -2462,6 +2490,7 @@ export const api = {
   auth,
 
   companies,
+  provisioning,
   interviews,
   candidates,
   matching,

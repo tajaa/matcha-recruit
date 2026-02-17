@@ -104,6 +104,19 @@ const navSections: NavSection[] = [
         ),
       },
       {
+        path: '/app/matcha/google-workspace',
+        label: 'Google Workspace',
+        roles: ['admin', 'client'],
+        feature: 'employees',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 5a2 2 0 012-2h4l2 2h8a2 2 0 012 2v1H3V5z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8h18v9a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 11v6m-3-3h6" />
+          </svg>
+        ),
+      },
+      {
         path: '/app/ai-chat',
         label: 'AI Chat',
         roles: ['admin', 'client'],

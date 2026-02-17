@@ -35,6 +35,7 @@ const HandbookDetail = lazy(() => import('./pages/HandbookDetail'));
 const HandbookForm = lazy(() => import('./pages/HandbookForm'));
 const PolicySign = lazy(() => import('./pages/PolicySign'));
 const Compliance = lazy(() => import('./pages/Compliance'));
+const GoogleWorkspaceProvisioning = lazy(() => import('./pages/GoogleWorkspaceProvisioning'));
 const IRDashboard = lazy(() => import('./pages/IRDashboard'));
 const IRList = lazy(() => import('./pages/IRList'));
 const IRCreate = lazy(() => import('./pages/IRCreate'));
@@ -317,6 +318,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="employees">
                     <Employees />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/google-workspace"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="employees">
+                    <GoogleWorkspaceProvisioning />
                   </ProtectedRoute>
                 }
               />
