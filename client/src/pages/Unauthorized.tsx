@@ -1,7 +1,29 @@
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../components';
+import { useAuth } from '../context/AuthContext';
+import type { UserRole } from '../types';
+
+function getHomePath(role?: UserRole): string {
+  switch (role) {
+    case 'candidate':
+      return '/app/jobs';
+    case 'employee':
+      return '/app/portal';
+    case 'broker':
+      return '/app/broker/clients';
+    case 'admin':
+    case 'client':
+      return '/app';
+    default:
+      return '/';
+  }
+}
 
 export function Unauthorized() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const homePath = getHomePath(user?.role);
+
   return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-4">
       <div className="text-center">
@@ -12,9 +34,7 @@ export function Unauthorized() {
         </div>
         <h1 className="text-2xl font-bold text-white mb-2">Access Denied</h1>
         <p className="text-zinc-400 mb-6">You don't have permission to access this page.</p>
-        <Link to="/app">
-          <Button>Go to Home</Button>
-        </Link>
+        <Button onClick={() => navigate(homePath, { replace: true })}>Go to Home</Button>
       </div>
     </div>
   );
