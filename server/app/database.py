@@ -1527,6 +1527,22 @@ async def init_db():
                 END IF;
             END$$;
         """)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF to_regclass('employees') IS NOT NULL THEN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'employees'
+                          AND column_name = 'personal_email'
+                    ) THEN
+                        ALTER TABLE employees ADD COLUMN personal_email VARCHAR(255);
+                    END IF;
+                    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_employees_personal_email ON employees(personal_email)';
+                END IF;
+            END$$;
+        """)
 
         # ===========================================
         # Compliance Tracking Tables

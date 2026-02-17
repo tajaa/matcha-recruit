@@ -16,7 +16,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, model_validator
 
 from ...database import get_connection
 from ...core.dependencies import get_current_user
@@ -65,7 +65,9 @@ def _coerce_bool(value, default: bool = True) -> bool:
 
 # Request/Response Models
 class EmployeeCreateRequest(BaseModel):
-    email: EmailStr
+    email: Optional[EmailStr] = None  # Legacy alias for work_email
+    work_email: Optional[EmailStr] = None
+    personal_email: Optional[EmailStr] = None
     first_name: str
     last_name: str
     work_state: Optional[str] = None
@@ -73,8 +75,20 @@ class EmployeeCreateRequest(BaseModel):
     start_date: Optional[str] = None
     manager_id: Optional[UUID] = None
 
+    @model_validator(mode="after")
+    def validate_work_email_present(self):
+        if not self.work_email and not self.email:
+            raise ValueError("work_email (or legacy email) is required")
+        return self
+
+    def resolved_work_email(self) -> str:
+        value = self.work_email or self.email
+        return str(value).strip().lower() if value else ""
+
 
 class EmployeeUpdateRequest(BaseModel):
+    work_email: Optional[EmailStr] = None
+    personal_email: Optional[EmailStr] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     work_state: Optional[str] = None
@@ -89,6 +103,8 @@ class EmployeeUpdateRequest(BaseModel):
 class EmployeeListResponse(BaseModel):
     id: UUID
     email: str
+    work_email: Optional[str] = None
+    personal_email: Optional[str] = None
     first_name: str
     last_name: str
     work_state: Optional[str]
@@ -328,7 +344,7 @@ async def list_employees(
         # Build query based on status filter
         base_query = """
             SELECT
-                e.id, e.email, e.first_name, e.last_name, e.work_state,
+                e.id, e.email, e.personal_email, e.first_name, e.last_name, e.work_state,
                 e.employment_type, e.start_date, e.termination_date,
                 e.manager_id, e.user_id, e.created_at,
                 m.first_name || ' ' || m.last_name as manager_name,
@@ -357,6 +373,8 @@ async def list_employees(
             EmployeeListResponse(
                 id=row["id"],
                 email=row["email"],
+                work_email=row["email"],
+                personal_email=row["personal_email"],
                 first_name=row["first_name"],
                 last_name=row["last_name"],
                 work_state=row["work_state"],
@@ -383,10 +401,12 @@ async def create_employee(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
+        work_email = request.resolved_work_email()
+
         # Check if email already exists for this company
         existing = await conn.fetchval(
             "SELECT id FROM employees WHERE org_id = $1 AND email = $2",
-            company_id, request.email
+            company_id, work_email
         )
         if existing:
             raise HTTPException(status_code=400, detail="Employee with this email already exists")
@@ -402,14 +422,21 @@ async def create_employee(
         # Create employee record
         row = await conn.fetchrow(
             """
-            INSERT INTO employees (org_id, email, first_name, last_name, work_state, employment_type, start_date, manager_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, manager_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id, org_id, email, first_name, last_name, work_state, employment_type,
-                      start_date, termination_date, manager_id, user_id, phone, address,
+                      start_date, termination_date, manager_id, user_id, personal_email, phone, address,
                       emergency_contact, created_at, updated_at
             """,
-            company_id, request.email, request.first_name, request.last_name,
-            request.work_state, request.employment_type, start_date, request.manager_id
+            company_id,
+            work_email,
+            str(request.personal_email).strip().lower() if request.personal_email else None,
+            request.first_name,
+            request.last_name,
+            request.work_state,
+            request.employment_type,
+            start_date,
+            request.manager_id,
         )
 
         google_workspace_auto_provision = False
@@ -439,6 +466,8 @@ async def create_employee(
         response = EmployeeDetailResponse(
             id=row["id"],
             email=row["email"],
+            work_email=row["email"],
+            personal_email=row["personal_email"],
             first_name=row["first_name"],
             last_name=row["last_name"],
             work_state=row["work_state"],
@@ -499,6 +528,8 @@ async def get_employee(
         return EmployeeDetailResponse(
             id=row["id"],
             email=row["email"],
+            work_email=row["email"],
+            personal_email=row["personal_email"],
             first_name=row["first_name"],
             last_name=row["last_name"],
             work_state=row["work_state"],
@@ -543,6 +574,25 @@ async def update_employee(
         if request.first_name is not None:
             updates.append(f"first_name = ${param_num}")
             values.append(request.first_name)
+            param_num += 1
+
+        if request.work_email is not None:
+            normalized_work_email = str(request.work_email).strip().lower()
+            duplicate = await conn.fetchval(
+                "SELECT id FROM employees WHERE org_id = $1 AND email = $2 AND id <> $3",
+                company_id,
+                normalized_work_email,
+                employee_id,
+            )
+            if duplicate:
+                raise HTTPException(status_code=400, detail="Employee with this email already exists")
+            updates.append(f"email = ${param_num}")
+            values.append(normalized_work_email)
+            param_num += 1
+
+        if request.personal_email is not None:
+            updates.append(f"personal_email = ${param_num}")
+            values.append(str(request.personal_email).strip().lower() if request.personal_email else None)
             param_num += 1
 
         if request.last_name is not None:
@@ -627,6 +677,8 @@ async def update_employee(
         return EmployeeDetailResponse(
             id=row["id"],
             email=row["email"],
+            work_email=row["email"],
+            personal_email=row["personal_email"],
             first_name=row["first_name"],
             last_name=row["last_name"],
             work_state=row["work_state"],
@@ -720,14 +772,15 @@ async def download_bulk_upload_template(
     # Create CSV in memory
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=[
-        'email', 'first_name', 'last_name', 'work_state',
+        'email', 'personal_email', 'first_name', 'last_name', 'work_state',
         'employment_type', 'start_date', 'manager_email', 'job_title', 'phone'
     ])
     writer.writeheader()
 
     # Add example row
     writer.writerow({
-        'email': 'jane.doe@example.com',
+        'email': 'jane.doe@energyco.com',
+        'personal_email': 'jane.doe@gmail.com',
         'first_name': 'Jane',
         'last_name': 'Doe',
         'work_state': 'CA',
@@ -761,6 +814,7 @@ async def bulk_upload_employees_csv(
     - last_name (required)
 
     CSV Format (optional columns):
+    - personal_email (personal/non-work email)
     - work_state (e.g., "CA", "NY")
     - employment_type (full_time, part_time, contractor)
     - start_date (YYYY-MM-DD format)
@@ -809,6 +863,7 @@ async def bulk_upload_employees_csv(
             try:
                 # Validate email format
                 email = row.get('email', '').strip()
+                personal_email = row.get('personal_email', '').strip() or None
                 if not email:
                     errors.append({
                         "row": row_num,
@@ -824,6 +879,15 @@ async def bulk_upload_employees_csv(
                         "row": row_num,
                         "email": email,
                         "error": "Invalid email format"
+                    })
+                    failed += 1
+                    continue
+
+                if personal_email and not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', personal_email):
+                    errors.append({
+                        "row": row_num,
+                        "email": email,
+                        "error": "Invalid personal_email format"
                     })
                     failed += 1
                     continue
@@ -884,13 +948,13 @@ async def bulk_upload_employees_csv(
                 employee = await conn.fetchrow(
                     """
                     INSERT INTO employees (
-                        org_id, email, first_name, last_name, work_state,
+                        org_id, email, personal_email, first_name, last_name, work_state,
                         employment_type, start_date, manager_id, phone
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     RETURNING id
                     """,
-                    company_id, email, first_name, last_name, work_state,
+                    company_id, email, personal_email, first_name, last_name, work_state,
                     employment_type, start_date, manager_id, phone
                 )
 

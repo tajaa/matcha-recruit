@@ -42,3 +42,29 @@ def test_google_workspace_test_connection_missing_token():
 
     assert ok is False
     assert error == "Google Workspace access token is missing"
+
+
+def test_google_workspace_test_connection_missing_service_account_credentials():
+    service = GoogleWorkspaceService()
+    ok, error = asyncio.run(service.test_connection({"mode": "service_account"}, {}))
+
+    assert ok is False
+    assert error == "Google Workspace service account credentials are missing"
+
+
+def test_google_workspace_service_account_requires_delegated_admin():
+    service = GoogleWorkspaceService()
+    credentials = {
+        "client_email": "svc@example.iam.gserviceaccount.com",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+
+    with pytest.raises(GoogleWorkspaceProvisioningError, match="Delegated admin email is required"):
+        asyncio.run(
+            service.provision_user(
+                {"mode": "service_account"},
+                {"service_account_json": credentials},
+                {"email": "jane@example.com", "first_name": "Jane", "last_name": "Doe"},
+            )
+        )

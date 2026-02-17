@@ -10,6 +10,8 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 interface Employee {
   id: string;
   email: string;
+  work_email?: string | null;
+  personal_email?: string | null;
   first_name: string;
   last_name: string;
   work_state: string | null;
@@ -24,7 +26,8 @@ interface Employee {
 }
 
 interface NewEmployee {
-  email: string;
+  work_email: string;
+  personal_email: string;
   first_name: string;
   last_name: string;
   work_state: string;
@@ -48,7 +51,8 @@ export default function Employees() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [filter, setFilter] = useState<string>('');
   const [newEmployee, setNewEmployee] = useState<NewEmployee>({
-    email: '',
+    work_email: '',
+    personal_email: '',
     first_name: '',
     last_name: '',
     work_state: '',
@@ -185,13 +189,23 @@ export default function Employees() {
 
     try {
       const token = getAccessToken();
+      const payload = {
+        email: newEmployee.work_email,
+        work_email: newEmployee.work_email,
+        personal_email: newEmployee.personal_email || undefined,
+        first_name: newEmployee.first_name,
+        last_name: newEmployee.last_name,
+        work_state: newEmployee.work_state,
+        employment_type: newEmployee.employment_type,
+        start_date: newEmployee.start_date,
+      };
       const response = await fetch(`${API_BASE}/employees`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(newEmployee),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -207,7 +221,8 @@ export default function Employees() {
       setShowOnboardingPrompt(true);
 
       setNewEmployee({
-        email: '',
+        work_email: '',
+        personal_email: '',
         first_name: '',
         last_name: '',
         work_state: '',
@@ -519,7 +534,7 @@ export default function Employees() {
                   <h4 className="text-xs font-bold text-white uppercase tracking-wider">Add Employees</h4>
                 </div>
                 <p className="text-xs text-zinc-400 leading-relaxed pl-8">
-                  Click "Add Employee" to create a new team member record. Enter their name, email, work state, and start date. The employee won't have system access until you send an invitation.
+                  Click "Add Employee" to create a new team member record. Enter their name, work email, and start date. Add a personal email if you want a separate contact address.
                 </p>
               </div>
 
@@ -655,7 +670,14 @@ export default function Employees() {
                       {employee.first_name} {employee.last_name}
                     </p>
                   </div>
-                  <p className="text-xs text-zinc-500 font-mono truncate">{employee.email}</p>
+                  <p className="text-xs text-zinc-500 font-mono truncate">
+                    {employee.work_email || employee.email}
+                  </p>
+                  {employee.personal_email && (
+                    <p className="text-[10px] text-zinc-600 truncate">
+                      Personal: {employee.personal_email}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -767,16 +789,32 @@ export default function Employees() {
 
                     <div>
                       <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
-                        Email <span className="text-red-500">*</span>
+                        Work Email <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="email"
                         required
-                        value={newEmployee.email}
+                        value={newEmployee.work_email}
                         onChange={(e) =>
-                          setNewEmployee({ ...newEmployee, email: e.target.value })
+                          setNewEmployee({ ...newEmployee, work_email: e.target.value })
                         }
                         className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                        placeholder="johnny.bravo@energyco.com"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                        Personal Email (Optional)
+                      </label>
+                      <input
+                        type="email"
+                        value={newEmployee.personal_email}
+                        onChange={(e) =>
+                          setNewEmployee({ ...newEmployee, personal_email: e.target.value })
+                        }
+                        className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                        placeholder="johnny_bravo@gmail.com"
                       />
                     </div>
 

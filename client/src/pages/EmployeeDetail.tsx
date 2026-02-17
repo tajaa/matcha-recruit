@@ -12,6 +12,8 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 interface Employee {
   id: string;
   email: string;
+  work_email?: string | null;
+  personal_email?: string | null;
   first_name: string;
   last_name: string;
   work_state: string | null;
@@ -299,6 +301,8 @@ export default function EmployeeDetail() {
     );
   }
 
+  const displayWorkEmail = employee.work_email || employee.email;
+
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       {/* Header */}
@@ -313,7 +317,7 @@ export default function EmployeeDetail() {
           <h1 className="text-4xl font-bold tracking-tighter text-white">
             {employee.first_name} {employee.last_name}
           </h1>
-          <p className="text-xs text-zinc-500 mt-1 font-mono">{employee.email}</p>
+          <p className="text-xs text-zinc-500 mt-1 font-mono">{displayWorkEmail}</p>
         </div>
         <div className="flex items-center gap-2">
           {employee.termination_date ? (
@@ -364,8 +368,14 @@ export default function EmployeeDetail() {
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <Mail size={16} className="text-zinc-500" />
-                <span className="text-sm text-white">{employee.email}</span>
+                <span className="text-sm text-white">{displayWorkEmail}</span>
               </div>
+              {employee.personal_email && (
+                <div className="flex items-center gap-3">
+                  <Mail size={16} className="text-zinc-600" />
+                  <span className="text-sm text-zinc-300">Personal: {employee.personal_email}</span>
+                </div>
+              )}
               {employee.phone && (
                 <div className="flex items-center gap-3">
                   <Phone size={16} className="text-zinc-500" />

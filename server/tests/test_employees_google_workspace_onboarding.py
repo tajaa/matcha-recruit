@@ -25,6 +25,7 @@ class _FakeConn:
             (
                 company_id,
                 email,
+                personal_email,
                 first_name,
                 last_name,
                 work_state,
@@ -36,6 +37,7 @@ class _FakeConn:
                 "id": self.employee_id,
                 "org_id": company_id,
                 "email": email,
+                "personal_email": personal_email,
                 "first_name": first_name,
                 "last_name": last_name,
                 "work_state": work_state,
@@ -88,7 +90,8 @@ def test_create_employee_queues_google_onboarding_when_connected_and_enabled(mon
     monkeypatch.setattr(employees_routes, "get_client_company_id", _fake_get_client_company_id)
 
     request = employees_routes.EmployeeCreateRequest(
-        email="new.hire@itsmatcha.net",
+        work_email="new.hire@itsmatcha.net",
+        personal_email="new.hire@gmail.com",
         first_name="New",
         last_name="Hire",
         work_state="CA",
@@ -102,6 +105,8 @@ def test_create_employee_queues_google_onboarding_when_connected_and_enabled(mon
 
     assert response.id == conn.employee_id
     assert response.email == "new.hire@itsmatcha.net"
+    assert response.work_email == "new.hire@itsmatcha.net"
+    assert response.personal_email == "new.hire@gmail.com"
     assert len(background_tasks.tasks) == 1
     task = background_tasks.tasks[0]
     assert task.func == employees_routes._run_google_workspace_auto_provisioning

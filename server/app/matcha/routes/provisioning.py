@@ -53,13 +53,15 @@ def _coerce_bool(value, default: bool = True) -> bool:
 
 
 class GoogleWorkspaceConnectionRequest(BaseModel):
-    mode: str = Field(default="mock", pattern="^(mock|api_token)$")
+    mode: str = Field(default="mock", pattern="^(mock|api_token|service_account)$")
     domain: Optional[str] = Field(default=None, max_length=255)
     admin_email: Optional[EmailStr] = None
+    delegated_admin_email: Optional[EmailStr] = None
     default_org_unit: Optional[str] = Field(default=None, max_length=255)
     default_groups: list[str] = Field(default_factory=list)
     auto_provision_on_employee_create: bool = True
     access_token: Optional[str] = None
+    service_account_json: Optional[str] = None
     test_connection: bool = True
 
 
@@ -70,10 +72,12 @@ class GoogleWorkspaceConnectionStatus(BaseModel):
     mode: Optional[str] = None
     domain: Optional[str] = None
     admin_email: Optional[str] = None
+    delegated_admin_email: Optional[str] = None
     default_org_unit: Optional[str] = None
     default_groups: list[str] = Field(default_factory=list)
     auto_provision_on_employee_create: bool = True
     has_access_token: bool = False
+    has_service_account_credentials: bool = False
     last_tested_at: Optional[datetime] = None
     last_error: Optional[str] = None
     updated_at: Optional[datetime] = None
@@ -143,10 +147,12 @@ def _connection_status_payload(row) -> GoogleWorkspaceConnectionStatus:
         mode=config.get("mode"),
         domain=config.get("domain"),
         admin_email=config.get("admin_email"),
+        delegated_admin_email=config.get("delegated_admin_email"),
         default_org_unit=config.get("default_org_unit"),
         default_groups=[str(item) for item in (config.get("default_groups") or []) if str(item).strip()],
         auto_provision_on_employee_create=_coerce_bool(config.get("auto_provision_on_employee_create"), True),
         has_access_token=bool(secrets.get("access_token")),
+        has_service_account_credentials=bool(secrets.get("service_account_json")),
         last_tested_at=row["last_tested_at"],
         last_error=row["last_error"],
         updated_at=row["updated_at"],
@@ -233,25 +239,36 @@ async def connect_google_workspace(
                 existing_access_token_plain = decrypt_secret(existing_secrets.get("access_token"))
             except ValueError:
                 existing_access_token_unreadable = True
+        existing_service_account_json_plain: Optional[str] = None
+        existing_service_account_json_unreadable = False
+        if existing_secrets.get("service_account_json"):
+            try:
+                existing_service_account_json_plain = decrypt_secret(existing_secrets.get("service_account_json"))
+            except ValueError:
+                existing_service_account_json_unreadable = True
 
         default_groups = [str(item).strip() for item in request.default_groups if str(item).strip()]
         config = {
             "mode": request.mode,
             "domain": request.domain,
             "admin_email": str(request.admin_email) if request.admin_email else None,
+            "delegated_admin_email": str(request.delegated_admin_email) if request.delegated_admin_email else None,
             "default_org_unit": request.default_org_unit,
             "default_groups": default_groups,
             "auto_provision_on_employee_create": bool(request.auto_provision_on_employee_create),
         }
 
         requested_access_token = request.access_token.strip() if request.access_token else None
+        requested_service_account_json = request.service_account_json.strip() if request.service_account_json else None
         access_token_plain = requested_access_token or existing_access_token_plain
+        service_account_json_plain = requested_service_account_json or existing_service_account_json_plain
 
         secrets_for_storage = dict(existing_secrets)
         secrets_for_test: dict = {}
         if request.mode == "mock":
             secrets_for_storage.pop("access_token", None)
-        else:
+            secrets_for_storage.pop("service_account_json", None)
+        elif request.mode == "api_token":
             if not access_token_plain:
                 message = "access_token is required when mode is api_token"
                 if existing_access_token_unreadable and not requested_access_token:
@@ -262,10 +279,40 @@ async def connect_google_workspace(
                 )
             secrets_for_test["access_token"] = access_token_plain
             secrets_for_storage["access_token"] = encrypt_secret(access_token_plain)
+            secrets_for_storage.pop("service_account_json", None)
+        elif request.mode == "service_account":
+            if not service_account_json_plain:
+                message = "service_account_json is required when mode is service_account"
+                if existing_service_account_json_unreadable and not requested_service_account_json:
+                    message = "Stored service account credentials are unreadable. Provide new service_account_json."
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=message,
+                )
+            delegated_admin_email = config.get("delegated_admin_email") or config.get("admin_email")
+            if not delegated_admin_email:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="delegated_admin_email is required when mode is service_account",
+                )
+            secrets_for_test["service_account_json"] = service_account_json_plain
+            secrets_for_storage["service_account_json"] = encrypt_secret(service_account_json_plain)
+            secrets_for_storage.pop("access_token", None)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported mode '{request.mode}'",
+            )
 
         # Normalize older plaintext stored tokens into encrypted format on save.
         if request.mode == "api_token" and existing_access_token_plain and not requested_access_token:
             secrets_for_storage["access_token"] = encrypt_secret(existing_access_token_plain)
+        if (
+            request.mode == "service_account"
+            and existing_service_account_json_plain
+            and not requested_service_account_json
+        ):
+            secrets_for_storage["service_account_json"] = encrypt_secret(existing_service_account_json_plain)
 
         status_value = "connected" if request.mode == "mock" else "needs_action"
         last_error = None

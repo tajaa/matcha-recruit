@@ -5,16 +5,18 @@ import type {
   GoogleWorkspaceConnectionStatus,
 } from '../types';
 
-type ConnectionMode = 'mock' | 'api_token';
+type ConnectionMode = 'mock' | 'api_token' | 'service_account';
 
 interface FormState {
   mode: ConnectionMode;
   domain: string;
   admin_email: string;
+  delegated_admin_email: string;
   default_org_unit: string;
   default_groups: string;
   auto_provision_on_employee_create: boolean;
   access_token: string;
+  service_account_json: string;
   test_connection: boolean;
 }
 
@@ -22,10 +24,12 @@ const EMPTY_FORM: FormState = {
   mode: 'mock',
   domain: '',
   admin_email: '',
+  delegated_admin_email: '',
   default_org_unit: '',
   default_groups: '',
   auto_provision_on_employee_create: true,
   access_token: '',
+  service_account_json: '',
   test_connection: true,
 };
 
@@ -38,13 +42,15 @@ function statusTone(status: string): string {
 
 function hydrateFormFromStatus(status: GoogleWorkspaceConnectionStatus): FormState {
   return {
-    mode: status.mode === 'api_token' ? 'api_token' : 'mock',
+    mode: status.mode === 'api_token' || status.mode === 'service_account' ? status.mode : 'mock',
     domain: status.domain || '',
     admin_email: status.admin_email || '',
+    delegated_admin_email: status.delegated_admin_email || '',
     default_org_unit: status.default_org_unit || '',
     default_groups: (status.default_groups || []).join(', '),
     auto_provision_on_employee_create: status.auto_provision_on_employee_create ?? true,
     access_token: '',
+    service_account_json: '',
     test_connection: true,
   };
 }
@@ -91,10 +97,13 @@ export default function GoogleWorkspaceProvisioning() {
         mode: form.mode,
         domain: form.domain.trim() || undefined,
         admin_email: form.admin_email.trim() || undefined,
+        delegated_admin_email: form.delegated_admin_email.trim() || undefined,
         default_org_unit: form.default_org_unit.trim() || undefined,
         default_groups: groups.length > 0 ? groups : undefined,
         auto_provision_on_employee_create: form.auto_provision_on_employee_create,
-        access_token: form.access_token.trim() || undefined,
+        access_token: form.mode === 'api_token' ? (form.access_token.trim() || undefined) : undefined,
+        service_account_json:
+          form.mode === 'service_account' ? (form.service_account_json.trim() || undefined) : undefined,
         test_connection: form.test_connection,
       };
 
@@ -155,6 +164,7 @@ export default function GoogleWorkspaceProvisioning() {
           <div className="text-xs opacity-80 space-y-1">
             <p>Mode: {status?.mode || 'not configured'}</p>
             <p>Domain: {status?.domain || 'not set'}</p>
+            <p>Delegated admin: {status?.delegated_admin_email || 'not set'}</p>
             <p>Auto-provision on employee create: {status?.auto_provision_on_employee_create ? 'on' : 'off'}</p>
             <p>Last tested: {status?.last_tested_at ? new Date(status.last_tested_at).toLocaleString() : 'never'}</p>
           </div>
@@ -175,6 +185,7 @@ export default function GoogleWorkspaceProvisioning() {
             >
               <option value="mock">Mock (safe sandbox)</option>
               <option value="api_token">API Token (live)</option>
+              <option value="service_account">Service Account (live, recommended)</option>
             </select>
           </label>
 
@@ -195,6 +206,17 @@ export default function GoogleWorkspaceProvisioning() {
               value={form.admin_email}
               onChange={(e) => setForm((prev) => ({ ...prev, admin_email: e.target.value }))}
               placeholder="admin@example.com"
+              className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
+            />
+          </label>
+
+          <label className="space-y-2">
+            <span className="text-[11px] uppercase tracking-wider text-zinc-400">Delegated Admin Email</span>
+            <input
+              type="email"
+              value={form.delegated_admin_email}
+              onChange={(e) => setForm((prev) => ({ ...prev, delegated_admin_email: e.target.value }))}
+              placeholder="it-admin@example.com"
               className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
             />
           </label>
@@ -234,6 +256,24 @@ export default function GoogleWorkspaceProvisioning() {
               placeholder={status?.has_access_token ? '••••••••••••••••' : 'Paste Google admin token'}
               className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
             />
+          </label>
+        )}
+
+        {form.mode === 'service_account' && (
+          <label className="space-y-2 block">
+            <span className="text-[11px] uppercase tracking-wider text-zinc-400">
+              Service Account JSON {status?.has_service_account_credentials ? '(leave blank to keep existing)' : '(required)'}
+            </span>
+            <textarea
+              value={form.service_account_json}
+              onChange={(e) => setForm((prev) => ({ ...prev, service_account_json: e.target.value }))}
+              placeholder='{"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\\n..."}'
+              rows={8}
+              className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white font-mono"
+            />
+            <p className="text-[11px] text-zinc-500">
+              Use a Workspace service account with Domain-Wide Delegation enabled.
+            </p>
           </label>
         )}
 

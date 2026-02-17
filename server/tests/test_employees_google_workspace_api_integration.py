@@ -38,6 +38,7 @@ async def _run_api_employee_onboarding_test(database_url: str) -> None:
     email_suffix = uuid4().hex[:8]
     user_email = f"hr-admin-{email_suffix}@itsmatcha.net"
     employee_email = f"new-hire-{email_suffix}@itsmatcha.net"
+    personal_email = f"new-hire-personal-{email_suffix}@gmail.com"
 
     app = FastAPI()
     app.include_router(employees_routes.router, prefix="/api/employees")
@@ -124,7 +125,8 @@ async def _run_api_employee_onboarding_test(database_url: str) -> None:
             response = await client.post(
                 "/api/employees",
                 json={
-                    "email": employee_email,
+                    "work_email": employee_email,
+                    "personal_email": personal_email,
                     "first_name": "New",
                     "last_name": "Hire",
                     "work_state": "CA",
@@ -134,6 +136,8 @@ async def _run_api_employee_onboarding_test(database_url: str) -> None:
             )
 
         assert response.status_code == 200, response.text
+        assert response.json().get("work_email") == employee_email
+        assert response.json().get("personal_email") == personal_email
         employee_id = response.json()["id"]
 
         run_row = None

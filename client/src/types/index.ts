@@ -708,13 +708,15 @@ export interface BrokerPortfolioReportResponse {
 }
 
 export interface GoogleWorkspaceConnectionRequest {
-  mode: 'mock' | 'api_token';
+  mode: 'mock' | 'api_token' | 'service_account';
   domain?: string;
   admin_email?: string;
+  delegated_admin_email?: string;
   default_org_unit?: string;
   default_groups?: string[];
   auto_provision_on_employee_create?: boolean;
   access_token?: string;
+  service_account_json?: string;
   test_connection?: boolean;
 }
 
@@ -722,13 +724,15 @@ export interface GoogleWorkspaceConnectionStatus {
   provider: 'google_workspace';
   connected: boolean;
   status: 'disconnected' | 'connected' | 'error' | 'needs_action' | string;
-  mode: 'mock' | 'api_token' | null;
+  mode: 'mock' | 'api_token' | 'service_account' | null;
   domain: string | null;
   admin_email: string | null;
+  delegated_admin_email: string | null;
   default_org_unit: string | null;
   default_groups: string[];
   auto_provision_on_employee_create: boolean;
   has_access_token: boolean;
+  has_service_account_credentials: boolean;
   last_tested_at: string | null;
   last_error: string | null;
   updated_at: string | null;
