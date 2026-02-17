@@ -103,19 +103,40 @@ async def init_db():
         # Update users role constraint
         await conn.execute("""
             DO $$
+            DECLARE
+                normalized_count INTEGER := 0;
+                downgraded_count INTEGER := 0;
             BEGIN
-                -- Drop the old constraint if it exists and recreate with new values
+                -- Normalize known legacy role typos before enforcing the constraint.
+                UPDATE users
+                SET role = 'gumfit_admin'
+                WHERE role IN ('gummfit_admin', 'gumfit-admin', 'gumfit admin');
+                GET DIAGNOSTICS normalized_count = ROW_COUNT;
+
+                -- Fail closed: unknown roles are downgraded to least-privileged default.
+                UPDATE users
+                SET role = 'candidate'
+                WHERE role NOT IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency', 'gumfit_admin');
+                GET DIAGNOSTICS downgraded_count = ROW_COUNT;
+
+                IF normalized_count > 0 OR downgraded_count > 0 THEN
+                    RAISE NOTICE 'users.role normalized: % typo fixes, % downgraded to candidate',
+                        normalized_count, downgraded_count;
+                END IF;
+
                 IF EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check'
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'users_role_check'
+                      AND conrelid = 'users'::regclass
                 ) THEN
                     ALTER TABLE users DROP CONSTRAINT users_role_check;
-                    ALTER TABLE users ADD CONSTRAINT users_role_check
-                        CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency', 'gumfit_admin'));
                 END IF;
-            EXCEPTION WHEN undefined_object THEN
-                -- Constraint doesn't exist, add it
+
                 ALTER TABLE users ADD CONSTRAINT users_role_check
                     CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency', 'gumfit_admin'));
+            EXCEPTION WHEN duplicate_object THEN
+                NULL;
             END $$;
         """)
 
