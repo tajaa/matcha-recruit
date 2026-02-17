@@ -36,12 +36,29 @@ def _json_object(value) -> dict:
     return {}
 
 
+def _coerce_bool(value, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
 class GoogleWorkspaceConnectionRequest(BaseModel):
     mode: str = Field(default="mock", pattern="^(mock|api_token)$")
     domain: Optional[str] = Field(default=None, max_length=255)
     admin_email: Optional[EmailStr] = None
     default_org_unit: Optional[str] = Field(default=None, max_length=255)
     default_groups: list[str] = Field(default_factory=list)
+    auto_provision_on_employee_create: bool = True
     access_token: Optional[str] = None
     test_connection: bool = True
 
@@ -55,6 +72,7 @@ class GoogleWorkspaceConnectionStatus(BaseModel):
     admin_email: Optional[str] = None
     default_org_unit: Optional[str] = None
     default_groups: list[str] = Field(default_factory=list)
+    auto_provision_on_employee_create: bool = True
     has_access_token: bool = False
     last_tested_at: Optional[datetime] = None
     last_error: Optional[str] = None
@@ -127,6 +145,7 @@ def _connection_status_payload(row) -> GoogleWorkspaceConnectionStatus:
         admin_email=config.get("admin_email"),
         default_org_unit=config.get("default_org_unit"),
         default_groups=[str(item) for item in (config.get("default_groups") or []) if str(item).strip()],
+        auto_provision_on_employee_create=_coerce_bool(config.get("auto_provision_on_employee_create"), True),
         has_access_token=bool(secrets.get("access_token")),
         last_tested_at=row["last_tested_at"],
         last_error=row["last_error"],
@@ -222,6 +241,7 @@ async def connect_google_workspace(
             "admin_email": str(request.admin_email) if request.admin_email else None,
             "default_org_unit": request.default_org_unit,
             "default_groups": default_groups,
+            "auto_provision_on_employee_create": bool(request.auto_provision_on_employee_create),
         }
 
         requested_access_token = request.access_token.strip() if request.access_token else None

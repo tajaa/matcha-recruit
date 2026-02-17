@@ -5,6 +5,7 @@ Allows admins/clients to create, update, delete employees and send invitations.
 import asyncio
 import csv
 import io
+import json
 import logging
 import re
 import secrets
@@ -32,6 +33,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 pto_admin_router = APIRouter()
 leave_admin_router = APIRouter()
+
+
+def _json_object(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _coerce_bool(value, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
 
 
 # Request/Response Models
@@ -383,23 +412,27 @@ async def create_employee(
             request.work_state, request.employment_type, start_date, request.manager_id
         )
 
-        google_workspace_connected = False
+        google_workspace_auto_provision = False
         try:
-            google_workspace_connected = bool(
-                await conn.fetchval(
-                    """
-                    SELECT EXISTS(
-                        SELECT 1
-                        FROM integration_connections
-                        WHERE company_id = $1
-                          AND provider = $2
-                          AND status = 'connected'
-                    )
-                    """,
-                    company_id,
-                    PROVIDER_GOOGLE_WORKSPACE,
-                )
+            integration_row = await conn.fetchrow(
+                """
+                SELECT config
+                FROM integration_connections
+                WHERE company_id = $1
+                  AND provider = $2
+                  AND status = 'connected'
+                ORDER BY updated_at DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """,
+                company_id,
+                PROVIDER_GOOGLE_WORKSPACE,
             )
+            if integration_row:
+                integration_config = _json_object(integration_row["config"])
+                google_workspace_auto_provision = _coerce_bool(
+                    integration_config.get("auto_provision_on_employee_create"),
+                    True,
+                )
         except Exception:
             logger.exception("Unable to evaluate Google Workspace connection status for company %s", company_id)
 
@@ -423,7 +456,7 @@ async def create_employee(
             updated_at=row["updated_at"],
         )
 
-        if google_workspace_connected:
+        if google_workspace_auto_provision:
             background_tasks.add_task(
                 _run_google_workspace_auto_provisioning,
                 company_id=row["org_id"],

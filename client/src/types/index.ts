@@ -708,6 +708,7 @@ export interface GoogleWorkspaceConnectionRequest {
   admin_email?: string;
   default_org_unit?: string;
   default_groups?: string[];
+  auto_provision_on_employee_create?: boolean;
   access_token?: string;
   test_connection?: boolean;
 }
@@ -721,6 +722,7 @@ export interface GoogleWorkspaceConnectionStatus {
   admin_email: string | null;
   default_org_unit: string | null;
   default_groups: string[];
+  auto_provision_on_employee_create: boolean;
   has_access_token: boolean;
   last_tested_at: string | null;
   last_error: string | null;

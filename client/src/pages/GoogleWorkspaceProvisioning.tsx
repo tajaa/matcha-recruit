@@ -13,6 +13,7 @@ interface FormState {
   admin_email: string;
   default_org_unit: string;
   default_groups: string;
+  auto_provision_on_employee_create: boolean;
   access_token: string;
   test_connection: boolean;
 }
@@ -23,6 +24,7 @@ const EMPTY_FORM: FormState = {
   admin_email: '',
   default_org_unit: '',
   default_groups: '',
+  auto_provision_on_employee_create: true,
   access_token: '',
   test_connection: true,
 };
@@ -41,6 +43,7 @@ function hydrateFormFromStatus(status: GoogleWorkspaceConnectionStatus): FormSta
     admin_email: status.admin_email || '',
     default_org_unit: status.default_org_unit || '',
     default_groups: (status.default_groups || []).join(', '),
+    auto_provision_on_employee_create: status.auto_provision_on_employee_create ?? true,
     access_token: '',
     test_connection: true,
   };
@@ -90,6 +93,7 @@ export default function GoogleWorkspaceProvisioning() {
         admin_email: form.admin_email.trim() || undefined,
         default_org_unit: form.default_org_unit.trim() || undefined,
         default_groups: groups.length > 0 ? groups : undefined,
+        auto_provision_on_employee_create: form.auto_provision_on_employee_create,
         access_token: form.access_token.trim() || undefined,
         test_connection: form.test_connection,
       };
@@ -151,6 +155,7 @@ export default function GoogleWorkspaceProvisioning() {
           <div className="text-xs opacity-80 space-y-1">
             <p>Mode: {status?.mode || 'not configured'}</p>
             <p>Domain: {status?.domain || 'not set'}</p>
+            <p>Auto-provision on employee create: {status?.auto_provision_on_employee_create ? 'on' : 'off'}</p>
             <p>Last tested: {status?.last_tested_at ? new Date(status.last_tested_at).toLocaleString() : 'never'}</p>
           </div>
         </div>
@@ -231,6 +236,17 @@ export default function GoogleWorkspaceProvisioning() {
             />
           </label>
         )}
+
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={form.auto_provision_on_employee_create}
+            onChange={(e) =>
+              setForm((prev) => ({ ...prev, auto_provision_on_employee_create: e.target.checked }))
+            }
+          />
+          Auto-provision Google account when a new employee is created
+        </label>
 
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input
