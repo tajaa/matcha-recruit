@@ -37,6 +37,7 @@ export type GuideKey =
   | 'accommodations'
   | 'employees'
   | 'company-setup'
+  | 'google-workspace'
   | 'broker-clients'
   | 'broker-reporting'
   | 'portal-onboarding'

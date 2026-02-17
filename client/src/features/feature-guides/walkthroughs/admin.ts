@@ -540,6 +540,48 @@ export const companySetupWalkthrough: WalkthroughConfig = {
   ],
 };
 
+export const googleWorkspaceWalkthrough: WalkthroughConfig = {
+  id: 'google-workspace',
+  title: 'Google Workspace Setup',
+  category: 'admin',
+  steps: [
+    {
+      target: 'google-workspace-guide',
+      title: 'Setup Guide',
+      content: 'Use this walkthrough to configure and validate Google Workspace provisioning.',
+      placement: 'left',
+      action: 'Click Show Me anytime to replay this setup guide.',
+    },
+    {
+      target: 'google-workspace-status',
+      title: 'Connection Status',
+      content: 'Review your current connection state, domain, mode, and last tested timestamp before changing settings.',
+      placement: 'bottom',
+      expect: 'Status card showing connected/disconnected/error and environment details.',
+    },
+    {
+      target: 'google-workspace-mode',
+      title: 'Connection Mode',
+      content: 'Pick the integration mode for your tenant: mock for dry runs, API token, or service account for production.',
+      placement: 'bottom',
+      action: 'Select the mode that matches your deployment plan.',
+    },
+    {
+      target: 'google-workspace-options',
+      title: 'Provisioning Defaults',
+      content: 'Set onboarding defaults like auto-provision and whether to run a connection test before save.',
+      placement: 'top',
+    },
+    {
+      target: 'google-workspace-save',
+      title: 'Save Configuration',
+      content: 'Save to persist settings and optionally run a connection test to verify credentials immediately.',
+      placement: 'left',
+      action: 'Click Save Connection after entering required fields.',
+    },
+  ],
+};
+
 export const brokerClientsWalkthrough: WalkthroughConfig = {
   id: 'broker-clients',
   title: 'Broker Client Onboarding',

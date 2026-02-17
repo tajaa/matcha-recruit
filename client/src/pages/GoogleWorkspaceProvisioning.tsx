@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { provisioning } from '../api/client';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 import type {
   GoogleWorkspaceConnectionRequest,
   GoogleWorkspaceConnectionStatus,
@@ -137,11 +138,16 @@ export default function GoogleWorkspaceProvisioning() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div className="border-b border-white/10 pb-6">
-        <h1 className="text-3xl font-bold tracking-tighter text-white">Google Workspace Provisioning</h1>
-        <p className="text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
-          Configure Matcha to provision employee accounts in your Google Workspace tenant.
-        </p>
+      <div className="border-b border-white/10 pb-6 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tighter text-white">Google Workspace Provisioning</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
+            Configure Matcha to provision employee accounts in your Google Workspace tenant.
+          </p>
+        </div>
+        <div data-tour="google-workspace-guide">
+          <FeatureGuideTrigger guideId="google-workspace" />
+        </div>
       </div>
 
       {error && (
@@ -155,7 +161,7 @@ export default function GoogleWorkspaceProvisioning() {
         </div>
       )}
 
-      <div className={`border p-4 ${statusTone(currentStatus)}`}>
+      <div data-tour="google-workspace-status" className={`border p-4 ${statusTone(currentStatus)}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-wider opacity-80">Current Status</p>
@@ -174,9 +180,9 @@ export default function GoogleWorkspaceProvisioning() {
         )}
       </div>
 
-      <form onSubmit={handleSave} className="border border-white/10 bg-zinc-900/40 p-5 space-y-5">
+      <form data-tour="google-workspace-form" onSubmit={handleSave} className="border border-white/10 bg-zinc-900/40 p-5 space-y-5">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="space-y-2">
+          <label data-tour="google-workspace-mode" className="space-y-2">
             <span className="text-[11px] uppercase tracking-wider text-zinc-400">Mode</span>
             <select
               value={form.mode}
@@ -277,7 +283,7 @@ export default function GoogleWorkspaceProvisioning() {
           </label>
         )}
 
-        <label className="flex items-center gap-2 text-sm text-zinc-300">
+        <label data-tour="google-workspace-options" className="flex items-center gap-2 text-sm text-zinc-300">
           <input
             type="checkbox"
             checked={form.auto_provision_on_employee_create}
@@ -299,6 +305,7 @@ export default function GoogleWorkspaceProvisioning() {
 
         <div className="flex justify-end">
           <button
+            data-tour="google-workspace-save"
             type="submit"
             disabled={saving}
             className="px-5 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider disabled:opacity-60"

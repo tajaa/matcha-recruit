@@ -21,6 +21,7 @@ import {
   accommodationsWalkthrough,
   employeesWalkthrough,
   companySetupWalkthrough,
+  googleWorkspaceWalkthrough,
   brokerClientsWalkthrough,
   brokerReportingWalkthrough,
 } from './admin';
@@ -51,6 +52,7 @@ export const WALKTHROUGH_CONFIGS: Record<GuideKey, WalkthroughConfig> = {
   accommodations: accommodationsWalkthrough,
   employees: employeesWalkthrough,
   'company-setup': companySetupWalkthrough,
+  'google-workspace': googleWorkspaceWalkthrough,
   'broker-clients': brokerClientsWalkthrough,
   'broker-reporting': brokerReportingWalkthrough,
   'portal-onboarding': portalOnboardingWalkthrough,
