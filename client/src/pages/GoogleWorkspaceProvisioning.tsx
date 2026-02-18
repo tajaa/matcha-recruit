@@ -159,14 +159,14 @@ export default function GoogleWorkspaceProvisioning() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div className="border-b border-white/10 pb-6 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tighter text-white">Google Workspace Provisioning</h1>
-          <p className="text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
-            Configure Matcha to provision employee accounts in your Google Workspace tenant.
+      <div className="border-b border-white/10 pb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div className="text-center sm:text-left">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tighter text-white uppercase">Google Workspace</h1>
+          <p className="text-[10px] sm:text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
+            Automate Gmail & Group provisioning
           </p>
         </div>
-        <div data-tour="google-workspace-guide">
+        <div className="flex justify-center sm:justify-end" data-tour="google-workspace-guide">
           <FeatureGuideTrigger guideId="google-workspace" />
         </div>
       </div>

@@ -243,18 +243,18 @@ export function CompanyProfile() {
   return (
     <div className="space-y-12 animate-in fade-in duration-500">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/10 pb-8">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 border-b border-white/10 pb-8">
+        <div className="text-center sm:text-left">
+          <div className="flex items-center gap-3 mb-2 justify-center sm:justify-start">
             <div className="px-2 py-1 border border-emerald-500/20 bg-emerald-900/10 text-emerald-400 text-[9px] uppercase tracking-widest font-mono rounded">
               Company Profile
             </div>
           </div>
-          <h1 className="text-5xl font-bold tracking-tighter text-white uppercase">
+          <h1 className="text-4xl md:text-5xl font-bold tracking-tighter text-white uppercase break-all">
             {company?.name || 'Company'}
           </h1>
         </div>
-        <div data-tour="company-setup-guide">
+        <div className="flex justify-center sm:justify-end" data-tour="company-setup-guide">
           <FeatureGuideTrigger guideId="company-setup" />
         </div>
       </div>

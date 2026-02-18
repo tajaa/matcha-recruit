@@ -81,21 +81,21 @@ export default function OnboardingCenter() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-white/10 pb-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tighter text-white uppercase">Onboarding Center</h1>
-          <p className="text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/10 pb-6">
+        <div className="text-center sm:text-left">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tighter text-white uppercase">Onboarding Center</h1>
+          <p className="text-[10px] sm:text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
             Manage integrations, new hires, and onboarding workflows.
           </p>
         </div>
-        <div data-tour="onboarding-center-guide">
+        <div className="flex justify-center sm:justify-end" data-tour="onboarding-center-guide">
           <FeatureGuideTrigger guideId="onboarding-center" />
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-white/10">
-        <nav className="-mb-px flex space-x-8">
+      <div className="border-b border-white/10 -mx-4 px-4 sm:mx-0 sm:px-0">
+        <nav className="-mb-px flex space-x-8 overflow-x-auto pb-px no-scrollbar">
           {[
             { id: 'workspace', label: 'Workspace' },
             { id: 'employees', label: 'Employees' },
@@ -107,7 +107,7 @@ export default function OnboardingCenter() {
               key={tab.id}
               onClick={() => handleTabChange(tab.id as Tab)}
               data-tour={`onboarding-tab-${tab.id}`}
-              className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+              className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'border-white text-white'
                   : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-800'
@@ -127,7 +127,7 @@ export default function OnboardingCenter() {
               Connect external systems to automate employee provisioning. Credentials are encrypted and scoped to your organization.
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {/* Google Workspace Card */}
               <section data-tour="onboarding-workspace-google-card" className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">

@@ -188,10 +188,10 @@ export default function OnboardingTemplates() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/10 pb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Onboarding Templates</h1>
-          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white uppercase text-center sm:text-left">Onboarding Templates</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase text-center sm:text-left">
             Manage tasks assigned to new employees
           </p>
         </div>
@@ -208,7 +208,7 @@ export default function OnboardingTemplates() {
             });
             setShowModal(true);
           }}
-          className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+          className="flex items-center justify-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors w-full sm:w-auto"
         >
           <Plus size={14} />
           Add Template
@@ -217,14 +217,14 @@ export default function OnboardingTemplates() {
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded p-4 flex items-center justify-between">
+        <div className="bg-red-500/10 border border-red-500/20 rounded p-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <AlertTriangle className="text-red-400" size={16} />
+            <AlertTriangle className="text-red-400 shrink-0" size={16} />
             <p className="text-sm text-red-400 font-mono">{error}</p>
           </div>
           <button
             onClick={() => setError(null)}
-            className="text-xs text-red-400 hover:text-red-300 uppercase tracking-wider font-bold"
+            className="text-xs text-red-400 hover:text-red-300 uppercase tracking-wider font-bold shrink-0"
           >
             Dismiss
           </button>
@@ -232,13 +232,13 @@ export default function OnboardingTemplates() {
       )}
 
       {/* Category filter */}
-      <div className="border-b border-white/10">
-        <nav className="-mb-px flex space-x-8">
+      <div className="border-b border-white/10 -mx-4 px-4 sm:mx-0 sm:px-0">
+        <nav className="-mb-px flex space-x-8 overflow-x-auto pb-px no-scrollbar">
           {[{ value: '', label: 'All' }, ...CATEGORIES].map((cat) => (
             <button
               key={cat.value}
               onClick={() => setCategoryFilter(cat.value)}
-              className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+              className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
                 categoryFilter === cat.value
                   ? 'border-white text-white'
                   : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-800'
@@ -276,7 +276,7 @@ export default function OnboardingTemplates() {
                   {categoryTemplates.map((template) => (
                     <div
                       key={template.id}
-                      className={`group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 flex items-center gap-4 ${
+                      className={`group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 flex flex-col sm:flex-row sm:items-center gap-4 ${
                         !template.is_active ? 'opacity-50' : ''
                       }`}
                     >
@@ -293,18 +293,18 @@ export default function OnboardingTemplates() {
                           <p className="text-xs text-zinc-500 truncate mt-1">{template.description}</p>
                         )}
                       </div>
-                      <div className="flex items-center gap-6">
-                        <div className="text-right">
+                      <div className="flex items-center justify-between sm:justify-end gap-4 md:gap-8 border-t border-white/5 pt-3 sm:border-0 sm:pt-0">
+                        <div className="text-left sm:text-right">
                           <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Due</p>
                           <p className="text-xs text-zinc-400 font-mono">{template.due_days} days</p>
                         </div>
-                        <div className="text-right">
+                        <div className="text-left sm:text-right">
                           <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Assigned to</p>
                           <p className="text-xs text-zinc-400">
                             {template.is_employee_task ? 'Employee' : 'HR/Manager'}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
                           <button
                             onClick={() => handleToggleActive(template)}
                             className={`p-2 rounded transition-colors ${
