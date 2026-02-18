@@ -1,16 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { tutorMetrics } from '../api/client';
-import type { TutorSessionSummary, TutorMetricsAggregate, TutorProgressDataPoint, TutorVocabularyStats } from '../types';
-import { Activity, BarChart2, Book, Trash2, Clock, CheckCircle2 } from 'lucide-react';
+import { tutorMetrics, api } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import type { TutorSessionSummary, TutorMetricsAggregate, TutorProgressDataPoint, TutorVocabularyStats, RankedCandidate } from '../types';
+import { Activity, BarChart2, Book, Trash2, Clock, CheckCircle2, ShieldCheck, RefreshCw, Loader2 } from 'lucide-react';
 
-type TabValue = 'all' | 'interview_prep' | 'language_test' | 'company_tool';
+type TabValue = 'all' | 'interview_prep' | 'language_test' | 'company_tool' | 'candidate_rankings';
 
 const TABS: { label: string; value: TabValue }[] = [
   { label: 'All Sessions', value: 'all' },
   { label: 'User Interview Prep', value: 'interview_prep' },
   { label: 'User Language Test', value: 'language_test' },
   { label: 'Company Interviews', value: 'company_tool' },
+  { label: 'Candidate Rankings', value: 'candidate_rankings' },
 ];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -230,14 +232,58 @@ function VocabularySection({ vocab }: { vocab: TutorVocabularyStats }) {
   );
 }
 
+function scoreColor(score: number | null) {
+  if (score === null) return 'text-zinc-500';
+  if (score >= 80) return 'text-emerald-400';
+  if (score >= 60) return 'text-amber-400';
+  return 'text-red-400';
+}
+
+function rankBadgeStyle(rank: number) {
+  if (rank === 1) return 'bg-amber-500/20 border-amber-400/40 text-amber-300';
+  if (rank === 2) return 'bg-zinc-400/10 border-zinc-400/30 text-zinc-300';
+  if (rank === 3) return 'bg-orange-700/20 border-orange-600/30 text-orange-400';
+  return 'bg-zinc-800/60 border-zinc-700/50 text-zinc-400';
+}
+
+function SignalBar({ label, score, barColor }: { label: string; score: number | null; barColor: string }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-[10px]">
+        <span className="text-zinc-500 uppercase tracking-wider">{label}</span>
+        {score !== null
+          ? <span className={`font-mono font-bold ${scoreColor(score)}`}>{Math.round(score)}</span>
+          : <span className="text-zinc-600 italic">—</span>}
+      </div>
+      <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+        {score !== null && (
+          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(score, 100)}%` }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function TutorMetrics() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const companyId = searchParams.get('company_id');
+  const { user, profile } = useAuth();
+  const urlCompanyId = searchParams.get('company_id');
+
+  // For client users, fall back to their own company_id when not in URL
+  const profileCompanyId =
+    profile && typeof profile === 'object' && 'company_id' in profile && typeof profile.company_id === 'string'
+      ? profile.company_id
+      : null;
+  const companyId = urlCompanyId || (user?.role === 'client' ? profileCompanyId : null);
+
   const [sessions, setSessions] = useState<TutorSessionSummary[]>([]);
   const [aggregate, setAggregate] = useState<TutorMetricsAggregate | null>(null);
   const [progress, setProgress] = useState<TutorProgressDataPoint[]>([]);
   const [vocabulary, setVocabulary] = useState<TutorVocabularyStats | null>(null);
+  const [rankings, setRankings] = useState<RankedCandidate[]>([]);
+  const [rankingsLoading, setRankingsLoading] = useState(false);
+  const [rankingsRunning, setRankingsRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabValue>('all');
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -259,10 +305,41 @@ export function TutorMetrics() {
     }
   };
 
+  const fetchRankings = useCallback(async () => {
+    if (!companyId) return;
+    setRankingsLoading(true);
+    try {
+      const data = await api.rankings.list(companyId);
+      setRankings(data);
+    } catch {
+      // silently fail — empty state handles it
+    } finally {
+      setRankingsLoading(false);
+    }
+  }, [companyId]);
+
+  const handleRunRanking = async () => {
+    if (!companyId) return;
+    setRankingsRunning(true);
+    try {
+      const result = await api.rankings.run(companyId);
+      setRankings(result.rankings);
+    } catch (err) {
+      console.error('Failed to run ranking:', err);
+    } finally {
+      setRankingsRunning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'candidate_rankings') fetchRankings();
+  }, [activeTab, fetchRankings]);
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const mode = activeTab === 'all' ? undefined : activeTab;
+      const sessionMode = activeTab === 'candidate_rankings' ? undefined : activeTab;
+      const mode = sessionMode === 'all' ? undefined : sessionMode;
       const shouldLoadLanguageInsights = (activeTab === 'all' || activeTab === 'language_test') && !companyId;
       const [sessionsData, aggregateData, progressData, vocabData] = await Promise.all([
         tutorMetrics.listSessions({ mode, company_id: companyId || undefined, limit: 100 }),
@@ -549,7 +626,104 @@ export function TutorMetrics() {
         <VocabularySection vocab={vocabulary} />
       )}
 
+      {/* Candidate Rankings Tab */}
+      {activeTab === 'candidate_rankings' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Multi-Signal Candidate Rankings</div>
+              <div className="text-xs text-zinc-600">Screening performance · Culture alignment · Conversation quality</div>
+            </div>
+            {companyId && (
+              <button
+                onClick={handleRunRanking}
+                disabled={rankingsRunning}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-matcha-500 hover:bg-matcha-600 disabled:opacity-50 text-white rounded-sm transition-colors"
+              >
+                {rankingsRunning
+                  ? <><Loader2 size={11} className="animate-spin" /> Running…</>
+                  : <><RefreshCw size={11} /> Run Ranking</>}
+              </button>
+            )}
+          </div>
+
+          {!companyId ? (
+            <div className="p-12 text-center text-xs text-zinc-500 uppercase tracking-wider bg-zinc-950 border border-white/10">
+              Select a company to view rankings
+            </div>
+          ) : rankingsLoading ? (
+            <div className="p-12 text-center text-xs text-zinc-500 uppercase tracking-wider bg-zinc-950 border border-white/10">
+              Loading rankings…
+            </div>
+          ) : rankings.length === 0 ? (
+            <div className="p-12 text-center bg-zinc-950 border border-white/10">
+              <div className="text-xs text-zinc-500 uppercase tracking-wider mb-3">No rankings yet</div>
+              <div className="text-xs text-zinc-600">Click "Run Ranking" to score candidates against this company's culture profile.</div>
+            </div>
+          ) : (
+            <div className="space-y-px bg-white/10 border border-white/10">
+              {/* Header */}
+              <div className="flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
+                <div className="w-10 text-center">#</div>
+                <div className="flex-1">Candidate</div>
+                <div className="w-20 text-right">Score</div>
+                <div className="w-64 hidden md:block">Signals</div>
+                <div className="w-28 text-right">Mode</div>
+              </div>
+              {rankings.map((r, idx) => (
+                <div key={r.id} className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 px-6 flex items-center gap-4">
+                  {/* Rank */}
+                  <div className={`w-10 h-10 flex-shrink-0 rounded border flex items-center justify-center text-xs font-bold font-mono ${rankBadgeStyle(idx + 1)}`}>
+                    #{idx + 1}
+                  </div>
+
+                  {/* Name + badges */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-white">{r.candidate_name || 'Unknown'}</span>
+                      {r.has_interview_data && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-400 text-[9px] font-bold uppercase tracking-wider">
+                          <ShieldCheck size={9} /> Verified
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Overall score */}
+                  <div className="w-20 text-right">
+                    <span className={`text-2xl font-bold font-mono ${scoreColor(r.overall_rank_score)}`}>
+                      {Math.round(r.overall_rank_score)}
+                    </span>
+                  </div>
+
+                  {/* Signal bars */}
+                  <div className="w-64 hidden md:block space-y-1.5">
+                    <SignalBar label="Screening" score={r.screening_score} barColor="bg-emerald-500" />
+                    <SignalBar label="Culture" score={r.culture_alignment_score} barColor="bg-violet-500" />
+                    <SignalBar label="Conversation" score={r.conversation_score} barColor="bg-cyan-500" />
+                  </div>
+
+                  {/* Mode badge */}
+                  <div className="w-28 text-right">
+                    {r.signal_breakdown?.mode === 'full_signal' && (
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-sm">Full Signal</span>
+                    )}
+                    {r.signal_breakdown?.mode === 'partial_signal' && (
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-sm">Partial</span>
+                    )}
+                    {r.signal_breakdown?.mode === 'resume_only' && (
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 bg-zinc-800 border border-zinc-700 px-2 py-0.5 rounded-sm">Resume Only</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Sessions Table */}
+      {activeTab !== 'candidate_rankings' && (
       <div className="space-y-px bg-white/10 border border-white/10">
         <div className="flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
           <div className="flex-1">Date / Type</div>
@@ -614,6 +788,7 @@ export function TutorMetrics() {
           ))
         )}
       </div>
+      )}
     </div>
   );
 }
