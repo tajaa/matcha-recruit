@@ -26,6 +26,7 @@ const AUDIO_FROM_SERVER = 0x02;
 interface UseAudioInterviewReturn {
   isConnected: boolean;
   isRecording: boolean;
+  isPlaying: boolean;
   messages: WSMessage[];
   sessionTimeRemaining: number | null; // seconds remaining, null if not connected
   idleWarning: boolean;
@@ -45,6 +46,7 @@ export function useAudioInterview(
   const wsAuthToken = options.wsAuthToken ?? null;
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [messages, setMessages] = useState<WSMessage[]>([]);
   const [sessionTimeRemaining, setSessionTimeRemaining] = useState<number | null>(null);
   const [idleWarning, setIdleWarning] = useState(false);
@@ -55,6 +57,28 @@ export function useAudioInterview(
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
   const nextPlaybackTimeRef = useRef(0);
+  const playbackCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Monitor playback status
+  useEffect(() => {
+    playbackCheckIntervalRef.current = setInterval(() => {
+      const ctx = playbackContextRef.current;
+      if (!ctx) {
+        setIsPlaying(false);
+        return;
+      }
+      // Check if we are currently within a playback window
+      // nextPlaybackTimeRef points to the END of the scheduled buffer
+      // If currentTime < nextPlaybackTimeRef, we are playing
+      // Add a small buffer (0.1s) to prevent flickering between chunks
+      const isActive = ctx.currentTime < nextPlaybackTimeRef.current + 0.1;
+      setIsPlaying((prev) => (prev !== isActive ? isActive : prev));
+    }, 100);
+
+    return () => {
+      if (playbackCheckIntervalRef.current) clearInterval(playbackCheckIntervalRef.current);
+    };
+  }, []);
 
   // Session protection refs
   const sessionStartTimeRef = useRef<number | null>(null);
@@ -415,6 +439,7 @@ export function useAudioInterview(
   return {
     isConnected,
     isRecording,
+    isPlaying,
     messages,
     sessionTimeRemaining,
     idleWarning,

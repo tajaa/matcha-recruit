@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '../components/Button';
+import { AsciiWaveform } from '../components/AsciiWaveform';
 import { tutor, companies } from '../api/client';
 import { useAudioInterview } from '../hooks/useAudioInterview';
 import { useAuth } from '../context/AuthContext';
 import type { Company } from '../types';
-import { Mic, Square, Clock, Award, Users, Globe, Play, CheckCircle2, Search, Target } from 'lucide-react';
+import { Mic, Square, Clock, Award, Users, Globe, Play, CheckCircle2, Search, Target, Activity } from 'lucide-react';
+import { SystemCheckModal } from '../components/SystemCheckModal';
 
 type CompanyInterviewMode = 'culture' | 'screening' | 'candidate';
 type TutorMode = 'interview_prep' | 'language_test' | CompanyInterviewMode;
@@ -77,11 +79,13 @@ export function Tutor() {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
+  const [showSystemCheck, setShowSystemCheck] = useState(false);
 
   // Audio interview hook with server-configured session limit
   const {
     isConnected,
     isRecording,
+    isPlaying,
     messages,
     sessionTimeRemaining,
     connect,
@@ -367,11 +371,18 @@ export function Tutor() {
                     {isConnected ? 'Stable' : 'Offline'}
                   </span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-zinc-400">Audio Stream</span>
-                  <span className={`text-xs font-mono uppercase ${isRecording ? 'text-red-500 animate-pulse' : 'text-zinc-600'}`}>
-                    {isRecording ? 'Active' : 'Idle'}
-                  </span>
+                <div className="flex flex-col gap-2 pt-1 pb-1">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-zinc-400">Audio Stream</span>
+                    <span className={`text-[10px] font-mono uppercase tracking-wider ${
+                      isPlaying ? 'text-emerald-400 animate-pulse' : isRecording ? 'text-white animate-pulse' : 'text-zinc-600'
+                    }`}>
+                      {isPlaying ? 'AI Speaking' : isRecording ? 'Listening' : 'Idle'}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 border border-white/5 rounded py-3">
+                    <AsciiWaveform isRecording={isRecording} isPlaying={isPlaying} />
+                  </div>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-zinc-400">Transcript</span>
@@ -405,25 +416,43 @@ export function Tutor() {
     <div className="max-w-6xl mx-auto space-y-12">
       <div className="flex items-center justify-between border-b border-white/10 pb-8">
         <div>
-          <h1 className="text-4xl font-bold text-white tracking-tighter uppercase">
-            {isCandidate ? 'Interview Prep' : 'Tutor'}
-          </h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-4xl font-bold text-white tracking-tighter uppercase">
+              {isCandidate ? 'Interview Prep' : 'Tutor'}
+            </h1>
+            <button 
+              onClick={() => setShowSystemCheck(true)}
+              className="hidden sm:flex text-[10px] text-zinc-500 hover:text-white uppercase tracking-wider items-center gap-2 border border-zinc-800 bg-zinc-900/50 px-3 py-1.5 transition-all hover:border-zinc-600 rounded-sm"
+            >
+              <Activity size={12} /> System Check
+            </button>
+          </div>
           <p className="text-zinc-500 mt-2 text-xs font-mono tracking-wide uppercase">
             Unified Interview System: Language Coaching + Company Culture/Screening
           </p>
         </div>
-        {isCandidate && (
-          <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900 border border-zinc-800">
-            <Award className="w-4 h-4 text-amber-500" />
-            <div className="flex flex-col items-end">
-              <span className={`text-lg font-mono font-bold leading-none ${interviewPrepTokens > 0 ? 'text-white' : 'text-red-500'}`}>
-                {interviewPrepTokens}
-              </span>
-              <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Tokens Available</span>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setShowSystemCheck(true)}
+            className="sm:hidden text-zinc-500 hover:text-white p-2 border border-zinc-800 bg-zinc-900/50 rounded-sm"
+          >
+            <Activity size={16} />
+          </button>
+          {isCandidate && (
+            <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900 border border-zinc-800">
+              <Award className="w-4 h-4 text-amber-500" />
+              <div className="flex flex-col items-end">
+                <span className={`text-lg font-mono font-bold leading-none ${interviewPrepTokens > 0 ? 'text-white' : 'text-red-500'}`}>
+                  {interviewPrepTokens}
+                </span>
+                <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Tokens Available</span>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+
+      <SystemCheckModal isOpen={showSystemCheck} onClose={() => setShowSystemCheck(false)} />
 
       {error && (
         <div className="bg-red-900/20 border border-red-500/30 p-4 text-red-400 text-sm font-mono flex items-center gap-3">
