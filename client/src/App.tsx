@@ -63,6 +63,7 @@ const BulkImport = lazy(() => import('./pages/BulkImport'));
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
 const EmployeeDetail = lazy(() => import('./pages/EmployeeDetail'));
+const OnboardingCenter = lazy(() => import('./pages/OnboardingCenter'));
 const OnboardingTemplates = lazy(() => import('./pages/OnboardingTemplates'));
 const PTOManagement = lazy(() => import('./pages/PTOManagement'));
 const LeaveManagement = lazy(() => import('./pages/LeaveManagement'));
@@ -222,7 +223,15 @@ function App() {
                 path="matcha/company"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
-                    <CompanyProfile />
+                    <Navigate to="/app/matcha/onboarding?tab=profile" replace />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/onboarding"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <OnboardingCenter />
                   </ProtectedRoute>
                 }
               />
@@ -325,7 +334,7 @@ function App() {
                 path="matcha/setup"
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
-                    <Navigate to="/app/matcha/company" replace />
+                    <Navigate to="/app/matcha/onboarding?tab=workspace" replace />
                   </ProtectedRoute>
                 }
               />
