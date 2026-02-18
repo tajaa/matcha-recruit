@@ -189,9 +189,16 @@ class GoogleWorkspaceService:
             )
 
         if response.status_code >= 400:
+            error_msg = _extract_response_error(response)
+            if "invalid_grant" in error_msg or "Invalid email" in error_msg:
+                error_msg = (
+                    f"{error_msg}. Hint: Ensure the Service Account has Domain-Wide Delegation enabled "
+                    f"in the Google Admin Console and that '{delegated_admin_email}' is a valid admin user."
+                )
+            
             raise GoogleWorkspaceProvisioningError(
                 "service_account_token_exchange_failed",
-                _extract_response_error(response),
+                error_msg,
                 needs_action=response.status_code in (400, 401, 403),
             )
 

@@ -593,7 +593,7 @@ export const googleWorkspaceWalkthrough: WalkthroughConfig = {
     {
       target: 'google-workspace-groups',
       title: 'Default Groups',
-      content: 'New employees will be automatically added to these groups. Enter full email addresses separated by commas or new lines (e.g., all-hands@company.com).',
+      content: 'Groups grant access to team resources. Enter the email addresses (e.g. all-hands@company.com) for mailing lists, shared drives, or calendars new hires should join.',
       placement: 'top',
     },
     {

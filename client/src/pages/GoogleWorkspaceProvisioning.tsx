@@ -278,7 +278,9 @@ export default function GoogleWorkspaceProvisioning() {
             rows={3}
             className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
           />
-          <p className="text-[11px] text-zinc-500">Separate groups by comma or newline.</p>
+          <p className="text-[11px] text-zinc-500">
+            Separate groups by comma or newline. These are Google Groups (mailing lists) that grant access to team calendars and shared drives.
+          </p>
         </label>
 
         {form.mode === 'api_token' && (
