@@ -605,6 +605,11 @@ export function Layout() {
 
   const [activeHelp, setActiveHelp] = useState<string | null>(null);
 
+  // Extract company name from profile (client users have it, admins don't)
+  const companyName = profile && 'company_name' in profile
+    ? (profile as { company_name: string }).company_name
+    : null;
+
   const NavLink = ({ item }: { item: NavItem }) => {
     const isActive = location.pathname === item.path;
     const showingHelp = activeHelp === item.path;
@@ -708,7 +713,12 @@ export function Layout() {
         <div className="border-t border-white/10 p-4">
           <NavLink item={settingsItem} />
           <div className="mt-4 px-3 py-3 bg-zinc-900 border border-white/5">
-            <div className="text-[10px] text-white tracking-wide truncate font-mono">{user?.email}</div>
+            {companyName && (
+              <div className="text-[10px] font-bold text-white tracking-widest uppercase truncate mb-2 pb-2 border-b border-white/10">
+                {companyName}
+              </div>
+            )}
+            <div className="text-[10px] text-zinc-400 tracking-wide truncate font-mono">{user?.email}</div>
             <div className="flex items-center justify-between mt-2">
               <span className="px-1.5 py-0.5 text-[8px] bg-emerald-900/30 text-emerald-400 border border-emerald-500/20 tracking-[0.15em] uppercase">
                 {user?.role}
@@ -738,7 +748,12 @@ export function Layout() {
             </div>
 
             {user && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
+                {companyName && (
+                  <span className="text-[10px] font-bold text-white uppercase tracking-widest hidden sm:block truncate max-w-[140px]">
+                    {companyName}
+                  </span>
+                )}
                 <button
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                   className="p-2 text-zinc-400 hover:text-white transition-colors"
