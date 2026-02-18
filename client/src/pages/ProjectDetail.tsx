@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { projects as projectsApi, candidates as candidatesApi } from '../api/client';
+import { projects as projectsApi, candidates as candidatesApi, api } from '../api/client';
 import type {
   Project,
   ProjectCandidate,
@@ -10,10 +10,13 @@ import type {
   Candidate,
   ProjectUpdate,
   Outreach,
+  RankedCandidate,
+  ReachOutDraft,
 } from '../types';
 import {
-  ArrowLeft, Plus, Send, Mail, BarChart2, Loader2, X, ChevronRight,
-  CheckCircle2, Clock, AlertCircle, XCircle, UserPlus,
+  ArrowLeft, Send, Mail, BarChart2, Loader2, X, ChevronRight,
+  CheckCircle2, Clock, AlertCircle, XCircle, UserPlus, RefreshCw,
+  ShieldCheck, Star,
 } from 'lucide-react';
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -136,6 +139,20 @@ export function ProjectDetail() {
   const [sendingScreening, setSendingScreening] = useState(false);
   const [screeningMessage, setScreeningMessage] = useState('');
   const [screeningResult, setScreeningResult] = useState<string | null>(null);
+
+  // Rankings
+  const [rankings, setRankings] = useState<RankedCandidate[]>([]);
+  const [rankingsLoading, setRankingsLoading] = useState(false);
+  const [rankingsRunning, setRankingsRunning] = useState(false);
+
+  // Reach-out modal (within rankings)
+  const [reachOutTarget, setReachOutTarget] = useState<RankedCandidate | null>(null);
+  const [reachOutDraft, setReachOutDraft] = useState<ReachOutDraft | null>(null);
+  const [reachOutLoading, setReachOutLoading] = useState(false);
+  const [reachOutSending, setReachOutSending] = useState(false);
+  const [reachOutSent, setReachOutSent] = useState<Set<string>>(new Set());
+  const [editedSubject, setEditedSubject] = useState('');
+  const [editedBody, setEditedBody] = useState('');
 
   // ─── Data fetching ──────────────────────────────────────────────────────────
 
@@ -296,6 +313,73 @@ export function ProjectDetail() {
       await fetchProject();
     } catch (err) {
       console.error('Failed to update status:', err);
+    }
+  };
+
+  const fetchRankings = async (companyId: string) => {
+    setRankingsLoading(true);
+    try {
+      // Filter to only candidates in this project
+      const projectCandidateIds = new Set(candidateList.map(c => c.candidate_id));
+      const all = await api.rankings.list(companyId);
+      setRankings(all.filter(r => projectCandidateIds.has(r.candidate_id)));
+    } catch (err) {
+      console.error('Failed to fetch rankings:', err);
+    } finally {
+      setRankingsLoading(false);
+    }
+  };
+
+  const handleRunRankings = async () => {
+    if (!project?.company_id) return;
+    setRankingsRunning(true);
+    try {
+      const candidateIds = candidateList.map(c => c.candidate_id);
+      const result = await api.rankings.run(project.company_id, candidateIds);
+      setRankings(result.rankings);
+    } catch (err) {
+      console.error('Failed to run rankings:', err);
+    } finally {
+      setRankingsRunning(false);
+    }
+  };
+
+  const handleOpenReachOut = async (candidate: RankedCandidate) => {
+    if (!project?.company_id) return;
+    setReachOutTarget(candidate);
+    setReachOutDraft(null);
+    setEditedSubject('');
+    setEditedBody('');
+    setReachOutLoading(true);
+    try {
+      const draft = await api.reachOut.draft(project.company_id, candidate.candidate_id);
+      setReachOutDraft(draft);
+      setEditedSubject(draft.subject);
+      setEditedBody(draft.body);
+    } catch (err) {
+      console.error('Failed to draft reach-out:', err);
+      setReachOutTarget(null);
+    } finally {
+      setReachOutLoading(false);
+    }
+  };
+
+  const handleSendReachOut = async () => {
+    if (!reachOutTarget || !reachOutDraft || !project?.company_id) return;
+    setReachOutSending(true);
+    try {
+      await api.reachOut.send(project.company_id, reachOutTarget.candidate_id, {
+        to_email: reachOutDraft.to_email,
+        subject: editedSubject,
+        body: editedBody,
+      });
+      setReachOutSent(prev => new Set(prev).add(reachOutTarget.candidate_id));
+      setReachOutTarget(null);
+      setReachOutDraft(null);
+    } catch (err) {
+      console.error('Failed to send reach-out:', err);
+    } finally {
+      setReachOutSending(false);
     }
   };
 
@@ -610,6 +694,199 @@ export function ProjectDetail() {
           </div>
         )}
       </div>
+
+      {/* ─── Rankings section ─────────────────────────────────────────────────── */}
+      {project.company_id ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1 flex items-center gap-2">
+                <Star size={11} /> Candidate Rankings
+              </div>
+              <div className="text-xs text-zinc-600">Scoring · Culture alignment · Conversation quality</div>
+            </div>
+            <button
+              onClick={handleRunRankings}
+              disabled={rankingsRunning || candidateList.length === 0}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-zinc-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {rankingsRunning
+                ? <><Loader2 size={11} className="animate-spin" /> Scoring…</>
+                : <><RefreshCw size={11} /> Run Rankings</>}
+            </button>
+          </div>
+
+          {rankings.length === 0 && !rankingsLoading ? (
+            <div className="p-10 text-center bg-zinc-950 border border-white/10">
+              <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">No rankings yet</div>
+              <div className="text-xs text-zinc-600 mb-4">
+                {candidateList.length === 0
+                  ? 'Add candidates to this project first'
+                  : 'Click "Run Rankings" to score candidates against this company\'s culture profile'}
+              </div>
+              {rankings.length === 0 && candidateList.length > 0 && (
+                <button
+                  onClick={() => project.company_id && fetchRankings(project.company_id)}
+                  className="text-[10px] text-zinc-400 hover:text-white uppercase tracking-widest underline underline-offset-4"
+                >
+                  Load existing rankings
+                </button>
+              )}
+            </div>
+          ) : rankingsLoading ? (
+            <div className="p-10 text-center bg-zinc-950 border border-white/10">
+              <Loader2 size={16} className="animate-spin text-zinc-500 mx-auto" />
+            </div>
+          ) : (
+            <div className="space-y-px bg-white/10 border border-white/10">
+              {/* Header */}
+              <div className="grid grid-cols-[36px_2fr_80px_200px_120px] gap-4 px-6 py-3 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
+                <div>#</div>
+                <div>Candidate</div>
+                <div className="text-right">Score</div>
+                <div>Signals</div>
+                <div className="text-right">Action</div>
+              </div>
+
+              {rankings.map((r, idx) => (
+                <div key={r.id} className="grid grid-cols-[36px_2fr_80px_200px_120px] gap-4 px-6 py-4 bg-zinc-950 hover:bg-zinc-900 transition-colors items-center">
+                  {/* Rank badge */}
+                  <div className={`w-8 h-8 rounded border flex items-center justify-center text-[10px] font-bold font-mono flex-shrink-0 ${
+                    idx === 0 ? 'bg-amber-500/20 border-amber-400/40 text-amber-300'
+                    : idx === 1 ? 'bg-zinc-400/10 border-zinc-400/30 text-zinc-300'
+                    : idx === 2 ? 'bg-orange-700/20 border-orange-600/30 text-orange-400'
+                    : 'bg-zinc-800/60 border-zinc-700/50 text-zinc-500'
+                  }`}>
+                    {idx + 1}
+                  </div>
+
+                  {/* Name */}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-white truncate">{r.candidate_name || 'Unknown'}</span>
+                      {r.has_interview_data && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-teal-500/10 border border-teal-500/20 text-teal-400">
+                          <ShieldCheck size={9} /> Verified
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Score */}
+                  <div className="text-right">
+                    <span className={`text-xl font-bold font-mono ${
+                      r.overall_rank_score >= 80 ? 'text-emerald-400'
+                      : r.overall_rank_score >= 60 ? 'text-amber-400'
+                      : 'text-red-400'
+                    }`}>
+                      {Math.round(r.overall_rank_score)}
+                    </span>
+                  </div>
+
+                  {/* Signal bars */}
+                  <div className="space-y-1">
+                    {[
+                      { label: 'Screening', score: r.screening_score, color: 'bg-emerald-500' },
+                      { label: 'Culture', score: r.culture_alignment_score, color: 'bg-violet-500' },
+                      { label: 'Conversation', score: r.conversation_score, color: 'bg-cyan-500' },
+                    ].map(({ label, score, color }) => (
+                      <div key={label} className="space-y-0.5">
+                        <div className="flex justify-between text-[9px]">
+                          <span className="text-zinc-600 uppercase tracking-wider">{label}</span>
+                          <span className="font-mono text-zinc-500">{score !== null ? Math.round(score) : '—'}</span>
+                        </div>
+                        <div className="h-0.5 bg-zinc-800 rounded-full overflow-hidden">
+                          {score !== null && <div className={`h-full ${color}`} style={{ width: `${Math.min(score, 100)}%` }} />}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Reach Out action */}
+                  <div className="flex justify-end">
+                    {reachOutSent.has(r.candidate_id) ? (
+                      <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-teal-400">
+                        <CheckCircle2 size={10} /> Sent
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleOpenReachOut(r)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 transition-colors"
+                      >
+                        <Mail size={10} /> Reach Out
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="p-6 bg-zinc-950 border border-white/10 flex items-center gap-4">
+          <Star size={16} className="text-zinc-700 flex-shrink-0" />
+          <div>
+            <div className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Rankings not available</div>
+            <div className="text-xs text-zinc-600">
+              Link this project to a company profile to enable candidate rankings.
+              Edit the project and select a company to activate this feature.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reach-out modal */}
+      {reachOutTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="relative bg-zinc-950 border border-white/15 shadow-2xl w-full max-w-2xl mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+              <div>
+                <div className="text-xs font-bold text-white uppercase tracking-wider">
+                  {reachOutTarget.candidate_name || 'Candidate'}
+                </div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">Draft Reach-Out Message</div>
+              </div>
+              <button onClick={() => { setReachOutTarget(null); setReachOutDraft(null); }} className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div className="text-sm text-zinc-400 font-mono bg-zinc-900 border border-zinc-800 px-3 py-2">
+                {reachOutDraft ? `${reachOutDraft.to_name} <${reachOutDraft.to_email}>` : <span className="text-zinc-600 italic">Loading…</span>}
+              </div>
+              {reachOutDraft && (
+                <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-violet-500/10 border border-violet-500/20 text-violet-400 text-[9px] font-bold uppercase tracking-widest">
+                  ✦ AI-generated — edit as needed
+                </div>
+              )}
+              <div>
+                <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Subject</label>
+                {reachOutLoading
+                  ? <div className="h-9 bg-zinc-800 animate-pulse" />
+                  : <input type="text" value={editedSubject} onChange={e => setEditedSubject(e.target.value)} className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white outline-none" />}
+              </div>
+              <div>
+                <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Message</label>
+                {reachOutLoading
+                  ? <div className="h-48 bg-zinc-800 animate-pulse" />
+                  : <textarea value={editedBody} onChange={e => setEditedBody(e.target.value)} rows={10} className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white outline-none resize-none leading-relaxed" />}
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
+              <button onClick={() => { setReachOutTarget(null); setReachOutDraft(null); }} className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white">
+                Cancel
+              </button>
+              <button
+                onClick={handleSendReachOut}
+                disabled={reachOutLoading || reachOutSending || !reachOutDraft}
+                className="inline-flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
+              >
+                {reachOutSending ? <><Loader2 size={11} className="animate-spin" /> Sending…</> : <><Mail size={11} /> Send Message</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Project details strip ─────────────────────────────────────────────── */}
       {(project.requirements || project.benefits || project.notes) && (

@@ -26,6 +26,7 @@ class CandidateStage(str, Enum):
 class ProjectCreate(BaseModel):
     company_name: str
     name: str
+    company_id: Optional[UUID] = None
     position_title: Optional[str] = None
     location: Optional[str] = None
     salary_min: Optional[int] = None
@@ -39,6 +40,7 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     company_name: Optional[str] = None
     name: Optional[str] = None
+    company_id: Optional[UUID] = None
     position_title: Optional[str] = None
     location: Optional[str] = None
     salary_min: Optional[int] = None
@@ -53,6 +55,7 @@ class ProjectResponse(BaseModel):
     id: UUID
     company_name: str
     name: str
+    company_id: Optional[UUID] = None
     position_title: Optional[str] = None
     location: Optional[str] = None
     salary_min: Optional[int] = None

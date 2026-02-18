@@ -700,6 +700,7 @@ async def init_db():
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 company_name VARCHAR(255) NOT NULL,
                 name VARCHAR(255) NOT NULL,
+                company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
                 position_title VARCHAR(255),
                 location VARCHAR(255),
                 salary_min INTEGER,

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projects as projectsApi } from '../api/client';
-import type { Project, ProjectStatus, ProjectCreate } from '../types';
+import { projects as projectsApi, companies as companiesApi } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import type { Project, ProjectStatus, ProjectCreate, Company } from '../types';
 import { Plus, Trash2, FolderOpen, Loader2, X } from 'lucide-react';
 
 const STATUS_TABS: { label: string; value: ProjectStatus | 'all' }[] = [
@@ -28,16 +29,24 @@ function formatSalary(min?: number | null, max?: number | null): string | null {
 
 export function Projects() {
   const navigate = useNavigate();
+  const { user, profile } = useAuth();
   const [projectList, setProjectList] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ProjectStatus | 'all'>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [companyList, setCompanyList] = useState<Company[]>([]);
+
+  // For client users, extract their company_id from profile
+  const clientCompanyId = user?.role === 'client'
+    ? (profile as { company_id?: string } | null)?.company_id ?? null
+    : null;
 
   const [form, setForm] = useState<ProjectCreate>({
     company_name: '',
     name: '',
+    company_id: clientCompanyId ?? undefined,
     position_title: '',
     location: '',
     salary_min: undefined,
@@ -61,6 +70,13 @@ export function Projects() {
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
+  // Admins can link to any company; fetch the list once
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      companiesApi.list().then(setCompanyList).catch(() => {});
+    }
+  }, [user?.role]);
+
   const handleCreate = async () => {
     if (!form.company_name.trim() || !form.name.trim()) return;
     setCreating(true);
@@ -71,7 +87,7 @@ export function Projects() {
         salary_max: form.salary_max || undefined,
       });
       setShowCreate(false);
-      setForm({ company_name: '', name: '', position_title: '', location: '', salary_min: undefined, salary_max: undefined, benefits: '', requirements: '', notes: '' });
+      setForm({ company_name: '', name: '', company_id: clientCompanyId ?? undefined, position_title: '', location: '', salary_min: undefined, salary_max: undefined, benefits: '', requirements: '', notes: '' });
       navigate(`/app/projects/${created.id}`);
     } catch (err) {
       console.error('Failed to create project:', err);
@@ -253,6 +269,40 @@ export function Projects() {
                   />
                 </div>
               </div>
+
+              {/* Company link — admins pick from list, clients auto-linked */}
+              {user?.role === 'admin' && companyList.length > 0 && (
+                <div>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">
+                    Link to Company Profile
+                    <span className="ml-2 text-zinc-700 normal-case tracking-normal">for rankings</span>
+                  </label>
+                  <select
+                    value={form.company_id ?? ''}
+                    onChange={e => {
+                      const val = e.target.value;
+                      const company = companyList.find(c => c.id === val);
+                      setForm({
+                        ...form,
+                        company_id: val || undefined,
+                        company_name: company?.name ?? form.company_name,
+                      });
+                    }}
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white outline-none transition-colors"
+                  >
+                    <option value="">— No company link —</option>
+                    {companyList.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-[9px] text-zinc-600 mt-1">Linking enables candidate rankings scoped to this project</p>
+                </div>
+              )}
+              {user?.role === 'client' && clientCompanyId && (
+                <div className="px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 text-[10px] text-emerald-400 uppercase tracking-widest">
+                  ✓ Linked to your company — rankings will be available
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>

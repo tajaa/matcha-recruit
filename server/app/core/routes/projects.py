@@ -20,18 +20,39 @@ from ..models.project import (
 router = APIRouter()
 
 
+def _project_response(row, candidate_count: int = 0) -> ProjectResponse:
+    return ProjectResponse(
+        id=row["id"],
+        company_name=row["company_name"],
+        name=row["name"],
+        company_id=row["company_id"],
+        position_title=row["position_title"],
+        location=row["location"],
+        salary_min=row["salary_min"],
+        salary_max=row["salary_max"],
+        benefits=row["benefits"],
+        requirements=row["requirements"],
+        status=row["status"],
+        notes=row["notes"],
+        candidate_count=candidate_count,
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 @router.post("", response_model=ProjectResponse)
 async def create_project(project: ProjectCreate):
     """Create a new project."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO projects (company_name, name, position_title, location, salary_min, salary_max, benefits, requirements, status, notes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            RETURNING id, company_name, name, position_title, location, salary_min, salary_max, benefits, requirements, status, notes, created_at, updated_at
+            INSERT INTO projects (company_name, name, company_id, position_title, location, salary_min, salary_max, benefits, requirements, status, notes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING id, company_name, name, company_id, position_title, location, salary_min, salary_max, benefits, requirements, status, notes, created_at, updated_at
             """,
             project.company_name,
             project.name,
+            project.company_id,
             project.position_title,
             project.location,
             project.salary_min,
@@ -42,22 +63,7 @@ async def create_project(project: ProjectCreate):
             project.notes,
         )
 
-        return ProjectResponse(
-            id=row["id"],
-            company_name=row["company_name"],
-            name=row["name"],
-            position_title=row["position_title"],
-            location=row["location"],
-            salary_min=row["salary_min"],
-            salary_max=row["salary_max"],
-            benefits=row["benefits"],
-            requirements=row["requirements"],
-            status=row["status"],
-            notes=row["notes"],
-            candidate_count=0,
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
+        return _project_response(row, 0)
 
 
 @router.get("", response_model=list[ProjectResponse])
@@ -65,44 +71,29 @@ async def list_projects(status: Optional[str] = None):
     """List projects with optional status filter."""
     async with get_connection() as conn:
         if status:
-            query = """
+            rows = await conn.fetch(
+                """
                 SELECT p.*, COUNT(pc.id) as candidate_count
                 FROM projects p
                 LEFT JOIN project_candidates pc ON p.id = pc.project_id
                 WHERE p.status = $1
                 GROUP BY p.id
                 ORDER BY p.updated_at DESC
-            """
-            rows = await conn.fetch(query, status)
+                """,
+                status,
+            )
         else:
-            query = """
+            rows = await conn.fetch(
+                """
                 SELECT p.*, COUNT(pc.id) as candidate_count
                 FROM projects p
                 LEFT JOIN project_candidates pc ON p.id = pc.project_id
                 GROUP BY p.id
                 ORDER BY p.updated_at DESC
-            """
-            rows = await conn.fetch(query)
-
-        return [
-            ProjectResponse(
-                id=row["id"],
-                company_name=row["company_name"],
-                name=row["name"],
-                position_title=row["position_title"],
-                location=row["location"],
-                salary_min=row["salary_min"],
-                salary_max=row["salary_max"],
-                benefits=row["benefits"],
-                requirements=row["requirements"],
-                status=row["status"],
-                notes=row["notes"],
-                candidate_count=row["candidate_count"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
+                """
             )
-            for row in rows
-        ]
+
+        return [_project_response(row, row["candidate_count"]) for row in rows]
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -123,22 +114,7 @@ async def get_project(project_id: UUID):
         if not row:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        return ProjectResponse(
-            id=row["id"],
-            company_name=row["company_name"],
-            name=row["name"],
-            position_title=row["position_title"],
-            location=row["location"],
-            salary_min=row["salary_min"],
-            salary_max=row["salary_max"],
-            benefits=row["benefits"],
-            requirements=row["requirements"],
-            status=row["status"],
-            notes=row["notes"],
-            candidate_count=row["candidate_count"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
+        return _project_response(row, row["candidate_count"])
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
@@ -158,6 +134,11 @@ async def update_project(project_id: UUID, project: ProjectUpdate):
         if project.name is not None:
             updates.append(f"name = ${param_idx}")
             params.append(project.name)
+            param_idx += 1
+
+        if project.company_id is not None:
+            updates.append(f"company_id = ${param_idx}")
+            params.append(project.company_id)
             param_idx += 1
 
         if project.position_title is not None:
@@ -210,7 +191,7 @@ async def update_project(project_id: UUID, project: ProjectUpdate):
             UPDATE projects
             SET {', '.join(updates)}
             WHERE id = ${param_idx}
-            RETURNING id, company_name, name, position_title, location, salary_min, salary_max, benefits, requirements, status, notes, created_at, updated_at
+            RETURNING id, company_name, name, company_id, position_title, location, salary_min, salary_max, benefits, requirements, status, notes, created_at, updated_at
         """
 
         row = await conn.fetchrow(query, *params)
@@ -218,28 +199,12 @@ async def update_project(project_id: UUID, project: ProjectUpdate):
         if not row:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        # Get candidate count
         count = await conn.fetchval(
             "SELECT COUNT(*) FROM project_candidates WHERE project_id = $1",
             project_id,
         )
 
-        return ProjectResponse(
-            id=row["id"],
-            company_name=row["company_name"],
-            name=row["name"],
-            position_title=row["position_title"],
-            location=row["location"],
-            salary_min=row["salary_min"],
-            salary_max=row["salary_max"],
-            benefits=row["benefits"],
-            requirements=row["requirements"],
-            status=row["status"],
-            notes=row["notes"],
-            candidate_count=count,
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
+        return _project_response(row, count)
 
 
 @router.delete("/{project_id}")

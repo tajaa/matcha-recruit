@@ -861,6 +861,7 @@ export interface Project {
   id: string;
   company_name: string;
   name: string;
+  company_id: string | null;
   position_title: string | null;
   location: string | null;
   salary_min: number | null;
@@ -877,6 +878,7 @@ export interface Project {
 export interface ProjectCreate {
   company_name: string;
   name: string;
+  company_id?: string;
   position_title?: string;
   location?: string;
   salary_min?: number;
@@ -890,6 +892,7 @@ export interface ProjectCreate {
 export interface ProjectUpdate {
   company_name?: string;
   name?: string;
+  company_id?: string;
   position_title?: string;
   location?: string;
   salary_min?: number;
