@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { tutorMetrics, api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import type { TutorSessionSummary, TutorMetricsAggregate, TutorProgressDataPoint, TutorVocabularyStats, RankedCandidate } from '../types';
-import { Activity, BarChart2, Book, Trash2, Clock, CheckCircle2, ShieldCheck, RefreshCw, Loader2 } from 'lucide-react';
+import type { TutorSessionSummary, TutorMetricsAggregate, TutorProgressDataPoint, TutorVocabularyStats, RankedCandidate, ReachOutDraft } from '../types';
+import { Activity, BarChart2, Book, Trash2, Clock, CheckCircle2, ShieldCheck, RefreshCw, Loader2, Mail, X } from 'lucide-react';
 
 type TabValue = 'all' | 'interview_prep' | 'language_test' | 'company_tool' | 'candidate_rankings';
 
@@ -288,6 +288,15 @@ export function TutorMetrics() {
   const [activeTab, setActiveTab] = useState<TabValue>('all');
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // Reach Out state
+  const [reachOutTarget, setReachOutTarget] = useState<RankedCandidate | null>(null);
+  const [reachOutDraft, setReachOutDraft] = useState<ReachOutDraft | null>(null);
+  const [reachOutLoading, setReachOutLoading] = useState(false);
+  const [reachOutSending, setReachOutSending] = useState(false);
+  const [reachOutSent, setReachOutSent] = useState<Set<string>>(new Set());
+  const [editedSubject, setEditedSubject] = useState('');
+  const [editedBody, setEditedBody] = useState('');
+
   const handleDelete = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent row click navigation
     if (!confirm('Are you sure you want to delete this session? This cannot be undone.')) {
@@ -328,6 +337,45 @@ export function TutorMetrics() {
       console.error('Failed to run ranking:', err);
     } finally {
       setRankingsRunning(false);
+    }
+  };
+
+  const handleOpenReachOut = async (candidate: RankedCandidate) => {
+    if (!companyId) return;
+    setReachOutTarget(candidate);
+    setReachOutDraft(null);
+    setEditedSubject('');
+    setEditedBody('');
+    setReachOutLoading(true);
+    try {
+      const draft = await api.reachOut.draft(companyId, candidate.candidate_id);
+      setReachOutDraft(draft);
+      setEditedSubject(draft.subject);
+      setEditedBody(draft.body);
+    } catch (err) {
+      console.error('Failed to draft reach-out:', err);
+      setReachOutTarget(null);
+    } finally {
+      setReachOutLoading(false);
+    }
+  };
+
+  const handleSendReachOut = async () => {
+    if (!reachOutTarget || !reachOutDraft || !companyId) return;
+    setReachOutSending(true);
+    try {
+      await api.reachOut.send(companyId, reachOutTarget.candidate_id, {
+        to_email: reachOutDraft.to_email,
+        subject: editedSubject,
+        body: editedBody,
+      });
+      setReachOutSent((prev) => new Set(prev).add(reachOutTarget.candidate_id));
+      setReachOutTarget(null);
+      setReachOutDraft(null);
+    } catch (err) {
+      console.error('Failed to send reach-out:', err);
+    } finally {
+      setReachOutSending(false);
     }
   };
 
@@ -669,6 +717,7 @@ export function TutorMetrics() {
                 <div className="w-20 text-right">Score</div>
                 <div className="w-64 hidden md:block">Signals</div>
                 <div className="w-28 text-right">Mode</div>
+                <div className="w-28 text-right">Action</div>
               </div>
               {rankings.map((r, idx) => (
                 <div key={r.id} className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 px-6 flex items-center gap-4">
@@ -715,9 +764,120 @@ export function TutorMetrics() {
                       <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 bg-zinc-800 border border-zinc-700 px-2 py-0.5 rounded-sm">Resume Only</span>
                     )}
                   </div>
+
+                  {/* Reach Out action */}
+                  <div className="w-28 flex justify-end">
+                    {reachOutSent.has(r.candidate_id) ? (
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-teal-400">
+                        <CheckCircle2 size={12} /> Sent
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleOpenReachOut(r)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 rounded-sm transition-colors"
+                        title="Draft a personalized reach-out email"
+                      >
+                        <Mail size={11} /> Reach Out
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
+
+            {/* Reach Out Modal */}
+            {reachOutTarget && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                <div className="relative bg-zinc-950 border border-white/15 rounded-sm shadow-2xl w-full max-w-2xl mx-4">
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+                    <div>
+                      <div className="text-xs font-bold text-white uppercase tracking-wider">
+                        {reachOutTarget.candidate_name || 'Candidate'}
+                      </div>
+                      <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">Draft Message</div>
+                    </div>
+                    <button
+                      onClick={() => { setReachOutTarget(null); setReachOutDraft(null); }}
+                      className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded transition-colors"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  {/* Modal Body */}
+                  <div className="px-6 py-5 space-y-4">
+                    {/* To field */}
+                    <div>
+                      <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">To</div>
+                      <div className="text-sm text-zinc-300 font-mono bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-sm">
+                        {reachOutDraft
+                          ? `${reachOutDraft.to_name} <${reachOutDraft.to_email}>`
+                          : <span className="text-zinc-600 italic">Loading…</span>}
+                      </div>
+                    </div>
+
+                    {/* AI badge */}
+                    {reachOutDraft && (
+                      <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-violet-500/10 border border-violet-500/20 text-violet-400 text-[9px] font-bold uppercase tracking-widest rounded-sm">
+                        ✦ AI-generated draft — edit as needed
+                      </div>
+                    )}
+
+                    {/* Subject */}
+                    <div>
+                      <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Subject</div>
+                      {reachOutLoading ? (
+                        <div className="h-9 bg-zinc-800 rounded-sm animate-pulse" />
+                      ) : (
+                        <input
+                          type="text"
+                          value={editedSubject}
+                          onChange={(e) => setEditedSubject(e.target.value)}
+                          className="w-full bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-white text-sm px-3 py-2 rounded-sm outline-none transition-colors"
+                        />
+                      )}
+                    </div>
+
+                    {/* Body */}
+                    <div>
+                      <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Message</div>
+                      {reachOutLoading ? (
+                        <div className="h-48 bg-zinc-800 rounded-sm animate-pulse" />
+                      ) : (
+                        <textarea
+                          value={editedBody}
+                          onChange={(e) => setEditedBody(e.target.value)}
+                          rows={10}
+                          className="w-full bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-white text-sm px-3 py-2 rounded-sm outline-none transition-colors resize-none font-sans leading-relaxed"
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
+                    <button
+                      onClick={() => { setReachOutTarget(null); setReachOutDraft(null); }}
+                      className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSendReachOut}
+                      disabled={reachOutLoading || reachOutSending || !reachOutDraft}
+                      className="inline-flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-sm transition-colors"
+                    >
+                      {reachOutSending ? (
+                        <><Loader2 size={11} className="animate-spin" /> Sending…</>
+                      ) : (
+                        <><Mail size={11} /> Send Message</>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           )}
         </div>
       )}

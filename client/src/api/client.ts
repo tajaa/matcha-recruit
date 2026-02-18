@@ -2,6 +2,7 @@ import type {
   Company,
   CompanyCreate,
   RankedCandidate,
+  ReachOutDraft,
   Interview,
   InterviewCreate,
   InterviewStart,
@@ -639,6 +640,25 @@ export const candidates = {
 
   listForCompany: () =>
     request<{id: string, name: string, email: string}[]>(`/candidates/company`),
+};
+
+// Reach-out email (Candidate Rankings → agentic email draft + send)
+export const reachOut = {
+  draft: (companyId: string, candidateId: string) =>
+    request<ReachOutDraft>(
+      `/companies/${companyId}/candidates/${candidateId}/draft-reach-out`,
+      { method: 'POST' }
+    ),
+
+  send: (
+    companyId: string,
+    candidateId: string,
+    data: { to_email: string; subject: string; body: string }
+  ) =>
+    request<{ success: boolean; message: string }>(
+      `/companies/${companyId}/candidates/${candidateId}/send-reach-out`,
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
 };
 
 // Rankings
@@ -2517,6 +2537,7 @@ export const api = {
   provisioning,
   interviews,
   candidates,
+  reachOut,
   rankings,
   matching,
   positions,

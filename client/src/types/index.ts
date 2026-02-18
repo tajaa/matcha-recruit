@@ -235,6 +235,14 @@ export interface RankedCandidate {
   created_at: string;
 }
 
+// Reach-out email drafting types
+export interface ReachOutDraft {
+  to_email: string;
+  to_name: string;
+  subject: string;
+  body: string;
+}
+
 // WebSocket message types
 export interface WSMessage {
   type: 'user' | 'assistant' | 'status' | 'system';

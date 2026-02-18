@@ -1798,6 +1798,94 @@ Welcome to Matcha! We're excited to have you on board.
             print(f"[Email] Error sending to {to_email}: {e}")
             return False
 
+    async def send_candidate_reach_out_email(
+        self,
+        to_email: str,
+        to_name: str,
+        subject: str,
+        body: str,
+        from_name: str,
+        from_company: str,
+    ) -> bool:
+        """Send a personalized meeting-request email to a candidate.
+
+        The subject and body are admin-reviewed (possibly AI-drafted) text.
+        Returns True if sent successfully, False otherwise.
+        """
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        # Wrap the plain-text body in a simple HTML email
+        html_body = body.replace('\n', '<br>')
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.7; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; font-size: 15px; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            {html_body}
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit on behalf of {from_company}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": from_name or self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_name,
+                }
+            ],
+            "subject": subject,
+            "html": html_content,
+            "text": body,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent reach-out email to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
     async def send_business_rejected_email(
         self,
         to_email: str,
