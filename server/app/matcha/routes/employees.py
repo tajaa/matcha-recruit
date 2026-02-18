@@ -16,7 +16,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, EmailStr, model_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from ...database import get_connection
 from ...core.dependencies import get_current_user
@@ -1166,6 +1166,8 @@ class UpdateOnboardingTaskRequest(BaseModel):
 
 
 VALID_ONBOARDING_CATEGORIES = ["documents", "equipment", "training", "admin", "return_to_work"]
+VALID_OFFBOARDING_CASE_STATUS = {"in_progress", "completed", "cancelled"}
+VALID_OFFBOARDING_TASK_STATUS = {"pending", "completed", "skipped"}
 
 RETURN_TO_WORK_DEFAULT_TEMPLATES = [
     {
@@ -1217,6 +1219,132 @@ RETURN_TO_WORK_DEFAULT_TEMPLATES = [
         "sort_order": 6,
     },
 ]
+
+OFFBOARDING_DEFAULT_TASKS = [
+    {
+        "title": "Disable SaaS and identity access",
+        "description": "Disable SSO, email, and application access for the employee.",
+        "category": "access_revocation",
+        "assignee_type": "it",
+        "due_offset_days": 0,
+    },
+    {
+        "title": "Collect company equipment",
+        "description": "Retrieve laptop, badge, and any other assigned hardware.",
+        "category": "equipment_return",
+        "assignee_type": "it",
+        "due_offset_days": 3,
+    },
+    {
+        "title": "Run knowledge transfer handoff",
+        "description": "Capture handoff notes, docs, and transition ownership.",
+        "category": "knowledge_transfer",
+        "assignee_type": "manager",
+        "due_offset_days": -2,
+    },
+    {
+        "title": "Schedule exit interview",
+        "description": "Coordinate and document employee exit interview.",
+        "category": "exit_interview",
+        "assignee_type": "hr",
+        "due_offset_days": 1,
+    },
+    {
+        "title": "Finalize payroll and benefits termination",
+        "description": "Process final payroll and confirm benefits termination timing.",
+        "category": "final_payroll",
+        "assignee_type": "payroll",
+        "due_offset_days": 2,
+    },
+]
+
+
+class OffboardingCaseCreateRequest(BaseModel):
+    last_day: date
+    reason: Optional[str] = None
+    is_voluntary: bool = True
+    assign_default_tasks: bool = True
+
+
+class OffboardingCaseCompleteRequest(BaseModel):
+    force: bool = False
+
+
+class OffboardingTaskUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class OffboardingTaskResponse(BaseModel):
+    id: UUID
+    case_id: UUID
+    employee_id: UUID
+    title: str
+    description: Optional[str]
+    category: str
+    assignee_type: str
+    due_date: Optional[str]
+    status: str
+    completed_at: Optional[datetime]
+    completed_by: Optional[UUID]
+    notes: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class OffboardingCaseResponse(BaseModel):
+    id: UUID
+    org_id: UUID
+    employee_id: UUID
+    status: str
+    reason: Optional[str]
+    is_voluntary: bool
+    last_day: str
+    started_at: datetime
+    completed_at: Optional[datetime]
+    created_by: Optional[UUID]
+    created_at: datetime
+    tasks: list[OffboardingTaskResponse] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+
+def _to_offboarding_task_response(row) -> OffboardingTaskResponse:
+    return OffboardingTaskResponse(
+        id=row["id"],
+        case_id=row["case_id"],
+        employee_id=row["employee_id"],
+        title=row["title"],
+        description=row["description"],
+        category=row["category"],
+        assignee_type=row["assignee_type"],
+        due_date=str(row["due_date"]) if row["due_date"] else None,
+        status=row["status"],
+        completed_at=row["completed_at"],
+        completed_by=row["completed_by"],
+        notes=row["notes"],
+        created_at=row["created_at"],
+    )
+
+
+def _to_offboarding_case_response(case_row, task_rows: list) -> OffboardingCaseResponse:
+    return OffboardingCaseResponse(
+        id=case_row["id"],
+        org_id=case_row["org_id"],
+        employee_id=case_row["employee_id"],
+        status=case_row["status"],
+        reason=case_row["reason"],
+        is_voluntary=bool(case_row["is_voluntary"]),
+        last_day=str(case_row["last_day"]),
+        started_at=case_row["started_at"],
+        completed_at=case_row["completed_at"],
+        created_by=case_row["created_by"],
+        created_at=case_row["created_at"],
+        tasks=[_to_offboarding_task_response(row) for row in task_rows],
+    )
 
 
 async def _ensure_rtw_templates(conn, company_id: UUID) -> None:
@@ -1725,6 +1853,359 @@ async def delete_employee_onboarding_task(
             raise HTTPException(status_code=404, detail="Onboarding task not found")
 
         return {"message": "Onboarding task removed"}
+
+
+# ================================
+# Employee Offboarding
+# ================================
+
+@router.post("/{employee_id}/offboard", response_model=OffboardingCaseResponse)
+async def create_offboarding_case(
+    employee_id: UUID,
+    request: OffboardingCaseCreateRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create or return the active offboarding case for an employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            employee = await conn.fetchrow(
+                """
+                SELECT id, org_id, start_date
+                FROM employees
+                WHERE id = $1 AND org_id = $2
+                FOR UPDATE
+                """,
+                employee_id,
+                company_id,
+            )
+            if not employee:
+                raise HTTPException(status_code=404, detail="Employee not found")
+
+            if employee["start_date"] and request.last_day < employee["start_date"]:
+                raise HTTPException(status_code=400, detail="last_day cannot be before employee start_date")
+
+            existing_case = await conn.fetchrow(
+                """
+                SELECT *
+                FROM offboarding_cases
+                WHERE employee_id = $1 AND status = 'in_progress'
+                ORDER BY created_at DESC
+                LIMIT 1
+                FOR UPDATE
+                """,
+                employee_id,
+            )
+
+            if existing_case:
+                case_row = existing_case
+            else:
+                case_row = await conn.fetchrow(
+                    """
+                    INSERT INTO offboarding_cases
+                    (org_id, employee_id, status, reason, is_voluntary, last_day, created_by)
+                    VALUES ($1, $2, 'in_progress', $3, $4, $5, $6)
+                    RETURNING *
+                    """,
+                    company_id,
+                    employee_id,
+                    request.reason,
+                    request.is_voluntary,
+                    request.last_day,
+                    current_user.id,
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE employees
+                    SET termination_date = $2, updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    employee_id,
+                    request.last_day,
+                )
+
+                if request.assign_default_tasks:
+                    for template in OFFBOARDING_DEFAULT_TASKS:
+                        due_date = request.last_day + timedelta(days=template["due_offset_days"])
+                        await conn.execute(
+                            """
+                            INSERT INTO offboarding_tasks
+                            (case_id, employee_id, title, description, category, assignee_type, due_date)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                            """,
+                            case_row["id"],
+                            employee_id,
+                            template["title"],
+                            template["description"],
+                            template["category"],
+                            template["assignee_type"],
+                            due_date,
+                        )
+
+            task_rows = await conn.fetch(
+                """
+                SELECT *
+                FROM offboarding_tasks
+                WHERE case_id = $1
+                ORDER BY due_date NULLS LAST, created_at
+                """,
+                case_row["id"],
+            )
+
+        return _to_offboarding_case_response(case_row, list(task_rows))
+
+
+@router.get("/{employee_id}/offboard", response_model=OffboardingCaseResponse)
+async def get_offboarding_case(
+    employee_id: UUID,
+    status: Optional[str] = Query(None, description="Filter case status"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get the latest offboarding case for an employee."""
+    company_id = await get_client_company_id(current_user)
+    if status and status not in VALID_OFFBOARDING_CASE_STATUS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {sorted(VALID_OFFBOARDING_CASE_STATUS)}",
+        )
+
+    async with get_connection() as conn:
+        employee = await conn.fetchrow(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id,
+            company_id,
+        )
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        if status:
+            case_row = await conn.fetchrow(
+                """
+                SELECT *
+                FROM offboarding_cases
+                WHERE employee_id = $1 AND org_id = $2 AND status = $3
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                employee_id,
+                company_id,
+                status,
+            )
+        else:
+            case_row = await conn.fetchrow(
+                """
+                SELECT *
+                FROM offboarding_cases
+                WHERE employee_id = $1 AND org_id = $2
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                employee_id,
+                company_id,
+            )
+
+        if not case_row:
+            raise HTTPException(status_code=404, detail="Offboarding case not found")
+
+        task_rows = await conn.fetch(
+            """
+            SELECT *
+            FROM offboarding_tasks
+            WHERE case_id = $1
+            ORDER BY due_date NULLS LAST, created_at
+            """,
+            case_row["id"],
+        )
+
+        return _to_offboarding_case_response(case_row, list(task_rows))
+
+
+@router.patch("/{employee_id}/offboard/tasks/{task_id}", response_model=OffboardingTaskResponse)
+async def update_offboarding_task(
+    employee_id: UUID,
+    task_id: UUID,
+    request: OffboardingTaskUpdateRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update offboarding task status/notes."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        task = await conn.fetchrow(
+            """
+            SELECT t.*
+            FROM offboarding_tasks t
+            JOIN offboarding_cases c ON c.id = t.case_id
+            WHERE t.id = $1 AND t.employee_id = $2 AND c.org_id = $3
+            """,
+            task_id,
+            employee_id,
+            company_id,
+        )
+        if not task:
+            raise HTTPException(status_code=404, detail="Offboarding task not found")
+
+        updates = []
+        values = []
+        idx = 1
+
+        if request.status is not None:
+            if request.status not in VALID_OFFBOARDING_TASK_STATUS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid status. Must be one of: {sorted(VALID_OFFBOARDING_TASK_STATUS)}",
+                )
+            updates.append(f"status = ${idx}")
+            values.append(request.status)
+            idx += 1
+
+            if request.status == "completed":
+                updates.append("completed_at = NOW()")
+                updates.append(f"completed_by = ${idx}")
+                values.append(current_user.id)
+                idx += 1
+            elif request.status == "pending":
+                updates.append("completed_at = NULL")
+                updates.append("completed_by = NULL")
+
+        if request.notes is not None:
+            updates.append(f"notes = ${idx}")
+            values.append(request.notes)
+            idx += 1
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        updates.append("updated_at = NOW()")
+        values.append(task_id)
+
+        row = await conn.fetchrow(
+            f"""
+            UPDATE offboarding_tasks
+            SET {', '.join(updates)}
+            WHERE id = ${idx}
+            RETURNING *
+            """,
+            *values,
+        )
+        return _to_offboarding_task_response(row)
+
+
+@router.post("/{employee_id}/offboard/{case_id}/complete", response_model=OffboardingCaseResponse)
+async def complete_offboarding_case(
+    employee_id: UUID,
+    case_id: UUID,
+    request: OffboardingCaseCompleteRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Complete an offboarding case and finalize access revocation status."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            case_row = await conn.fetchrow(
+                """
+                SELECT *
+                FROM offboarding_cases
+                WHERE id = $1 AND employee_id = $2 AND org_id = $3
+                FOR UPDATE
+                """,
+                case_id,
+                employee_id,
+                company_id,
+            )
+            if not case_row:
+                raise HTTPException(status_code=404, detail="Offboarding case not found")
+
+            if case_row["status"] == "completed":
+                task_rows = await conn.fetch(
+                    "SELECT * FROM offboarding_tasks WHERE case_id = $1 ORDER BY due_date NULLS LAST, created_at",
+                    case_id,
+                )
+                return _to_offboarding_case_response(case_row, list(task_rows))
+
+            pending_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM offboarding_tasks WHERE case_id = $1 AND status = 'pending'",
+                case_id,
+            )
+            if pending_count > 0 and not request.force:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot complete case with {pending_count} pending tasks unless force=true",
+                )
+
+            if pending_count > 0 and request.force:
+                await conn.execute(
+                    """
+                    UPDATE offboarding_tasks
+                    SET status = 'skipped',
+                        notes = COALESCE(notes || E'\\n', '') || 'Auto-skipped during forced case completion.',
+                        updated_at = NOW()
+                    WHERE case_id = $1 AND status = 'pending'
+                    """,
+                    case_id,
+                )
+
+            case_row = await conn.fetchrow(
+                """
+                UPDATE offboarding_cases
+                SET status = 'completed', completed_at = NOW(), updated_at = NOW()
+                WHERE id = $1
+                RETURNING *
+                """,
+                case_id,
+            )
+
+            if case_row["last_day"] <= date.today():
+                try:
+                    identities = await conn.fetch(
+                        """
+                        SELECT id, provider
+                        FROM external_identities
+                        WHERE employee_id = $1 AND company_id = $2 AND status <> 'deprovisioned'
+                        """,
+                        employee_id,
+                        company_id,
+                    )
+                except Exception:
+                    identities = []
+
+                for identity in identities:
+                    try:
+                        await conn.execute(
+                            """
+                            UPDATE external_identities
+                            SET status = 'deprovisioned', updated_at = NOW()
+                            WHERE id = $1
+                            """,
+                            identity["id"],
+                        )
+                        await conn.execute(
+                            """
+                            INSERT INTO provisioning_audit_logs (
+                                company_id, employee_id, actor_user_id, provider, action, status, detail, payload
+                            )
+                            VALUES ($1, $2, $3, $4, $5, 'info', $6, $7::jsonb)
+                            """,
+                            company_id,
+                            employee_id,
+                            current_user.id,
+                            identity["provider"],
+                            "offboarding_case_completed",
+                            "Marked external identity as deprovisioned during offboarding completion.",
+                            json.dumps({"offboarding_case_id": str(case_id)}),
+                        )
+                    except Exception:
+                        continue
+
+            task_rows = await conn.fetch(
+                "SELECT * FROM offboarding_tasks WHERE case_id = $1 ORDER BY due_date NULLS LAST, created_at",
+                case_id,
+            )
+
+        return _to_offboarding_case_response(case_row, list(task_rows))
 
 
 # ================================

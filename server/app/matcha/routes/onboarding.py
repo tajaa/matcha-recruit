@@ -68,6 +68,35 @@ class OnboardingStateMachineResponse(BaseModel):
     event_optional_fields: List[str]
 
 
+class OnboardingFunnelResponse(BaseModel):
+    invited: int
+    accepted: int
+    started: int
+    completed: int
+    ready_for_day1: int
+
+
+class OnboardingKPIResponse(BaseModel):
+    time_to_ready_p50_days: Optional[float]
+    time_to_ready_p90_days: Optional[float]
+    completion_before_start_rate: Optional[float]
+    automation_success_rate: Optional[float]
+    manual_intervention_rate: Optional[float]
+
+
+class OnboardingBottleneckItem(BaseModel):
+    task_title: str
+    overdue_count: int
+    avg_days_overdue: float
+
+
+class OnboardingAnalyticsResponse(BaseModel):
+    generated_at: datetime
+    funnel: OnboardingFunnelResponse
+    kpis: OnboardingKPIResponse
+    bottlenecks: List[OnboardingBottleneckItem]
+
+
 # Default templates to create for new companies
 DEFAULT_TEMPLATES = [
     # Documents
@@ -96,6 +125,12 @@ DEFAULT_TEMPLATES = [
 ]
 
 
+def _safe_rate(numerator: int, denominator: int) -> Optional[float]:
+    if denominator <= 0:
+        return None
+    return round((numerator / denominator) * 100, 2)
+
+
 @router.get("/state-machine", response_model=OnboardingStateMachineResponse)
 async def get_onboarding_state_machine(
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -114,6 +149,167 @@ async def get_onboarding_state_machine(
         event_schema_version=event_contract["version"],
         event_required_fields=event_contract["required_fields"],
         event_optional_fields=event_contract["optional_fields"],
+    )
+
+
+@router.get("/analytics", response_model=OnboardingAnalyticsResponse)
+async def get_onboarding_analytics(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return Phase-3 onboarding funnel, KPI, and bottleneck analytics."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        funnel = await conn.fetchrow(
+            """
+            WITH latest_invites AS (
+                SELECT DISTINCT ON (i.employee_id)
+                    i.employee_id,
+                    i.status
+                FROM employee_invitations i
+                JOIN employees e ON e.id = i.employee_id
+                WHERE e.org_id = $1
+                ORDER BY i.employee_id, i.created_at DESC
+            ),
+            onboarding_progress AS (
+                SELECT
+                    e.id AS employee_id,
+                    COUNT(eot.id)::int AS total_tasks,
+                    COUNT(*) FILTER (WHERE eot.status = 'completed')::int AS completed_tasks,
+                    COUNT(*) FILTER (WHERE eot.status = 'pending')::int AS pending_tasks
+                FROM employees e
+                LEFT JOIN employee_onboarding_tasks eot ON eot.employee_id = e.id
+                WHERE e.org_id = $1
+                GROUP BY e.id
+            )
+            SELECT
+                COUNT(*) FILTER (WHERE li.employee_id IS NOT NULL)::int AS invited,
+                COUNT(*) FILTER (WHERE li.status = 'accepted')::int AS accepted,
+                COUNT(*) FILTER (WHERE op.total_tasks > 0)::int AS started,
+                COUNT(*) FILTER (WHERE op.total_tasks > 0 AND op.pending_tasks = 0)::int AS completed,
+                COUNT(*) FILTER (WHERE op.total_tasks > 0 AND op.pending_tasks = 0)::int AS ready_for_day1
+            FROM employees e
+            LEFT JOIN latest_invites li ON li.employee_id = e.id
+            LEFT JOIN onboarding_progress op ON op.employee_id = e.id
+            WHERE e.org_id = $1
+            """,
+            company_id,
+        )
+
+        kpi_time = await conn.fetchrow(
+            """
+            WITH per_employee AS (
+                SELECT
+                    e.id AS employee_id,
+                    e.start_date,
+                    first_inv.invited_at,
+                    MAX(eot.completed_at) FILTER (WHERE eot.status = 'completed') AS all_completed_at,
+                    COUNT(eot.id)::int AS total_tasks,
+                    COUNT(*) FILTER (WHERE eot.status = 'completed')::int AS completed_tasks
+                FROM employees e
+                LEFT JOIN LATERAL (
+                    SELECT i.created_at AS invited_at
+                    FROM employee_invitations i
+                    WHERE i.employee_id = e.id
+                    ORDER BY i.created_at ASC
+                    LIMIT 1
+                ) first_inv ON true
+                LEFT JOIN employee_onboarding_tasks eot ON eot.employee_id = e.id
+                WHERE e.org_id = $1
+                GROUP BY e.id, e.start_date, first_inv.invited_at
+            )
+            SELECT
+                percentile_disc(0.5) WITHIN GROUP (
+                    ORDER BY EXTRACT(EPOCH FROM (all_completed_at - invited_at)) / 86400.0
+                ) AS p50_days,
+                percentile_disc(0.9) WITHIN GROUP (
+                    ORDER BY EXTRACT(EPOCH FROM (all_completed_at - invited_at)) / 86400.0
+                ) AS p90_days,
+                COUNT(*) FILTER (
+                    WHERE total_tasks > 0
+                      AND completed_tasks = total_tasks
+                      AND start_date IS NOT NULL
+                      AND all_completed_at::date <= start_date
+                )::int AS completed_before_start_count,
+                COUNT(*) FILTER (
+                    WHERE total_tasks > 0
+                      AND completed_tasks = total_tasks
+                      AND start_date IS NOT NULL
+                )::int AS completed_with_start_date_count
+            FROM per_employee
+            WHERE invited_at IS NOT NULL
+              AND all_completed_at IS NOT NULL
+              AND total_tasks > 0
+              AND completed_tasks = total_tasks
+              AND all_completed_at >= invited_at
+            """,
+            company_id,
+        )
+
+        run_stats = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*)::int AS total_runs,
+                COUNT(*) FILTER (WHERE status = 'completed')::int AS completed_runs,
+                COUNT(*) FILTER (WHERE status IN ('failed', 'needs_action'))::int AS intervention_runs
+            FROM onboarding_runs
+            WHERE company_id = $1
+            """,
+            company_id,
+        )
+
+        bottleneck_rows = await conn.fetch(
+            """
+            SELECT
+                eot.title,
+                COUNT(*)::int AS overdue_count,
+                AVG((CURRENT_DATE - eot.due_date))::float AS avg_days_overdue
+            FROM employee_onboarding_tasks eot
+            JOIN employees e ON e.id = eot.employee_id
+            WHERE e.org_id = $1
+              AND eot.status = 'pending'
+              AND eot.due_date IS NOT NULL
+              AND eot.due_date < CURRENT_DATE
+            GROUP BY eot.title
+            ORDER BY overdue_count DESC, avg_days_overdue DESC
+            LIMIT 5
+            """,
+            company_id,
+        )
+
+    return OnboardingAnalyticsResponse(
+        generated_at=datetime.utcnow(),
+        funnel=OnboardingFunnelResponse(
+            invited=int(funnel["invited"] or 0),
+            accepted=int(funnel["accepted"] or 0),
+            started=int(funnel["started"] or 0),
+            completed=int(funnel["completed"] or 0),
+            ready_for_day1=int(funnel["ready_for_day1"] or 0),
+        ),
+        kpis=OnboardingKPIResponse(
+            time_to_ready_p50_days=float(kpi_time["p50_days"]) if kpi_time and kpi_time["p50_days"] is not None else None,
+            time_to_ready_p90_days=float(kpi_time["p90_days"]) if kpi_time and kpi_time["p90_days"] is not None else None,
+            completion_before_start_rate=_safe_rate(
+                int(kpi_time["completed_before_start_count"] or 0),
+                int(kpi_time["completed_with_start_date_count"] or 0),
+            ) if kpi_time else None,
+            automation_success_rate=_safe_rate(
+                int(run_stats["completed_runs"] or 0),
+                int(run_stats["total_runs"] or 0),
+            ) if run_stats else None,
+            manual_intervention_rate=_safe_rate(
+                int(run_stats["intervention_runs"] or 0),
+                int(run_stats["total_runs"] or 0),
+            ) if run_stats else None,
+        ),
+        bottlenecks=[
+            OnboardingBottleneckItem(
+                task_title=row["title"],
+                overdue_count=int(row["overdue_count"] or 0),
+                avg_days_overdue=float(row["avg_days_overdue"] or 0.0),
+            )
+            for row in bottleneck_rows
+        ],
     )
 
 
