@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from ...database import get_connection
 from ...core.services.auth import hash_password, create_access_token, create_refresh_token
+from ...core.services.email import EmailService
 
 router = APIRouter()
 
@@ -94,14 +95,16 @@ async def accept_invitation(token: str, request: AcceptInvitationRequest):
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
     async with get_connection() as conn:
-        # Get invitation with employee info
+        # Get invitation with employee and company info
         invitation = await conn.fetchrow(
             """
             SELECT
                 i.id, i.employee_id, i.org_id, i.status, i.expires_at,
-                e.email, e.first_name, e.last_name, e.user_id
+                e.email, e.work_email, e.first_name, e.last_name, e.user_id,
+                c.name as company_name
             FROM employee_invitations i
             JOIN employees e ON i.employee_id = e.id
+            JOIN companies c ON i.org_id = c.id
             WHERE i.token = $1
             """,
             token
@@ -159,6 +162,20 @@ async def accept_invitation(token: str, request: AcceptInvitationRequest):
         # Generate tokens
         access_token = create_access_token(user["id"], user["email"], user["role"])
         refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+
+        # Send welcome email to work email (company email) — fire and forget
+        welcome_to = invitation["work_email"] or invitation["email"]
+        employee_name = f"{invitation['first_name']} {invitation['last_name']}"
+        try:
+            email_service = EmailService()
+            await email_service.send_employee_welcome_email(
+                to_email=welcome_to,
+                to_name=employee_name,
+                company_name=invitation["company_name"],
+                login_email=invitation["email"],
+            )
+        except Exception as e:
+            print(f"[Email] Failed to send welcome email after invitation acceptance: {e}")
 
         return AcceptInvitationResponse(
             access_token=access_token,
