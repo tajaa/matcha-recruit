@@ -38,6 +38,219 @@ const SEVERITY_COLORS: Record<string, string> = {
   low: 'bg-emerald-500',
 };
 
+// ─── Incident Lifecycle Wizard ────────────────────────────────────────────────
+
+type IRStepIcon = 'report' | 'investigate' | 'analyze' | 'action' | 'resolve';
+
+type IRWizardStep = {
+  id: number;
+  icon: IRStepIcon;
+  title: string;
+  description: string;
+  action?: string;
+};
+
+const IR_CYCLE_STEPS: IRWizardStep[] = [
+  {
+    id: 1,
+    icon: 'report',
+    title: 'Report Incident',
+    description: 'Log safety, behavioral, or property incidents. Assign an initial severity level and description.',
+    action: 'Click "Report" to log a new incident.',
+  },
+  {
+    id: 2,
+    icon: 'investigate',
+    title: 'Investigate',
+    description: 'Gather evidence, interview witnesses, and document findings to build a complete case record.',
+    action: 'Update status to "Investigating" to start your review.',
+  },
+  {
+    id: 3,
+    icon: 'analyze',
+    title: 'AI Analysis',
+    description: 'AI detects risk patterns, root causes, and provides suggestions based on labor law compliance.',
+    action: 'View "AI Analysis" in the incident detail view.',
+  },
+  {
+    id: 4,
+    icon: 'action',
+    title: 'Take Action',
+    description: 'Assign resolution tasks, issue warnings, or implement new safety protocols based on findings.',
+    action: 'Update status to "Action Required" for follow-up.',
+  },
+  {
+    id: 5,
+    icon: 'resolve',
+    title: 'Resolve & Close',
+    description: 'Finalize the audit trail and close the record with a comprehensive summary of outcomes.',
+    action: 'Review and transition to "Resolved" or "Closed".',
+  },
+];
+
+function IRCycleIcon({ icon, className = '' }: { icon: IRStepIcon; className?: string }) {
+  const common = { className, width: 16, height: 16, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
+  
+  if (icon === 'report') {
+    return (
+      <svg {...common}>
+        <path d="M10 5V15M5 10H15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  if (icon === 'investigate') {
+    return (
+      <svg {...common}>
+        <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M10 10V6M10 10L13 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'analyze') {
+    return (
+      <svg {...common}>
+        <rect x="5" y="5" width="10" height="10" rx="1" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M10 8V12M8 10H12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'action') {
+    return (
+      <svg {...common}>
+        <path d="M16 5L4 10L10 11L11 17L16 5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (icon === 'resolve') {
+    return (
+      <svg {...common}>
+        <path d="M6 10.3L8.5 12.8L14 7.3" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  return null;
+}
+
+function IRCycleWizard({ incidentsCount, actionRequiredCount }: { incidentsCount: number, actionRequiredCount: number }) {
+  const storageKey = 'ir-wizard-collapsed-v1';
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(storageKey) === 'true'; } catch { return false; }
+  });
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try { localStorage.setItem(storageKey, String(next)); } catch {}
+  };
+
+  const activeStep = incidentsCount > 20 ? 5 
+                  : actionRequiredCount > 0 ? 4
+                  : incidentsCount > 0 ? 2
+                  : 1;
+
+  return (
+    <div className="border border-white/10 bg-zinc-950/60 mb-10">
+      <button
+        onClick={toggle}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Incident Cycle</span>
+          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
+            Step {activeStep} of 5
+          </span>
+          <span className="text-[10px] text-zinc-600">
+            {IR_CYCLE_STEPS[activeStep - 1].title}
+          </span>
+        </div>
+        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`} />
+      </button>
+
+      {!collapsed && (
+        <div className="border-t border-white/10">
+          <div className="relative px-5 pt-5 pb-2 overflow-x-auto">
+            <div className="flex items-start gap-0 min-w-max">
+              {IR_CYCLE_STEPS.map((step, idx) => {
+                const isComplete = step.id < activeStep;
+                const isActive = step.id === activeStep;
+
+                return (
+                  <div key={step.id} className="flex items-start">
+                    <div className="flex flex-col items-center w-28">
+                      <div className={`relative w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all ${
+                        isComplete
+                          ? 'bg-matcha-500/20 border-matcha-500/50 text-matcha-400'
+                          : isActive
+                          ? 'bg-white/10 border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)]'
+                          : 'bg-zinc-900 border-zinc-700 text-zinc-600'
+                      }`}>
+                        {isComplete ? '✓' : <IRCycleIcon icon={step.icon} className="w-4 h-4" />}
+                      </div>
+                      <div className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider leading-tight px-1 ${
+                        isActive ? 'text-white' : isComplete ? 'text-matcha-400/70' : 'text-zinc-600'
+                      }`}>
+                        {step.title}
+                      </div>
+                    </div>
+                    {idx < IR_CYCLE_STEPS.length - 1 && (
+                      <div className={`w-10 h-0.5 mt-[18px] flex-shrink-0 transition-colors ${
+                        step.id < activeStep ? 'bg-matcha-500/40' : 'bg-zinc-800'
+                      }`} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
+            <div className="flex items-start gap-3">
+              <span className="text-xl flex-shrink-0 text-zinc-200">
+                <IRCycleIcon icon={IR_CYCLE_STEPS[activeStep - 1].icon} className="w-5 h-5" />
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    {IR_CYCLE_STEPS[activeStep - 1].title}
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-white/10 text-zinc-400 border border-white/10">
+                    Current Step
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 leading-relaxed mb-2">
+                  {IR_CYCLE_STEPS[activeStep - 1].description}
+                </p>
+                {IR_CYCLE_STEPS[activeStep - 1].action && (
+                  <p className="text-[11px] text-matcha-400/80 font-medium">
+                    → {IR_CYCLE_STEPS[activeStep - 1].action}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChevronDownIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function IRList() {
   const navigate = useNavigate();
   const [incidents, setIncidents] = useState<IRIncident[]>([]);
@@ -156,6 +369,8 @@ export function IRList() {
           </button>
         </div>
       </div>
+
+      <IRCycleWizard incidentsCount={incidents.length} actionRequiredCount={actionRequiredCount} />
 
       {/* Summary */}
       <div data-tour="ir-list-stats" className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10">

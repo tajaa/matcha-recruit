@@ -113,6 +113,221 @@ interface OnboardingProgress {
   has_onboarding: boolean;
 }
 
+// ─── Employee Lifecycle Wizard ────────────────────────────────────────────────
+
+type EmployeeStepIcon = 'onboard' | 'provision' | 'invite' | 'track' | 'directory';
+
+type EmployeeWizardStep = {
+  id: number;
+  icon: EmployeeStepIcon;
+  title: string;
+  description: string;
+  action?: string;
+};
+
+const EMPLOYEE_CYCLE_STEPS: EmployeeWizardStep[] = [
+  {
+    id: 1,
+    icon: 'onboard',
+    title: 'Onboard Personnel',
+    description: 'Add new hires to your directory. You can use a single form, the Batch Wizard for up to 50 people, or a Bulk CSV upload.',
+    action: 'Click "Onboard New Employee" or "Add Employee" to begin.',
+  },
+  {
+    id: 2,
+    icon: 'provision',
+    title: 'Auto-Provision',
+    description: 'Synchronize with Google Workspace and Slack to automatically create business accounts for your new hires.',
+    action: 'Configure Google Auto-Provisioning in Onboarding Settings.',
+  },
+  {
+    id: 3,
+    icon: 'invite',
+    title: 'Send Invitations',
+    description: 'Issue portal invitations to employees so they can access their documents, PTO, and onboarding tasks.',
+    action: 'Click "Send Invite" for employees in "Not Invited" status.',
+  },
+  {
+    id: 4,
+    icon: 'track',
+    title: 'Track Progress',
+    description: 'Monitor real-time progress as employees complete their assigned onboarding tasks and document signatures.',
+    action: 'View the "Onboarding" column in the directory below.',
+  },
+  {
+    id: 5,
+    icon: 'directory',
+    title: 'Manage Directory',
+    description: 'Maintain your official system of record for active, pending, and terminated personnel.',
+    action: 'Filter the directory by status to manage different employee groups.',
+  },
+];
+
+function EmployeeCycleIcon({ icon, className = '' }: { icon: EmployeeStepIcon; className?: string }) {
+  const common = { className, width: 16, height: 16, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
+  
+  if (icon === 'onboard') {
+    return (
+      <svg {...common}>
+        <path d="M10 5V15M5 10H15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  if (icon === 'provision') {
+    return (
+      <svg {...common}>
+        <rect x="5" y="5" width="10" height="10" rx="1" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M10 8V12M8 10H12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M5 10H3.5M16.5 10H15M10 5V3.5M10 16.5V15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'invite') {
+    return (
+      <svg {...common}>
+        <path d="M16 5L4 10L10 11L11 17L16 5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (icon === 'track') {
+    return (
+      <svg {...common}>
+        <path d="M4 16V12M10 16V8M16 16V4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M3 17H17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'directory') {
+    return (
+      <svg {...common}>
+        <circle cx="10" cy="8" r="3" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M5 16C5 13.5 7.23858 11.5 10 11.5C12.7614 11.5 15 13.5 15 16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return null;
+}
+
+function EmployeeCycleWizard({ employees, onboardingProgress }: { employees: Employee[], onboardingProgress: Record<string, OnboardingProgress> }) {
+  const storageKey = 'employee-wizard-collapsed-v1';
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(storageKey) === 'true'; } catch { return false; }
+  });
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try { localStorage.setItem(storageKey, String(next)); } catch {}
+  };
+
+  const activeStep = employees.some(e => e.user_id) ? 5 
+                  : Object.values(onboardingProgress).some(p => p.completed > 0) ? 4
+                  : employees.some(e => e.invitation_status === 'pending') ? 3
+                  : employees.length > 0 ? 2
+                  : 1;
+
+  return (
+    <div className="border border-white/10 bg-zinc-950/60 mb-10">
+      <button
+        onClick={toggle}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Employee Cycle</span>
+          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
+            Step {activeStep} of 5
+          </span>
+          <span className="text-[10px] text-zinc-600">
+            {EMPLOYEE_CYCLE_STEPS[activeStep - 1].title}
+          </span>
+        </div>
+        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`} />
+      </button>
+
+      {!collapsed && (
+        <div className="border-t border-white/10">
+          <div className="relative px-5 pt-5 pb-2 overflow-x-auto">
+            <div className="flex items-start gap-0 min-w-max">
+              {EMPLOYEE_CYCLE_STEPS.map((step, idx) => {
+                const isComplete = step.id < activeStep;
+                const isActive = step.id === activeStep;
+
+                return (
+                  <div key={step.id} className="flex items-start">
+                    <div className="flex flex-col items-center w-28">
+                      <div className={`relative w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all ${
+                        isComplete
+                          ? 'bg-matcha-500/20 border-matcha-500/50 text-matcha-400'
+                          : isActive
+                          ? 'bg-white/10 border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)]'
+                          : 'bg-zinc-900 border-zinc-700 text-zinc-600'
+                      }`}>
+                        {isComplete ? '✓' : <EmployeeCycleIcon icon={step.icon} className="w-4 h-4" />}
+                      </div>
+                      <div className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider leading-tight px-1 ${
+                        isActive ? 'text-white' : isComplete ? 'text-matcha-400/70' : 'text-zinc-600'
+                      }`}>
+                        {step.title}
+                      </div>
+                    </div>
+                    {idx < EMPLOYEE_CYCLE_STEPS.length - 1 && (
+                      <div className={`w-10 h-0.5 mt-[18px] flex-shrink-0 transition-colors ${
+                        step.id < activeStep ? 'bg-matcha-500/40' : 'bg-zinc-800'
+                      }`} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
+            <div className="flex items-start gap-3">
+              <span className="text-xl flex-shrink-0 text-zinc-200">
+                <EmployeeCycleIcon icon={EMPLOYEE_CYCLE_STEPS[activeStep - 1].icon} className="w-5 h-5" />
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    {EMPLOYEE_CYCLE_STEPS[activeStep - 1].title}
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-white/10 text-zinc-400 border border-white/10">
+                    Current Step
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 leading-relaxed mb-2">
+                  {EMPLOYEE_CYCLE_STEPS[activeStep - 1].description}
+                </p>
+                {EMPLOYEE_CYCLE_STEPS[activeStep - 1].action && (
+                  <p className="text-[11px] text-matcha-400/80 font-medium">
+                    → {EMPLOYEE_CYCLE_STEPS[activeStep - 1].action}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChevronDownIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' | 'directory' }) {
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -841,6 +1056,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           </div>
         )}
       </div>
+
+      <EmployeeCycleWizard employees={employees} onboardingProgress={onboardingProgress} />
 
       {mode === 'onboarding' && (
         <div className="border border-white/10 bg-zinc-900/40 p-4 text-[11px] text-zinc-300 space-y-1">

@@ -21,6 +21,219 @@ import { StatusBadge } from '../../components/xp/StatusBadge';
 
 type Tab = 'cycles' | 'templates';
 
+// ─── Review Cycle Wizard ──────────────────────────────────────────────────────
+
+type ReviewStepIcon = 'template' | 'launch' | 'self' | 'manager' | 'finalize';
+
+type ReviewWizardStep = {
+  id: number;
+  icon: ReviewStepIcon;
+  title: string;
+  description: string;
+  action?: string;
+};
+
+const REVIEW_CYCLE_STEPS: ReviewWizardStep[] = [
+  {
+    id: 1,
+    icon: 'template',
+    title: 'Define Templates',
+    description: 'Create structured criteria, categories (e.g., Job Performance, Collaboration), and weighted scores.',
+    action: 'Switch to the "Templates" tab to build or edit.',
+  },
+  {
+    id: 2,
+    icon: 'launch',
+    title: 'Launch Cycle',
+    description: 'Set the review period and select a template. This automatically notifies all participants.',
+    action: 'Click "New Cycle" to start a review period.',
+  },
+  {
+    id: 3,
+    icon: 'self',
+    title: 'Self-Assessments',
+    description: 'Employees reflect on their own performance and submit self-reviews through the portal.',
+    action: 'Monitor "Self Reviews" in the progress dashboard.',
+  },
+  {
+    id: 4,
+    icon: 'manager',
+    title: 'Manager Reviews',
+    description: 'Managers complete evaluations for their direct reports based on the established template.',
+    action: 'Monitor "Manager Reviews" in the progress dashboard.',
+  },
+  {
+    id: 5,
+    icon: 'finalize',
+    title: 'Finalize Growth',
+    description: 'Complete the cycle to lock scores and finalize development plans and growth paths.',
+    action: 'Review completion rates and click "Complete Cycle".',
+  },
+];
+
+function ReviewCycleIcon({ icon, className = '' }: { icon: ReviewStepIcon; className?: string }) {
+  const common = { className, width: 16, height: 16, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
+  
+  if (icon === 'template') {
+    return (
+      <svg {...common}>
+        <path d="M10 6.5V3.5M10 16.5V13.5M13.5 10H16.5M3.5 10H6.5M12.5 7.5L14.5 5.5M5.5 14.5L7.5 12.5M12.5 12.5L14.5 14.5M5.5 5.5L7.5 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <circle cx="10" cy="10" r="2.3" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  if (icon === 'launch') {
+    return (
+      <svg {...common}>
+        <path d="M16 5L4 10L10 11L11 17L16 5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (icon === 'self') {
+    return (
+      <svg {...common}>
+        <path d="M10 5C7.23858 5 5 7.23858 5 10C5 12.7614 7.23858 15 10 15C12.7614 15 15 12.7614 15 10C15 7.23858 12.7614 5 10 5Z" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M10 8V12M8 10H12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'manager') {
+    return (
+      <svg {...common}>
+        <rect x="5" y="4" width="10" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M8 8H12M8 11H12M8 14H10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'finalize') {
+    return (
+      <svg {...common}>
+        <path d="M6 10.3L8.5 12.8L14 7.3" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  return null;
+}
+
+function ReviewCycleWizard({ activeCyclesCount, cyclesCount, templatesCount }: { activeCyclesCount: number, cyclesCount: number, templatesCount: number }) {
+  const storageKey = 'review-wizard-collapsed-v1';
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(storageKey) === 'true'; } catch { return false; }
+  });
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try { localStorage.setItem(storageKey, String(next)); } catch {}
+  };
+
+  const activeStep = cyclesCount > activeCyclesCount ? 5 
+                  : activeCyclesCount > 0 ? 3
+                  : templatesCount > 0 ? 2
+                  : 1;
+
+  return (
+    <div className="border border-white/10 bg-zinc-950/60 mb-10">
+      <button
+        onClick={toggle}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Review Cycle</span>
+          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
+            Step {activeStep} of 5
+          </span>
+          <span className="text-[10px] text-zinc-600">
+            {REVIEW_CYCLE_STEPS[activeStep - 1].title}
+          </span>
+        </div>
+        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`} />
+      </button>
+
+      {!collapsed && (
+        <div className="border-t border-white/10">
+          <div className="relative px-5 pt-5 pb-2 overflow-x-auto">
+            <div className="flex items-start gap-0 min-w-max">
+              {REVIEW_CYCLE_STEPS.map((step, idx) => {
+                const isComplete = step.id < activeStep;
+                const isActive = step.id === activeStep;
+
+                return (
+                  <div key={step.id} className="flex items-start">
+                    <div className="flex flex-col items-center w-28">
+                      <div className={`relative w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all ${
+                        isComplete
+                          ? 'bg-matcha-500/20 border-matcha-500/50 text-matcha-400'
+                          : isActive
+                          ? 'bg-white/10 border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)]'
+                          : 'bg-zinc-900 border-zinc-700 text-zinc-600'
+                      }`}>
+                        {isComplete ? '✓' : <ReviewCycleIcon icon={step.icon} className="w-4 h-4" />}
+                      </div>
+                      <div className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider leading-tight px-1 ${
+                        isActive ? 'text-white' : isComplete ? 'text-matcha-400/70' : 'text-zinc-600'
+                      }`}>
+                        {step.title}
+                      </div>
+                    </div>
+                    {idx < REVIEW_CYCLE_STEPS.length - 1 && (
+                      <div className={`w-10 h-0.5 mt-[18px] flex-shrink-0 transition-colors ${
+                        step.id < activeStep ? 'bg-matcha-500/40' : 'bg-zinc-800'
+                      }`} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
+            <div className="flex items-start gap-3">
+              <span className="text-xl flex-shrink-0 text-zinc-200">
+                <ReviewCycleIcon icon={REVIEW_CYCLE_STEPS[activeStep - 1].icon} className="w-5 h-5" />
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    {REVIEW_CYCLE_STEPS[activeStep - 1].title}
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-white/10 text-zinc-400 border border-white/10">
+                    Current Step
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 leading-relaxed mb-2">
+                  {REVIEW_CYCLE_STEPS[activeStep - 1].description}
+                </p>
+                {REVIEW_CYCLE_STEPS[activeStep - 1].action && (
+                  <p className="text-[11px] text-matcha-400/80 font-medium">
+                    → {REVIEW_CYCLE_STEPS[activeStep - 1].action}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChevronDownIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export default function PerformanceReviews() {
   const [activeTab, setActiveTab] = useState<Tab>('cycles');
   const { data: templates, loading: loadingTemplates, error: templatesError, refetch: refetchTemplates } = useReviewTemplates();
@@ -359,6 +572,8 @@ export default function PerformanceReviews() {
           </button>
         </div>
       </div>
+
+      <ReviewCycleWizard activeCyclesCount={activeCycles.length} cyclesCount={cycles.length} templatesCount={templates.length} />
 
       {(error || cyclesError || templatesError) && (
         <div className="bg-red-500/10 border border-red-500/20 rounded p-4 flex items-center justify-between">

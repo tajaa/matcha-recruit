@@ -78,6 +78,218 @@ const emptyFormData: LocationFormData = {
     jurisdictionKey: ''
 };
 
+// ─── Compliance Lifecycle Wizard ──────────────────────────────────────────────
+
+type ComplianceStepIcon = 'locations' | 'research' | 'alerts' | 'posters' | 'audit';
+
+type ComplianceWizardStep = {
+  id: number;
+  icon: ComplianceStepIcon;
+  title: string;
+  description: string;
+  action?: string;
+};
+
+const COMPLIANCE_CYCLE_STEPS: ComplianceWizardStep[] = [
+  {
+    id: 1,
+    icon: 'locations',
+    title: 'Add Locations',
+    description: 'Pin the cities and states where you have employees or offices. We use this to map applicable laws.',
+    action: 'Click "Add Location" to register your first business site.',
+  },
+  {
+    id: 2,
+    icon: 'research',
+    title: 'AI Research',
+    description: 'The AI researches federal, state, and local labor ordinances specific to each of your locations.',
+    action: 'Select a location and click "Check for Updates" to trigger AI research.',
+  },
+  {
+    id: 3,
+    icon: 'alerts',
+    title: 'Monitor Alerts',
+    description: 'Get notified when laws change, new requirements are detected, or deadlines are approaching.',
+    action: 'Check the "Alerts" tab for items needing your attention.',
+  },
+  {
+    id: 4,
+    icon: 'posters',
+    title: 'Order Posters',
+    description: 'Fulfill mandatory posting requirements by ordering or downloading AI-generated compliance posters.',
+    action: 'Navigate to the "Posters" tab to view available downloads or place orders.',
+  },
+  {
+    id: 5,
+    icon: 'audit',
+    title: 'Audit History',
+    description: 'Maintain a verifiable record of all compliance checks and historical requirement states.',
+    action: 'View the "Log" tab for a full audit trail of your compliance monitoring.',
+  },
+];
+
+function ComplianceCycleIcon({ icon, className = '' }: { icon: ComplianceStepIcon; className?: string }) {
+  const common = { className, width: 16, height: 16, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
+  
+  if (icon === 'locations') {
+    return (
+      <svg {...common}>
+        <path d="M10 17C10 17 4 11 4 7C4 3.68629 6.68629 1 10 1C13.3137 1 16 3.68629 16 7C16 11 10 17 10 17Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="10" cy="7" r="2" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  if (icon === 'research') {
+    return (
+      <svg {...common}>
+        <path d="M10 6.5V3.5M10 16.5V13.5M13.5 10H16.5M3.5 10H6.5M12.5 7.5L14.5 5.5M5.5 14.5L7.5 12.5M12.5 12.5L14.5 14.5M5.5 5.5L7.5 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <circle cx="10" cy="10" r="2.3" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  if (icon === 'alerts') {
+    return (
+      <svg {...common}>
+        <path d="M10 3V17M3 10H17M14.5 5.5L5.5 14.5M14.5 14.5L5.5 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'posters') {
+    return (
+      <svg {...common}>
+        <rect x="5" y="4" width="10" height="12" rx="1" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M7 7H13M7 10H13M7 13H10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'audit') {
+    return (
+      <svg {...common}>
+        <path d="M4 10L8 14L16 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return null;
+}
+
+function ComplianceCycleWizard({ locations, alerts }: { locations?: BusinessLocation[], alerts?: any[] }) {
+  const storageKey = 'compliance-wizard-collapsed-v1';
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(storageKey) === 'true'; } catch { return false; }
+  });
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try { localStorage.setItem(storageKey, String(next)); } catch {}
+  };
+
+  const activeStep = (alerts && alerts.length > 0) ? 3
+                  : (locations && locations.some(l => (l.requirements_count || 0) > 0)) ? 2
+                  : (locations && locations.length > 0) ? 2
+                  : 1;
+
+  return (
+    <div className="border border-white/10 bg-zinc-950/60 mb-10">
+      <button
+        onClick={toggle}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Compliance Cycle</span>
+          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
+            Step {activeStep} of 5
+          </span>
+          <span className="text-[10px] text-zinc-600">
+            {COMPLIANCE_CYCLE_STEPS[activeStep - 1].title}
+          </span>
+        </div>
+        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`} />
+      </button>
+
+      {!collapsed && (
+        <div className="border-t border-white/10">
+          <div className="relative px-5 pt-5 pb-2 overflow-x-auto">
+            <div className="flex items-start gap-0 min-w-max">
+              {COMPLIANCE_CYCLE_STEPS.map((step, idx) => {
+                const isComplete = step.id < activeStep;
+                const isActive = step.id === activeStep;
+
+                return (
+                  <div key={step.id} className="flex items-start">
+                    <div className="flex flex-col items-center w-28">
+                      <div className={`relative w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all ${
+                        isComplete
+                          ? 'bg-matcha-500/20 border-matcha-500/50 text-matcha-400'
+                          : isActive
+                          ? 'bg-white/10 border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)]'
+                          : 'bg-zinc-900 border-zinc-700 text-zinc-600'
+                      }`}>
+                        {isComplete ? '✓' : <ComplianceCycleIcon icon={step.icon} className="w-4 h-4" />}
+                      </div>
+                      <div className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider leading-tight px-1 ${
+                        isActive ? 'text-white' : isComplete ? 'text-matcha-400/70' : 'text-zinc-600'
+                      }`}>
+                        {step.title}
+                      </div>
+                    </div>
+                    {idx < COMPLIANCE_CYCLE_STEPS.length - 1 && (
+                      <div className={`w-10 h-0.5 mt-[18px] flex-shrink-0 transition-colors ${
+                        step.id < activeStep ? 'bg-matcha-500/40' : 'bg-zinc-800'
+                      }`} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
+            <div className="flex items-start gap-3">
+              <span className="text-xl flex-shrink-0 text-zinc-200">
+                <ComplianceCycleIcon icon={COMPLIANCE_CYCLE_STEPS[activeStep - 1].icon} className="w-5 h-5" />
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    {COMPLIANCE_CYCLE_STEPS[activeStep - 1].title}
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-white/10 text-zinc-400 border border-white/10">
+                    Current Step
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 leading-relaxed mb-2">
+                  {COMPLIANCE_CYCLE_STEPS[activeStep - 1].description}
+                </p>
+                {COMPLIANCE_CYCLE_STEPS[activeStep - 1].action && (
+                  <p className="text-[11px] text-matcha-400/80 font-medium">
+                    → {COMPLIANCE_CYCLE_STEPS[activeStep - 1].action}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChevronDownIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function Compliance() {
     const { user } = useAuth();
     const isClient = user?.role === 'client';
@@ -408,6 +620,8 @@ export function Compliance() {
                     Add Location
                 </button>
             </div>
+
+            <ComplianceCycleWizard locations={locations} alerts={alerts} />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div data-tour="compliance-locations" className="lg:col-span-1 space-y-4">

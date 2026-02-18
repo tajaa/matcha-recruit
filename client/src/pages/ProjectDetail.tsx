@@ -52,9 +52,11 @@ function formatSalary(min?: number | null, max?: number | null): string {
 
 // ─── Pipeline Wizard ────────────────────────────────────────────────────────
 
+type PipelineStepIcon = 'setup' | 'share' | 'ai_screen' | 'accept' | 'interview' | 'scores' | 'finalize';
+
 type WizardStep = {
   id: number;
-  icon: string;
+  icon: PipelineStepIcon;
   title: string;
   description: string;
   action?: string;
@@ -63,54 +65,117 @@ type WizardStep = {
 const WIZARD_STEPS: WizardStep[] = [
   {
     id: 1,
-    icon: '⚙',
+    icon: 'setup',
     title: 'Set Up Project',
     description: 'Define the role, requirements, salary range, and closing date. Toggle "Accept public applications" to generate a shareable apply URL.',
     action: 'Edit the project and enable public applications to proceed.',
   },
   {
     id: 2,
-    icon: '🔗',
+    icon: 'share',
     title: 'Share Apply URL',
     description: 'Copy the public apply link from the project header and share it with candidates — on LinkedIn, your careers page, or via email.',
     action: 'Copy the apply URL above and distribute it.',
   },
   {
     id: 3,
-    icon: '🤖',
+    icon: 'ai_screen',
     title: 'AI Screens Resumes',
     description: 'As applications arrive, the AI immediately reads each resume and scores it against your requirements. Results appear in the Applications section as Recommended, Needs Review, or Not Recommended.',
     action: 'Watch the Applications section — results appear within 30 seconds of each submission.',
   },
   {
     id: 4,
-    icon: '✅',
+    icon: 'accept',
     title: 'Review & Accept',
     description: 'Review AI recommendations and accept candidates you want to advance. Use "Accept All Recommended" for bulk approval, or manually add others the AI didn\'t flag.',
     action: 'Accept recommended candidates to trigger AI interview invitations.',
   },
   {
     id: 5,
-    icon: '🎤',
+    icon: 'interview',
     title: 'AI Interviews',
     description: 'Accepted candidates receive a screening interview link by email. They complete a short voice conversation with an AI interviewer (5–10 min). Each interview is analyzed immediately after completion.',
     action: 'Invite candidates to their screening interviews from the Outreach section.',
   },
   {
     id: 6,
-    icon: '📊',
+    icon: 'scores',
     title: 'Review Scores',
     description: 'After interviews are analyzed, view screening scores in the Pipeline view (Pass/Fail badges) and run Rankings to see a multi-signal score combining screening performance, culture fit, and conversation quality.',
     action: 'Check the Pipeline for interview results and run Rankings.',
   },
   {
     id: 7,
-    icon: '🏆',
+    icon: 'finalize',
     title: 'Close & Finalize',
     description: 'When the closing date arrives (or you click Close Project), the system analyzes any remaining interviews, ranks all candidates, and automatically sends personal interview invitations to the top 3. They\'re moved to the Finalist stage.',
     action: 'Click "Close Project" or wait for the closing date to finalize.',
   },
 ];
+
+function PipelineIcon({ icon, className = '' }: { icon: PipelineStepIcon; className?: string }) {
+  const common = { className, width: 16, height: 16, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
+  
+  if (icon === 'setup') {
+    return (
+      <svg {...common}>
+        <path d="M10 6.5V3.5M10 16.5V13.5M13.5 10H16.5M3.5 10H6.5M12.5 7.5L14.5 5.5M5.5 14.5L7.5 12.5M12.5 12.5L14.5 14.5M5.5 5.5L7.5 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <circle cx="10" cy="10" r="2.3" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  if (icon === 'share') {
+    return (
+      <svg {...common}>
+        <path d="M8.5 6.7L6.6 8.6C5.8 9.4 5.8 10.6 6.6 11.4C7.4 12.2 8.6 12.2 9.4 11.4L11.3 9.5M11.5 13.3L13.4 11.4C14.2 10.6 14.2 9.4 13.4 8.6C12.6 7.8 11.4 7.8 10.6 8.6L8.7 10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'ai_screen') {
+    return (
+      <svg {...common}>
+        <rect x="5" y="5" width="10" height="10" rx="1" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M10 8V12M8 10H12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M5 10H3.5M16.5 10H15M10 5V3.5M10 16.5V15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'accept') {
+    return (
+      <svg {...common}>
+        <path d="M6 10.3L8.5 12.8L14 7.3" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (icon === 'interview') {
+    return (
+      <svg {...common}>
+        <rect x="7.5" y="4" width="5" height="8" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M5 10.5C5 13.2614 7.23858 15.5 10 15.5C12.7614 15.5 15 13.2614 15 10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M10 15.5V18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'scores') {
+    return (
+      <svg {...common}>
+        <path d="M4 16V12M10 16V8M16 16V4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M3 17H17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === 'finalize') {
+    return (
+      <svg {...common}>
+        <path d="M6 5H14M6 5V8C6 10.2091 7.79086 12 10 12M14 5V8C14 10.2091 12.2091 12 10 12M10 12V15M7 15H13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M6 7H4.5C3.67157 7 3 7.67157 3 8.5V9C3 9.82843 3.67157 10.5 4.5 10.5H6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M14 7H15.5C16.3284 7 17 7.67157 17 8.5V9C17 9.82843 16.3284 10.5 15.5 10.5H14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return null;
+}
 
 function computeWizardStep(
   project: Project,
@@ -212,7 +277,7 @@ function PipelineWizard({
                           ? 'bg-white/10 border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)]'
                           : 'bg-zinc-900 border-zinc-700 text-zinc-600'
                       }`}>
-                        {isComplete ? '✓' : step.icon}
+                        {isComplete ? '✓' : <PipelineIcon icon={step.icon} className="w-4 h-4" />}
                       </div>
                       {/* Label */}
                       <div className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider leading-tight px-1 ${
@@ -237,7 +302,9 @@ function PipelineWizard({
           {/* Active step callout */}
           <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
             <div className="flex items-start gap-3">
-              <span className="text-xl flex-shrink-0">{WIZARD_STEPS[activeStep - 1].icon}</span>
+              <span className="text-xl flex-shrink-0 text-zinc-200">
+                <PipelineIcon icon={WIZARD_STEPS[activeStep - 1].icon} className="w-5 h-5" />
+              </span>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs font-bold text-white uppercase tracking-wider">
