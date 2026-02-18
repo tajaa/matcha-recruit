@@ -1,33 +1,41 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, CardContent, Modal } from '../components';
-import { projects as projectsApi, type ProjectFilters } from '../api/client';
+import { projects as projectsApi } from '../api/client';
 import type { Project, ProjectStatus, ProjectCreate } from '../types';
+import { Plus, Trash2, FolderOpen, Loader2, X } from 'lucide-react';
 
 const STATUS_TABS: { label: string; value: ProjectStatus | 'all' }[] = [
   { label: 'All', value: 'all' },
-  { label: 'Draft', value: 'draft' },
   { label: 'Active', value: 'active' },
+  { label: 'Draft', value: 'draft' },
   { label: 'Completed', value: 'completed' },
 ];
 
-const STATUS_COLORS: Record<ProjectStatus, string> = {
-  draft: 'bg-zinc-700 text-zinc-300',
-  active: 'bg-matcha-500/20 text-white',
-  completed: 'bg-blue-500/20 text-blue-400',
-  cancelled: 'bg-red-500/20 text-red-400',
+const STATUS_STYLE: Record<ProjectStatus, string> = {
+  draft:     'text-zinc-400 bg-zinc-800 border-zinc-700',
+  active:    'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+  completed: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+  cancelled: 'text-red-400 bg-red-500/10 border-red-500/20',
 };
+
+function formatSalary(min?: number | null, max?: number | null): string | null {
+  if (!min && !max) return null;
+  const fmt = (n: number) => `$${(n / 1000).toFixed(0)}k`;
+  if (min && max) return `${fmt(min)}–${fmt(max)}`;
+  if (min) return `${fmt(min)}+`;
+  return `Up to ${fmt(max!)}`;
+}
 
 export function Projects() {
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectList, setProjectList] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ProjectStatus | 'all'>('all');
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Form state
-  const [formData, setFormData] = useState<ProjectCreate>({
+  const [form, setForm] = useState<ProjectCreate>({
     company_name: '',
     name: '',
     position_title: '',
@@ -42,12 +50,8 @@ export function Projects() {
   const fetchProjects = useCallback(async () => {
     try {
       setLoading(true);
-      const filters: ProjectFilters = {};
-      if (activeTab !== 'all') {
-        filters.status = activeTab;
-      }
-      const data = await projectsApi.list(filters);
-      setProjects(data);
+      const data = await projectsApi.list(activeTab !== 'all' ? { status: activeTab } : {});
+      setProjectList(data);
     } catch (err) {
       console.error('Failed to fetch projects:', err);
     } finally {
@@ -55,32 +59,19 @@ export function Projects() {
     }
   }, [activeTab]);
 
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
+  useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
   const handleCreate = async () => {
-    if (!formData.company_name.trim() || !formData.name.trim()) return;
-
+    if (!form.company_name.trim() || !form.name.trim()) return;
     setCreating(true);
     try {
       const created = await projectsApi.create({
-        ...formData,
-        salary_min: formData.salary_min || undefined,
-        salary_max: formData.salary_max || undefined,
+        ...form,
+        salary_min: form.salary_min || undefined,
+        salary_max: form.salary_max || undefined,
       });
-      setShowCreateModal(false);
-      setFormData({
-        company_name: '',
-        name: '',
-        position_title: '',
-        location: '',
-        salary_min: undefined,
-        salary_max: undefined,
-        benefits: '',
-        requirements: '',
-        notes: '',
-      });
+      setShowCreate(false);
+      setForm({ company_name: '', name: '', position_title: '', location: '', salary_min: undefined, salary_max: undefined, benefits: '', requirements: '', notes: '' });
       navigate(`/app/projects/${created.id}`);
     } catch (err) {
       console.error('Failed to create project:', err);
@@ -91,40 +82,48 @@ export function Projects() {
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Delete this project?')) return;
+    if (!confirm('Delete this project and all its data?')) return;
+    setDeletingId(id);
     try {
       await projectsApi.delete(id);
-      fetchProjects();
+      setProjectList(prev => prev.filter(p => p.id !== id));
     } catch (err) {
       console.error('Failed to delete project:', err);
+    } finally {
+      setDeletingId(null);
     }
   };
 
-  const formatSalary = (min?: number | null, max?: number | null) => {
-    if (!min && !max) return null;
-    const fmt = (n: number) => `$${(n / 1000).toFixed(0)}k`;
-    if (min && max) return `${fmt(min)} - ${fmt(max)}`;
-    if (min) return `${fmt(min)}+`;
-    return `Up to ${fmt(max!)}`;
-  };
+  const displayed = projectList;
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-white tracking-tight">Projects</h1>
-        <Button onClick={() => setShowCreateModal(true)}>New Project</Button>
+    <div className="max-w-7xl mx-auto space-y-10">
+      {/* Header */}
+      <div className="flex justify-between items-start border-b border-white/10 pb-8">
+        <div>
+          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Recruiting Projects</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+            Create pipelines · Send interview invites · Track candidate progress
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-white text-black text-[10px] font-bold uppercase tracking-widest hover:bg-zinc-200 transition-colors"
+        >
+          <Plus size={12} /> New Project
+        </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-zinc-900 p-1 rounded-lg w-fit">
-        {STATUS_TABS.map((tab) => (
+      {/* Status tabs */}
+      <div className="flex gap-8 border-b border-white/10 pb-px">
+        {STATUS_TABS.map(tab => (
           <button
             key={tab.value}
             onClick={() => setActiveTab(tab.value)}
-            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            className={`pb-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2 ${
               activeTab === tab.value
-                ? 'bg-zinc-800 text-white'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'border-white text-white'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
             }`}
           >
             {tab.label}
@@ -132,217 +131,228 @@ export function Projects() {
         ))}
       </div>
 
+      {/* Content */}
       {loading ? (
-        <div className="text-center py-12 text-zinc-500">Loading...</div>
-      ) : projects.length === 0 ? (
-        <Card>
-          <CardContent className="text-center py-12">
-            <svg
-              className="mx-auto h-12 w-12 text-zinc-600"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-              />
-            </svg>
-            <p className="mt-4 text-zinc-500">
-              {activeTab === 'all' ? 'No projects yet' : `No ${activeTab} projects`}
-            </p>
-            <Button className="mt-4" onClick={() => setShowCreateModal(true)}>
-              Create Your First Project
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="p-16 text-center">
+          <Loader2 size={20} className="animate-spin text-zinc-500 mx-auto" />
+        </div>
+      ) : displayed.length === 0 ? (
+        <div className="p-16 text-center bg-zinc-950 border border-white/10">
+          <FolderOpen size={32} className="text-zinc-700 mx-auto mb-4" />
+          <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">
+            {activeTab === 'all' ? 'No projects yet' : `No ${activeTab} projects`}
+          </div>
+          <div className="text-xs text-zinc-600 mb-6">
+            Create a project to start building your candidate pipeline and sending interview invites.
+          </div>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-black bg-white hover:bg-zinc-200 transition-colors"
+          >
+            Create First Project
+          </button>
+        </div>
       ) : (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-          {/* Table Header */}
-          <div className="grid grid-cols-[1.5fr_1fr_1fr_100px_80px_100px_50px] gap-4 px-4 py-3 bg-zinc-800/50 border-b border-zinc-700 text-xs font-medium text-zinc-400 uppercase tracking-wider">
-            <div>Project</div>
+        <div className="space-y-px bg-white/10 border border-white/10">
+          {/* Table header */}
+          <div className="grid grid-cols-[2fr_1fr_1fr_80px_80px_36px] gap-4 px-6 py-3 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
+            <div>Project / Company</div>
             <div>Position</div>
-            <div>Location</div>
-            <div>Salary</div>
-            <div>Status</div>
-            <div>Candidates</div>
-            <div></div>
+            <div>Location · Salary</div>
+            <div className="text-center">Status</div>
+            <div className="text-center">Candidates</div>
+            <div />
           </div>
 
-          {/* Table Body */}
-          <div className="divide-y divide-zinc-800">
-            {projects.map((project) => (
-              <div
-                key={project.id}
-                onClick={() => navigate(`/app/projects/${project.id}`)}
-                className="grid grid-cols-[1.5fr_1fr_1fr_100px_80px_100px_50px] gap-4 px-4 py-3 items-center hover:bg-zinc-800/30 transition-colors cursor-pointer"
-              >
-                <div className="min-w-0">
-                  <div className="font-medium text-zinc-100 truncate">{project.name}</div>
-                  <div className="text-sm text-zinc-500 truncate">{project.company_name}</div>
-                </div>
-                <div className="text-zinc-400 text-sm truncate">
-                  {project.position_title || '-'}
-                </div>
-                <div className="text-zinc-400 text-sm truncate">
-                  {project.location || '-'}
-                </div>
-                <div className="text-zinc-400 text-sm">
-                  {formatSalary(project.salary_min, project.salary_max) || '-'}
-                </div>
-                <div>
-                  <span className={`px-2 py-0.5 text-xs font-medium rounded ${STATUS_COLORS[project.status]}`}>
-                    {project.status}
-                  </span>
-                </div>
-                <div className="text-zinc-400 text-sm">
-                  {project.candidate_count}
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    onClick={(e) => handleDelete(project.id, e)}
-                    className="text-zinc-600 hover:text-red-400 transition-colors p-1"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
-                  </button>
-                </div>
+          {displayed.map(project => (
+            <div
+              key={project.id}
+              onClick={() => navigate(`/app/projects/${project.id}`)}
+              className="grid grid-cols-[2fr_1fr_1fr_80px_80px_36px] gap-4 px-6 py-4 bg-zinc-950 hover:bg-zinc-900 transition-colors cursor-pointer items-center"
+            >
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-white truncate">{project.name}</div>
+                <div className="text-xs text-zinc-500 font-mono truncate mt-0.5">{project.company_name}</div>
               </div>
-            ))}
-          </div>
+
+              <div className="text-xs text-zinc-400 truncate">
+                {project.position_title || <span className="text-zinc-700">—</span>}
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-xs text-zinc-400 truncate">{project.location || <span className="text-zinc-700">—</span>}</div>
+                {formatSalary(project.salary_min, project.salary_max) && (
+                  <div className="text-[10px] text-zinc-600 font-mono mt-0.5">
+                    {formatSalary(project.salary_min, project.salary_max)}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-center">
+                <span className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider border rounded-sm ${STATUS_STYLE[project.status]}`}>
+                  {project.status}
+                </span>
+              </div>
+
+              <div className="text-center text-sm font-mono text-zinc-300">
+                {project.candidate_count}
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  onClick={(e) => handleDelete(project.id, e)}
+                  disabled={deletingId === project.id}
+                  className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+                >
+                  {deletingId === project.id
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <Trash2 size={14} />}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Create Project Modal */}
-      <Modal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        title="New Project"
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Company Name *</label>
-              <input
-                type="text"
-                value={formData.company_name}
-                onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
-                placeholder="e.g., Urth Caffe"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-              />
+      {/* Create Modal */}
+      {showCreate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="relative bg-zinc-950 border border-white/15 shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
+              <div>
+                <div className="text-xs font-bold text-white uppercase tracking-wider">New Project</div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">Define the role and company details</div>
+              </div>
+              <button onClick={() => setShowCreate(false)} className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded transition-colors">
+                <X size={16} />
+              </button>
             </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Project Name *</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g., General Manager Search"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-              />
+
+            {/* Body */}
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Company Name *</label>
+                  <input
+                    type="text"
+                    value={form.company_name}
+                    onChange={e => setForm({ ...form, company_name: e.target.value })}
+                    placeholder="e.g., Acme Corp"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Project Name *</label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={e => setForm({ ...form, name: e.target.value })}
+                    placeholder="e.g., Senior Engineer Search"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Position Title</label>
+                  <input
+                    type="text"
+                    value={form.position_title || ''}
+                    onChange={e => setForm({ ...form, position_title: e.target.value })}
+                    placeholder="e.g., Software Engineer"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Location</label>
+                  <input
+                    type="text"
+                    value={form.location || ''}
+                    onChange={e => setForm({ ...form, location: e.target.value })}
+                    placeholder="e.g., Los Angeles, CA"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Salary Min ($)</label>
+                  <input
+                    type="number"
+                    value={form.salary_min || ''}
+                    onChange={e => setForm({ ...form, salary_min: e.target.value ? parseInt(e.target.value) : undefined })}
+                    placeholder="80000"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Salary Max ($)</label>
+                  <input
+                    type="number"
+                    value={form.salary_max || ''}
+                    onChange={e => setForm({ ...form, salary_max: e.target.value ? parseInt(e.target.value) : undefined })}
+                    placeholder="120000"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Requirements</label>
+                <textarea
+                  value={form.requirements || ''}
+                  onChange={e => setForm({ ...form, requirements: e.target.value })}
+                  placeholder="Skills, experience, qualifications..."
+                  rows={3}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Benefits</label>
+                <textarea
+                  value={form.benefits || ''}
+                  onChange={e => setForm({ ...form, benefits: e.target.value })}
+                  placeholder="Health, 401k, equity..."
+                  rows={2}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Internal Notes</label>
+                <textarea
+                  value={form.notes || ''}
+                  onChange={e => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Private notes visible only to admins..."
+                  rows={2}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors resize-none"
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Position Title</label>
-              <input
-                type="text"
-                value={formData.position_title || ''}
-                onChange={(e) => setFormData({ ...formData, position_title: e.target.value })}
-                placeholder="e.g., General Manager"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-              />
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10 flex-shrink-0">
+              <button
+                onClick={() => setShowCreate(false)}
+                className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={creating || !form.company_name.trim() || !form.name.trim()}
+                className="inline-flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {creating ? <><Loader2 size={11} className="animate-spin" /> Creating…</> : 'Create Project'}
+              </button>
             </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Location</label>
-              <input
-                type="text"
-                value={formData.location || ''}
-                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                placeholder="e.g., Los Angeles, CA"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Salary Min ($)</label>
-              <input
-                type="number"
-                value={formData.salary_min || ''}
-                onChange={(e) => setFormData({ ...formData, salary_min: e.target.value ? parseInt(e.target.value) : undefined })}
-                placeholder="e.g., 80000"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Salary Max ($)</label>
-              <input
-                type="number"
-                value={formData.salary_max || ''}
-                onChange={(e) => setFormData({ ...formData, salary_max: e.target.value ? parseInt(e.target.value) : undefined })}
-                placeholder="e.g., 100000"
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Requirements</label>
-            <textarea
-              value={formData.requirements || ''}
-              onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
-              placeholder="What the company is looking for..."
-              rows={3}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Benefits</label>
-            <textarea
-              value={formData.benefits || ''}
-              onChange={(e) => setFormData({ ...formData, benefits: e.target.value })}
-              placeholder="Health insurance, 401k, etc..."
-              rows={2}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Notes</label>
-            <textarea
-              value={formData.notes || ''}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="Internal notes..."
-              rows={2}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4">
-            <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreate}
-              disabled={creating || !formData.company_name.trim() || !formData.name.trim()}
-            >
-              {creating ? 'Creating...' : 'Create Project'}
-            </Button>
           </div>
         </div>
-      </Modal>
+      )}
     </div>
   );
 }

@@ -82,6 +82,8 @@ const PortalVibeCheck = lazy(() => import('./pages/portal/PortalVibeCheck'));
 const PortalENPS = lazy(() => import('./pages/portal/PortalENPS'));
 const PortalReviews = lazy(() => import('./pages/portal/PortalReviews'));
 const CandidateRankings = lazy(() => import('./pages/CandidateRankings'));
+const Projects = lazy(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
+const ProjectDetail = lazy(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
 const BrokerClients = lazy(() => import('./pages/broker/BrokerClients'));
 const BrokerReporting = lazy(() => import('./pages/broker/BrokerReporting'));
 
@@ -594,6 +596,24 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <CandidateRankings />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Recruiting Projects */}
+              <Route
+                path="projects"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <Projects />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="projects/:id"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <ProjectDetail />
                   </ProtectedRoute>
                 }
               />

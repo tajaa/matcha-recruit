@@ -942,7 +942,7 @@ export interface ProjectStats {
 }
 
 // Outreach types
-export type OutreachStatus = 'sent' | 'opened' | 'interested' | 'declined' | 'screening_started' | 'screening_complete' | 'email_failed';
+export type OutreachStatus = 'sent' | 'opened' | 'interested' | 'declined' | 'screening_started' | 'screening_complete' | 'screening_invited' | 'email_failed';
 
 export interface Outreach {
   id: string;

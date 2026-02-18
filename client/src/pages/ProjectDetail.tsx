@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Card, CardContent, Modal } from '../components';
 import { projects as projectsApi, candidates as candidatesApi } from '../api/client';
 import type {
   Project,
@@ -12,137 +11,222 @@ import type {
   ProjectUpdate,
   Outreach,
 } from '../types';
+import {
+  ArrowLeft, Plus, Send, Mail, BarChart2, Loader2, X, ChevronRight,
+  CheckCircle2, Clock, AlertCircle, XCircle, UserPlus,
+} from 'lucide-react';
 
-const STAGES: { value: CandidateStage; label: string; color: string }[] = [
-  { value: 'initial', label: 'Initial', color: 'bg-zinc-700' },
-  { value: 'screening', label: 'Screening', color: 'bg-yellow-500/20 text-yellow-400' },
-  { value: 'interview', label: 'Interview', color: 'bg-blue-500/20 text-blue-400' },
-  { value: 'finalist', label: 'Finalist', color: 'bg-purple-500/20 text-purple-400' },
-  { value: 'placed', label: 'Placed', color: 'bg-matcha-500/20 text-white' },
-  { value: 'rejected', label: 'Rejected', color: 'bg-red-500/20 text-red-400' },
+// ─── Config ─────────────────────────────────────────────────────────────────
+
+const STAGES: { value: CandidateStage; label: string }[] = [
+  { value: 'initial',   label: 'Initial'   },
+  { value: 'screening', label: 'Screening' },
+  { value: 'interview', label: 'Interview' },
+  { value: 'finalist',  label: 'Finalist'  },
+  { value: 'placed',    label: 'Placed'    },
+  { value: 'rejected',  label: 'Rejected'  },
 ];
 
+const STAGE_STYLE: Record<CandidateStage, string> = {
+  initial:   'text-zinc-400 bg-zinc-800 border-zinc-700',
+  screening: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  interview: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+  finalist:  'text-violet-400 bg-violet-500/10 border-violet-500/20',
+  placed:    'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+  rejected:  'text-red-400 bg-red-500/10 border-red-500/20',
+};
+
 const STATUS_OPTIONS: ProjectStatus[] = ['draft', 'active', 'completed', 'cancelled'];
+
+function formatSalary(min?: number | null, max?: number | null): string {
+  if (!min && !max) return 'Not specified';
+  const fmt = (n: number) => `$${n.toLocaleString()}`;
+  if (min && max) return `${fmt(min)} – ${fmt(max)}`;
+  if (min) return `${fmt(min)}+`;
+  return `Up to ${fmt(max!)}`;
+}
+
+function OutreachBadge({ outreach }: { outreach: Outreach }) {
+  if (outreach.status === 'screening_complete') {
+    const rec = outreach.screening_recommendation;
+    if (rec === 'strong_pass' || rec === 'pass') {
+      return (
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+          <CheckCircle2 size={9} /> {rec === 'strong_pass' ? 'Strong Pass' : 'Pass'} · {Math.round(outreach.screening_score || 0)}
+        </span>
+      );
+    }
+    if (rec === 'borderline') {
+      return (
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/20 text-amber-400">
+          <AlertCircle size={9} /> Borderline · {Math.round(outreach.screening_score || 0)}
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-red-500/10 border border-red-500/20 text-red-400">
+        <XCircle size={9} /> Fail · {Math.round(outreach.screening_score || 0)}
+      </span>
+    );
+  }
+  if (outreach.status === 'screening_started' || outreach.status === 'interested') {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-blue-500/10 border border-blue-500/20 text-blue-400">
+        <Clock size={9} /> {outreach.status === 'screening_started' ? 'In Progress' : 'Interested'}
+      </span>
+    );
+  }
+  if (outreach.status === 'declined') {
+    return (
+      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-zinc-800 border border-zinc-700 text-zinc-500">
+        Declined
+      </span>
+    );
+  }
+  if (outreach.status === 'screening_invited') {
+    return (
+      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-violet-500/10 border border-violet-500/20 text-violet-400">
+        Invite Sent
+      </span>
+    );
+  }
+  return (
+    <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-zinc-800 border border-zinc-700 text-zinc-500">
+      {outreach.status === 'opened' ? 'Opened' : 'Sent'}
+    </span>
+  );
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
   const [project, setProject] = useState<Project | null>(null);
-  const [candidates, setCandidates] = useState<ProjectCandidate[]>([]);
+  const [candidateList, setCandidateList] = useState<ProjectCandidate[]>([]);
   const [stats, setStats] = useState<ProjectStats | null>(null);
+  const [outreachRecords, setOutreachRecords] = useState<Outreach[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeStage, setActiveStage] = useState<CandidateStage | 'all'>('all');
 
+  // Add candidates modal
   const [showAddModal, setShowAddModal] = useState(false);
   const [availableCandidates, setAvailableCandidates] = useState<Candidate[]>([]);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [adding, setAdding] = useState(false);
-
-  // Add modal filter state
   const [addSearch, setAddSearch] = useState('');
-  const [addSkills, setAddSkills] = useState('');
-  const [addMinExp, setAddMinExp] = useState('');
-  const [addMaxExp, setAddMaxExp] = useState('');
 
+  // Edit modal
   const [showEditModal, setShowEditModal] = useState(false);
   const [editData, setEditData] = useState<ProjectUpdate>({});
   const [saving, setSaving] = useState(false);
 
-  // Outreach state
-  const [outreachRecords, setOutreachRecords] = useState<Outreach[]>([]);
+  // Outreach modal
   const [showOutreachModal, setShowOutreachModal] = useState(false);
   const [outreachCandidateIds, setOutreachCandidateIds] = useState<string[]>([]);
   const [sendingOutreach, setSendingOutreach] = useState(false);
   const [customMessage, setCustomMessage] = useState('');
+  const [outreachResult, setOutreachResult] = useState<string | null>(null);
 
-  // Screening invite state
+  // Screening modal
   const [showScreeningModal, setShowScreeningModal] = useState(false);
   const [screeningCandidateIds, setScreeningCandidateIds] = useState<string[]>([]);
   const [sendingScreening, setSendingScreening] = useState(false);
   const [screeningMessage, setScreeningMessage] = useState('');
+  const [screeningResult, setScreeningResult] = useState<string | null>(null);
+
+  // ─── Data fetching ──────────────────────────────────────────────────────────
 
   const fetchProject = useCallback(async () => {
     if (!id) return;
-    try {
-      const data = await projectsApi.get(id);
-      setProject(data);
-      setEditData({
-        company_name: data.company_name,
-        name: data.name,
-        position_title: data.position_title || '',
-        location: data.location || '',
-        salary_min: data.salary_min || undefined,
-        salary_max: data.salary_max || undefined,
-        benefits: data.benefits || '',
-        requirements: data.requirements || '',
-        notes: data.notes || '',
-        status: data.status,
-      });
-    } catch (err) {
-      console.error('Failed to fetch project:', err);
-    }
+    const data = await projectsApi.get(id);
+    setProject(data);
+    setEditData({
+      company_name: data.company_name,
+      name: data.name,
+      position_title: data.position_title || '',
+      location: data.location || '',
+      salary_min: data.salary_min || undefined,
+      salary_max: data.salary_max || undefined,
+      benefits: data.benefits || '',
+      requirements: data.requirements || '',
+      notes: data.notes || '',
+      status: data.status,
+    });
   }, [id]);
 
   const fetchCandidates = useCallback(async () => {
     if (!id) return;
-    try {
-      const stage = activeStage === 'all' ? undefined : activeStage;
-      const data = await projectsApi.listCandidates(id, stage);
-      setCandidates(data);
-    } catch (err) {
-      console.error('Failed to fetch candidates:', err);
-    }
+    const stage = activeStage === 'all' ? undefined : activeStage;
+    const data = await projectsApi.listCandidates(id, stage);
+    setCandidateList(data);
   }, [id, activeStage]);
 
   const fetchStats = useCallback(async () => {
     if (!id) return;
-    try {
-      const data = await projectsApi.getStats(id);
-      setStats(data);
-    } catch (err) {
-      console.error('Failed to fetch stats:', err);
-    }
+    const data = await projectsApi.getStats(id);
+    setStats(data);
   }, [id]);
 
   const fetchOutreach = useCallback(async () => {
     if (!id) return;
-    try {
-      const data = await projectsApi.listOutreach(id);
-      setOutreachRecords(data);
-    } catch (err) {
-      console.error('Failed to fetch outreach:', err);
-    }
+    const data = await projectsApi.listOutreach(id);
+    setOutreachRecords(data);
   }, [id]);
 
   useEffect(() => {
-    const loadAll = async () => {
+    const load = async () => {
       setLoading(true);
-      await Promise.all([fetchProject(), fetchCandidates(), fetchStats(), fetchOutreach()]);
-      setLoading(false);
+      try {
+        await Promise.all([fetchProject(), fetchCandidates(), fetchStats(), fetchOutreach()]);
+      } catch (err) {
+        console.error('Failed to load project:', err);
+      } finally {
+        setLoading(false);
+      }
     };
-    loadAll();
+    load();
   }, [fetchProject, fetchCandidates, fetchStats, fetchOutreach]);
 
-  useEffect(() => {
-    fetchCandidates();
-  }, [activeStage, fetchCandidates]);
+  useEffect(() => { fetchCandidates(); }, [activeStage, fetchCandidates]);
+
+  // ─── Helpers ────────────────────────────────────────────────────────────────
+
+  const getOutreachStatus = (candidateId: string) =>
+    outreachRecords.find(o => o.candidate_id === candidateId);
+
+  const outreachCandidateSet = new Set(outreachRecords.map(o => o.candidate_id));
+
+  const outreachEligible = candidateList.filter(
+    c => c.stage === 'initial' && !outreachCandidateSet.has(c.candidate_id)
+  );
+
+  const screeningEligible = candidateList.filter(
+    c => !outreachCandidateSet.has(c.candidate_id)
+  );
+
+  const outreachStats = {
+    sent:       outreachRecords.filter(o => o.status === 'sent' || o.status === 'opened').length,
+    interested: outreachRecords.filter(o => o.status === 'interested' || o.status === 'screening_started').length,
+    screened:   outreachRecords.filter(o => o.status === 'screening_complete').length,
+    invited:    outreachRecords.filter(o => o.status === 'screening_invited').length,
+    declined:   outreachRecords.filter(o => o.status === 'declined').length,
+    total:      outreachRecords.length,
+  };
+
+  // ─── Handlers ────────────────────────────────────────────────────────────────
 
   const openAddModal = async () => {
     setShowAddModal(true);
     setLoadingCandidates(true);
     setSelectedCandidateIds([]);
-    // Reset filters
     setAddSearch('');
-    setAddSkills('');
-    setAddMinExp('');
-    setAddMaxExp('');
     try {
       const all = await candidatesApi.list();
-      // Filter out candidates already in this project
-      const existingIds = new Set(candidates.map((c) => c.candidate_id));
-      setAvailableCandidates(all.filter((c) => !existingIds.has(c.id)));
+      const existingIds = new Set(candidateList.map(c => c.candidate_id));
+      setAvailableCandidates(all.filter(c => !existingIds.has(c.id)));
     } catch (err) {
       console.error('Failed to load candidates:', err);
     } finally {
@@ -150,49 +234,11 @@ export function ProjectDetail() {
     }
   };
 
-  // Filter available candidates based on search criteria
-  const filteredAvailableCandidates = availableCandidates.filter((c) => {
-    // Search filter (name or email)
-    if (addSearch.trim()) {
-      const search = addSearch.toLowerCase();
-      const nameMatch = c.name?.toLowerCase().includes(search);
-      const emailMatch = c.email?.toLowerCase().includes(search);
-      if (!nameMatch && !emailMatch) return false;
-    }
-
-    // Skills filter
-    if (addSkills.trim()) {
-      const searchSkills = addSkills.toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
-      const candidateSkills = (c.skills || []).map((s) => s.toLowerCase());
-      const hasAnySkill = searchSkills.some((skill) =>
-        candidateSkills.some((cs) => cs.includes(skill))
-      );
-      if (!hasAnySkill) return false;
-    }
-
-    // Min experience filter
-    if (addMinExp) {
-      const min = parseInt(addMinExp);
-      if (!c.experience_years || c.experience_years < min) return false;
-    }
-
-    // Max experience filter
-    if (addMaxExp) {
-      const max = parseInt(addMaxExp);
-      if (!c.experience_years || c.experience_years > max) return false;
-    }
-
-    return true;
+  const filteredAvailable = availableCandidates.filter(c => {
+    if (!addSearch.trim()) return true;
+    const s = addSearch.toLowerCase();
+    return c.name?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s);
   });
-
-  const handleSelectAll = () => {
-    const filteredIds = filteredAvailableCandidates.map((c) => c.id);
-    setSelectedCandidateIds(filteredIds);
-  };
-
-  const handleDeselectAll = () => {
-    setSelectedCandidateIds([]);
-  };
 
   const handleAddCandidates = async () => {
     if (!id || selectedCandidateIds.length === 0) return;
@@ -253,924 +299,679 @@ export function ProjectDetail() {
     }
   };
 
-  // Get outreach status for a candidate
-  const getOutreachStatus = (candidateId: string) => {
-    return outreachRecords.find((o) => o.candidate_id === candidateId);
-  };
-
-  // Get candidates eligible for outreach (initial stage, no existing outreach)
-  const getOutreachEligibleCandidates = () => {
-    const outreachCandidateSet = new Set(outreachRecords.map((o) => o.candidate_id));
-    return candidates.filter(
-      (c) => c.stage === 'initial' && !outreachCandidateSet.has(c.candidate_id)
-    );
-  };
-
-  // Get candidates eligible for screening invite (any stage, no existing outreach)
-  const getScreeningEligibleCandidates = () => {
-    const outreachCandidateSet = new Set(outreachRecords.map((o) => o.candidate_id));
-    return candidates.filter((c) => !outreachCandidateSet.has(c.candidate_id));
-  };
-
-  // Open outreach modal with eligible candidates pre-selected
   const openOutreachModal = () => {
-    const eligible = getOutreachEligibleCandidates();
-    setOutreachCandidateIds(eligible.map((c) => c.candidate_id));
+    setOutreachCandidateIds(outreachEligible.map(c => c.candidate_id));
     setCustomMessage('');
+    setOutreachResult(null);
     setShowOutreachModal(true);
   };
 
-  // Open screening modal with eligible candidates pre-selected
   const openScreeningModal = () => {
-    const eligible = getScreeningEligibleCandidates();
-    setScreeningCandidateIds(eligible.map((c) => c.candidate_id));
+    setScreeningCandidateIds(screeningEligible.map(c => c.candidate_id));
     setScreeningMessage('');
+    setScreeningResult(null);
     setShowScreeningModal(true);
   };
 
-  // Send outreach to selected candidates
   const handleSendOutreach = async () => {
     if (!id || outreachCandidateIds.length === 0) return;
     setSendingOutreach(true);
+    setOutreachResult(null);
     try {
       const result = await projectsApi.sendOutreach(id, {
         candidate_ids: outreachCandidateIds,
         custom_message: customMessage || undefined,
       });
-      setShowOutreachModal(false);
+      setOutreachResult(`✓ Sent ${result.sent_count} · Skipped ${result.skipped_count} · Failed ${result.failed_count}`);
       await fetchOutreach();
-      alert(`Outreach sent: ${result.sent_count} successful, ${result.skipped_count} skipped, ${result.failed_count} failed`);
+      setTimeout(() => setShowOutreachModal(false), 2000);
     } catch (err) {
       console.error('Failed to send outreach:', err);
-      alert('Failed to send outreach. Please try again.');
+      setOutreachResult('Failed to send outreach. Please try again.');
     } finally {
       setSendingOutreach(false);
     }
   };
 
-  // Send screening invites to selected candidates
   const handleSendScreening = async () => {
     if (!id || screeningCandidateIds.length === 0) return;
     setSendingScreening(true);
+    setScreeningResult(null);
     try {
       const result = await projectsApi.sendScreeningInvite(id, {
         candidate_ids: screeningCandidateIds,
         custom_message: screeningMessage || undefined,
       });
-      setShowScreeningModal(false);
+      setScreeningResult(`✓ Sent ${result.sent_count} · Skipped ${result.skipped_count} · Failed ${result.failed_count}`);
       await fetchOutreach();
-      alert(`Screening invites sent: ${result.sent_count} successful, ${result.skipped_count} skipped, ${result.failed_count} failed`);
+      setTimeout(() => setShowScreeningModal(false), 2000);
     } catch (err) {
       console.error('Failed to send screening invites:', err);
-      alert('Failed to send screening invites. Please try again.');
+      setScreeningResult('Failed to send invites. Please try again.');
     } finally {
       setSendingScreening(false);
     }
   };
 
-  // Outreach stats
-  const outreachStats = {
-    sent: outreachRecords.filter((o) => o.status === 'sent' || o.status === 'opened').length,
-    interested: outreachRecords.filter((o) => o.status === 'interested' || o.status === 'screening_started').length,
-    screened: outreachRecords.filter((o) => o.status === 'screening_complete').length,
-    declined: outreachRecords.filter((o) => o.status === 'declined').length,
-    total: outreachRecords.length,
-  };
-
-  const formatSalary = (min?: number | null, max?: number | null) => {
-    if (!min && !max) return 'Not specified';
-    const fmt = (n: number) => `$${n.toLocaleString()}`;
-    if (min && max) return `${fmt(min)} - ${fmt(max)}`;
-    if (min) return `${fmt(min)}+`;
-    return `Up to ${fmt(max!)}`;
-  };
+  // ─── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return <div className="text-center py-12 text-zinc-500">Loading...</div>;
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <Loader2 size={20} className="animate-spin text-zinc-500" />
+      </div>
+    );
   }
 
   if (!project) {
     return (
-      <div className="text-center py-12">
-        <p className="text-zinc-500">Project not found</p>
-        <Button className="mt-4" onClick={() => navigate('/app/projects')}>
+      <div className="text-center py-16">
+        <div className="text-xs text-zinc-500 uppercase tracking-wider mb-4">Project not found</div>
+        <button
+          onClick={() => navigate('/app/projects')}
+          className="text-[10px] text-zinc-400 hover:text-white uppercase tracking-widest underline underline-offset-4"
+        >
           Back to Projects
-        </Button>
+        </button>
       </div>
     );
   }
 
   return (
-    <div>
+    <div className="max-w-7xl mx-auto space-y-8">
+
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <button
-            onClick={() => navigate('/app/projects')}
-            className="text-sm text-zinc-500 hover:text-zinc-300 mb-2 flex items-center gap-1"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            Back to Projects
-          </button>
-          <h1 className="text-3xl font-bold text-white tracking-tight">{project.name}</h1>
-          <p className="text-zinc-500 mt-1">{project.company_name}</p>
-        </div>
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={() => setShowEditModal(true)}>
-            Edit
-          </Button>
-          <Button variant="secondary" onClick={openOutreachModal} disabled={getOutreachEligibleCandidates().length === 0}>
-            Send Outreach
-          </Button>
-          <Button variant="secondary" onClick={openScreeningModal} disabled={getScreeningEligibleCandidates().length === 0}>
-            Send Screening
-          </Button>
-          <Button onClick={openAddModal}>Add Candidates</Button>
-        </div>
-      </div>
+      <div className="border-b border-white/10 pb-8">
+        <button
+          onClick={() => navigate('/app/projects')}
+          className="inline-flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-white uppercase tracking-widest mb-4 transition-colors"
+        >
+          <ArrowLeft size={12} /> Projects
+        </button>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Project Info */}
-          <Card>
-            <CardContent>
-              <h2 className="text-lg font-semibold text-zinc-200 mb-4">Project Details</h2>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                {project.position_title && (
-                  <div>
-                    <span className="text-zinc-500">Position</span>
-                    <p className="text-zinc-200">{project.position_title}</p>
-                  </div>
-                )}
-                {project.location && (
-                  <div>
-                    <span className="text-zinc-500">Location</span>
-                    <p className="text-zinc-200">{project.location}</p>
-                  </div>
-                )}
-                <div>
-                  <span className="text-zinc-500">Salary Range</span>
-                  <p className="text-zinc-200">{formatSalary(project.salary_min, project.salary_max)}</p>
-                </div>
-              </div>
-              {project.requirements && (
-                <div className="mt-4">
-                  <span className="text-sm text-zinc-500">Requirements</span>
-                  <p className="text-sm text-zinc-300 mt-1 whitespace-pre-wrap">{project.requirements}</p>
-                </div>
-              )}
-              {project.benefits && (
-                <div className="mt-4">
-                  <span className="text-sm text-zinc-500">Benefits</span>
-                  <p className="text-sm text-zinc-300 mt-1 whitespace-pre-wrap">{project.benefits}</p>
-                </div>
-              )}
-              {project.notes && (
-                <div className="mt-4">
-                  <span className="text-sm text-zinc-500">Notes</span>
-                  <p className="text-sm text-zinc-300 mt-1 whitespace-pre-wrap">{project.notes}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">{project.name}</h1>
+            <p className="text-sm text-zinc-500 mt-1 font-mono">{project.company_name}</p>
+            {project.position_title && (
+              <p className="text-xs text-zinc-600 mt-1 uppercase tracking-widest">{project.position_title}</p>
+            )}
+          </div>
 
-          {/* Candidate Pipeline */}
-          <Card>
-            <CardContent>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-zinc-200">Candidate Pipeline</h2>
-              </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Status selector */}
+            <select
+              value={project.status}
+              onChange={e => handleStatusChange(e.target.value as ProjectStatus)}
+              className="px-3 py-1.5 bg-zinc-900 border border-zinc-700 text-[10px] text-zinc-300 uppercase tracking-widest outline-none focus:border-zinc-500"
+            >
+              {STATUS_OPTIONS.map(s => (
+                <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+              ))}
+            </select>
 
-              {/* Stage Tabs */}
-              <div className="flex gap-1 mb-4 bg-zinc-900 p-1 rounded-lg overflow-x-auto">
-                <button
-                  onClick={() => setActiveStage('all')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                    activeStage === 'all' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  All ({stats?.total || 0})
-                </button>
-                {STAGES.map((stage) => (
-                  <button
-                    key={stage.value}
-                    onClick={() => setActiveStage(stage.value)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                      activeStage === stage.value ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'
-                    }`}
-                  >
-                    {stage.label} ({stats?.[stage.value] || 0})
-                  </button>
-                ))}
-              </div>
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-zinc-300 hover:text-white bg-zinc-900 border border-zinc-700 hover:border-zinc-500 transition-colors"
+            >
+              Edit
+            </button>
 
-              {/* Candidate List */}
-              {candidates.length === 0 ? (
-                <div className="text-center py-8 text-zinc-500">
-                  {activeStage === 'all' ? 'No candidates added yet' : `No candidates in ${activeStage} stage`}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {candidates.map((pc) => {
-                    const outreach = getOutreachStatus(pc.candidate_id);
-                    return (
-                    <div
-                      key={pc.id}
-                      className="flex items-center justify-between p-3 bg-zinc-900 rounded-lg border border-zinc-800"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-zinc-200 truncate">
-                            {pc.candidate_name || 'Unknown'}
-                          </p>
-                          {outreach && (
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                              outreach.status === 'screening_complete'
-                                ? outreach.screening_recommendation === 'strong_pass' || outreach.screening_recommendation === 'pass'
-                                  ? 'bg-matcha-500/20 text-white'
-                                  : outreach.screening_recommendation === 'borderline'
-                                  ? 'bg-yellow-500/20 text-yellow-400'
-                                  : 'bg-red-500/20 text-red-400'
-                                : outreach.status === 'interested' || outreach.status === 'screening_started'
-                                ? 'bg-blue-500/20 text-blue-400'
-                                : outreach.status === 'declined'
-                                ? 'bg-red-500/20 text-red-400'
-                                : 'bg-zinc-700 text-zinc-400'
-                            }`}>
-                              {outreach.status === 'screening_complete'
-                                ? `${outreach.screening_recommendation} (${Math.round(outreach.screening_score || 0)}%)`
-                                : outreach.status === 'interested'
-                                ? 'Interested'
-                                : outreach.status === 'screening_started'
-                                ? 'Screening...'
-                                : outreach.status === 'declined'
-                                ? 'Declined'
-                                : outreach.status === 'opened'
-                                ? 'Opened'
-                                : 'Sent'}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-3 text-xs text-zinc-500 mt-1">
-                          {pc.candidate_email && <span>{pc.candidate_email}</span>}
-                          {pc.candidate_experience_years && (
-                            <span>{pc.candidate_experience_years} yrs exp</span>
-                          )}
-                        </div>
-                        {pc.candidate_skills && pc.candidate_skills.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-2">
-                            {pc.candidate_skills.slice(0, 4).map((skill) => (
-                              <span
-                                key={skill}
-                                className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded text-xs"
-                              >
-                                {skill}
-                              </span>
-                            ))}
-                            {pc.candidate_skills.length > 4 && (
-                              <span className="text-xs text-zinc-600">+{pc.candidate_skills.length - 4}</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
+            <button
+              onClick={openOutreachModal}
+              disabled={outreachEligible.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-zinc-300 hover:text-white bg-zinc-900 border border-zinc-700 hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title="Send outreach email with interest link"
+            >
+              <Mail size={11} /> Outreach ({outreachEligible.length})
+            </button>
 
-                      <div className="flex items-center gap-2 ml-4">
-                        <select
-                          value={pc.stage}
-                          onChange={(e) => handleStageChange(pc.candidate_id, e.target.value as CandidateStage)}
-                          className="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 focus:outline-none focus:border-white"
-                        >
-                          {STAGES.map((stage) => (
-                            <option key={stage.value} value={stage.value}>
-                              {stage.label}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={() => handleRemoveCandidate(pc.candidate_id)}
-                          className="p-1 text-zinc-600 hover:text-red-400 transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            <button
+              onClick={openScreeningModal}
+              disabled={screeningEligible.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title="Send direct screening interview invite"
+            >
+              <Send size={11} /> Send Screening ({screeningEligible.length})
+            </button>
+          </div>
         </div>
 
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Status Card */}
-          <Card>
-            <CardContent>
-              <h3 className="text-sm font-medium text-zinc-400 mb-3">Status</h3>
-              <select
-                value={project.status}
-                onChange={(e) => handleStatusChange(e.target.value as ProjectStatus)}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
-              >
-                {STATUS_OPTIONS.map((status) => (
-                  <option key={status} value={status}>
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </CardContent>
-          </Card>
-
-          {/* Stats Card */}
-          <Card>
-            <CardContent>
-              <h3 className="text-sm font-medium text-zinc-400 mb-3">Pipeline Stats</h3>
-              <div className="space-y-2">
-                {STAGES.filter((s) => s.value !== 'rejected').map((stage) => (
-                  <div key={stage.value} className="flex justify-between text-sm">
-                    <span className="text-zinc-500">{stage.label}</span>
-                    <span className="text-zinc-200">{stats?.[stage.value] || 0}</span>
-                  </div>
-                ))}
-                <div className="border-t border-zinc-800 pt-2 mt-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Rejected</span>
-                    <span className="text-red-400">{stats?.rejected || 0}</span>
-                  </div>
-                </div>
-                <div className="border-t border-zinc-800 pt-2 mt-2">
-                  <div className="flex justify-between text-sm font-medium">
-                    <span className="text-zinc-400">Total</span>
-                    <span className="text-zinc-200">{stats?.total || 0}</span>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Outreach Stats Card */}
+        {/* Quick stats strip */}
+        <div className="flex items-center gap-6 mt-6 pt-6 border-t border-white/5">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-white font-mono">{stats?.total || 0}</div>
+            <div className="text-[9px] text-zinc-500 uppercase tracking-widest mt-0.5">Candidates</div>
+          </div>
           {outreachStats.total > 0 && (
-            <Card>
-              <CardContent>
-                <h3 className="text-sm font-medium text-zinc-400 mb-3">Outreach Status</h3>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Pending Response</span>
-                    <span className="text-zinc-200">{outreachStats.sent}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Interested</span>
-                    <span className="text-blue-400">{outreachStats.interested}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Screened</span>
-                    <span className="text-white">{outreachStats.screened}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Declined</span>
-                    <span className="text-red-400">{outreachStats.declined}</span>
-                  </div>
-                  <div className="border-t border-zinc-800 pt-2 mt-2">
-                    <div className="flex justify-between text-sm font-medium">
-                      <span className="text-zinc-400">Total Outreach</span>
-                      <span className="text-zinc-200">{outreachStats.total}</span>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Quick Actions */}
-          <Card>
-            <CardContent>
-              <h3 className="text-sm font-medium text-zinc-400 mb-3">Quick Actions</h3>
-              <div className="space-y-2">
-                <Button variant="secondary" size="sm" className="w-full" onClick={openAddModal}>
-                  Add Candidates
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="w-full"
-                  onClick={openOutreachModal}
-                  disabled={getOutreachEligibleCandidates().length === 0}
-                >
-                  Send Outreach ({getOutreachEligibleCandidates().length})
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="w-full"
-                  onClick={openScreeningModal}
-                  disabled={getScreeningEligibleCandidates().length === 0}
-                >
-                  Send Screening ({getScreeningEligibleCandidates().length})
-                </Button>
+            <>
+              <div className="w-px h-8 bg-white/10" />
+              <div className="text-center">
+                <div className="text-2xl font-bold text-zinc-300 font-mono">{outreachStats.total}</div>
+                <div className="text-[9px] text-zinc-500 uppercase tracking-widest mt-0.5">Contacted</div>
               </div>
-            </CardContent>
-          </Card>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-emerald-400 font-mono">{outreachStats.screened}</div>
+                <div className="text-[9px] text-zinc-500 uppercase tracking-widest mt-0.5">Screened</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-red-400 font-mono">{outreachStats.declined}</div>
+                <div className="text-[9px] text-zinc-500 uppercase tracking-widest mt-0.5">Declined</div>
+              </div>
+            </>
+          )}
+          <div className="ml-auto">
+            <button
+              onClick={() => navigate('/app/admin/candidate-metrics')}
+              className="inline-flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-white uppercase tracking-widest transition-colors"
+            >
+              <BarChart2 size={11} /> View Metrics <ChevronRight size={10} />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Add Candidates Modal */}
-      <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Add Candidates">
-        {loadingCandidates ? (
-          <div className="text-center py-8 text-zinc-500">Loading candidates...</div>
-        ) : availableCandidates.length === 0 ? (
-          <div className="text-center py-8 text-zinc-500">
-            No more candidates to add. All candidates are already in this project.
+      {/* Pipeline */}
+      <div className="space-y-4">
+        {/* Stage tabs + Add button */}
+        <div className="flex items-center justify-between">
+          <div className="flex gap-6 border-b border-white/10 pb-px flex-1">
+            {[{ value: 'all' as const, label: 'All' }, ...STAGES].map(stage => (
+              <button
+                key={stage.value}
+                onClick={() => setActiveStage(stage.value as CandidateStage | 'all')}
+                className={`pb-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2 whitespace-nowrap ${
+                  activeStage === stage.value
+                    ? 'border-white text-white'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {stage.label}
+                {stage.value !== 'all' && stats && (
+                  <span className="ml-1.5 text-zinc-600">({stats[stage.value as CandidateStage] || 0})</span>
+                )}
+                {stage.value === 'all' && (
+                  <span className="ml-1.5 text-zinc-600">({stats?.total || 0})</span>
+                )}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={openAddModal}
+            className="ml-6 inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-zinc-300 hover:text-white bg-zinc-900 border border-zinc-700 hover:border-zinc-500 transition-colors flex-shrink-0"
+          >
+            <UserPlus size={11} /> Add Candidates
+          </button>
+        </div>
+
+        {/* Candidate list */}
+        {candidateList.length === 0 ? (
+          <div className="p-12 text-center bg-zinc-950 border border-white/10">
+            <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">
+              {activeStage === 'all' ? 'No candidates added yet' : `No candidates in ${activeStage} stage`}
+            </div>
+            {activeStage === 'all' && (
+              <button
+                onClick={openAddModal}
+                className="mt-3 text-[10px] text-zinc-400 hover:text-white uppercase tracking-widest underline underline-offset-4"
+              >
+                Add your first candidate
+              </button>
+            )}
           </div>
         ) : (
-          <>
-            {/* Filters */}
-            <div className="mb-4 p-3 bg-zinc-900 rounded-lg border border-zinc-800">
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Search</label>
-                  <input
-                    type="text"
-                    placeholder="Name or email..."
-                    value={addSearch}
-                    onChange={(e) => setAddSearch(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Skills</label>
-                  <input
-                    type="text"
-                    placeholder="python, react..."
-                    value={addSkills}
-                    onChange={(e) => setAddSkills(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Min Experience</label>
-                  <input
-                    type="number"
-                    placeholder="Years"
-                    value={addMinExp}
-                    onChange={(e) => setAddMinExp(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Max Experience</label>
-                  <input
-                    type="number"
-                    placeholder="Years"
-                    value={addMaxExp}
-                    onChange={(e) => setAddMaxExp(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white"
-                  />
-                </div>
-              </div>
+          <div className="space-y-px bg-white/10 border border-white/10">
+            {/* Header row */}
+            <div className="grid grid-cols-[2fr_1fr_1fr_120px_140px_32px] gap-4 px-6 py-3 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
+              <div>Candidate</div>
+              <div>Experience</div>
+              <div>Interview Status</div>
+              <div>Stage</div>
+              <div>Actions</div>
+              <div />
             </div>
 
-            {/* Selection controls */}
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-sm text-zinc-500">
-                {filteredAvailableCandidates.length === availableCandidates.length
-                  ? `${availableCandidates.length} candidates`
-                  : `${filteredAvailableCandidates.length} of ${availableCandidates.length} candidates`}
-                {selectedCandidateIds.length > 0 && ` (${selectedCandidateIds.length} selected)`}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSelectAll}
-                  className="text-xs text-white hover:text-white transition-colors"
+            {candidateList.map(pc => {
+              const outreach = getOutreachStatus(pc.candidate_id);
+              return (
+                <div
+                  key={pc.id}
+                  className="grid grid-cols-[2fr_1fr_1fr_120px_140px_32px] gap-4 px-6 py-4 bg-zinc-950 hover:bg-zinc-900 transition-colors items-center"
                 >
-                  Select All ({filteredAvailableCandidates.length})
-                </button>
-                {selectedCandidateIds.length > 0 && (
-                  <button
-                    onClick={handleDeselectAll}
-                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-                  >
-                    Deselect All
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Candidate list */}
-            {filteredAvailableCandidates.length === 0 ? (
-              <div className="text-center py-8 text-zinc-500">
-                No candidates match your filters
-              </div>
-            ) : (
-              <div className="max-h-72 overflow-y-auto space-y-2">
-                {filteredAvailableCandidates.map((c) => (
-                  <label
-                    key={c.id}
-                    className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
-                      selectedCandidateIds.includes(c.id)
-                        ? 'bg-zinc-800 border-zinc-700'
-                        : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedCandidateIds.includes(c.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedCandidateIds([...selectedCandidateIds, c.id]);
-                        } else {
-                          setSelectedCandidateIds(selectedCandidateIds.filter((cid) => cid !== c.id));
-                        }
-                      }}
-                      className="mr-3"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-zinc-200 truncate">{c.name || 'Unknown'}</p>
-                      <div className="flex items-center gap-3 text-xs text-zinc-500 mt-1">
-                        {c.email && <span>{c.email}</span>}
-                        {c.experience_years && <span>{c.experience_years} yrs exp</span>}
+                  {/* Name */}
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-white truncate">{pc.candidate_name || 'Unknown'}</div>
+                    <div className="text-xs text-zinc-500 font-mono truncate mt-0.5">{pc.candidate_email}</div>
+                    {pc.candidate_skills && pc.candidate_skills.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {pc.candidate_skills.slice(0, 3).map(skill => (
+                          <span key={skill} className="px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 text-[9px] text-zinc-500 uppercase tracking-wider">
+                            {skill}
+                          </span>
+                        ))}
+                        {pc.candidate_skills.length > 3 && (
+                          <span className="text-[9px] text-zinc-700">+{pc.candidate_skills.length - 3}</span>
+                        )}
                       </div>
-                      {c.skills && c.skills.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {c.skills.slice(0, 4).map((skill) => (
-                            <span
-                              key={skill}
-                              className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded text-xs"
-                            >
-                              {skill}
-                            </span>
-                          ))}
-                          {c.skills.length > 4 && (
-                            <span className="text-xs text-zinc-600">+{c.skills.length - 4}</span>
-                          )}
-                        </div>
+                    )}
+                  </div>
+
+                  {/* Experience */}
+                  <div className="text-xs text-zinc-400 font-mono">
+                    {pc.candidate_experience_years ? `${pc.candidate_experience_years} yrs` : '—'}
+                  </div>
+
+                  {/* Outreach status */}
+                  <div>
+                    {outreach ? <OutreachBadge outreach={outreach} /> : (
+                      <span className="text-[9px] text-zinc-700 uppercase tracking-wider">Not contacted</span>
+                    )}
+                  </div>
+
+                  {/* Stage dropdown */}
+                  <div>
+                    <select
+                      value={pc.stage}
+                      onChange={e => handleStageChange(pc.candidate_id, e.target.value as CandidateStage)}
+                      className={`w-full px-2 py-1 text-[9px] font-bold uppercase tracking-wider border outline-none cursor-pointer ${STAGE_STYLE[pc.stage]}`}
+                      style={{ background: 'transparent' }}
+                    >
+                      {STAGES.map(stage => (
+                        <option key={stage.value} value={stage.value} className="bg-zinc-900 text-zinc-200">
+                          {stage.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
+                    {outreach?.status === 'screening_complete' && (
+                      <button
+                        onClick={() => navigate(`/app/analysis/${outreach.interview_id}`)}
+                        className="text-[9px] text-zinc-400 hover:text-white uppercase tracking-widest underline underline-offset-2 transition-colors whitespace-nowrap"
+                      >
+                        View Analysis
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Remove */}
+                  <button
+                    onClick={() => handleRemoveCandidate(pc.candidate_id)}
+                    className="p-1 text-zinc-700 hover:text-red-400 transition-colors"
+                    title="Remove from project"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ─── Project details strip ─────────────────────────────────────────────── */}
+      {(project.requirements || project.benefits || project.notes) && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-white/10 border border-white/10">
+          {project.requirements && (
+            <div className="bg-zinc-950 p-6">
+              <div className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold mb-3">Requirements</div>
+              <p className="text-xs text-zinc-400 whitespace-pre-wrap leading-relaxed">{project.requirements}</p>
+            </div>
+          )}
+          {project.benefits && (
+            <div className="bg-zinc-950 p-6">
+              <div className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold mb-3">Benefits</div>
+              <p className="text-xs text-zinc-400 whitespace-pre-wrap leading-relaxed">{project.benefits}</p>
+            </div>
+          )}
+          {project.notes && (
+            <div className="bg-zinc-950 p-6">
+              <div className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold mb-3">Internal Notes</div>
+              <p className="text-xs text-zinc-400 whitespace-pre-wrap leading-relaxed">{project.notes}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Modals ────────────────────────────────────────────────────────────── */}
+
+      {/* Add Candidates Modal */}
+      {showAddModal && (
+        <Modal title="Add Candidates" subtitle="Select from your candidate database" onClose={() => setShowAddModal(false)}>
+          {loadingCandidates ? (
+            <div className="py-12 flex justify-center"><Loader2 size={18} className="animate-spin text-zinc-500" /></div>
+          ) : (
+            <>
+              <input
+                type="text"
+                placeholder="Search by name or email…"
+                value={addSearch}
+                onChange={e => setAddSearch(e.target.value)}
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none mb-3"
+              />
+
+              <div className="flex items-center justify-between mb-2 text-[10px] text-zinc-500 uppercase tracking-widest">
+                <span>
+                  {filteredAvailable.length === availableCandidates.length
+                    ? `${availableCandidates.length} candidates`
+                    : `${filteredAvailable.length} of ${availableCandidates.length}`}
+                  {selectedCandidateIds.length > 0 && ` · ${selectedCandidateIds.length} selected`}
+                </span>
+                <div className="flex gap-3">
+                  <button onClick={() => setSelectedCandidateIds(filteredAvailable.map(c => c.id))} className="text-white hover:text-zinc-300">
+                    Select All
+                  </button>
+                  {selectedCandidateIds.length > 0 && (
+                    <button onClick={() => setSelectedCandidateIds([])} className="hover:text-zinc-300">
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {filteredAvailable.length === 0 ? (
+                <div className="py-8 text-center text-xs text-zinc-600">
+                  {availableCandidates.length === 0 ? 'All candidates are already in this project' : 'No candidates match your search'}
+                </div>
+              ) : (
+                <div className="max-h-72 overflow-y-auto space-y-px bg-white/5 border border-white/10">
+                  {filteredAvailable.map(c => (
+                    <label
+                      key={c.id}
+                      className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${
+                        selectedCandidateIds.includes(c.id) ? 'bg-zinc-800' : 'bg-zinc-950 hover:bg-zinc-900'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedCandidateIds.includes(c.id)}
+                        onChange={e => {
+                          setSelectedCandidateIds(e.target.checked
+                            ? [...selectedCandidateIds, c.id]
+                            : selectedCandidateIds.filter(id => id !== c.id));
+                        }}
+                        className="accent-white"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-white truncate">{c.name || 'Unknown'}</div>
+                        <div className="text-[10px] text-zinc-500 font-mono truncate">{c.email}</div>
+                      </div>
+                      {c.experience_years && (
+                        <div className="text-[10px] text-zinc-600 font-mono">{c.experience_years}y</div>
                       )}
-                    </div>
-                  </label>
-                ))}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-white/10">
+                <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddCandidates}
+                  disabled={adding || selectedCandidateIds.length === 0}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {adding ? <><Loader2 size={11} className="animate-spin" /> Adding…</> : `Add ${selectedCandidateIds.length || ''} Candidate${selectedCandidateIds.length !== 1 ? 's' : ''}`}
+                </button>
+              </div>
+            </>
+          )}
+        </Modal>
+      )}
+
+      {/* Edit Project Modal */}
+      {showEditModal && (
+        <Modal title="Edit Project" onClose={() => setShowEditModal(false)}>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Company Name">
+                <input type="text" value={editData.company_name || ''} onChange={e => setEditData({ ...editData, company_name: e.target.value })} className={inputCls} />
+              </Field>
+              <Field label="Project Name">
+                <input type="text" value={editData.name || ''} onChange={e => setEditData({ ...editData, name: e.target.value })} className={inputCls} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Position Title">
+                <input type="text" value={editData.position_title || ''} onChange={e => setEditData({ ...editData, position_title: e.target.value })} className={inputCls} />
+              </Field>
+              <Field label="Location">
+                <input type="text" value={editData.location || ''} onChange={e => setEditData({ ...editData, location: e.target.value })} className={inputCls} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Salary Min ($)">
+                <input type="number" value={editData.salary_min || ''} onChange={e => setEditData({ ...editData, salary_min: e.target.value ? parseInt(e.target.value) : undefined })} className={inputCls} />
+              </Field>
+              <Field label="Salary Max ($)">
+                <input type="number" value={editData.salary_max || ''} onChange={e => setEditData({ ...editData, salary_max: e.target.value ? parseInt(e.target.value) : undefined })} className={inputCls} />
+              </Field>
+            </div>
+            <Field label="Requirements">
+              <textarea rows={3} value={editData.requirements || ''} onChange={e => setEditData({ ...editData, requirements: e.target.value })} className={`${inputCls} resize-none`} />
+            </Field>
+            <Field label="Benefits">
+              <textarea rows={2} value={editData.benefits || ''} onChange={e => setEditData({ ...editData, benefits: e.target.value })} className={`${inputCls} resize-none`} />
+            </Field>
+            <Field label="Internal Notes">
+              <textarea rows={2} value={editData.notes || ''} onChange={e => setEditData({ ...editData, notes: e.target.value })} className={`${inputCls} resize-none`} />
+            </Field>
+            <div className="flex justify-end gap-3 pt-2 border-t border-white/10">
+              <button onClick={() => setShowEditModal(false)} className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white">Cancel</button>
+              <button
+                onClick={handleSaveProject}
+                disabled={saving}
+                className="inline-flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 transition-colors"
+              >
+                {saving ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Outreach Modal */}
+      {showOutreachModal && (
+        <Modal
+          title="Send Outreach Email"
+          subtitle="Candidates receive an interest link → AI screening interview"
+          onClose={() => setShowOutreachModal(false)}
+        >
+          <div className="space-y-4">
+            <CandidateCheckList
+              candidates={outreachEligible}
+              selected={outreachCandidateIds}
+              onChange={setOutreachCandidateIds}
+              getLabel={c => `${c.candidate_name || 'Unknown'} · ${c.candidate_email || ''}`}
+              getId={c => c.candidate_id}
+              emptyText="No candidates eligible (all already contacted)"
+            />
+
+            <Field label="Custom Message (optional)">
+              <textarea
+                rows={3}
+                value={customMessage}
+                onChange={e => setCustomMessage(e.target.value)}
+                placeholder="Add a personalized note to the outreach email…"
+                className={`${inputCls} resize-none`}
+              />
+            </Field>
+
+            <EmailPreviewBox project={project} note="Candidates click a link to express interest, then take the AI screening interview. No account required." />
+
+            {outreachResult && (
+              <div className={`px-4 py-3 text-[10px] font-mono border ${outreachResult.startsWith('✓') ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10' : 'text-red-400 border-red-500/20 bg-red-500/10'}`}>
+                {outreachResult}
               </div>
             )}
 
-            <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-zinc-800">
-              <Button variant="secondary" onClick={() => setShowAddModal(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleAddCandidates} disabled={adding || selectedCandidateIds.length === 0}>
-                {adding ? 'Adding...' : `Add ${selectedCandidateIds.length} Candidate${selectedCandidateIds.length !== 1 ? 's' : ''}`}
-              </Button>
-            </div>
-          </>
-        )}
-      </Modal>
-
-      {/* Edit Project Modal */}
-      <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Project">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Company Name</label>
-              <input
-                type="text"
-                value={editData.company_name || ''}
-                onChange={(e) => setEditData({ ...editData, company_name: e.target.value })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Project Name</label>
-              <input
-                type="text"
-                value={editData.name || ''}
-                onChange={(e) => setEditData({ ...editData, name: e.target.value })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
-              />
+            <div className="flex justify-end gap-3 pt-2 border-t border-white/10">
+              <button onClick={() => setShowOutreachModal(false)} className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white">Cancel</button>
+              <button
+                onClick={handleSendOutreach}
+                disabled={sendingOutreach || outreachCandidateIds.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {sendingOutreach
+                  ? <><Loader2 size={11} className="animate-spin" /> Sending…</>
+                  : <><Mail size={11} /> Send to {outreachCandidateIds.length}</>}
+              </button>
             </div>
           </div>
+        </Modal>
+      )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Position Title</label>
-              <input
-                type="text"
-                value={editData.position_title || ''}
-                onChange={(e) => setEditData({ ...editData, position_title: e.target.value })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Location</label>
-              <input
-                type="text"
-                value={editData.location || ''}
-                onChange={(e) => setEditData({ ...editData, location: e.target.value })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Salary Min ($)</label>
-              <input
-                type="number"
-                value={editData.salary_min || ''}
-                onChange={(e) => setEditData({ ...editData, salary_min: e.target.value ? parseInt(e.target.value) : undefined })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Salary Max ($)</label>
-              <input
-                type="number"
-                value={editData.salary_max || ''}
-                onChange={(e) => setEditData({ ...editData, salary_max: e.target.value ? parseInt(e.target.value) : undefined })}
-                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Requirements</label>
-            <textarea
-              value={editData.requirements || ''}
-              onChange={(e) => setEditData({ ...editData, requirements: e.target.value })}
-              rows={3}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white resize-none"
+      {/* Screening Modal */}
+      {showScreeningModal && (
+        <Modal
+          title="Send Screening Interview"
+          subtitle="Candidates receive a direct link to the AI screening interview"
+          onClose={() => setShowScreeningModal(false)}
+        >
+          <div className="space-y-4">
+            <CandidateCheckList
+              candidates={screeningEligible}
+              selected={screeningCandidateIds}
+              onChange={setScreeningCandidateIds}
+              getLabel={c => `${c.candidate_name || 'Unknown'} · ${c.candidate_email || ''} · ${c.stage}`}
+              getId={c => c.candidate_id}
+              emptyText="No candidates eligible for screening"
             />
-          </div>
 
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Benefits</label>
-            <textarea
-              value={editData.benefits || ''}
-              onChange={(e) => setEditData({ ...editData, benefits: e.target.value })}
-              rows={2}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white resize-none"
-            />
-          </div>
+            <Field label="Custom Message (optional)">
+              <textarea
+                rows={3}
+                value={screeningMessage}
+                onChange={e => setScreeningMessage(e.target.value)}
+                placeholder="Add a personalized note to the screening invite…"
+                className={`${inputCls} resize-none`}
+              />
+            </Field>
 
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Notes</label>
-            <textarea
-              value={editData.notes || ''}
-              onChange={(e) => setEditData({ ...editData, notes: e.target.value })}
-              rows={2}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-white resize-none"
-            />
-          </div>
+            <EmailPreviewBox project={project} note="Candidates need an account to access the interview. Direct link skips the interest confirmation step." highlight />
 
-          <div className="flex justify-end gap-3 pt-4">
-            <Button variant="secondary" onClick={() => setShowEditModal(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSaveProject} disabled={saving}>
-              {saving ? 'Saving...' : 'Save Changes'}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Send Outreach Modal */}
-      <Modal isOpen={showOutreachModal} onClose={() => setShowOutreachModal(false)} title="Send Outreach">
-        <div className="space-y-4">
-          <p className="text-sm text-zinc-400">
-            Send outreach emails to candidates in the Initial stage who haven't been contacted yet.
-            They'll receive a link to express interest and complete a screening interview.
-          </p>
-
-          {/* Candidate selection */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs text-zinc-500">
-                Select Candidates ({outreachCandidateIds.length} selected)
-              </label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setOutreachCandidateIds(getOutreachEligibleCandidates().map((c) => c.candidate_id))}
-                  className="text-xs text-white hover:text-white transition-colors"
-                >
-                  Select All
-                </button>
-                {outreachCandidateIds.length > 0 && (
-                  <button
-                    onClick={() => setOutreachCandidateIds([])}
-                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-                  >
-                    Clear
-                  </button>
-                )}
+            {screeningResult && (
+              <div className={`px-4 py-3 text-[10px] font-mono border ${screeningResult.startsWith('✓') ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10' : 'text-red-400 border-red-500/20 bg-red-500/10'}`}>
+                {screeningResult}
               </div>
-            </div>
+            )}
 
-            <div className="max-h-48 overflow-y-auto space-y-1 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
-              {getOutreachEligibleCandidates().map((pc) => (
-                <label
-                  key={pc.candidate_id}
-                  className={`flex items-center p-2 rounded cursor-pointer transition-colors ${
-                    outreachCandidateIds.includes(pc.candidate_id)
-                      ? 'bg-zinc-800'
-                      : 'hover:bg-zinc-800'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={outreachCandidateIds.includes(pc.candidate_id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setOutreachCandidateIds([...outreachCandidateIds, pc.candidate_id]);
-                      } else {
-                        setOutreachCandidateIds(outreachCandidateIds.filter((cid) => cid !== pc.candidate_id));
-                      }
-                    }}
-                    className="mr-2"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm text-zinc-200">{pc.candidate_name || 'Unknown'}</span>
-                    {pc.candidate_email && (
-                      <span className="text-xs text-zinc-500 ml-2">{pc.candidate_email}</span>
-                    )}
-                  </div>
-                </label>
-              ))}
-              {getOutreachEligibleCandidates().length === 0 && (
-                <p className="text-sm text-zinc-500 text-center py-4">
-                  No candidates eligible for outreach
-                </p>
-              )}
+            <div className="flex justify-end gap-3 pt-2 border-t border-white/10">
+              <button onClick={() => setShowScreeningModal(false)} className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white">Cancel</button>
+              <button
+                onClick={handleSendScreening}
+                disabled={sendingScreening || screeningCandidateIds.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {sendingScreening
+                  ? <><Loader2 size={11} className="animate-spin" /> Sending…</>
+                  : <><Send size={11} /> Send to {screeningCandidateIds.length}</>}
+              </button>
             </div>
           </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
 
-          {/* Custom message */}
+// ─── Shared sub-components ───────────────────────────────────────────────────
+
+const inputCls = 'w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors';
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function Modal({ title, subtitle, onClose, children }: {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="relative bg-zinc-950 border border-white/15 shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">
-              Custom Message (optional)
-            </label>
-            <textarea
-              value={customMessage}
-              onChange={(e) => setCustomMessage(e.target.value)}
-              placeholder="Add a personalized note to the email..."
-              rows={3}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
-            />
+            <div className="text-xs font-bold text-white uppercase tracking-wider">{title}</div>
+            {subtitle && <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">{subtitle}</div>}
           </div>
-
-          {/* Preview info */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-            <h4 className="text-xs text-zinc-500 uppercase mb-2">Email will include:</h4>
-            <ul className="text-sm text-zinc-400 space-y-1">
-              <li>• Position: {project?.position_title || project?.name}</li>
-              <li>• Company: {project?.company_name}</li>
-              {project?.location && <li>• Location: {project.location}</li>}
-              {(project?.salary_min || project?.salary_max) && (
-                <li>• Salary: {formatSalary(project?.salary_min, project?.salary_max)}</li>
-              )}
-            </ul>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4">
-            <Button variant="secondary" onClick={() => setShowOutreachModal(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSendOutreach}
-              disabled={sendingOutreach || outreachCandidateIds.length === 0}
-            >
-              {sendingOutreach
-                ? 'Sending...'
-                : `Send to ${outreachCandidateIds.length} Candidate${outreachCandidateIds.length !== 1 ? 's' : ''}`}
-            </Button>
-          </div>
+          <button onClick={onClose} className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded transition-colors">
+            <X size={16} />
+          </button>
         </div>
-      </Modal>
+        <div className="px-6 py-5 overflow-y-auto flex-1">{children}</div>
+      </div>
+    </div>
+  );
+}
 
-      {/* Send Screening Modal */}
-      <Modal isOpen={showScreeningModal} onClose={() => setShowScreeningModal(false)} title="Send Screening Interview">
-        <div className="space-y-4">
-          <p className="text-sm text-zinc-400">
-            Send screening interview invitations directly to candidates.
-            They'll need to log in or create an account to complete the interview.
-          </p>
-
-          {/* Candidate selection */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs text-zinc-500">
-                Select Candidates ({screeningCandidateIds.length} selected)
-              </label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setScreeningCandidateIds(getScreeningEligibleCandidates().map((c) => c.candidate_id))}
-                  className="text-xs text-white hover:text-white transition-colors"
-                >
-                  Select All
-                </button>
-                {screeningCandidateIds.length > 0 && (
-                  <button
-                    onClick={() => setScreeningCandidateIds([])}
-                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="max-h-48 overflow-y-auto space-y-1 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
-              {getScreeningEligibleCandidates().map((pc) => (
-                <label
-                  key={pc.candidate_id}
-                  className={`flex items-center p-2 rounded cursor-pointer transition-colors ${
-                    screeningCandidateIds.includes(pc.candidate_id)
-                      ? 'bg-zinc-800'
-                      : 'hover:bg-zinc-800'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={screeningCandidateIds.includes(pc.candidate_id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setScreeningCandidateIds([...screeningCandidateIds, pc.candidate_id]);
-                      } else {
-                        setScreeningCandidateIds(screeningCandidateIds.filter((cid) => cid !== pc.candidate_id));
-                      }
-                    }}
-                    className="mr-2"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm text-zinc-200">{pc.candidate_name || 'Unknown'}</span>
-                    {pc.candidate_email && (
-                      <span className="text-xs text-zinc-500 ml-2">{pc.candidate_email}</span>
-                    )}
-                    <span className={`ml-2 px-1.5 py-0.5 rounded text-xs font-medium ${
-                      pc.stage === 'interview' ? 'bg-blue-500/20 text-blue-400' :
-                      pc.stage === 'screening' ? 'bg-yellow-500/20 text-yellow-400' :
-                      pc.stage === 'finalist' ? 'bg-purple-500/20 text-purple-400' :
-                      'bg-zinc-700 text-zinc-400'
-                    }`}>
-                      {pc.stage}
-                    </span>
-                  </div>
-                </label>
-              ))}
-              {getScreeningEligibleCandidates().length === 0 && (
-                <p className="text-sm text-zinc-500 text-center py-4">
-                  No candidates eligible for screening
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Custom message */}
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">
-              Custom Message (optional)
-            </label>
-            <textarea
-              value={screeningMessage}
-              onChange={(e) => setScreeningMessage(e.target.value)}
-              placeholder="Add a personalized note to the email..."
-              rows={3}
-              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-white resize-none"
-            />
-          </div>
-
-          {/* Preview info */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-            <h4 className="text-xs text-zinc-500 uppercase mb-2">Email will include:</h4>
-            <ul className="text-sm text-zinc-400 space-y-1">
-              <li>• Position: {project?.position_title || project?.name}</li>
-              <li>• Company: {project?.company_name}</li>
-              {project?.location && <li>• Location: {project.location}</li>}
-              {(project?.salary_min || project?.salary_max) && (
-                <li>• Salary: {formatSalary(project?.salary_min, project?.salary_max)}</li>
-              )}
-              <li className="text-white">• Direct link to screening interview</li>
-            </ul>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4">
-            <Button variant="secondary" onClick={() => setShowScreeningModal(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSendScreening}
-              disabled={sendingScreening || screeningCandidateIds.length === 0}
-            >
-              {sendingScreening
-                ? 'Sending...'
-                : `Send to ${screeningCandidateIds.length} Candidate${screeningCandidateIds.length !== 1 ? 's' : ''}`}
-            </Button>
-          </div>
+function CandidateCheckList<T>({
+  candidates, selected, onChange, getLabel, getId, emptyText,
+}: {
+  candidates: T[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  getLabel: (c: T) => string;
+  getId: (c: T) => string;
+  emptyText: string;
+}) {
+  if (candidates.length === 0) {
+    return <div className="py-6 text-center text-xs text-zinc-600">{emptyText}</div>;
+  }
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2 text-[10px] text-zinc-500 uppercase tracking-widest">
+        <span>{selected.length} of {candidates.length} selected</span>
+        <div className="flex gap-3">
+          <button onClick={() => onChange(candidates.map(getId))} className="text-white hover:text-zinc-300">Select All</button>
+          {selected.length > 0 && <button onClick={() => onChange([])} className="hover:text-zinc-300">Clear</button>}
         </div>
-      </Modal>
+      </div>
+      <div className="max-h-48 overflow-y-auto space-y-px bg-white/5 border border-white/10">
+        {candidates.map(c => {
+          const cid = getId(c);
+          return (
+            <label
+              key={cid}
+              className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${selected.includes(cid) ? 'bg-zinc-800' : 'bg-zinc-950 hover:bg-zinc-900'}`}
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(cid)}
+                onChange={e => onChange(e.target.checked ? [...selected, cid] : selected.filter(id => id !== cid))}
+                className="accent-white"
+              />
+              <span className="text-xs text-zinc-200 font-mono truncate">{getLabel(c)}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EmailPreviewBox({ project, note, highlight }: { project: Project; note: string; highlight?: boolean }) {
+  return (
+    <div className={`p-4 border text-xs space-y-1 ${highlight ? 'bg-violet-500/5 border-violet-500/20' : 'bg-zinc-900 border-white/5'}`}>
+      <div className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold mb-2">Email will include</div>
+      <div className="text-zinc-400">Position: <span className="text-zinc-200">{project.position_title || project.name}</span></div>
+      <div className="text-zinc-400">Company: <span className="text-zinc-200">{project.company_name}</span></div>
+      {project.location && <div className="text-zinc-400">Location: <span className="text-zinc-200">{project.location}</span></div>}
+      {(project.salary_min || project.salary_max) && (
+        <div className="text-zinc-400">Salary: <span className="text-zinc-200">{formatSalary(project.salary_min, project.salary_max)}</span></div>
+      )}
+      <div className={`pt-2 mt-2 border-t border-white/5 text-[10px] ${highlight ? 'text-violet-400' : 'text-zinc-500'}`}>{note}</div>
     </div>
   );
 }
