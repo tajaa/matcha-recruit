@@ -825,6 +825,35 @@ export interface EmployeeGoogleWorkspaceProvisioningStatus {
   runs: ProvisioningRunStatus[];
 }
 
+export interface OnboardingFunnel {
+  invited: number;
+  accepted: number;
+  started: number;
+  completed: number;
+  ready_for_day1: number;
+}
+
+export interface OnboardingKpis {
+  time_to_ready_p50_days: number | null;
+  time_to_ready_p90_days: number | null;
+  completion_before_start_rate: number | null;
+  automation_success_rate: number | null;
+  manual_intervention_rate: number | null;
+}
+
+export interface OnboardingBottleneck {
+  task_title: string;
+  overdue_count: number;
+  avg_days_overdue: number;
+}
+
+export interface OnboardingAnalytics {
+  generated_at: string;
+  funnel: OnboardingFunnel;
+  kpis: OnboardingKpis;
+  bottlenecks: OnboardingBottleneck[];
+}
+
 // Beta access management types
 export interface CandidateBetaInfo {
   user_id: string;

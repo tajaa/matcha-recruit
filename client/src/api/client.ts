@@ -41,6 +41,7 @@ import type {
   GoogleWorkspaceConnectionStatus,
   ProvisioningRunStatus,
   EmployeeGoogleWorkspaceProvisioningStatus,
+  OnboardingAnalytics,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -505,6 +506,10 @@ export const provisioning = {
     request<ProvisioningRunStatus>(`/provisioning/runs/${runId}/retry`, {
       method: 'POST',
     }),
+};
+
+export const onboarding = {
+  getAnalytics: () => request<OnboardingAnalytics>('/onboarding/analytics'),
 };
 
 // Interviews
@@ -2593,6 +2598,7 @@ export const api = {
 
   companies,
   provisioning,
+  onboarding,
   interviews,
   candidates,
   reachOut,
