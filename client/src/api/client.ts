@@ -1174,9 +1174,10 @@ export const tutor = {
 
 // Tutor Metrics API (admin only)
 export const tutorMetrics = {
-  listSessions: (filters?: { mode?: 'interview_prep' | 'language_test' | 'company_tool' | 'culture' | 'screening' | 'candidate'; limit?: number; offset?: number }) => {
+  listSessions: (filters?: { mode?: 'interview_prep' | 'language_test' | 'company_tool' | 'culture' | 'screening' | 'candidate'; company_id?: string; limit?: number; offset?: number }) => {
     const params = new URLSearchParams();
     if (filters?.mode) params.append('mode', filters.mode);
+    if (filters?.company_id) params.append('company_id', filters.company_id);
     if (filters?.limit) params.append('limit', filters.limit.toString());
     if (filters?.offset) params.append('offset', filters.offset.toString());
     const query = params.toString();
@@ -1191,8 +1192,12 @@ export const tutorMetrics = {
       method: 'DELETE',
     }),
 
-  getAggregateMetrics: () =>
-    request<TutorMetricsAggregate>('/tutor/metrics/aggregate'),
+  getAggregateMetrics: (company_id?: string) => {
+    const params = new URLSearchParams();
+    if (company_id) params.append('company_id', company_id);
+    const query = params.toString();
+    return request<TutorMetricsAggregate>(`/tutor/metrics/aggregate${query ? `?${query}` : ''}`);
+  },
 
   getProgress: (language?: string, limit: number = 20) => {
     const params = new URLSearchParams();

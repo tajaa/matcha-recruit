@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { tutorMetrics } from '../api/client';
 import type { TutorSessionSummary, TutorMetricsAggregate, TutorProgressDataPoint, TutorVocabularyStats } from '../types';
 import { Activity, BarChart2, Book, Trash2, Clock, CheckCircle2 } from 'lucide-react';
@@ -232,6 +232,8 @@ function VocabularySection({ vocab }: { vocab: TutorVocabularyStats }) {
 
 export function TutorMetrics() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const companyId = searchParams.get('company_id');
   const [sessions, setSessions] = useState<TutorSessionSummary[]>([]);
   const [aggregate, setAggregate] = useState<TutorMetricsAggregate | null>(null);
   const [progress, setProgress] = useState<TutorProgressDataPoint[]>([]);
@@ -261,10 +263,10 @@ export function TutorMetrics() {
     try {
       setLoading(true);
       const mode = activeTab === 'all' ? undefined : activeTab;
-      const shouldLoadLanguageInsights = activeTab === 'all' || activeTab === 'language_test';
+      const shouldLoadLanguageInsights = (activeTab === 'all' || activeTab === 'language_test') && !companyId;
       const [sessionsData, aggregateData, progressData, vocabData] = await Promise.all([
-        tutorMetrics.listSessions({ mode, limit: 100 }),
-        tutorMetrics.getAggregateMetrics(),
+        tutorMetrics.listSessions({ mode, company_id: companyId || undefined, limit: 100 }),
+        tutorMetrics.getAggregateMetrics(companyId || undefined),
         shouldLoadLanguageInsights
           ? tutorMetrics.getProgress('es', 15)
           : Promise.resolve({ sessions: [] }),
@@ -281,11 +283,13 @@ export function TutorMetrics() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, companyId]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const filteredCompanyName = companyId && sessions.length > 0 ? sessions[0].company_name : null;
 
   return (
     <div className="max-w-7xl mx-auto space-y-12">
@@ -294,6 +298,20 @@ export function TutorMetrics() {
         <div>
           <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Performance Metrics</h1>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Language/User Coaching Metrics Kept Separate From Company Culture/Screening Metrics</p>
+          
+          {companyId && (
+            <div className="mt-4 flex items-center gap-3">
+              <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-widest rounded-sm">
+                Filtered by: {filteredCompanyName || 'Company'}
+              </div>
+              <button 
+                onClick={() => navigate('/app/admin/tutor-metrics')}
+                className="text-[10px] text-zinc-500 hover:text-white uppercase tracking-widest underline underline-offset-4"
+              >
+                Clear Filter
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

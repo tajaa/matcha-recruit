@@ -17,6 +17,7 @@ const FEATURE_CONFIG: { key: string; label: string; section: string }[] = [
   { key: 'incidents', label: 'Incidents', section: 'HR Tools' },
   { key: 'time_off', label: 'Time Off', section: 'HR Tools' },
   { key: 'accommodations', label: 'Accommodations', section: 'HR Tools' },
+  { key: 'interview_prep', label: 'Tutor', section: 'HR Tools' },
 ];
 
 export function CompanyFeatures() {
@@ -200,19 +201,27 @@ export function CompanyFeatures() {
                         );
                       })}
                       <td className="text-center px-4 py-4">
-                        <div className="flex items-center justify-center gap-1">
+                        <div className="flex flex-col items-center justify-center gap-1">
                           <button
-                            onClick={() => enableAll(company.id)}
-                            className="text-[9px] px-2 py-1 text-zinc-500 hover:text-emerald-400 border border-zinc-800 hover:border-emerald-500/30 transition-colors uppercase tracking-wider"
+                            onClick={() => navigate(`/app/admin/tutor-metrics?company_id=${company.id}`)}
+                            className="text-[9px] px-2 py-1 text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 transition-colors uppercase tracking-wider mb-1 w-full"
                           >
-                            All
+                            Metrics
                           </button>
-                          <button
-                            onClick={() => disableAll(company.id)}
-                            className="text-[9px] px-2 py-1 text-zinc-500 hover:text-red-400 border border-zinc-800 hover:border-red-500/30 transition-colors uppercase tracking-wider"
-                          >
-                            None
-                          </button>
+                          <div className="flex gap-1 w-full">
+                            <button
+                              onClick={() => enableAll(company.id)}
+                              className="flex-1 text-[9px] px-2 py-1 text-zinc-500 hover:text-emerald-400 border border-zinc-800 hover:border-emerald-500/30 transition-colors uppercase tracking-wider"
+                            >
+                              All
+                            </button>
+                            <button
+                              onClick={() => disableAll(company.id)}
+                              className="flex-1 text-[9px] px-2 py-1 text-zinc-500 hover:text-red-400 border border-zinc-800 hover:border-red-500/30 transition-colors uppercase tracking-wider"
+                            >
+                              None
+                            </button>
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -249,6 +258,12 @@ export function CompanyFeatures() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => navigate(`/app/admin/tutor-metrics?company_id=${company.id}`)}
+                        className="text-[9px] px-2 py-1 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider"
+                      >
+                        Metrics
+                      </button>
                       <button
                         onClick={() => enableAll(company.id)}
                         className="text-[9px] px-2 py-1 text-zinc-500 hover:text-emerald-400 border border-zinc-800 hover:border-emerald-500/30 transition-colors uppercase tracking-wider"

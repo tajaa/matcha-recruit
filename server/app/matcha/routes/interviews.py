@@ -249,6 +249,7 @@ async def create_tutor_session(
 @router.get("/tutor/sessions", response_model=list[TutorSessionSummary])
 async def list_tutor_sessions(
     mode: Optional[str] = None,  # "interview_prep", "language_test", "company_tool", "culture", "screening", "candidate"
+    company_id: Optional[UUID] = None,
     limit: int = 50,
     offset: int = 0,
     _current_user: CurrentUser = Depends(require_admin),
@@ -270,8 +271,7 @@ async def list_tutor_sessions(
     interview_type_filters = mode_to_types[mode] if mode else all_types
 
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            """
+        query = """
             SELECT i.id, i.company_id, c.name as company_name, i.interview_type,
                    i.interviewer_role as language, i.status, i.tutor_analysis,
                    i.conversation_analysis, i.screening_analysis,
@@ -279,13 +279,19 @@ async def list_tutor_sessions(
             FROM interviews i
             LEFT JOIN companies c ON i.company_id = c.id
             WHERE i.interview_type = ANY($1::text[])
-            ORDER BY i.created_at DESC
-            LIMIT $2 OFFSET $3
-            """,
-            interview_type_filters,
-            limit,
-            offset,
-        )
+        """
+        params = [interview_type_filters]
+
+        if company_id:
+            query += " AND i.company_id = $2"
+            params.append(company_id)
+            query += f" ORDER BY i.created_at DESC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
+            params.extend([limit, offset])
+        else:
+            query += " ORDER BY i.created_at DESC LIMIT $2 OFFSET $3"
+            params.extend([limit, offset])
+
+        rows = await conn.fetch(query, *params)
 
         sessions = []
         for row in rows:
@@ -392,17 +398,26 @@ async def delete_tutor_session(
 
 @router.get("/tutor/metrics/aggregate", response_model=TutorMetricsAggregate)
 async def get_tutor_aggregate_metrics(
+    company_id: Optional[UUID] = None,
     _current_user: CurrentUser = Depends(require_admin),
 ):
     """Get aggregate metrics across user-tool and company-tool interview sessions (admin only)."""
     async with get_connection() as conn:
+        # Build base filter
+        where_clause = "WHERE status = 'completed'"
+        params = []
+        if company_id:
+            where_clause += " AND company_id = $1"
+            params.append(company_id)
+
         # Get interview prep stats
         interview_prep_rows = await conn.fetch(
-            """
+            f"""
             SELECT tutor_analysis, status
             FROM interviews
-            WHERE interview_type = 'tutor_interview' AND status = 'completed'
-            """
+            {where_clause} AND interview_type = 'tutor_interview'
+            """,
+            *params
         )
 
         interview_prep_stats = {
@@ -439,11 +454,12 @@ async def get_tutor_aggregate_metrics(
 
         # Get language test stats
         language_test_rows = await conn.fetch(
-            """
+            f"""
             SELECT tutor_analysis, interviewer_role as language, status
             FROM interviews
-            WHERE interview_type = 'tutor_language' AND status = 'completed'
-            """
+            {where_clause} AND interview_type = 'tutor_language'
+            """,
+            *params
         )
 
         language_test_stats = {
@@ -501,12 +517,12 @@ async def get_tutor_aggregate_metrics(
 
         # Company interview metrics (kept separate from language/user coaching metrics).
         company_rows = await conn.fetch(
-            """
+            f"""
             SELECT interview_type, conversation_analysis, screening_analysis
             FROM interviews
-            WHERE interview_type IN ('culture', 'candidate', 'screening')
-              AND status = 'completed'
-            """
+            {where_clause} AND interview_type IN ('culture', 'candidate', 'screening')
+            """,
+            *params
         )
 
         culture_scores: list[float] = []
