@@ -53,6 +53,77 @@ const LOCAL_JURISDICTIONS = [
   "Seattle Local",
 ];
 
+const WAVEFORM_FRAMES = [
+  String.raw`
+      .----------------------------------------.
+      |   MATCHA VOICE SIGNAL :: REAL-TIME     |
+      |----------------------------------------|
+      |                                        |
+      |   __      __        __      __       _ |
+      | _/  \____/  \__/\__/  \____/  \__/\_/ \|
+      |                                        |
+      |   gain:+4dB   mode:screening   LIVE    |
+      '----------------------------------------'
+`,
+  String.raw`
+      .----------------------------------------.
+      |   MATCHA VOICE SIGNAL :: REAL-TIME     |
+      |----------------------------------------|
+      |                                        |
+      |      __        __        __        __  |
+      | ____/  \__/\__/  \__/\__/  \__/\__/  \_|
+      |                                        |
+      |   gain:+4dB   mode:screening   LIVE    |
+      '----------------------------------------'
+`,
+  String.raw`
+      .----------------------------------------.
+      |   MATCHA VOICE SIGNAL :: REAL-TIME     |
+      |----------------------------------------|
+      |                                        |
+      |  _    _      _    _      _    _      _ |
+      |_/ \__/ \____/ \__/ \____/ \__/ \____/ \|
+      |                                        |
+      |   gain:+4dB   mode:screening   LIVE    |
+      '----------------------------------------'
+`,
+  String.raw`
+      .----------------------------------------.
+      |   MATCHA VOICE SIGNAL :: REAL-TIME     |
+      |----------------------------------------|
+      |                                        |
+      | __  __   __  __   __  __   __  __   __ |
+      |/  \/  \_/  \/  \_/  \/  \_/  \/  \_/  \|
+      |                                        |
+      |   gain:+4dB   mode:screening   LIVE    |
+      '----------------------------------------'
+`,
+  String.raw`
+      .----------------------------------------.
+      |   MATCHA VOICE SIGNAL :: REAL-TIME     |
+      |----------------------------------------|
+      |                                        |
+      |     _      ___      _      ___      _  |
+      |____/ \____/   \____/ \____/   \____/ \_|
+      |                                        |
+      |   gain:+4dB   mode:screening   LIVE    |
+      '----------------------------------------'
+`,
+  String.raw`
+      .----------------------------------------.
+      |   MATCHA VOICE SIGNAL :: REAL-TIME     |
+      |----------------------------------------|
+      |                                        |
+      |  __/\__/\____/\__/\____/\__/\____/\__  |
+      |_/                                      \_|
+      |                                        |
+      |   gain:+4dB   mode:screening   LIVE    |
+      '----------------------------------------'
+`,
+];
+
+const WAVEFORM_SEQUENCE = [0, 1, 2, 3, 4, 5, 4, 3, 2, 1];
+
 const TypewriterBadge = ({ text }: { text: string }) => {
   const [displayText, setDisplayText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
@@ -102,36 +173,38 @@ const TypewriterBadge = ({ text }: { text: string }) => {
   );
 };
 
-const TalkingMouth = () => {
+const AsciiWaveform = () => {
+  const [sequenceIndex, setSequenceIndex] = useState(0);
+
+  useEffect(() => {
+    const frameTimer = setInterval(() => {
+      setSequenceIndex((prev) => (prev + 1) % WAVEFORM_SEQUENCE.length);
+    }, 110);
+    return () => clearInterval(frameTimer);
+  }, []);
+
+  const frameIndex = WAVEFORM_SEQUENCE[sequenceIndex] ?? 0;
+
   return (
-    <div className="font-mono text-emerald-500 leading-none select-none">
+    <div className="font-mono text-emerald-400 leading-none select-none">
       <motion.pre
         animate={{
-          opacity: [0.4, 1, 0.4],
-          scaleY: [1, 1.4, 0.9, 1.3, 1],
+          opacity: [0.7, 1, 0.78],
+          scale: [1, 1.008, 1],
           filter: [
             "drop-shadow(0 0 2px rgba(16,185,129,0.3))",
-            "drop-shadow(0 0 8px rgba(16,185,129,0.6))",
+            "drop-shadow(0 0 12px rgba(16,185,129,0.75))",
             "drop-shadow(0 0 2px rgba(16,185,129,0.3))",
           ],
         }}
         transition={{
-          duration: 0.2,
+          duration: 0.32,
           repeat: Infinity,
-          ease: "linear"
+          ease: "linear",
         }}
-        className="text-[10px] md:text-xs"
+        className="text-[9px] md:text-[10px] leading-[0.95] whitespace-pre"
       >
-{`
-         .------------------.
-       /  .----------------.  \\
-      |  /                  \\  |
-      | |                    | |
-      | |                    | |
-      |  \\                  /  |
-       \\  '----------------'  /
-         '------------------'
-`}
+        {WAVEFORM_FRAMES[frameIndex]}
       </motion.pre>
     </div>
   );
@@ -266,7 +339,7 @@ export function Landing() {
   const card1Y = useTransform(scrollYProgress, [0, 1], [100, -100]);
   const card2Y = useTransform(scrollYProgress, [0, 1], [150, -150]);
 
-  const scrollTo = (ref: React.RefObject<HTMLDivElement>) => {
+  const scrollTo = (ref: React.RefObject<HTMLDivElement | null>) => {
     ref.current?.scrollIntoView({ behavior: "smooth" });
   };
 
@@ -301,6 +374,9 @@ export function Landing() {
               <span onClick={() => setIsContactOpen(true)} className="hover:text-white cursor-pointer transition-colors">
                 Pricing
               </span>
+              <Link to="/terms" className="hover:text-white transition-colors">
+                Terms
+              </Link>
             </div>
             <Link
               to="/login"
@@ -725,7 +801,7 @@ export function Landing() {
               <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-emerald-500/40" />
               <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-emerald-500/40" />
               
-              <TalkingMouth />
+              <AsciiWaveform />
               
               <div className="mt-12 w-full space-y-4 font-mono">
                 <div className="flex justify-between text-[10px] text-emerald-500/60 uppercase tracking-widest">
@@ -955,6 +1031,9 @@ export function Landing() {
                 </span>
               </div>
               <div className="space-y-4">
+                <Link to="/terms" className="block hover:underline">
+                  Terms
+                </Link>
                 <a href="#" className="block hover:underline">
                   Twitter
                 </a>
@@ -970,7 +1049,12 @@ export function Landing() {
 
           <div className="mt-24 pt-8 border-t border-black/10 flex justify-between items-center text-xs font-mono uppercase tracking-widest opacity-50">
             <span>© 2024 Matcha Inc.</span>
-            <span>All Systems Normal</span>
+            <div className="flex items-center gap-6">
+              <Link to="/terms" className="hover:opacity-100 transition-opacity">
+                Terms of Service
+              </Link>
+              <span>All Systems Normal</span>
+            </div>
           </div>
         </div>
       </footer>
@@ -979,4 +1063,3 @@ export function Landing() {
 }
 
 export default Landing;
-

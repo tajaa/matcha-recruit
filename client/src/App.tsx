@@ -48,6 +48,7 @@ const PublicJobApply = lazy(() => import('./pages/PublicJobApply'));
 const PublicProjectApply = lazy(() => import('./pages/PublicProjectApply'));
 const PublicBlogList = lazy(() => import('./pages/PublicBlogList'));
 const PublicBlogDetail = lazy(() => import('./pages/PublicBlogDetail'));
+const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
 const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 const BlogCommentsAdmin = lazy(() => import('./pages/BlogCommentsAdmin'));
@@ -155,6 +156,8 @@ function App() {
               <Route path="/register/invite/:token" element={<RegisterInvite />} />
               <Route path="/onboarding/resume" element={<ResumeOnboarding />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
+              <Route path="/terms" element={<TermsOfService />} />
+              <Route path="/tos" element={<Navigate to="/terms" replace />} />
 
               {/* Chat routes (separate auth system) */}
               <Route path="/chat/login" element={<ChatLogin />} />
