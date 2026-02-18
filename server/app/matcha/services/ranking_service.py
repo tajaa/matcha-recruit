@@ -78,8 +78,22 @@ class RankingService:
                     *candidate_ids,
                 )
             else:
+                # Scope to candidates connected to this company — either via a completed
+                # interview or an existing match result. Avoids hitting Gemini for every
+                # unrelated candidate in the database.
                 candidates = await conn.fetch(
-                    "SELECT id, name, parsed_data FROM candidates"
+                    """
+                    SELECT DISTINCT c.id, c.name, c.parsed_data
+                    FROM candidates c
+                    WHERE c.id IN (
+                        SELECT candidate_id FROM interviews
+                        WHERE company_id = $1 AND candidate_id IS NOT NULL AND status = 'completed'
+                        UNION
+                        SELECT candidate_id FROM match_results
+                        WHERE company_id = $1
+                    )
+                    """,
+                    company_id,
                 )
 
             if not candidates:
