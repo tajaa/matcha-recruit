@@ -1,6 +1,6 @@
 import { useRef, lazy, Suspense, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { motion, useScroll, useTransform } from "framer-motion";
+import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
 import {
   ArrowUpRight,
   Terminal,
@@ -9,6 +9,10 @@ import {
   Users,
   Cpu,
   MapPin,
+  X,
+  Send,
+  Sparkles,
+  Zap,
 } from "lucide-react";
 
 // Lazy load 3D component
@@ -98,10 +102,119 @@ const TypewriterBadge = ({ text }: { text: string }) => {
   );
 };
 
+function ContactModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const [formData, setFormData] = useState({ name: "", email: "", message: "" });
+  const [sent, setSent] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    // In a real app, you'd send this to a backend. 
+    // Here we'll just simulate and open mailto
+    const mailtoUrl = `mailto:aaron@hey-matcha.com?subject=Matcha Pricing Inquiry from ${formData.name}&body=${formData.message}%0D%0A%0D%0AFrom: ${formData.email}`;
+    window.location.href = mailtoUrl;
+    setSent(true);
+    setTimeout(() => {
+      setSent(false);
+      onClose();
+    }, 2000);
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="absolute inset-0 bg-black/90 backdrop-blur-md"
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="relative w-full max-w-lg bg-zinc-900 border border-white/10 p-8 md:p-12 shadow-2xl"
+          >
+            <button onClick={onClose} className="absolute top-6 right-6 text-zinc-500 hover:text-white transition-colors">
+              <X className="w-6 h-6" />
+            </button>
+
+            {sent ? (
+              <div className="py-12 text-center space-y-4">
+                <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Send className="w-8 h-8 text-emerald-400" />
+                </div>
+                <h3 className="text-2xl font-bold uppercase tracking-tighter">Request Received</h3>
+                <p className="text-zinc-500 font-mono text-sm uppercase tracking-widest leading-relaxed">
+                  Redirecting to mail client...
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                <div>
+                  <h3 className="text-3xl font-bold uppercase tracking-tighter mb-2">Request Pricing</h3>
+                  <p className="text-zinc-500 font-mono text-[10px] uppercase tracking-[0.2em]">Contact: aaron@hey-matcha.com</p>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 ml-1">Full Name</label>
+                    <input
+                      required
+                      type="text"
+                      value={formData.name}
+                      onChange={e => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full bg-black border border-white/10 px-4 py-3 text-sm focus:border-white/30 outline-none transition-colors"
+                      placeholder="Jane Doe"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 ml-1">Work Email</label>
+                    <input
+                      required
+                      type="email"
+                      value={formData.email}
+                      onChange={e => setFormData({ ...formData, email: e.target.value })}
+                      className="w-full bg-black border border-white/10 px-4 py-3 text-sm focus:border-white/30 outline-none transition-colors"
+                      placeholder="jane@company.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 ml-1">Project Requirements</label>
+                    <textarea
+                      required
+                      rows={4}
+                      value={formData.message}
+                      onChange={e => setFormData({ ...formData, message: e.target.value })}
+                      className="w-full bg-black border border-white/10 px-4 py-3 text-sm focus:border-white/30 outline-none transition-colors resize-none"
+                      placeholder="Tell us about your organization size and which modules you need."
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full bg-white text-black py-4 font-mono text-sm uppercase tracking-[0.2em] font-bold hover:bg-zinc-200 transition-colors"
+                  >
+                    Send Request
+                  </button>
+                </form>
+              </div>
+            )}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 export function Landing() {
   const containerRef = useRef<HTMLDivElement>(null);
   const complianceSectionRef = useRef<HTMLDivElement>(null);
+  const manifestoRef = useRef<HTMLDivElement>(null);
+  const systemRef = useRef<HTMLDivElement>(null);
+  
   const [jurisdictionIndex, setJurisdictionIndex] = useState(0);
+  const [isContactOpen, setIsContactOpen] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -118,11 +231,16 @@ export function Landing() {
   const card1Y = useTransform(scrollYProgress, [0, 1], [100, -100]);
   const card2Y = useTransform(scrollYProgress, [0, 1], [150, -150]);
 
+  const scrollTo = (ref: React.RefObject<HTMLDivElement>) => {
+    ref.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
   return (
     <div
       ref={containerRef}
       className="bg-zinc-950 text-zinc-100 font-sans selection:bg-white selection:text-black overflow-x-hidden"
     >
+      <ContactModal isOpen={isContactOpen} onClose={() => setIsContactOpen(false)} />
       {/* Noise Overlay */}
       <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-50 mix-blend-overlay" />
 
@@ -139,13 +257,13 @@ export function Landing() {
           </Link>
           <div className="flex items-center gap-8">
             <div className="hidden md:flex gap-6 text-xs font-mono uppercase tracking-widest text-zinc-500">
-              <span className="hover:text-white cursor-pointer transition-colors">
+              <span onClick={() => scrollTo(manifestoRef)} className="hover:text-white cursor-pointer transition-colors">
                 Manifesto
               </span>
-              <span className="hover:text-white cursor-pointer transition-colors">
+              <span onClick={() => scrollTo(systemRef)} className="hover:text-white cursor-pointer transition-colors">
                 System
               </span>
-              <span className="hover:text-white cursor-pointer transition-colors">
+              <span onClick={() => setIsContactOpen(true)} className="hover:text-white cursor-pointer transition-colors">
                 Pricing
               </span>
             </div>
@@ -461,6 +579,93 @@ export function Landing() {
         </div>
       </section>
 
+      {/* MANIFESTO SECTION */}
+      <section ref={manifestoRef} className="py-32 px-6 border-b border-white/5 relative overflow-hidden">
+        <div className="max-w-[1800px] mx-auto grid lg:grid-cols-2 gap-24 items-center">
+          <div className="space-y-12">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 text-[10px] font-mono uppercase tracking-widest text-zinc-500">
+              <Sparkles className="w-3 h-3 text-emerald-400" />
+              Manifesto
+            </div>
+            <h2 className="text-6xl md:text-8xl font-bold tracking-tighter leading-[0.85]">
+              AI SHOULD FREE US <br />
+              <span className="text-zinc-500">NOT REPLACE US</span>
+            </h2>
+            <div className="space-y-6 text-zinc-400 text-lg md:text-xl font-light leading-relaxed max-w-xl">
+              <p>
+                The promise of automation was never about removing the human element. It was about stripping away the administrative noise that keeps people from doing their best work.
+              </p>
+              <p>
+                We build agentic systems that handle the complex, the repetitive, and the regulatory — freeing up workers to engage in more meaningful, high-leverage activities that drive organizational growth.
+              </p>
+            </div>
+          </div>
+          <div className="relative">
+            <div className="absolute inset-0 bg-emerald-500/10 blur-[120px] rounded-full" />
+            <div className="relative grid grid-cols-2 gap-4">
+              {[
+                { label: "Administrative Burden", value: "-85%", icon: Zap },
+                { label: "Strategic Focus", value: "4x", icon: Sparkles },
+              ].map((item, i) => (
+                <div key={i} className="bg-zinc-900/50 border border-white/10 p-8 space-y-4">
+                  <item.icon className="w-6 h-6 text-emerald-400" />
+                  <div>
+                    <div className="text-4xl font-bold tracking-tighter">{item.value}</div>
+                    <div className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 mt-1">{item.label}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* SYSTEM SECTION */}
+      <section ref={systemRef} className="py-32 px-6 border-b border-white/5 bg-white text-black relative">
+        <div className="max-w-[1800px] mx-auto">
+          <div className="grid lg:grid-cols-12 gap-12 items-start">
+            <div className="lg:col-span-4 space-y-8">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-black/5 border border-black/10 text-[10px] font-mono uppercase tracking-widest text-zinc-500">
+                <Cpu className="w-3 h-3 text-black" />
+                The Engine
+              </div>
+              <h2 className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.9]">
+                PROPRIETARY <br /> AGENTIC <br /> SYSTEMS
+              </h2>
+              <p className="text-zinc-600 text-lg font-light leading-relaxed">
+                Matcha runs on a custom layer of autonomous agents designed specifically for the complexities of labor compliance and employee relations.
+              </p>
+            </div>
+            <div className="lg:col-span-8 grid md:grid-cols-2 gap-px bg-black/10 border border-black/10">
+              {[
+                {
+                  title: "Autonomous Research",
+                  desc: "Agents continuously crawl municipal, county, and state databases to detect shifts in labor law before they're officially codified.",
+                },
+                {
+                  title: "Policy Reasoning",
+                  desc: "Neural inference engines map complex legal requirements directly to your unique organizational constraints in real-time.",
+                },
+                {
+                  title: "Predictive Compliance",
+                  desc: "Identify potential regulatory breaches before they occur through deep-pattern analysis of workforce data.",
+                },
+                {
+                  title: "Case Synthesis",
+                  desc: "AI agents synthesize interview transcripts, emails, and logs into structured evidence trails for instant ER resolution.",
+                },
+              ].map((feat, i) => (
+                <div key={i} className="bg-white p-12 space-y-4">
+                  <div className="text-[10px] font-mono text-zinc-400">0{i+1}</div>
+                  <h4 className="text-xl font-bold uppercase tracking-tight">{feat.title}</h4>
+                  <p className="text-sm text-zinc-500 leading-relaxed">{feat.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* MARQUEE */}
       <div className="py-20 border-b border-white/5 overflow-hidden">
         <Marquee>
@@ -615,15 +820,15 @@ export function Landing() {
 
             <div className="grid grid-cols-2 gap-12 text-sm font-mono uppercase tracking-widest">
               <div className="space-y-4">
-                <a href="#" className="block hover:underline">
-                  Product
-                </a>
-                <a href="#" className="block hover:underline">
+                <span onClick={() => scrollTo(systemRef)} className="block hover:underline cursor-pointer">
+                  System
+                </span>
+                <span onClick={() => scrollTo(manifestoRef)} className="block hover:underline cursor-pointer">
                   Manifesto
-                </a>
-                <a href="#" className="block hover:underline">
+                </span>
+                <span onClick={() => setIsContactOpen(true)} className="block hover:underline cursor-pointer">
                   Pricing
-                </a>
+                </span>
               </div>
               <div className="space-y-4">
                 <a href="#" className="block hover:underline">
