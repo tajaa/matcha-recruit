@@ -2004,6 +2004,121 @@ If you believe this was a mistake or have additional information to provide, ple
             return False
 
 
+    async def send_admin_interview_invitation_email(
+        self,
+        candidate_email: str,
+        candidate_name: Optional[str],
+        company_name: str,
+        position_title: str,
+    ) -> bool:
+        """Send an admin interview invitation to a top-ranked candidate.
+
+        This email goes to the top 3 candidates after project closes and ranking is complete.
+        It congratulates them and lets them know the hiring team will reach out personally.
+
+        Returns True if sent successfully, False otherwise.
+        """
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .role-card {{ background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .highlight {{ background: #ecfdf5; border-left: 4px solid #22c55e; padding: 15px; margin: 20px 0; border-radius: 0 6px 6px 0; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi{' ' + candidate_name if candidate_name else ''},</p>
+
+            <p>Congratulations — you've been selected as a <strong>top candidate</strong> for the following role:</p>
+
+            <div class="role-card">
+                <h2 style="margin-top: 0; color: #111;">{position_title}</h2>
+                <p><strong>Company:</strong> {company_name}</p>
+            </div>
+
+            <div class="highlight">
+                <strong>What's next:</strong> A member of the hiring team will be reaching out to you directly to schedule a personal interview. Please keep an eye on your inbox.
+            </div>
+
+            <p>Thank you for going through our process — we were impressed by your background and look forward to speaking with you.</p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""Hi{' ' + candidate_name if candidate_name else ''},
+
+Congratulations — you've been selected as a top candidate for:
+
+{position_title} at {company_name}
+
+What's next: A member of the hiring team will be reaching out to you directly to schedule a personal interview. Please keep an eye on your inbox.
+
+Thank you for going through our process — we were impressed by your background and look forward to speaking with you.
+
+- Matcha Recruit
+"""
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": candidate_email,
+                    "name": candidate_name or candidate_email,
+                }
+            ],
+            "subject": f"You're a top candidate: {position_title} at {company_name}",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent admin interview invitation to {candidate_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {candidate_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {candidate_email}: {e}")
+            return False
+
+
 # Singleton instance
 _email_service: Optional[EmailService] = None
 

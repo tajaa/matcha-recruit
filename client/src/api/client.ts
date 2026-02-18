@@ -51,6 +51,9 @@ import type {
   ProjectStats,
   ProjectStatus,
   CandidateStage,
+  ProjectApplication,
+  PublicProjectDetail,
+  ApplicationStatus,
   Outreach,
   OutreachSendRequest,
   OutreachSendResult,
@@ -1120,6 +1123,61 @@ export const projects = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  // Public applications management
+  listApplications: (projectId: string, status?: ApplicationStatus) => {
+    const params = status ? `?status=${status}` : '';
+    return request<ProjectApplication[]>(`/projects/${projectId}/applications${params}`);
+  },
+
+  acceptApplication: (projectId: string, applicationId: string) =>
+    request<{ status: string; screening_invite_sent: boolean }>(
+      `/projects/${projectId}/applications/${applicationId}/accept`,
+      { method: 'POST' }
+    ),
+
+  rejectApplication: (projectId: string, applicationId: string) =>
+    request<{ status: string }>(
+      `/projects/${projectId}/applications/${applicationId}/reject`,
+      { method: 'POST' }
+    ),
+
+  bulkAcceptRecommended: (projectId: string) =>
+    request<{ accepted: number; skipped: number; errors: string[] }>(
+      `/projects/${projectId}/applications/bulk-accept-recommended`,
+      { method: 'POST' }
+    ),
+
+  closeProject: (projectId: string) =>
+    request<{ status: string; message: string }>(
+      `/projects/${projectId}/close`,
+      { method: 'POST' }
+    ),
+};
+
+// Public Projects API (no auth required — for public apply page)
+export const publicProjects = {
+  getDetail: async (projectId: string): Promise<PublicProjectDetail> => {
+    const response = await fetch(`${API_BASE}/public/projects/${projectId}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Project not found' }));
+      throw new Error(error.detail || 'Project not found');
+    }
+    return response.json();
+  },
+
+  apply: async (projectId: string, formData: FormData): Promise<{ success: boolean; message: string; application_id: string }> => {
+    const response = await fetch(`${API_BASE}/public/projects/${projectId}/apply`, {
+      method: 'POST',
+      body: formData,
+      // Do NOT set Content-Type — browser sets multipart boundary automatically
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Application failed' }));
+      throw new Error(error.detail || 'Application failed');
+    }
+    return response.json();
+  },
 };
 
 // Outreach API (public endpoints - no auth required)

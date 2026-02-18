@@ -14,6 +14,7 @@ from .chat import router as chat_router, ws_router as chat_ws_router
 from .contact import router as contact_router
 from .projects import router as projects_router
 from .outreach import router as outreach_router
+from .public_projects import router as public_projects_router
 from .leads_agent import router as leads_agent_router
 from .posters import router as posters_router
 from .hr_news import router as hr_news_router
@@ -38,6 +39,7 @@ core_router.include_router(chat_router, prefix="/chat", tags=["chat"])
 core_router.include_router(contact_router, prefix="/contact", tags=["contact"])
 core_router.include_router(projects_router, prefix="/projects", tags=["projects"])
 core_router.include_router(outreach_router, tags=["outreach"])
+core_router.include_router(public_projects_router, prefix="/public/projects", tags=["public-projects"])
 core_router.include_router(leads_agent_router, prefix="/leads-agent", tags=["leads-agent"])
 core_router.include_router(posters_router, prefix="/compliance/posters", tags=["compliance-posters"],
                            dependencies=[Depends(require_feature("compliance"))])
@@ -59,6 +61,7 @@ __all__ = [
     "contact_router",
     "projects_router",
     "outreach_router",
+    "public_projects_router",
     "leads_agent_router",
     "posters_router",
     "hr_news_router",

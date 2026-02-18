@@ -12,11 +12,12 @@ import type {
   Outreach,
   RankedCandidate,
   ReachOutDraft,
+  ProjectApplication,
 } from '../types';
 import {
   ArrowLeft, Send, Mail, BarChart2, Loader2, X, ChevronRight,
   CheckCircle2, Clock, AlertCircle, XCircle, UserPlus, RefreshCw,
-  ShieldCheck, Star,
+  ShieldCheck, Star, Lock, Globe, Calendar, Copy, ChevronDown,
 } from 'lucide-react';
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -47,6 +48,307 @@ function formatSalary(min?: number | null, max?: number | null): string {
   if (min && max) return `${fmt(min)} – ${fmt(max)}`;
   if (min) return `${fmt(min)}+`;
   return `Up to ${fmt(max!)}`;
+}
+
+// ─── Pipeline Wizard ────────────────────────────────────────────────────────
+
+type WizardStep = {
+  id: number;
+  icon: string;
+  title: string;
+  description: string;
+  action?: string;
+};
+
+const WIZARD_STEPS: WizardStep[] = [
+  {
+    id: 1,
+    icon: '⚙',
+    title: 'Set Up Project',
+    description: 'Define the role, requirements, salary range, and closing date. Toggle "Accept public applications" to generate a shareable apply URL.',
+    action: 'Edit the project and enable public applications to proceed.',
+  },
+  {
+    id: 2,
+    icon: '🔗',
+    title: 'Share Apply URL',
+    description: 'Copy the public apply link from the project header and share it with candidates — on LinkedIn, your careers page, or via email.',
+    action: 'Copy the apply URL above and distribute it.',
+  },
+  {
+    id: 3,
+    icon: '🤖',
+    title: 'AI Screens Resumes',
+    description: 'As applications arrive, the AI immediately reads each resume and scores it against your requirements. Results appear in the Applications section as Recommended, Needs Review, or Not Recommended.',
+    action: 'Watch the Applications section — results appear within 30 seconds of each submission.',
+  },
+  {
+    id: 4,
+    icon: '✅',
+    title: 'Review & Accept',
+    description: 'Review AI recommendations and accept candidates you want to advance. Use "Accept All Recommended" for bulk approval, or manually add others the AI didn\'t flag.',
+    action: 'Accept recommended candidates to trigger AI interview invitations.',
+  },
+  {
+    id: 5,
+    icon: '🎤',
+    title: 'AI Interviews',
+    description: 'Accepted candidates receive a screening interview link by email. They complete a short voice conversation with an AI interviewer (5–10 min). Each interview is analyzed immediately after completion.',
+    action: 'Invite candidates to their screening interviews from the Outreach section.',
+  },
+  {
+    id: 6,
+    icon: '📊',
+    title: 'Review Scores',
+    description: 'After interviews are analyzed, view screening scores in the Pipeline view (Pass/Fail badges) and run Rankings to see a multi-signal score combining screening performance, culture fit, and conversation quality.',
+    action: 'Check the Pipeline for interview results and run Rankings.',
+  },
+  {
+    id: 7,
+    icon: '🏆',
+    title: 'Close & Finalize',
+    description: 'When the closing date arrives (or you click Close Project), the system analyzes any remaining interviews, ranks all candidates, and automatically sends personal interview invitations to the top 3. They\'re moved to the Finalist stage.',
+    action: 'Click "Close Project" or wait for the closing date to finalize.',
+  },
+];
+
+function computeWizardStep(
+  project: Project,
+  applications: ProjectApplication[],
+  candidateList: ProjectCandidate[],
+  outreachRecords: Outreach[],
+  rankings: RankedCandidate[],
+): number {
+  if (project.status === 'completed') return 7;
+
+  // Step 7: close queued or ranked results exist
+  if (rankings.length > 0 && candidateList.some(c => c.stage === 'finalist')) return 7;
+
+  // Step 6: interviews have been completed (screening_complete in outreach)
+  if (outreachRecords.some(o => o.status === 'screening_complete')) return 6;
+
+  // Step 5: screening invites have gone out
+  if (outreachRecords.some(o => ['screening_invited', 'screening_started', 'interested'].includes(o.status))) return 5;
+
+  // Step 4: applications exist and are screened (have recommendations), but no outreach yet
+  if (applications.some(a => a.ai_recommendation !== null)) return 4;
+
+  // Step 3: applications are being screened
+  if (applications.length > 0) return 3;
+
+  // Step 2: project is public and active
+  if (project.is_public && project.status === 'active') return 2;
+
+  // Step 1: setup
+  return 1;
+}
+
+function PipelineWizard({
+  project,
+  applications,
+  candidateList,
+  outreachRecords,
+  rankings,
+}: {
+  project: Project;
+  applications: ProjectApplication[];
+  candidateList: ProjectCandidate[];
+  outreachRecords: Outreach[];
+  rankings: RankedCandidate[];
+}) {
+  const storageKey = `wizard-collapsed-${project.id}`;
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(storageKey) === 'true'; } catch { return false; }
+  });
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try { localStorage.setItem(storageKey, String(next)); } catch {}
+  };
+
+  const activeStep = computeWizardStep(project, applications, candidateList, outreachRecords, rankings);
+
+  return (
+    <div className="border border-white/10 bg-zinc-950/60">
+      {/* Header bar */}
+      <button
+        onClick={toggle}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Recruiting Pipeline</span>
+          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
+            Step {activeStep} of 7
+          </span>
+          <span className="text-[10px] text-zinc-600">
+            {WIZARD_STEPS[activeStep - 1].title}
+          </span>
+        </div>
+        <ChevronDown
+          size={14}
+          className={`text-zinc-600 transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}
+        />
+      </button>
+
+      {!collapsed && (
+        <div className="border-t border-white/10">
+          {/* Step track */}
+          <div className="relative px-5 pt-5 pb-2 overflow-x-auto">
+            <div className="flex items-start gap-0 min-w-max">
+              {WIZARD_STEPS.map((step, idx) => {
+                const isComplete = step.id < activeStep;
+                const isActive = step.id === activeStep;
+                const isFuture = step.id > activeStep;
+
+                return (
+                  <div key={step.id} className="flex items-start">
+                    {/* Step node */}
+                    <div className="flex flex-col items-center w-28">
+                      {/* Circle */}
+                      <div className={`relative w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all ${
+                        isComplete
+                          ? 'bg-matcha-500/20 border-matcha-500/50 text-matcha-400'
+                          : isActive
+                          ? 'bg-white/10 border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)]'
+                          : 'bg-zinc-900 border-zinc-700 text-zinc-600'
+                      }`}>
+                        {isComplete ? '✓' : step.icon}
+                      </div>
+                      {/* Label */}
+                      <div className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider leading-tight px-1 ${
+                        isActive ? 'text-white' : isComplete ? 'text-matcha-400/70' : 'text-zinc-600'
+                      }`}>
+                        {step.title}
+                      </div>
+                    </div>
+
+                    {/* Connector */}
+                    {idx < WIZARD_STEPS.length - 1 && (
+                      <div className={`w-10 h-0.5 mt-[18px] flex-shrink-0 transition-colors ${
+                        step.id < activeStep ? 'bg-matcha-500/40' : 'bg-zinc-800'
+                      }`} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Active step callout */}
+          <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
+            <div className="flex items-start gap-3">
+              <span className="text-xl flex-shrink-0">{WIZARD_STEPS[activeStep - 1].icon}</span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    {WIZARD_STEPS[activeStep - 1].title}
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-white/10 text-zinc-400 border border-white/10">
+                    Current Step
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 leading-relaxed mb-2">
+                  {WIZARD_STEPS[activeStep - 1].description}
+                </p>
+                {WIZARD_STEPS[activeStep - 1].action && (
+                  <p className="text-[11px] text-matcha-400/80 font-medium">
+                    → {WIZARD_STEPS[activeStep - 1].action}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Next step preview */}
+            {activeStep < 7 && (
+              <div className="mt-3 pt-3 border-t border-white/10 flex items-center gap-2">
+                <span className="text-[9px] uppercase tracking-widest text-zinc-600">Up next:</span>
+                <span className="text-[10px] text-zinc-500">
+                  Step {activeStep + 1} — {WIZARD_STEPS[activeStep].title}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApplicationCard({
+  app,
+  onAccept,
+  onReject,
+  dimmed = false,
+}: {
+  app: ProjectApplication;
+  onAccept: () => void;
+  onReject: () => void;
+  dimmed?: boolean;
+}) {
+  const isProcessed = app.status === 'accepted' || app.status === 'rejected';
+  return (
+    <div className={`p-4 bg-zinc-950 border border-zinc-800 space-y-2 ${dimmed ? 'opacity-50' : ''}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-white truncate">
+              {app.candidate_name || app.candidate_email || 'Unknown'}
+            </span>
+            {app.ai_score !== null && (
+              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                app.ai_score >= 75 ? 'text-emerald-400 bg-emerald-500/10'
+                : app.ai_score >= 50 ? 'text-amber-400 bg-amber-500/10'
+                : 'text-red-400 bg-red-500/10'
+              }`}>
+                {Math.round(app.ai_score)}%
+              </span>
+            )}
+            {(app.status === 'ai_screening' || app.status === 'new') && (
+              <span className="inline-flex items-center gap-1 text-[9px] text-zinc-500">
+                <Loader2 size={9} className="animate-spin" /> Screening…
+              </span>
+            )}
+          </div>
+          {app.candidate_email && app.candidate_name && (
+            <div className="text-[10px] text-zinc-600 truncate">{app.candidate_email}</div>
+          )}
+          {app.ai_notes && (
+            <p className="text-[11px] text-zinc-500 mt-1 line-clamp-2">{app.ai_notes}</p>
+          )}
+          {app.candidate_skills.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {app.candidate_skills.slice(0, 4).map(s => (
+                <span key={s} className="px-1.5 py-0.5 text-[9px] bg-zinc-800 text-zinc-400 border border-zinc-700">{s}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        {!isProcessed && (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <button
+              onClick={onAccept}
+              className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest bg-matcha-500/20 border border-matcha-500/30 text-matcha-400 hover:bg-matcha-500/30 transition-colors"
+            >
+              Accept
+            </button>
+            <button
+              onClick={onReject}
+              className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-500/30 transition-colors"
+            >
+              Reject
+            </button>
+          </div>
+        )}
+        {app.status === 'accepted' && (
+          <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest flex-shrink-0">&#10003; In Pipeline</span>
+        )}
+        {app.status === 'rejected' && (
+          <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest flex-shrink-0">Rejected</span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function OutreachBadge({ outreach }: { outreach: Outreach }) {
@@ -145,6 +447,14 @@ export function ProjectDetail() {
   const [rankingsLoading, setRankingsLoading] = useState(false);
   const [rankingsRunning, setRankingsRunning] = useState(false);
 
+  // Applications (public apply)
+  const [applications, setApplications] = useState<ProjectApplication[]>([]);
+  const [applicationsLoading, setApplicationsLoading] = useState(false);
+  const [showRejectedApps, setShowRejectedApps] = useState(false);
+  const [closingProject, setClosingProject] = useState(false);
+  const [closeQueued, setCloseQueued] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
+
   // Reach-out modal (within rankings)
   const [reachOutTarget, setReachOutTarget] = useState<RankedCandidate | null>(null);
   const [reachOutDraft, setReachOutDraft] = useState<ReachOutDraft | null>(null);
@@ -193,11 +503,24 @@ export function ProjectDetail() {
     setOutreachRecords(data);
   }, [id]);
 
+  const fetchApplications = useCallback(async () => {
+    if (!id) return;
+    setApplicationsLoading(true);
+    try {
+      const data = await projectsApi.listApplications(id);
+      setApplications(data);
+    } catch (err) {
+      console.error('Failed to fetch applications:', err);
+    } finally {
+      setApplicationsLoading(false);
+    }
+  }, [id]);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       try {
-        await Promise.all([fetchProject(), fetchCandidates(), fetchStats(), fetchOutreach()]);
+        await Promise.all([fetchProject(), fetchCandidates(), fetchStats(), fetchOutreach(), fetchApplications()]);
       } catch (err) {
         console.error('Failed to load project:', err);
       } finally {
@@ -344,6 +667,71 @@ export function ProjectDetail() {
     }
   };
 
+  const handleCloseProject = async () => {
+    if (!id) return;
+    if (!confirm('Close this project? This will analyze remaining interviews, rank all candidates, and send admin interview invitations to the top 3.')) return;
+    setClosingProject(true);
+    try {
+      await projectsApi.closeProject(id);
+      setCloseQueued(true);
+    } catch (err) {
+      console.error('Failed to close project:', err);
+    } finally {
+      setClosingProject(false);
+    }
+  };
+
+  const handleAcceptApplication = async (applicationId: string) => {
+    if (!id) return;
+    try {
+      await projectsApi.acceptApplication(id, applicationId);
+      await Promise.all([fetchApplications(), fetchCandidates(), fetchStats(), fetchOutreach()]);
+    } catch (err) {
+      console.error('Failed to accept application:', err);
+    }
+  };
+
+  const handleRejectApplication = async (applicationId: string) => {
+    if (!id) return;
+    try {
+      await projectsApi.rejectApplication(id, applicationId);
+      await fetchApplications();
+    } catch (err) {
+      console.error('Failed to reject application:', err);
+    }
+  };
+
+  const handleBulkAccept = async () => {
+    if (!id) return;
+    try {
+      const result = await projectsApi.bulkAcceptRecommended(id);
+      await Promise.all([fetchApplications(), fetchCandidates(), fetchStats(), fetchOutreach()]);
+      alert(`Accepted ${result.accepted} candidates. ${result.skipped} skipped (already processed).`);
+    } catch (err) {
+      console.error('Failed to bulk accept:', err);
+    }
+  };
+
+  const handleCopyUrl = () => {
+    if (!project?.id) return;
+    const url = `${window.location.origin}/apply/${project.id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setUrlCopied(true);
+      setTimeout(() => setUrlCopied(false), 2000);
+    });
+  };
+
+  const getClosingDateInfo = () => {
+    if (!project?.closing_date) return null;
+    const date = new Date(project.closing_date);
+    const now = new Date();
+    const diffDays = Math.ceil((date.getTime() - now.getTime()) / 86400000);
+    if (diffDays < 0) return { label: 'Closed', color: 'text-red-400 bg-red-500/10 border-red-500/20' };
+    if (diffDays === 0) return { label: 'Closes today', color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
+    if (diffDays <= 3) return { label: `Closes in ${diffDays}d`, color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
+    return { label: `Closes ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, color: 'text-zinc-400 bg-zinc-800 border-zinc-700' };
+  };
+
   const handleOpenReachOut = async (candidate: RankedCandidate) => {
     if (!project?.company_id) return;
     setReachOutTarget(candidate);
@@ -464,6 +852,15 @@ export function ProjectDetail() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
 
+      {/* Pipeline Wizard */}
+      <PipelineWizard
+        project={project}
+        applications={applications}
+        candidateList={candidateList}
+        outreachRecords={outreachRecords}
+        rankings={rankings}
+      />
+
       {/* Header */}
       <div className="border-b border-white/10 pb-8">
         <button
@@ -482,7 +879,17 @@ export function ProjectDetail() {
             )}
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+            {/* Closing date badge */}
+            {(() => {
+              const info = getClosingDateInfo();
+              return info ? (
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest border ${info.color}`}>
+                  <Calendar size={10} /> {info.label}
+                </span>
+              ) : null;
+            })()}
+
             {/* Status selector */}
             <select
               value={project.status}
@@ -518,8 +925,45 @@ export function ProjectDetail() {
             >
               <Send size={11} /> Send Screening ({screeningEligible.length})
             </button>
+
+            {/* Close Project button (only for active projects) */}
+            {project.status === 'active' && (
+              <button
+                onClick={handleCloseProject}
+                disabled={closingProject || closeQueued}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {closingProject ? <><Loader2 size={11} className="animate-spin" /> Closing…</>
+                  : closeQueued ? <><CheckCircle2 size={11} /> Ranking…</>
+                  : <><Lock size={11} /> Close Project</>}
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Public URL display */}
+        {project.is_public && (
+          <div className="mt-4 flex items-center gap-3 p-3 bg-zinc-900/50 border border-zinc-800">
+            <Globe size={12} className="text-zinc-500 flex-shrink-0" />
+            <span className="text-[10px] text-zinc-500 uppercase tracking-widest">Public Apply URL:</span>
+            <code className="text-xs text-matcha-400 font-mono flex-1 truncate">
+              {window.location.origin}/apply/{project.id}
+            </code>
+            <button
+              onClick={handleCopyUrl}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[10px] text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 transition-colors"
+            >
+              <Copy size={10} /> {urlCopied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        )}
+
+        {/* Close queued notification */}
+        {closeQueued && (
+          <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">
+            &#9203; Ranking in progress — analyzing interviews and identifying top candidates. Top 3 will receive admin interview invitations automatically.
+          </div>
+        )}
 
         {/* Quick stats strip */}
         <div className="flex items-center gap-6 mt-6 pt-6 border-t border-white/5">
@@ -554,6 +998,147 @@ export function ProjectDetail() {
           </div>
         </div>
       </div>
+
+      {/* ─── Applications section (public applications) ─────────────────────── */}
+      {project.is_public && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1 flex items-center gap-2">
+                <Globe size={11} /> Public Applications
+                {applications.length > 0 && (
+                  <span className="px-1.5 py-0.5 text-[9px] font-bold bg-zinc-800 border border-zinc-700 text-zinc-300">
+                    {applications.filter(a => !['rejected', 'accepted'].includes(a.status)).length} pending
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-zinc-600">
+                {applications.filter(a => a.ai_recommendation === 'recommended').length} recommended ·{' '}
+                {applications.filter(a => a.ai_recommendation === 'review_required').length} need review ·{' '}
+                {applications.filter(a => a.status === 'accepted').length} accepted
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={fetchApplications}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-700 hover:border-zinc-500 transition-colors"
+              >
+                <RefreshCw size={11} /> Refresh
+              </button>
+              {applications.filter(a => a.ai_recommendation === 'recommended' && a.status === 'recommended').length > 0 && (
+                <button
+                  onClick={handleBulkAccept}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-matcha-500/20 border border-matcha-500/30 text-matcha-400 hover:bg-matcha-500/30 transition-colors"
+                >
+                  <CheckCircle2 size={11} /> Accept All Recommended ({applications.filter(a => a.ai_recommendation === 'recommended' && a.status === 'recommended').length})
+                </button>
+              )}
+            </div>
+          </div>
+
+          {applicationsLoading ? (
+            <div className="p-10 text-center bg-zinc-950 border border-white/10">
+              <Loader2 size={16} className="animate-spin text-zinc-500 mx-auto" />
+            </div>
+          ) : applications.length === 0 ? (
+            <div className="p-10 text-center bg-zinc-950 border border-white/10">
+              <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">No applications yet</div>
+              <div className="text-xs text-zinc-600">Share the apply URL to start receiving applications</div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Two-column layout: Recommended | Needs Review */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* AI Recommended column */}
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 border-b border-emerald-500/20 pb-2">
+                    &#10003; AI Recommended ({applications.filter(a => a.ai_recommendation === 'recommended').length})
+                  </div>
+                  {applications.filter(a => a.ai_recommendation === 'recommended').map(app => (
+                    <ApplicationCard
+                      key={app.id}
+                      app={app}
+                      onAccept={() => handleAcceptApplication(app.id)}
+                      onReject={() => handleRejectApplication(app.id)}
+                    />
+                  ))}
+                  {applications.filter(a => a.ai_recommendation === 'recommended').length === 0 && (
+                    <div className="p-4 text-center text-[10px] text-zinc-600 border border-dashed border-zinc-800">No recommended applications</div>
+                  )}
+                </div>
+
+                {/* Needs Review column */}
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400 border-b border-amber-500/20 pb-2">
+                    &#9888; Needs Review ({applications.filter(a => a.ai_recommendation === 'review_required').length})
+                  </div>
+                  {applications.filter(a => a.ai_recommendation === 'review_required').map(app => (
+                    <ApplicationCard
+                      key={app.id}
+                      app={app}
+                      onAccept={() => handleAcceptApplication(app.id)}
+                      onReject={() => handleRejectApplication(app.id)}
+                    />
+                  ))}
+                  {applications.filter(a => a.ai_recommendation === 'review_required').length === 0 && (
+                    <div className="p-4 text-center text-[10px] text-zinc-600 border border-dashed border-zinc-800">No pending reviews</div>
+                  )}
+                </div>
+              </div>
+
+              {/* AI Screening in progress */}
+              {applications.filter(a => a.status === 'ai_screening' || a.status === 'new').length > 0 && (
+                <div className="p-3 bg-zinc-900/50 border border-zinc-800 flex items-center gap-3">
+                  <Loader2 size={12} className="animate-spin text-zinc-500 flex-shrink-0" />
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest">
+                    {applications.filter(a => a.status === 'ai_screening' || a.status === 'new').length} application(s) being screened by AI…
+                  </span>
+                </div>
+              )}
+
+              {/* Accepted */}
+              {applications.filter(a => a.status === 'accepted').length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-b border-zinc-800 pb-2">
+                    Accepted ({applications.filter(a => a.status === 'accepted').length}) — moved to pipeline
+                  </div>
+                  {applications.filter(a => a.status === 'accepted').map(app => (
+                    <div key={app.id} className="flex items-center gap-3 p-3 bg-zinc-950 border border-zinc-800 opacity-60">
+                      <CheckCircle2 size={12} className="text-emerald-400 flex-shrink-0" />
+                      <span className="text-sm text-zinc-400">{app.candidate_name || app.candidate_email}</span>
+                      {app.ai_score !== null && (
+                        <span className="text-[10px] text-zinc-600 font-mono">{Math.round(app.ai_score)}%</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Not Recommended (collapsed by default) */}
+              {applications.filter(a => a.ai_recommendation === 'not_recommended').length > 0 && (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setShowRejectedApps(v => !v)}
+                    className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-600 hover:text-zinc-400 transition-colors"
+                  >
+                    <ChevronDown size={12} className={showRejectedApps ? 'rotate-180' : ''} />
+                    Not Recommended ({applications.filter(a => a.ai_recommendation === 'not_recommended').length})
+                  </button>
+                  {showRejectedApps && applications.filter(a => a.ai_recommendation === 'not_recommended').map(app => (
+                    <ApplicationCard
+                      key={app.id}
+                      app={app}
+                      onAccept={() => handleAcceptApplication(app.id)}
+                      onReject={() => handleRejectApplication(app.id)}
+                      dimmed
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pipeline */}
       <div className="space-y-4">
@@ -767,6 +1352,11 @@ export function ProjectDetail() {
                       {r.has_interview_data && (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-teal-500/10 border border-teal-500/20 text-teal-400">
                           <ShieldCheck size={9} /> Verified
+                        </span>
+                      )}
+                      {idx < 3 && candidateList.find(c => c.candidate_id === r.candidate_id)?.stage === 'finalist' && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                          <Star size={9} /> Interview Sent
                         </span>
                       )}
                     </div>

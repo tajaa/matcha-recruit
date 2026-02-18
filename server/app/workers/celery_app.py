@@ -29,6 +29,8 @@ celery_app = Celery(
         "app.workers.tasks.structured_data_fetch",
         "app.workers.tasks.leave_deadline_checks",
         "app.workers.tasks.leave_agent_tasks",
+        "app.workers.tasks.resume_screening",
+        "app.workers.tasks.project_close",
     ],
 )
 
@@ -140,3 +142,10 @@ def on_worker_ready(**kwargs):
         run_leave_agent_orchestration.delay()
     else:
         print("[Worker] Leave agent orchestration scheduler is disabled, skipping.")
+
+    from app.workers.tasks.project_close import check_project_deadlines
+
+    if _is_scheduler_enabled("project_deadline_checks"):
+        check_project_deadlines.delay()
+    else:
+        print("[Worker] Project deadline checks scheduler is disabled, skipping.")

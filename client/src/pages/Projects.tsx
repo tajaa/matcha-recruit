@@ -51,6 +51,11 @@ export function Projects() {
     location: '',
     salary_min: undefined,
     salary_max: undefined,
+    salary_hidden: false,
+    is_public: false,
+    description: '',
+    currency: 'USD',
+    closing_date: undefined,
     benefits: '',
     requirements: '',
     notes: '',
@@ -87,7 +92,7 @@ export function Projects() {
         salary_max: form.salary_max || undefined,
       });
       setShowCreate(false);
-      setForm({ company_name: '', name: '', company_id: clientCompanyId ?? undefined, position_title: '', location: '', salary_min: undefined, salary_max: undefined, benefits: '', requirements: '', notes: '' });
+      setForm({ company_name: '', name: '', company_id: clientCompanyId ?? undefined, position_title: '', location: '', salary_min: undefined, salary_max: undefined, salary_hidden: false, is_public: false, description: '', currency: 'USD', closing_date: undefined, benefits: '', requirements: '', notes: '' });
       navigate(`/app/projects/${created.id}`);
     } catch (err) {
       console.error('Failed to create project:', err);
@@ -329,7 +334,7 @@ export function Projects() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Salary Min ($)</label>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Salary Min</label>
                   <input
                     type="number"
                     value={form.salary_min || ''}
@@ -339,7 +344,7 @@ export function Projects() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Salary Max ($)</label>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Salary Max</label>
                   <input
                     type="number"
                     value={form.salary_max || ''}
@@ -348,6 +353,66 @@ export function Projects() {
                     className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
                   />
                 </div>
+              </div>
+
+              {/* Salary options row */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Currency</label>
+                  <select
+                    value={form.currency || 'USD'}
+                    onChange={e => setForm({ ...form, currency: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white outline-none transition-colors"
+                  >
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                    <option value="GBP">GBP (£)</option>
+                    <option value="CAD">CAD (CA$)</option>
+                    <option value="AUD">AUD (AU$)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Applications Close</label>
+                  <input
+                    type="date"
+                    value={form.closing_date ? form.closing_date.split('T')[0] : ''}
+                    onChange={e => setForm({ ...form, closing_date: e.target.value ? e.target.value + 'T23:59:59' : undefined })}
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Public toggles */}
+              <div className="flex items-center gap-6">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.is_public || false}
+                    onChange={e => setForm({ ...form, is_public: e.target.checked })}
+                    className="w-4 h-4 accent-matcha-500"
+                  />
+                  <span className="text-[10px] text-zinc-400 uppercase tracking-widest">Accept public applications</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.salary_hidden || false}
+                    onChange={e => setForm({ ...form, salary_hidden: e.target.checked })}
+                    className="w-4 h-4 accent-matcha-500"
+                  />
+                  <span className="text-[10px] text-zinc-400 uppercase tracking-widest">Hide salary</span>
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Description</label>
+                <textarea
+                  value={form.description || ''}
+                  onChange={e => setForm({ ...form, description: e.target.value })}
+                  placeholder="Describe the role and what the candidate will work on..."
+                  rows={3}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 focus:border-zinc-500 text-sm text-white placeholder-zinc-600 outline-none transition-colors resize-none"
+                />
               </div>
 
               <div>

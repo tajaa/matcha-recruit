@@ -737,6 +737,70 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_project_candidates_candidate_id ON project_candidates(candidate_id)
         """)
 
+        # Add new columns to projects table (idempotent)
+        await conn.execute("""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'projects' AND column_name = 'closing_date')
+                THEN ALTER TABLE projects ADD COLUMN closing_date TIMESTAMP; END IF;
+            END$$;
+        """)
+        await conn.execute("""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'projects' AND column_name = 'salary_hidden')
+                THEN ALTER TABLE projects ADD COLUMN salary_hidden BOOLEAN DEFAULT false; END IF;
+            END$$;
+        """)
+        await conn.execute("""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'projects' AND column_name = 'is_public')
+                THEN ALTER TABLE projects ADD COLUMN is_public BOOLEAN DEFAULT false; END IF;
+            END$$;
+        """)
+        await conn.execute("""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'projects' AND column_name = 'description')
+                THEN ALTER TABLE projects ADD COLUMN description TEXT; END IF;
+            END$$;
+        """)
+        await conn.execute("""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'projects' AND column_name = 'currency')
+                THEN ALTER TABLE projects ADD COLUMN currency VARCHAR(10) DEFAULT 'USD'; END IF;
+            END$$;
+        """)
+
+        # Project applications table (public applications linked to a project)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS project_applications (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                candidate_id UUID NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+                status VARCHAR(50) DEFAULT 'new',
+                ai_score FLOAT,
+                ai_recommendation VARCHAR(50),
+                ai_notes TEXT,
+                source VARCHAR(100) DEFAULT 'direct',
+                cover_letter TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(project_id, candidate_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_project_applications_project_id ON project_applications(project_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_project_applications_status ON project_applications(status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_project_applications_candidate_id ON project_applications(candidate_id)
+        """)
+
         # Project outreach table (for sending screening invites to candidates)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS project_outreach (
@@ -2561,6 +2625,14 @@ async def init_db():
             INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
             VALUES
                 ('structured_data_fetch', 'Structured Data Fetch', 'Fetch Tier 1 structured data from authoritative sources (Berkeley, DOL, EPI, NCSL).', false, 0)
+            ON CONFLICT (task_key) DO NOTHING
+        """)
+
+        # Add scheduler setting for project deadline checks
+        await conn.execute("""
+            INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
+            VALUES
+                ('project_deadline_checks', 'Project Deadline Checks', 'Auto-close recruiting projects that have passed their closing date, run ranking, and notify top candidates.', false, 0)
             ON CONFLICT (task_key) DO NOTHING
         """)
 

@@ -45,6 +45,7 @@ const InterviewPrepAdmin = lazy(() => import('./pages/InterviewPrepAdmin'));
 const PublicJobs = lazy(() => import('./pages/PublicJobs'));
 const PublicJobDetail = lazy(() => import('./pages/PublicJobDetail'));
 const PublicJobApply = lazy(() => import('./pages/PublicJobApply'));
+const PublicProjectApply = lazy(() => import('./pages/PublicProjectApply'));
 const PublicBlogList = lazy(() => import('./pages/PublicBlogList'));
 const PublicBlogDetail = lazy(() => import('./pages/PublicBlogDetail'));
 const BlogAdmin = lazy(() => import('./pages/BlogAdmin'));
@@ -170,6 +171,9 @@ function App() {
             {/* Public outreach routes (token-based access) */}
             <Route path="/outreach/:token" element={<OutreachLanding />} />
             <Route path="/outreach/:token/screening" element={<OutreachScreening />} />
+
+            {/* Public project apply page */}
+            <Route path="/apply/:projectId" element={<PublicProjectApply />} />
 
             {/* Admin Shortcuts */}
             <Route path="/admin/blogs/drafts" element={<Navigate to="/app/admin/blog?status=draft" replace />} />

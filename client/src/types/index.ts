@@ -854,8 +854,10 @@ export interface CandidateSessionSummary {
 }
 
 // Project types
-export type ProjectStatus = 'draft' | 'active' | 'completed' | 'cancelled';
+export type ProjectStatus = 'draft' | 'active' | 'closing' | 'completed' | 'cancelled';
 export type CandidateStage = 'initial' | 'screening' | 'interview' | 'finalist' | 'placed' | 'rejected';
+export type ApplicationStatus = 'new' | 'ai_screening' | 'recommended' | 'review_required' | 'not_recommended' | 'accepted' | 'rejected';
+export type AiRecommendation = 'recommended' | 'review_required' | 'not_recommended';
 
 export interface Project {
   id: string;
@@ -866,11 +868,17 @@ export interface Project {
   location: string | null;
   salary_min: number | null;
   salary_max: number | null;
+  salary_hidden: boolean;
+  is_public: boolean;
+  description: string | null;
+  currency: string;
+  closing_date: string | null;
   benefits: string | null;
   requirements: string | null;
   status: ProjectStatus;
   notes: string | null;
   candidate_count: number;
+  application_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -883,6 +891,11 @@ export interface ProjectCreate {
   location?: string;
   salary_min?: number;
   salary_max?: number;
+  salary_hidden?: boolean;
+  is_public?: boolean;
+  description?: string;
+  currency?: string;
+  closing_date?: string;
   benefits?: string;
   requirements?: string;
   status?: ProjectStatus;
@@ -897,10 +910,47 @@ export interface ProjectUpdate {
   location?: string;
   salary_min?: number;
   salary_max?: number;
+  salary_hidden?: boolean;
+  is_public?: boolean;
+  description?: string;
+  currency?: string;
+  closing_date?: string;
   benefits?: string;
   requirements?: string;
   status?: ProjectStatus;
   notes?: string;
+}
+
+export interface ProjectApplication {
+  id: string;
+  project_id: string;
+  candidate_id: string;
+  candidate_name: string | null;
+  candidate_email: string | null;
+  candidate_skills: string[];
+  status: ApplicationStatus;
+  ai_score: number | null;
+  ai_recommendation: AiRecommendation | null;
+  ai_notes: string | null;
+  source: string;
+  cover_letter: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PublicProjectDetail {
+  id: string;
+  company_name: string;
+  position_title: string | null;
+  description: string | null;
+  location: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_hidden: boolean;
+  currency: string;
+  requirements: string | null;
+  benefits: string | null;
+  closing_date: string | null;
 }
 
 export interface ProjectCandidate {
