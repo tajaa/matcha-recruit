@@ -34,6 +34,14 @@ const EMPTY_FORM: FormState = {
   test_connection: true,
 };
 
+const MOCK_DEFAULTS = {
+  domain: 'matcha.dev',
+  admin_email: 'admin@matcha.dev',
+  delegated_admin_email: 'it-admin@matcha.dev',
+  default_org_unit: '/Employees',
+  default_groups: 'all@matcha.dev, engineering@matcha.dev',
+};
+
 function statusTone(status: string): string {
   if (status === 'connected') return 'text-emerald-300 border-emerald-600/40 bg-emerald-950/20';
   if (status === 'error') return 'text-red-300 border-red-600/40 bg-red-950/20';
@@ -42,8 +50,21 @@ function statusTone(status: string): string {
 }
 
 function hydrateFormFromStatus(status: GoogleWorkspaceConnectionStatus): FormState {
+  const isRealMode = status.mode === 'api_token' || status.mode === 'service_account';
+
+  if (!isRealMode) {
+    return {
+      mode: 'mock',
+      ...MOCK_DEFAULTS,
+      auto_provision_on_employee_create: status.auto_provision_on_employee_create ?? true,
+      access_token: '',
+      service_account_json: '',
+      test_connection: true,
+    };
+  }
+
   return {
-    mode: status.mode === 'api_token' || status.mode === 'service_account' ? status.mode : 'mock',
+    mode: status.mode as ConnectionMode,
     domain: status.domain || '',
     admin_email: status.admin_email || '',
     delegated_admin_email: status.delegated_admin_email || '',
@@ -186,7 +207,14 @@ export default function GoogleWorkspaceProvisioning() {
             <span className="text-[11px] uppercase tracking-wider text-zinc-400">Mode</span>
             <select
               value={form.mode}
-              onChange={(e) => setForm((prev) => ({ ...prev, mode: e.target.value as ConnectionMode }))}
+              onChange={(e) => {
+                const newMode = e.target.value as ConnectionMode;
+                if (newMode === 'mock') {
+                  setForm((prev) => ({ ...prev, mode: newMode, ...MOCK_DEFAULTS }));
+                } else {
+                  setForm((prev) => ({ ...prev, mode: newMode }));
+                }
+              }}
               className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
             >
               <option value="mock">Mock (safe sandbox)</option>
