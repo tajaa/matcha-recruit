@@ -123,3 +123,8 @@ body {
 @utility animate-text-flicker {
   animation: text-flicker 6s linear infinite;
 }
+
+@utility vertical-text {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}

@@ -102,6 +102,41 @@ const TypewriterBadge = ({ text }: { text: string }) => {
   );
 };
 
+const TalkingMouth = () => {
+  return (
+    <div className="font-mono text-emerald-500 leading-none select-none">
+      <motion.pre
+        animate={{
+          opacity: [0.4, 1, 0.4],
+          scaleY: [1, 1.4, 0.9, 1.3, 1],
+          filter: [
+            "drop-shadow(0 0 2px rgba(16,185,129,0.3))",
+            "drop-shadow(0 0 8px rgba(16,185,129,0.6))",
+            "drop-shadow(0 0 2px rgba(16,185,129,0.3))",
+          ],
+        }}
+        transition={{
+          duration: 0.2,
+          repeat: Infinity,
+          ease: "linear"
+        }}
+        className="text-[10px] md:text-xs"
+      >
+{`
+         .------------------.
+       /  .----------------.  \\
+      |  /                  \\  |
+      | |                    | |
+      | |                    | |
+      |  \\                  /  |
+       \\  '----------------'  /
+         '------------------'
+`}
+      </motion.pre>
+    </div>
+  );
+};
+
 function ContactModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [formData, setFormData] = useState({ name: "", email: "", message: "" });
   const [sent, setSent] = useState(false);
@@ -672,6 +707,95 @@ export function Landing() {
           AUTOMATION COMPLIANCE INTELLIGENCE EFFICIENCY SECURITY SCALE
         </Marquee>
       </div>
+
+      {/* INTERVIEWER SECTION */}
+      <section className="py-32 px-6 border-b border-white/5 bg-black relative overflow-hidden">
+        {/* Animated Background Grid */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f1f1f_1px,transparent_1px),linear-gradient(to_bottom,#1f1f1f_1px,transparent_1px)] bg-[size:4rem_4px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-20" />
+        
+        <div className="max-w-[1800px] mx-auto grid lg:grid-cols-2 gap-24 items-center relative z-10">
+          <div className="order-2 lg:order-1 relative">
+            {/* Scanner Effect */}
+            <div className="absolute -inset-10 bg-emerald-500/5 blur-[100px] rounded-full animate-pulse" />
+            
+            <div className="relative aspect-square max-w-md mx-auto border border-white/10 bg-zinc-950/50 flex flex-col items-center justify-center p-12 overflow-hidden group">
+              {/* Corner Accents */}
+              <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-emerald-500/40" />
+              <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-emerald-500/40" />
+              <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-emerald-500/40" />
+              <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-emerald-500/40" />
+              
+              <TalkingMouth />
+              
+              <div className="mt-12 w-full space-y-4 font-mono">
+                <div className="flex justify-between text-[10px] text-emerald-500/60 uppercase tracking-widest">
+                  <span>Voice Signal</span>
+                  <span>Active</span>
+                </div>
+                <div className="h-1 w-full bg-white/5 relative">
+                  <motion.div 
+                    animate={{ width: ["20%", "80%", "45%", "95%", "30%"] }}
+                    transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                    className="absolute inset-y-0 left-0 bg-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.5)]" 
+                  />
+                </div>
+                <div className="text-[9px] text-zinc-600 uppercase tracking-widest flex gap-4">
+                  <span className="animate-pulse">● Rec</span>
+                  <span>00:04:12</span>
+                  <span className="text-zinc-800">Buffer: 99%</span>
+                </div>
+              </div>
+
+              {/* HUD Text */}
+              <div className="absolute top-6 left-6 text-[8px] font-mono text-zinc-700 uppercase tracking-[0.3em] vertical-text">
+                Neural Interface v4.0
+              </div>
+            </div>
+          </div>
+
+          <div className="order-1 lg:order-2 space-y-12">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/5 border border-emerald-500/10 text-[10px] font-mono uppercase tracking-widest text-emerald-500">
+              <Zap className="w-3 h-3" />
+              Agentic Voice
+            </div>
+            
+            <h2 className="text-6xl md:text-8xl font-bold tracking-tighter leading-[0.85]">
+              THE <br />
+              <span className="text-emerald-500">INTERVIEWER</span>
+            </h2>
+            
+            <p className="text-zinc-400 text-xl font-light leading-relaxed max-w-xl">
+              Replace standard screening forms with high-fidelity, autonomous voice agents that conduct natural conversations and extract deep cultural insights.
+            </p>
+
+            <div className="grid sm:grid-cols-2 gap-8 pt-8 border-t border-white/5">
+              {[
+                { 
+                  title: "Latent Analysis", 
+                  desc: "Detects confidence, sentiment, and hesitation markers through proprietary audio processing."
+                },
+                { 
+                  title: "Dynamic Probing", 
+                  desc: "Agents listen and ask intelligent follow-up questions based on candidate responses."
+                }
+              ].map((item, i) => (
+                <div key={i} className="space-y-3">
+                  <h4 className="font-bold text-white uppercase tracking-wider text-sm">{item.title}</h4>
+                  <p className="text-zinc-500 text-sm leading-relaxed">{item.desc}</p>
+                </div>
+              ))}
+            </div>
+
+            <Link
+              to="/register"
+              className="inline-flex items-center gap-4 bg-emerald-500 text-black px-8 py-4 font-mono text-sm uppercase tracking-widest font-bold hover:bg-emerald-400 transition-colors mt-4"
+            >
+              Deploy Agent
+              <ArrowUpRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
+      </section>
 
       {/* FEATURE GRID */}
       <section className="py-32 px-6 max-w-[1800px] mx-auto">
