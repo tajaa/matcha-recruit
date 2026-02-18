@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { provisioning } from '../api/client';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 import type { GoogleWorkspaceConnectionStatus } from '../types';
 import Employees from './Employees';
 import OnboardingTemplates from './OnboardingTemplates';
@@ -27,7 +28,7 @@ export default function OnboardingCenter() {
 
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab && ['workspace', 'employees', 'templates', 'runs'].includes(tab)) {
+    if (tab && ['workspace', 'employees', 'templates', 'runs', 'profile'].includes(tab)) {
       setActiveTab(tab as Tab);
     } else {
       setSearchParams({ tab: 'workspace' }, { replace: true });
@@ -80,11 +81,16 @@ export default function OnboardingCenter() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div className="border-b border-white/10 pb-6">
-        <h1 className="text-3xl font-bold tracking-tighter text-white uppercase">Onboarding Center</h1>
-        <p className="text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
-          Manage integrations, new hires, and onboarding workflows.
-        </p>
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-white/10 pb-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tighter text-white uppercase">Onboarding Center</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
+            Manage integrations, new hires, and onboarding workflows.
+          </p>
+        </div>
+        <div data-tour="onboarding-center-guide">
+          <FeatureGuideTrigger guideId="onboarding-center" />
+        </div>
       </div>
 
       {/* Tabs */}
@@ -100,6 +106,7 @@ export default function OnboardingCenter() {
             <button
               key={tab.id}
               onClick={() => handleTabChange(tab.id as Tab)}
+              data-tour={`onboarding-tab-${tab.id}`}
               className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors ${
                 activeTab === tab.id
                   ? 'border-white text-white'
@@ -122,7 +129,7 @@ export default function OnboardingCenter() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               {/* Google Workspace Card */}
-              <section className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
+              <section data-tour="onboarding-workspace-google-card" className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h2 className="text-sm font-semibold tracking-wide text-white">Google Workspace</h2>
@@ -146,6 +153,7 @@ export default function OnboardingCenter() {
                 )}
 
                 <button
+                  data-tour="onboarding-configure-google"
                   onClick={() => navigate('/app/matcha/google-workspace')}
                   className="w-full px-3 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider"
                 >
@@ -153,20 +161,24 @@ export default function OnboardingCenter() {
                 </button>
               </section>
 
-              {/* Slack Card (Coming Soon) */}
-              <section className="border border-white/10 bg-zinc-900/50 p-5 space-y-4 opacity-75">
+              {/* Slack Card */}
+              <section data-tour="onboarding-workspace-slack-card" className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h2 className="text-sm font-semibold tracking-wide text-white">Slack</h2>
-                    <p className="text-xs text-zinc-500 mt-1">Auto-invite & channel setup.</p>
+                    <p className="text-xs text-zinc-500 mt-1">Auto-invite, channels, and workspace defaults.</p>
                   </div>
                   <span className="rounded border border-zinc-700 bg-zinc-900/70 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-300">
-                    Soon
+                    Draft Ready
                   </span>
                 </div>
+                <p className="text-[11px] text-zinc-400">
+                  Configure your workspace defaults now and wire OAuth when your Slack app is enabled.
+                </p>
                 <button
-                  disabled
-                  className="w-full px-3 py-2 border border-white/10 text-zinc-500 text-[10px] font-bold uppercase tracking-wider cursor-not-allowed"
+                  data-tour="onboarding-configure-slack"
+                  onClick={() => navigate('/app/matcha/slack-provisioning')}
+                  className="w-full px-3 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider"
                 >
                   Configure
                 </button>
@@ -207,7 +219,7 @@ export default function OnboardingCenter() {
         )}
 
         {activeTab === 'runs' && (
-          <div className="flex items-center justify-center h-64 border border-dashed border-white/10 bg-white/5">
+          <div data-tour="onboarding-runs-panel" className="flex items-center justify-center h-64 border border-dashed border-white/10 bg-white/5">
             <div className="text-center">
               <p className="text-zinc-500 text-sm font-mono uppercase tracking-wide">Activity Log Coming Soon</p>
               <p className="text-zinc-600 text-xs mt-2">View provisioning run history and retries here.</p>

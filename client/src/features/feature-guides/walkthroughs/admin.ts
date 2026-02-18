@@ -626,6 +626,80 @@ export const googleWorkspaceWalkthrough: WalkthroughConfig = {
   ],
 };
 
+export const onboardingCenterWalkthrough: WalkthroughConfig = {
+  id: 'onboarding-center',
+  title: 'Onboarding Center',
+  category: 'admin',
+  steps: [
+    {
+      target: 'onboarding-center-guide',
+      title: 'Unified Onboarding Guide',
+      content: 'Use this guide to move from integration setup to employee onboarding without leaving this page.',
+      placement: 'left',
+      action: 'Click Show Me anytime to replay this end-to-end flow.',
+    },
+    {
+      target: 'onboarding-tab-workspace',
+      title: 'Workspace Tab',
+      content: 'Start in Workspace to configure integrations used during employee onboarding.',
+      placement: 'bottom',
+      action: 'Click Workspace if you are currently on another tab.',
+    },
+    {
+      target: 'onboarding-workspace-google-card',
+      title: 'Google Workspace Integration',
+      content: 'Check current Google status, defaults, and connection health before provisioning new hires.',
+      placement: 'bottom',
+      expect: 'Connection badge and configuration details on the card.',
+      ifMissing: 'Open the Workspace tab to see integration cards.',
+    },
+    {
+      target: 'onboarding-configure-google',
+      title: 'Configure Google',
+      content: 'Open full Google provisioning settings for credentials, domain setup, and validation.',
+      placement: 'left',
+      action: 'Click Configure to open Google setup.',
+      ifMissing: 'Google configure action is available on the Workspace tab.',
+    },
+    {
+      target: 'onboarding-workspace-slack-card',
+      title: 'Slack Integration',
+      content: 'Prepare Slack onboarding defaults so invitation and channel assignment can be automated when Slack is enabled.',
+      placement: 'bottom',
+      ifMissing: 'Open the Workspace tab to view Slack setup.',
+    },
+    {
+      target: 'onboarding-configure-slack',
+      title: 'Configure Slack',
+      content: 'Open the Slack setup page to configure workspace URL, channels, and invite defaults.',
+      placement: 'left',
+      action: 'Click Configure to manage Slack setup.',
+      ifMissing: 'Slack configuration is available from the Workspace tab.',
+    },
+    {
+      target: 'onboarding-tab-employees',
+      title: 'Employees Tab',
+      content: 'Switch here to add employees, send invites, and track onboarding completion progress.',
+      placement: 'bottom',
+      action: 'Click Employees to continue the flow after integrations are configured.',
+    },
+    {
+      target: 'onboarding-tab-runs',
+      title: 'Activity Tab',
+      content: 'Use Activity to review provisioning run outcomes and retry failed attempts.',
+      placement: 'bottom',
+      action: 'Click Activity to open run history.',
+    },
+    {
+      target: 'onboarding-runs-panel',
+      title: 'Run Visibility',
+      content: 'Provisioning run history and retry controls surface here so failures can be resolved quickly.',
+      placement: 'top',
+      ifMissing: 'Open the Activity tab to view the run panel.',
+    },
+  ],
+};
+
 export const brokerClientsWalkthrough: WalkthroughConfig = {
   id: 'broker-clients',
   title: 'Broker Client Onboarding',

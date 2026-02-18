@@ -35,6 +35,7 @@ export type GuideKey =
   | 'time-off'
   | 'leave-management'
   | 'accommodations'
+  | 'onboarding-center'
   | 'employees'
   | 'company-setup'
   | 'google-workspace'
