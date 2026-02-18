@@ -117,33 +117,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadUser]);
 
   const login = async (data: LoginRequest) => {
-    const result = await auth.login(data);
-    // Set user immediately from login response
-    setUser(result.user);
-
-    // Try to load full profile, but don't fail login if this errors
+    setIsLoading(true);
     try {
-      const profileData = await auth.me();
-      setUser({
-        id: profileData.user.id,
-        email: profileData.user.email,
-        role: profileData.user.role,
-        is_active: true,
-        created_at: '',
-        last_login: null,
-      });
-      setProfile(profileData.profile);
-      setBetaFeatures(profileData.user.beta_features || {});
-      setInterviewPrepTokens(profileData.user.interview_prep_tokens || 0);
-      setAllowedInterviewRoles(profileData.user.allowed_interview_roles || []);
-      setCompanyFeatures(extractCompanyFeatures(profileData.profile));
-      setOnboardingNeeded(profileData.onboarding_needed || {});
-    } catch (err) {
-      // Profile load failed, but login succeeded - keep the basic user info
-      console.warn('Failed to load full profile after login:', err);
-    }
+      const result = await auth.login(data);
+      // Set user immediately from login response
+      setUser(result.user);
 
-    return result.user;
+      // Try to load full profile, but don't fail login if this errors
+      try {
+        const profileData = await auth.me();
+        setUser({
+          id: profileData.user.id,
+          email: profileData.user.email,
+          role: profileData.user.role,
+          is_active: true,
+          created_at: '',
+          last_login: null,
+        });
+        setProfile(profileData.profile);
+        setBetaFeatures(profileData.user.beta_features || {});
+        setInterviewPrepTokens(profileData.user.interview_prep_tokens || 0);
+        setAllowedInterviewRoles(profileData.user.allowed_interview_roles || []);
+        setCompanyFeatures(extractCompanyFeatures(profileData.profile));
+        setOnboardingNeeded(profileData.onboarding_needed || {});
+      } catch (err) {
+        // Profile load failed, but login succeeded - keep the basic user info
+        console.warn('Failed to load full profile after login:', err);
+      }
+
+      return result.user;
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const logout = async () => {
