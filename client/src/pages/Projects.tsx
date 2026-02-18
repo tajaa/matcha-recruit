@@ -15,6 +15,7 @@ const STATUS_TABS: { label: string; value: ProjectStatus | 'all' }[] = [
 const STATUS_STYLE: Record<ProjectStatus, string> = {
   draft:     'text-zinc-400 bg-zinc-800 border-zinc-700',
   active:    'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+  closing:   'text-amber-400 bg-amber-500/10 border-amber-500/20',
   completed: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
   cancelled: 'text-red-400 bg-red-500/10 border-red-500/20',
 };

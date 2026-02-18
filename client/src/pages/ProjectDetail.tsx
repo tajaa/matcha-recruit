@@ -199,7 +199,6 @@ function PipelineWizard({
               {WIZARD_STEPS.map((step, idx) => {
                 const isComplete = step.id < activeStep;
                 const isActive = step.id === activeStep;
-                const isFuture = step.id > activeStep;
 
                 return (
                   <div key={step.id} className="flex items-start">
