@@ -2357,6 +2357,30 @@ async def list_schedulers():
                 item["stats"] = {
                     "active_legislation": stats["active_count"],
                 }
+            elif row["task_key"] == "onboarding_reminders":
+                stats = await conn.fetchrow(
+                    """
+                    SELECT
+                        (
+                            SELECT COUNT(*)
+                            FROM employee_onboarding_tasks eot
+                            WHERE eot.status = 'pending'
+                              AND eot.due_date IS NOT NULL
+                              AND eot.due_date < CURRENT_DATE
+                        ) AS overdue_tasks,
+                        (
+                            SELECT COUNT(*)
+                            FROM employee_onboarding_tasks eot
+                            WHERE eot.status = 'pending'
+                              AND eot.due_date IS NOT NULL
+                              AND eot.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+                        ) AS due_soon_tasks
+                    """
+                )
+                item["stats"] = {
+                    "overdue_tasks": stats["overdue_tasks"],
+                    "due_soon_tasks": stats["due_soon_tasks"],
+                }
 
             result.append(item)
 
@@ -2422,6 +2446,7 @@ async def trigger_scheduler(task_key: str):
         run_deadline_escalation,
     )
     from ...workers.tasks.leave_agent_tasks import run_leave_agent_orchestration
+    from ...workers.tasks.onboarding_reminders import run_onboarding_reminders
 
     if task_key == "compliance_checks":
         enqueue_scheduled_compliance_checks.delay()
@@ -2432,6 +2457,9 @@ async def trigger_scheduler(task_key: str):
     elif task_key == "leave_agent_orchestration":
         run_leave_agent_orchestration.delay()
         return {"status": "triggered", "task_key": task_key, "message": "Leave agent orchestration enqueued"}
+    elif task_key == "onboarding_reminders":
+        run_onboarding_reminders.delay()
+        return {"status": "triggered", "task_key": task_key, "message": "Onboarding reminders enqueued"}
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task key: {task_key}")
 

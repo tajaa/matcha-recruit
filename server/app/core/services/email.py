@@ -1,6 +1,6 @@
 """Email service using MailerSend."""
 import httpx
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from ...config import get_settings
@@ -1017,6 +1017,306 @@ Questions? Contact your HR administrator.
 
         except Exception as e:
             print(f"[Email] Error sending welcome email to {to_email}: {e}")
+            return False
+
+    async def send_task_reminder(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        employee_name: str,
+        task_title: str,
+        due_date: date,
+    ) -> bool:
+        """Send a standard onboarding task reminder email."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping onboarding reminder email")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        portal_url = f"{app_base_url}/app/portal"
+        due_text = due_date.strftime("%B %d, %Y")
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .card {{ background: #f9fafb; border-radius: 10px; padding: 20px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+            <p>This is a reminder to complete an onboarding task for <strong>{employee_name}</strong>.</p>
+
+            <div class="card">
+                <p style="margin: 0;"><strong>Task:</strong> {task_title}</p>
+                <p style="margin: 8px 0 0 0;"><strong>Due date:</strong> {due_text}</p>
+            </div>
+
+            <p>
+                <a href="{portal_url}" class="btn">Open Onboarding Portal</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit — {company_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+This is a reminder to complete an onboarding task for {employee_name}.
+
+Task: {task_title}
+Due date: {due_text}
+
+Open onboarding portal: {portal_url}
+
+- Matcha Recruit / {company_name}
+"""
+
+        payload = {
+            "from": {"email": self.from_email, "name": self.from_name},
+            "to": [{"email": to_email, "name": to_name or to_email}],
+            "subject": f"Onboarding reminder: {task_title}",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent onboarding reminder to {to_email}")
+                    return True
+                print(f"[Email] Failed onboarding reminder to {to_email}: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            print(f"[Email] Error sending onboarding reminder to {to_email}: {e}")
+            return False
+
+    async def send_task_escalation(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        employee_name: str,
+        task_title: str,
+        due_date: date,
+        escalation_target: str,
+        overdue_days: int,
+    ) -> bool:
+        """Send an onboarding escalation email for overdue tasks."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping onboarding escalation email")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        portal_url = f"{app_base_url}/app/onboarding"
+        due_text = due_date.strftime("%B %d, %Y")
+        escalation_label = "Manager" if escalation_target == "manager" else "HR"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #ef4444; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .alert {{ background: #fef2f2; border-left: 4px solid #ef4444; border-radius: 6px; padding: 16px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #ef4444; color: white; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+            <p>An onboarding task for <strong>{employee_name}</strong> has been escalated to {escalation_label} follow-up.</p>
+
+            <div class="alert">
+                <p style="margin: 0;"><strong>Task:</strong> {task_title}</p>
+                <p style="margin: 8px 0 0 0;"><strong>Due date:</strong> {due_text}</p>
+                <p style="margin: 8px 0 0 0;"><strong>Overdue by:</strong> {overdue_days} day(s)</p>
+            </div>
+
+            <p>
+                <a href="{portal_url}" class="btn">Review Onboarding Status</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit — {company_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+An onboarding task for {employee_name} has been escalated to {escalation_label} follow-up.
+
+Task: {task_title}
+Due date: {due_text}
+Overdue by: {overdue_days} day(s)
+
+Review onboarding status: {portal_url}
+
+- Matcha Recruit / {company_name}
+"""
+
+        payload = {
+            "from": {"email": self.from_email, "name": self.from_name},
+            "to": [{"email": to_email, "name": to_name or to_email}],
+            "subject": f"Onboarding escalation ({escalation_label}): {task_title}",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent onboarding escalation to {to_email}")
+                    return True
+                print(f"[Email] Failed onboarding escalation to {to_email}: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            print(f"[Email] Error sending onboarding escalation to {to_email}: {e}")
+            return False
+
+    async def send_manager_onboarding_summary(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        summary_lines: list[str],
+    ) -> bool:
+        """Send a weekly manager summary of onboarding items."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping manager onboarding summary email")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        portal_url = f"{app_base_url}/app/onboarding"
+        bullet_items = "".join([f"<li>{line}</li>" for line in summary_lines]) if summary_lines else "<li>No pending items this week.</li>"
+        text_bullets = "\n".join([f"- {line}" for line in summary_lines]) if summary_lines else "- No pending items this week."
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .card {{ background: #f9fafb; border-radius: 10px; padding: 20px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+            <p>Here is your weekly onboarding summary for {company_name}.</p>
+            <div class="card">
+                <ul>{bullet_items}</ul>
+            </div>
+            <p>
+                <a href="{portal_url}" class="btn">Open Onboarding Dashboard</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit — {company_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+Here is your weekly onboarding summary for {company_name}.
+
+{text_bullets}
+
+Open onboarding dashboard: {portal_url}
+
+- Matcha Recruit / {company_name}
+"""
+
+        payload = {
+            "from": {"email": self.from_email, "name": self.from_name},
+            "to": [{"email": to_email, "name": to_name or to_email}],
+            "subject": f"Weekly onboarding summary — {company_name}",
+            "html": html_content,
+            "text": text_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent manager onboarding summary to {to_email}")
+                    return True
+                print(f"[Email] Failed manager onboarding summary to {to_email}: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            print(f"[Email] Error sending manager onboarding summary to {to_email}: {e}")
             return False
 
 

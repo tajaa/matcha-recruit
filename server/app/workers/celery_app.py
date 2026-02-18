@@ -29,6 +29,7 @@ celery_app = Celery(
         "app.workers.tasks.structured_data_fetch",
         "app.workers.tasks.leave_deadline_checks",
         "app.workers.tasks.leave_agent_tasks",
+        "app.workers.tasks.onboarding_reminders",
         "app.workers.tasks.resume_screening",
         "app.workers.tasks.project_close",
     ],
@@ -103,6 +104,7 @@ def on_worker_ready(**kwargs):
     )
     from app.workers.tasks.legislation_watch import run_legislation_watch
     from app.workers.tasks.leave_agent_tasks import run_leave_agent_orchestration
+    from app.workers.tasks.onboarding_reminders import run_onboarding_reminders
     from app.workers.tasks.pattern_recognition import run_pattern_recognition
     from app.workers.tasks.structured_data_fetch import fetch_structured_data_sources
 
@@ -142,6 +144,11 @@ def on_worker_ready(**kwargs):
         run_leave_agent_orchestration.delay()
     else:
         print("[Worker] Leave agent orchestration scheduler is disabled, skipping.")
+
+    if _is_scheduler_enabled("onboarding_reminders"):
+        run_onboarding_reminders.delay()
+    else:
+        print("[Worker] Onboarding reminders scheduler is disabled, skipping.")
 
     from app.workers.tasks.project_close import check_project_deadlines
 

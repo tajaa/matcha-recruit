@@ -7,6 +7,7 @@ from .compliance_checks import (
     enqueue_scheduled_compliance_checks,
     run_deadline_escalation,
 )
+from .onboarding_reminders import run_onboarding_reminders
 
 __all__ = [
     "analyze_interview_async",
@@ -16,4 +17,5 @@ __all__ = [
     "run_compliance_check_task",
     "enqueue_scheduled_compliance_checks",
     "run_deadline_escalation",
+    "run_onboarding_reminders",
 ]
