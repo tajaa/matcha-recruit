@@ -75,3 +75,42 @@ body {
 @utility animate-marquee2 {
   animation: marquee2 25s linear infinite;
 }
+
+/* Tutor / Session UI animations */
+@keyframes pulse-ring {
+  0%   { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes scan-line {
+  0%   { top: -4px; opacity: 0.6; }
+  100% { top: 100%; opacity: 0; }
+}
+@keyframes grid-pan {
+  from { background-position: 0 0; }
+  to   { background-position: 40px 40px; }
+}
+@keyframes border-breathe {
+  0%, 100% { box-shadow: 0 0 0px rgba(52,211,153,0); border-color: rgba(52,211,153,0.25); }
+  50%       { box-shadow: 0 0 18px rgba(52,211,153,0.25); border-color: rgba(52,211,153,0.6); }
+}
+@keyframes text-flicker {
+  0%, 97%, 100% { opacity: 1; }
+  98%            { opacity: 0.85; }
+  99%            { opacity: 1; }
+}
+
+@utility animate-pulse-ring {
+  animation: pulse-ring 1.6s cubic-bezier(0.215,0.61,0.355,1) infinite;
+}
+@utility animate-scan-line {
+  animation: scan-line 3s linear infinite;
+}
+@utility animate-grid-pan {
+  animation: grid-pan 8s linear infinite;
+}
+@utility animate-border-breathe {
+  animation: border-breathe 2.5s ease-in-out infinite;
+}
+@utility animate-text-flicker {
+  animation: text-flicker 6s linear infinite;
+}
