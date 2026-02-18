@@ -573,7 +573,7 @@ function App() {
               <Route
                 path="admin/tutor-metrics"
                 element={
-                  <ProtectedRoute roles={['admin']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="interview_prep">
                     <TutorMetrics />
                   </ProtectedRoute>
                 }
@@ -581,7 +581,7 @@ function App() {
               <Route
                 path="admin/tutor-metrics/:id"
                 element={
-                  <ProtectedRoute roles={['admin']}>
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="interview_prep">
                     <TutorSessionDetail />
                   </ProtectedRoute>
                 }
