@@ -62,7 +62,10 @@ export default function OnboardingTemplates() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (!response.ok) throw new Error('Failed to fetch templates');
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to fetch templates');
+      }
       const data = await response.json();
       setTemplates(data);
     } catch (err) {
@@ -253,8 +256,8 @@ export default function OnboardingTemplates() {
           <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
             <CheckCircle size={24} className="text-zinc-600" />
           </div>
-          <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">No templates found</h3>
-          <p className="text-zinc-500 text-xs mb-6 font-mono">Create your first onboarding task template.</p>
+          <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">Create your first template</h3>
+          <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">You haven't defined any onboarding tasks yet. Build your first checklist to get started.</p>
         </div>
       ) : (
         <div className="space-y-8">

@@ -94,7 +94,10 @@ export default function Employees() {
         },
       });
 
-      if (!response.ok) throw new Error('Failed to fetch employees');
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to fetch employees');
+      }
 
       const data = await response.json();
       setEmployees(data);
@@ -629,14 +632,15 @@ export default function Employees() {
       {employees.length === 0 ? (
         <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
           <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-             <Search size={24} className="text-zinc-600" />
+             <Plus size={24} className="text-zinc-600" />
           </div>
-          <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">No employees found</h3>
-          <p className="text-zinc-500 text-xs mb-6 font-mono">Get started by adding your first team member.</p>
+          <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">Onboard your first employee</h3>
+          <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Your directory is empty. Start your onboarding process now.</p>
           <button
             onClick={() => setShowAddModal(true)}
-            className="text-white text-xs font-bold hover:text-zinc-300 uppercase tracking-wider underline underline-offset-4"
+            className="flex items-center gap-2 mx-auto px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
           >
+            <Plus size={14} />
             Add Employee
           </button>
         </div>
