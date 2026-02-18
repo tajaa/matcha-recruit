@@ -95,69 +95,73 @@ async def accept_invitation(token: str, request: AcceptInvitationRequest):
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
     async with get_connection() as conn:
-        # Get invitation with employee and company info
-        invitation = await conn.fetchrow(
-            """
-            SELECT
-                i.id, i.employee_id, i.org_id, i.status, i.expires_at,
-                e.email, e.work_email, e.first_name, e.last_name, e.user_id,
-                c.name as company_name
-            FROM employee_invitations i
-            JOIN employees e ON i.employee_id = e.id
-            JOIN companies c ON i.org_id = c.id
-            WHERE i.token = $1
-            """,
-            token
-        )
-
-        if not invitation:
-            raise HTTPException(status_code=404, detail="Invitation not found")
-
-        if invitation["status"] == "accepted":
-            raise HTTPException(status_code=400, detail="Invitation has already been accepted")
-
-        if invitation["status"] == "cancelled":
-            raise HTTPException(status_code=400, detail="Invitation has been cancelled")
-
-        if invitation["status"] == "expired" or invitation["expires_at"] < datetime.utcnow():
-            raise HTTPException(status_code=400, detail="Invitation has expired")
-
-        if invitation["user_id"]:
-            raise HTTPException(status_code=400, detail="Account has already been set up")
-
-        # Check if email already exists in users table
-        existing_user = await conn.fetchval(
-            "SELECT id FROM users WHERE email = $1",
-            invitation["email"]
-        )
-        if existing_user:
-            raise HTTPException(
-                status_code=400,
-                detail="An account with this email already exists. Please contact your administrator."
+        async with conn.transaction():
+            # Lock the invitation row up front to serialize concurrent accepts for
+            # the same token. The second concurrent request will block here, then
+            # re-read status='accepted' and receive a clean 400.
+            invitation = await conn.fetchrow(
+                """
+                SELECT
+                    i.id, i.employee_id, i.org_id, i.status, i.expires_at,
+                    e.email, e.work_email, e.first_name, e.last_name, e.user_id,
+                    c.name as company_name
+                FROM employee_invitations i
+                JOIN employees e ON i.employee_id = e.id
+                JOIN companies c ON i.org_id = c.id
+                WHERE i.token = $1
+                FOR UPDATE OF i
+                """,
+                token
             )
 
-        # Create user account
-        password_hash = hash_password(request.password)
-        user = await conn.fetchrow(
-            """
-            INSERT INTO users (email, password_hash, role, is_active)
-            VALUES ($1, $2, 'employee', true)
-            RETURNING id, email, role
-            """,
-            invitation["email"], password_hash
-        )
+            if not invitation:
+                raise HTTPException(status_code=404, detail="Invitation not found")
 
-        # Link user to employee record
-        await conn.execute(
-            "UPDATE employees SET user_id = $1, updated_at = NOW() WHERE id = $2",
-            user["id"], invitation["employee_id"]
-        )
+            if invitation["status"] == "accepted":
+                raise HTTPException(status_code=400, detail="Invitation has already been accepted")
 
-        # Mark invitation as accepted
-        await conn.execute(
-            "UPDATE employee_invitations SET status = 'accepted', accepted_at = NOW() WHERE id = $1",
-            invitation["id"]
-        )
+            if invitation["status"] == "cancelled":
+                raise HTTPException(status_code=400, detail="Invitation has been cancelled")
+
+            if invitation["status"] == "expired" or invitation["expires_at"] < datetime.utcnow():
+                raise HTTPException(status_code=400, detail="Invitation has expired")
+
+            if invitation["user_id"]:
+                raise HTTPException(status_code=400, detail="Account has already been set up")
+
+            # Check if email already exists in users table
+            existing_user = await conn.fetchval(
+                "SELECT id FROM users WHERE email = $1",
+                invitation["email"]
+            )
+            if existing_user:
+                raise HTTPException(
+                    status_code=400,
+                    detail="An account with this email already exists. Please contact your administrator."
+                )
+
+            # Create user account
+            password_hash = hash_password(request.password)
+            user = await conn.fetchrow(
+                """
+                INSERT INTO users (email, password_hash, role, is_active)
+                VALUES ($1, $2, 'employee', true)
+                RETURNING id, email, role
+                """,
+                invitation["email"], password_hash
+            )
+
+            # Link user to employee record
+            await conn.execute(
+                "UPDATE employees SET user_id = $1, updated_at = NOW() WHERE id = $2",
+                user["id"], invitation["employee_id"]
+            )
+
+            # Mark invitation as accepted
+            await conn.execute(
+                "UPDATE employee_invitations SET status = 'accepted', accepted_at = NOW() WHERE id = $1",
+                invitation["id"]
+            )
 
         # Generate tokens
         access_token = create_access_token(user["id"], user["email"], user["role"])

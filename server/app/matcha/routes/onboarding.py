@@ -91,24 +91,29 @@ async def list_templates(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
-        # Check if company has any templates, if not, create defaults
-        count = await conn.fetchval(
-            "SELECT COUNT(*) FROM onboarding_tasks WHERE org_id = $1",
-            company_id
-        )
-
-        if count == 0:
-            # Create default templates
-            for template in DEFAULT_TEMPLATES:
-                await conn.execute(
-                    """
-                    INSERT INTO onboarding_tasks (org_id, title, description, category, is_employee_task, due_days, sort_order)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    """,
-                    company_id, template["title"], template["description"],
-                    template["category"], template["is_employee_task"],
-                    template["due_days"], template["sort_order"]
-                )
+        # Bootstrap default templates atomically: acquire a per-company advisory
+        # lock inside a transaction so concurrent first-load requests don't each
+        # insert the full default set.
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1::text))",
+                str(company_id)
+            )
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM onboarding_tasks WHERE org_id = $1",
+                company_id
+            )
+            if count == 0:
+                for template in DEFAULT_TEMPLATES:
+                    await conn.execute(
+                        """
+                        INSERT INTO onboarding_tasks (org_id, title, description, category, is_employee_task, due_days, sort_order)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        """,
+                        company_id, template["title"], template["description"],
+                        template["category"], template["is_employee_task"],
+                        template["due_days"], template["sort_order"]
+                    )
 
         # Build query
         query = "SELECT * FROM onboarding_tasks WHERE org_id = $1"

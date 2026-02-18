@@ -199,49 +199,44 @@ async def send_single_invitation(
         should_close = True
 
     try:
-        # Get employee
-        employee = await conn.fetchrow(
-            "SELECT * FROM employees WHERE id = $1 AND org_id = $2",
-            employee_id, org_id
-        )
-
-        if not employee:
-            raise HTTPException(status_code=404, detail="Employee not found")
-
-        if employee["user_id"]:
-            raise HTTPException(status_code=400, detail="Employee already has an account")
-
-        # Check for existing pending invitation
-        existing = await conn.fetchrow(
-            """
-            SELECT * FROM employee_invitations
-            WHERE employee_id = $1 AND status = 'pending' AND expires_at > NOW()
-            """,
-            employee_id
-        )
-
-        if existing:
-            # Cancel existing invitation
-            await conn.execute(
-                "UPDATE employee_invitations SET status = 'cancelled' WHERE id = $1",
-                existing["id"]
+        async with conn.transaction():
+            # Lock the employee row to serialize concurrent invite/resend calls so
+            # only one active invitation per employee can be created at a time.
+            employee = await conn.fetchrow(
+                "SELECT * FROM employees WHERE id = $1 AND org_id = $2 FOR UPDATE",
+                employee_id, org_id
             )
 
-        # Generate new invitation token
-        token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(days=7)
+            if not employee:
+                raise HTTPException(status_code=404, detail="Employee not found")
 
-        # Create invitation record
-        invitation = await conn.fetchrow(
-            """
-            INSERT INTO employee_invitations (org_id, employee_id, invited_by, token, expires_at)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, employee_id, token, status, expires_at, created_at
-            """,
-            org_id, employee_id, invited_by, token, expires_at
-        )
+            if employee["user_id"]:
+                raise HTTPException(status_code=400, detail="Employee already has an account")
 
-        # Get company name for email
+            # Cancel all existing pending invitations for this employee
+            await conn.execute(
+                """
+                UPDATE employee_invitations SET status = 'cancelled'
+                WHERE employee_id = $1 AND status = 'pending'
+                """,
+                employee_id
+            )
+
+            # Generate new invitation token
+            token = secrets.token_urlsafe(32)
+            expires_at = datetime.utcnow() + timedelta(days=7)
+
+            # Create invitation record
+            invitation = await conn.fetchrow(
+                """
+                INSERT INTO employee_invitations (org_id, employee_id, invited_by, token, expires_at)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING id, employee_id, token, status, expires_at, created_at
+                """,
+                org_id, employee_id, invited_by, token, expires_at
+            )
+
+        # Get company name for email (outside transaction — read-only)
         company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", org_id)
         company_name = company["name"] if company else "Your Company"
 
@@ -1097,16 +1092,21 @@ async def get_invitation_status_summary(
             ORDER BY i.created_at DESC
         """, *params)
 
-        # Calculate statistics
+        # Calculate statistics from each employee's latest invitation only,
+        # so cancelled/expired historical rows from resends don't inflate counts.
         stats = await conn.fetchrow("""
             SELECT
                 COUNT(*) FILTER (WHERE status = 'pending') as pending,
                 COUNT(*) FILTER (WHERE status = 'accepted') as accepted,
                 COUNT(*) FILTER (WHERE status = 'expired') as expired,
                 COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled
-            FROM employee_invitations i
-            JOIN employees e ON i.employee_id = e.id
-            WHERE e.org_id = $1
+            FROM (
+                SELECT DISTINCT ON (i.employee_id) i.status
+                FROM employee_invitations i
+                JOIN employees e ON i.employee_id = e.id
+                WHERE e.org_id = $1
+                ORDER BY i.employee_id, i.created_at DESC
+            ) latest
         """, company_id)
 
         return InvitationStatusSummary(
@@ -1424,11 +1424,17 @@ async def assign_onboarding_tasks(
                             detail="return_to_work tasks require leave_request_id",
                         )
                     due_date = start_date + timedelta(days=template["due_days"])
+                    # Skip if this template is already assigned to prevent duplicates
+                    # on retries — INSERT only when no matching (employee_id, task_id) exists.
                     row = await conn.fetchrow(
                         """
                         INSERT INTO employee_onboarding_tasks
                         (employee_id, task_id, leave_request_id, title, description, category, is_employee_task, due_date)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        SELECT $1, $2, $3, $4, $5, $6, $7, $8
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM employee_onboarding_tasks
+                            WHERE employee_id = $1 AND task_id = $2
+                        )
                         RETURNING *
                         """,
                         employee_id,
@@ -1440,7 +1446,8 @@ async def assign_onboarding_tasks(
                         template["is_employee_task"],
                         due_date,
                     )
-                    assigned_tasks.append(row)
+                    if row:
+                        assigned_tasks.append(row)
 
         # Assign custom tasks
         if request.custom_tasks:
@@ -1560,45 +1567,46 @@ async def assign_all_onboarding_templates(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
-        # Verify employee belongs to company
-        employee = await conn.fetchrow(
-            "SELECT id, start_date FROM employees WHERE id = $1 AND org_id = $2",
-            employee_id, company_id
-        )
-        if not employee:
-            raise HTTPException(status_code=404, detail="Employee not found")
-
-        start_date = employee["start_date"] or datetime.now().date()
-
-        # Get all active templates
-        templates = await conn.fetch(
-            """SELECT * FROM onboarding_tasks
-               WHERE org_id = $1 AND is_active = true AND category != 'return_to_work'
-               ORDER BY category, sort_order""",
-            company_id
-        )
-
-        # Check if employee already has tasks
-        existing = await conn.fetchval(
-            "SELECT COUNT(*) FROM employee_onboarding_tasks WHERE employee_id = $1",
-            employee_id
-        )
-        if existing > 0:
-            raise HTTPException(status_code=400, detail="Employee already has onboarding tasks assigned")
-
-        count = 0
-        for template in templates:
-            due_date = start_date + timedelta(days=template["due_days"])
-            await conn.execute(
-                """
-                INSERT INTO employee_onboarding_tasks
-                (employee_id, task_id, title, description, category, is_employee_task, due_date)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                """,
-                employee_id, template["id"], template["title"], template["description"],
-                template["category"], template["is_employee_task"], due_date
+        async with conn.transaction():
+            # Lock the employee row to serialize concurrent assign-all calls.
+            employee = await conn.fetchrow(
+                "SELECT id, start_date FROM employees WHERE id = $1 AND org_id = $2 FOR UPDATE",
+                employee_id, company_id
             )
-            count += 1
+            if not employee:
+                raise HTTPException(status_code=404, detail="Employee not found")
+
+            # Idempotent: if tasks already assigned return current count rather than erroring,
+            # so retries (e.g. from the onboarding agent console) succeed cleanly.
+            existing = await conn.fetchval(
+                "SELECT COUNT(*) FROM employee_onboarding_tasks WHERE employee_id = $1",
+                employee_id
+            )
+            if existing > 0:
+                return {"message": f"Onboarding tasks already assigned", "count": int(existing)}
+
+            start_date = employee["start_date"] or datetime.now().date()
+
+            templates = await conn.fetch(
+                """SELECT * FROM onboarding_tasks
+                   WHERE org_id = $1 AND is_active = true AND category != 'return_to_work'
+                   ORDER BY category, sort_order""",
+                company_id
+            )
+
+            count = 0
+            for template in templates:
+                due_date = start_date + timedelta(days=template["due_days"])
+                await conn.execute(
+                    """
+                    INSERT INTO employee_onboarding_tasks
+                    (employee_id, task_id, title, description, category, is_employee_task, due_date)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    """,
+                    employee_id, template["id"], template["title"], template["description"],
+                    template["category"], template["is_employee_task"], due_date
+                )
+                count += 1
 
         return {"message": f"Assigned {count} onboarding tasks", "count": count}
 
