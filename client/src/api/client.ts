@@ -1171,6 +1171,7 @@ export interface TutorSessionCreate {
   language?: 'en' | 'es';
   duration_minutes?: 2 | 5 | 8;
   interview_role?: string;  // For interview_prep: role being practiced for (e.g., "CTO")
+  is_practice?: boolean;
 }
 
 export interface TutorSessionStart {

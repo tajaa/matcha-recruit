@@ -240,6 +240,7 @@ class TutorSessionCreate(BaseModel):
     language: Optional[Literal["en", "es"]] = None  # Required for language_test mode
     duration_minutes: Optional[Literal[2, 5, 8]] = None  # Session duration: 2, 5, or 8 minutes
     interview_role: Optional[str] = None  # For interview_prep: role being interviewed for
+    is_practice: bool = False  # If true, session is ephemeral (not analyzed/saved)
 
 
 class TutorSessionSummary(BaseModel):

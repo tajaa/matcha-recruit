@@ -80,6 +80,7 @@ export function Tutor() {
   const [error, setError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
   const [showSystemCheck, setShowSystemCheck] = useState(false);
+  const [isPracticeMode, setIsPracticeMode] = useState(false);
 
   // Audio interview hook with server-configured session limit
   const {
@@ -147,9 +148,11 @@ export function Tutor() {
     duration?: Duration;
     role?: InterviewRole;
     companyId?: string;
+    isPractice?: boolean;
   }) => {
     setStarting(true);
     setError(null);
+    setIsPracticeMode(params.isPractice || false);
     try {
       const result = await tutor.createSession({
         mode: params.mode,
@@ -157,6 +160,7 @@ export function Tutor() {
         duration_minutes: params.duration,
         interview_role: params.mode === 'interview_prep' ? params.role : undefined,
         company_id: isCompanyInterviewMode(params.mode) ? params.companyId : undefined,
+        is_practice: params.isPractice || false,
       });
 
       setInterviewId(result.interview_id);
@@ -218,19 +222,23 @@ export function Tutor() {
     return (
       <div className="max-w-2xl mx-auto space-y-8 py-12">
         <div className="text-center space-y-6">
-          <div className="w-20 h-20 mx-auto rounded-full bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center">
-            <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+          <div className={`w-20 h-20 mx-auto rounded-full ${isPracticeMode ? 'bg-amber-500/20 border-amber-500/50' : 'bg-emerald-500/20 border-emerald-500/50'} border flex items-center justify-center`}>
+            <CheckCircle2 className={`w-10 h-10 ${isPracticeMode ? 'text-amber-400' : 'text-emerald-400'}`} />
           </div>
           <div>
             <h1 className="text-4xl font-bold text-white tracking-tight uppercase">Session Complete</h1>
-            <p className="text-zinc-400 mt-2 font-mono">Analysis in progress...</p>
+            <p className={`mt-2 font-mono text-sm ${isPracticeMode ? 'text-amber-400/70' : 'text-zinc-400'}`}>
+              {isPracticeMode ? 'Practice mode — session not saved' : 'Analysis in progress...'}
+            </p>
           </div>
         </div>
 
         <div className="bg-zinc-900 border border-zinc-800 p-8 text-center">
           <h2 className="text-lg font-bold text-white uppercase tracking-wider mb-4">{selectedSessionTitle}</h2>
           <p className="text-sm text-zinc-400 mb-8 max-w-md mx-auto leading-relaxed">
-            {selectedMode === 'interview_prep'
+            {isPracticeMode
+              ? `This was a practice session — no data was saved and no analysis will be generated.`
+              : selectedMode === 'interview_prep'
               ? `Your responses for the ${selectedRole} role have been recorded. Review your communication and response quality once analysis completes.`
               : selectedMode === 'language_test'
               ? `Great work practicing ${selectedLanguage === 'es' ? 'Spanish' : 'English'}. Language scoring stays separate from hiring/culture scoring.`
@@ -238,7 +246,7 @@ export function Tutor() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            {completedCompanyMode ? (
+            {!isPracticeMode && completedCompanyMode ? (
               isCompanyUser && (
                 <Button
                   onClick={() => navigate(`/app/analysis/${interviewId}`)}
@@ -247,7 +255,7 @@ export function Tutor() {
                   View Analysis
                 </Button>
               )
-            ) : (
+            ) : !isPracticeMode ? (
               user?.role === 'admin' && (
                 <Button
                   onClick={() => navigate(`/app/admin/tutor-metrics/${interviewId}`)}
@@ -256,7 +264,7 @@ export function Tutor() {
                   View Analysis
                 </Button>
               )
-            )}
+            ) : null}
             <Button
               variant="secondary"
               onClick={handleReset}
@@ -287,6 +295,11 @@ export function Tutor() {
             <div className="flex items-center gap-3 mb-1">
               <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
               <h1 className="text-xl font-bold text-white uppercase tracking-wider">{selectedSessionTitle}</h1>
+              {isPracticeMode && (
+                <span className="px-2 py-0.5 bg-amber-500/15 border border-amber-500/40 text-amber-400 text-[9px] font-bold uppercase tracking-widest rounded-sm">
+                  Not Recording
+                </span>
+              )}
             </div>
             <p className="text-xs text-zinc-500 font-mono ml-5">
               {selectedMode === 'interview_prep'
@@ -383,6 +396,12 @@ export function Tutor() {
                   <div className="bg-black/40 border border-white/5 rounded py-3">
                     <AsciiWaveform isRecording={isRecording} isPlaying={isPlaying} />
                   </div>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-zinc-400">Recording</span>
+                  <span className={`text-xs font-mono uppercase tracking-wider ${isPracticeMode ? 'text-amber-400' : 'text-emerald-500'}`}>
+                    {isPracticeMode ? 'Off' : 'On'}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-zinc-400">Transcript</span>
@@ -612,13 +631,35 @@ export function Tutor() {
                   </div>
                 </div>
 
+                <div className="flex items-center justify-between py-3 border-t border-zinc-800/50 mt-2">
+                  <div>
+                    <div className="text-xs font-bold text-zinc-300 uppercase tracking-wider">Don't Record</div>
+                    <div className="text-[10px] text-zinc-600 font-mono mt-0.5">Session won't be saved or analyzed</div>
+                  </div>
+                  <button
+                    onClick={() => setIsPracticeMode((v) => !v)}
+                    className={`relative w-10 h-5 rounded-full transition-all duration-200 focus:outline-none ${isPracticeMode ? 'bg-amber-500' : 'bg-zinc-800 border border-zinc-700'}`}
+                    aria-label="Toggle practice mode"
+                  >
+                    <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-200 ${isPracticeMode ? 'left-5 bg-white' : 'left-0.5 bg-zinc-600'}`} />
+                  </button>
+                </div>
+
                 <Button
-                  onClick={() => handleStartSession({ mode: 'language_test', language: selectedLanguage, duration: selectedDuration })}
+                  onClick={() => handleStartSession({ mode: 'language_test', language: selectedLanguage, duration: selectedDuration, isPractice: isPracticeMode })}
                   disabled={starting}
                   variant="secondary"
-                  className="w-full bg-transparent border border-white/20 text-white hover:bg-white hover:text-black font-bold uppercase tracking-widest py-4 rounded-none flex items-center justify-center gap-2"
+                  className={`w-full font-bold uppercase tracking-widest py-4 rounded-none flex items-center justify-center gap-2 ${
+                    isPracticeMode
+                      ? 'bg-amber-500/10 border border-amber-500/40 text-amber-400 hover:bg-amber-500/20'
+                      : 'bg-transparent border border-white/20 text-white hover:bg-white hover:text-black'
+                  }`}
                 >
-                  {starting ? 'INITIALIZING...' : (
+                  {starting ? 'INITIALIZING...' : isPracticeMode ? (
+                    <>
+                      <Play size={14} fill="currentColor" /> Start (No Recording)
+                    </>
+                  ) : (
                     <>
                       <Play size={14} fill="currentColor" /> Start Practice
                     </>

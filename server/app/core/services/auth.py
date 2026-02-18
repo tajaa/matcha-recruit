@@ -73,6 +73,7 @@ def create_refresh_token(user_id: UUID, email: str, role: UserRole) -> str:
 def create_interview_ws_token(
     interview_id: UUID,
     expires_delta: Optional[timedelta] = None,
+    is_practice: bool = False,
 ) -> str:
     """Create a short-lived JWT token scoped to a specific interview websocket."""
     settings = get_settings()
@@ -81,12 +82,13 @@ def create_interview_ws_token(
         "sub": str(interview_id),
         "exp": expire,
         "type": "interview_ws",
+        "is_practice": is_practice,
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
-def decode_interview_ws_token(token: str) -> Optional[UUID]:
-    """Decode an interview websocket token and return the interview ID."""
+def decode_interview_ws_token(token: str) -> tuple[Optional[UUID], bool]:
+    """Decode an interview websocket token and return the interview ID and practice flag."""
     settings = get_settings()
     try:
         payload = jwt.decode(
@@ -95,10 +97,10 @@ def decode_interview_ws_token(token: str) -> Optional[UUID]:
             algorithms=[settings.jwt_algorithm],
         )
         if payload.get("type") != "interview_ws":
-            return None
-        return UUID(payload["sub"])
+            return None, False
+        return UUID(payload["sub"]), payload.get("is_practice", False)
     except (JWTError, ValueError, TypeError):
-        return None
+        return None, False
 
 
 def decode_token(token: str) -> Optional[TokenPayload]:

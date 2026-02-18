@@ -195,7 +195,8 @@ async def create_tutor_session(
 
         async with conn.transaction():
             # For candidates using interview prep, consume a token atomically.
-            if current_user.role == "candidate" and request.mode == "interview_prep":
+            # Skip token consumption for practice mode.
+            if current_user.role == "candidate" and request.mode == "interview_prep" and not request.is_practice:
                 token_row = await conn.fetchrow(
                     """
                     UPDATE users
@@ -239,7 +240,7 @@ async def create_tutor_session(
         return InterviewStart(
             interview_id=interview_id,
             websocket_url=f"/api/ws/interview/{interview_id}",
-            ws_auth_token=create_interview_ws_token(interview_id),
+            ws_auth_token=create_interview_ws_token(interview_id, is_practice=request.is_practice),
             max_session_duration_seconds=duration_seconds,
         )
 
@@ -1146,12 +1147,13 @@ async def interview_websocket(
         # Allow either:
         # 1) short-lived interview websocket token (for public invite flows), or
         # 2) authenticated app access token (for internal flows).
-        ws_token_interview_id = decode_interview_ws_token(token)
+        ws_token_interview_id, is_practice = decode_interview_ws_token(token)
         if ws_token_interview_id:
             if ws_token_interview_id != interview_id:
                 await websocket.close(code=4003, reason="Token not valid for this interview")
                 return
         else:
+            is_practice = False
             user_payload = decode_token(token)
             if not user_payload:
                 await websocket.close(code=4001, reason="Invalid or expired token")
@@ -1317,19 +1319,24 @@ async def interview_websocket(
         if gemini_session:
             transcript_text = gemini_session.get_transcript_text()
 
-            if cancelled:
-                # User cancelled — save transcript but skip analysis
-                async with get_connection() as conn:
-                    await conn.execute(
-                        """
-                        UPDATE interviews
-                        SET transcript = $1, status = 'cancelled', completed_at = NOW()
-                        WHERE id = $2
-                        """,
-                        transcript_text,
-                        interview_id,
-                    )
-                print(f"[Interview {interview_id}] Session cancelled by user, skipping analysis")
+            if cancelled or is_practice:
+                if is_practice:
+                    async with get_connection() as conn:
+                        await conn.execute("DELETE FROM interviews WHERE id = $1", interview_id)
+                    print(f"[Interview {interview_id}] Practice session ended, record deleted")
+                else:
+                    # User cancelled — save transcript but skip analysis
+                    async with get_connection() as conn:
+                        await conn.execute(
+                            """
+                            UPDATE interviews
+                            SET transcript = $1, status = 'cancelled', completed_at = NOW()
+                            WHERE id = $2
+                            """,
+                            transcript_text,
+                            interview_id,
+                        )
+                    print(f"[Interview {interview_id}] Session cancelled by user, skipping analysis")
             else:
                 # Save transcript with 'analyzing' status - analysis will run in background worker
                 async with get_connection() as conn:
