@@ -112,13 +112,13 @@ interface OnboardingProgress {
   has_onboarding: boolean;
 }
 
-export default function Employees() {
+export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' | 'directory' }) {
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [filter, setFilter] = useState<string>('');
+  const [filter, setFilter] = useState<string>(mode === 'directory' ? 'active' : '');
   const [newEmployee, setNewEmployee] = useState<NewEmployee>({
     work_email: '',
     personal_email: '',
@@ -753,117 +753,132 @@ export default function Employees() {
     <div className="max-w-7xl mx-auto space-y-8 overflow-x-hidden">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 border-b border-white/10 pb-8">
-        <div>
-          <div className="flex items-center gap-3 justify-center lg:justify-start">
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white uppercase">Directory</h1>
-            <FeatureGuideTrigger guideId="employees" />
-          </div>
-          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase text-center lg:text-left">
-            Manage personnel and access rights
-          </p>
-          <div className="flex justify-center lg:justify-start">
+        {mode === 'directory' ? (
+          <>
+            <div>
+              <div className="flex items-center gap-3 justify-center lg:justify-start">
+                <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white uppercase">Employees</h1>
+                <FeatureGuideTrigger guideId="employees" />
+              </div>
+              <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase text-center lg:text-left">
+                Manage your team
+              </p>
+              <div className="flex justify-center lg:justify-start">
+                <button
+                  onClick={() => navigate('/app/matcha/onboarding?tab=workspace')}
+                  className="mt-4 inline-flex items-center gap-2 border border-white/10 bg-zinc-900/60 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-300 hover:text-white hover:border-white/20 transition-colors"
+                  title="Open Google Workspace provisioning settings"
+                >
+                  <span className="text-zinc-500">Google Auto-Provision</span>
+                  <span className={`rounded border px-2 py-0.5 ${googleBadge.tone}`}>{googleBadge.label}</span>
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <button
+                onClick={() => navigate('/app/matcha/onboarding?tab=employees')}
+                className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
+              >
+                <Plus size={14} />
+                Onboard New Employee
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-3">
             <button
-              onClick={() => navigate('/app/matcha/onboarding?tab=workspace')}
-              className="mt-4 inline-flex items-center gap-2 border border-white/10 bg-zinc-900/60 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-300 hover:text-white hover:border-white/20 transition-colors"
-              title="Open Google Workspace provisioning settings"
-            >
-              <span className="text-zinc-500">Google Auto-Provision</span>
-              <span className={`rounded border px-2 py-0.5 ${googleBadge.tone}`}>{googleBadge.label}</span>
-            </button>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-3">
-          <button
-            data-tour="emp-help-btn"
-            onClick={() => setShowHelp(!showHelp)}
-            className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
-              showHelp
-                ? 'border-white/30 text-white bg-zinc-800'
-                : 'border-white/10 text-zinc-400 hover:text-white hover:border-white/20'
-            }`}
-          >
-            <HelpCircle size={14} />
-            <span>Help</span>
-            <ChevronDown size={12} className={`transition-transform ${showHelp ? 'rotate-180' : ''}`} />
-          </button>
-          
-          <div className="relative">
-            <button
-              onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
-              className={`w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
-                showSettingsDropdown
+              data-tour="emp-help-btn"
+              onClick={() => setShowHelp(!showHelp)}
+              className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
+                showHelp
                   ? 'border-white/30 text-white bg-zinc-800'
                   : 'border-white/10 text-zinc-400 hover:text-white hover:border-white/20'
               }`}
             >
-              <Settings size={14} />
-              <span>Tools</span>
+              <HelpCircle size={14} />
+              <span>Help</span>
+              <ChevronDown size={12} className={`transition-transform ${showHelp ? 'rotate-180' : ''}`} />
             </button>
-            {showSettingsDropdown && (
-              <>
-                <div
-                  className="fixed inset-0 z-10"
-                  onClick={() => setShowSettingsDropdown(false)}
-                />
-                <div className="absolute right-0 mt-2 w-56 bg-zinc-900 border border-white/10 shadow-xl z-20">
-                  <button
-                    onClick={() => {
-                      setShowSettingsDropdown(false);
-                      navigate('/app/matcha/onboarding-templates');
-                    }}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-left text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
-                  >
-                    <ClipboardCheck size={14} />
-                    Onboarding Templates
-                  </button>
-                </div>
-              </>
-            )}
+
+            <div className="relative">
+              <button
+                onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
+                className={`w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
+                  showSettingsDropdown
+                    ? 'border-white/30 text-white bg-zinc-800'
+                    : 'border-white/10 text-zinc-400 hover:text-white hover:border-white/20'
+                }`}
+              >
+                <Settings size={14} />
+                <span>Tools</span>
+              </button>
+              {showSettingsDropdown && (
+                <>
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setShowSettingsDropdown(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-56 bg-zinc-900 border border-white/10 shadow-xl z-20">
+                    <button
+                      onClick={() => {
+                        setShowSettingsDropdown(false);
+                        navigate('/app/matcha/onboarding-templates');
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                    >
+                      <ClipboardCheck size={14} />
+                      Onboarding Templates
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button
+              data-tour="emp-bulk-btn"
+              onClick={() => setShowBulkUploadModal(true)}
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
+            >
+              <Upload size={14} />
+              <span>Bulk CSV</span>
+            </button>
+
+            <button
+              onClick={() => {
+                resetBatchWizard();
+                setShowBatchWizardModal(true);
+              }}
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
+            >
+              <ClipboardCheck size={14} />
+              <span>Batch Wizard</span>
+            </button>
+
+            <button
+              data-tour="emp-add-btn"
+              onClick={() => {
+                resetAddEmployeeForm();
+                setShowAddModal(true);
+              }}
+              className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
+            >
+              <Plus size={14} />
+              Add Employee
+            </button>
           </div>
-          
-          <button
-            data-tour="emp-bulk-btn"
-            onClick={() => setShowBulkUploadModal(true)}
-            className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
-          >
-            <Upload size={14} />
-            <span>Bulk CSV</span>
-          </button>
+        )}
+      </div>
 
-          <button
-            onClick={() => {
-              resetBatchWizard();
-              setShowBatchWizardModal(true);
-            }}
-            className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
-          >
-            <ClipboardCheck size={14} />
-            <span>Batch Wizard</span>
-          </button>
-          
-          <button
-            data-tour="emp-add-btn"
-            onClick={() => {
-              resetAddEmployeeForm();
-              setShowAddModal(true);
-            }}
-            className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
-          >
-            <Plus size={14} />
-            Add Employee
-          </button>
+      {mode === 'onboarding' && (
+        <div className="border border-white/10 bg-zinc-900/40 p-4 text-[11px] text-zinc-300 space-y-1">
+          <p className="uppercase tracking-wider text-zinc-400">Onboarding flows</p>
+          <p>
+            Use <span className="text-white">Add Employee</span> for one hire,{' '}
+            <span className="text-white">Batch Wizard</span> for up to 50 hires, or{' '}
+            <span className="text-white">Bulk CSV</span> when you already have a spreadsheet.
+          </p>
         </div>
-      </div>
-
-      <div className="border border-white/10 bg-zinc-900/40 p-4 text-[11px] text-zinc-300 space-y-1">
-        <p className="uppercase tracking-wider text-zinc-400">Onboarding flows</p>
-        <p>
-          Use <span className="text-white">Add Employee</span> for one hire,{' '}
-          <span className="text-white">Batch Wizard</span> for up to 50 hires, or{' '}
-          <span className="text-white">Bulk CSV</span> when you already have a spreadsheet.
-        </p>
-      </div>
+      )}
 
       {/* Help Panel */}
       {/* ... keeping help panel same as it uses grid-cols-1 md:grid-cols-2 already */}
@@ -912,20 +927,36 @@ export default function Employees() {
       {employees.length === 0 ? (
         <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
           <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-             <Plus size={24} className="text-zinc-600" />
+            <Plus size={24} className="text-zinc-600" />
           </div>
-          <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">Onboard your first employee</h3>
-          <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Your directory is empty. Start your onboarding process now.</p>
-          <button
-            onClick={() => {
-              resetAddEmployeeForm();
-              setShowAddModal(true);
-            }}
-            className="flex items-center gap-2 mx-auto px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
-          >
-            <Plus size={14} />
-            Add Employee
-          </button>
+          {mode === 'directory' ? (
+            <>
+              <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">No employees found</h3>
+              <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Onboard employees first to see them here.</p>
+              <button
+                onClick={() => navigate('/app/matcha/onboarding?tab=employees')}
+                className="flex items-center gap-2 mx-auto px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+              >
+                <Plus size={14} />
+                Onboard New Employee
+              </button>
+            </>
+          ) : (
+            <>
+              <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">Onboard your first employee</h3>
+              <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Your directory is empty. Start your onboarding process now.</p>
+              <button
+                onClick={() => {
+                  resetAddEmployeeForm();
+                  setShowAddModal(true);
+                }}
+                className="flex items-center gap-2 mx-auto px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+              >
+                <Plus size={14} />
+                Add Employee
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <div data-tour="emp-list" className="space-y-px bg-white/10 border border-white/10">

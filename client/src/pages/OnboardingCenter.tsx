@@ -98,7 +98,7 @@ export default function OnboardingCenter() {
         <nav className="-mb-px flex space-x-8 overflow-x-auto pb-px no-scrollbar">
           {[
             { id: 'workspace', label: 'Workspace' },
-            { id: 'employees', label: 'Employees' },
+            { id: 'employees', label: 'New Hires' },
             { id: 'templates', label: 'Templates' },
             { id: 'runs', label: 'Activity' },
             { id: 'profile', label: 'Company Profile' },
@@ -208,7 +208,7 @@ export default function OnboardingCenter() {
 
         {activeTab === 'employees' && (
           <div className="space-y-6">
-            <Employees />
+            <Employees mode="onboarding" />
           </div>
         )}
 
