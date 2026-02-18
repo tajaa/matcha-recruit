@@ -615,17 +615,18 @@ export function Layout() {
     const showingHelp = activeHelp === item.path;
 
     return (
-      <div className="relative group">
-        <div className="flex items-center">
+      <div className="relative group min-w-0">
+        <div className="flex items-center min-w-0">
           <Link
             to={item.path}
-            className={`flex-1 flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
+            className={`flex-1 min-w-0 flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
                 ? 'text-white bg-zinc-800 border-l-2 border-white'
                 : 'text-zinc-300 hover:text-white border-l-2 border-transparent hover:border-zinc-700'
               }`}
+            title={item.label}
           >
-            {item.icon}
-            <span>{item.label}</span>
+            <span className="shrink-0">{item.icon}</span>
+            <span className="truncate">{item.label}</span>
           </Link>
           {item.helpText && (
             <button
@@ -665,7 +666,7 @@ export function Layout() {
       <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-30 mix-blend-overlay" />
 
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 border-r border-white/10">
+      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-64 flex-col bg-zinc-950 border-r border-white/10">
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-white/10">
           <Link to="/" className="flex items-center gap-3 group">
@@ -813,14 +814,14 @@ export function Layout() {
       </nav>
 
       {/* Main content - offset for sidebar on desktop, header on mobile */}
-      <main className="relative z-10 md:ml-56 pt-20 md:pt-8 pb-12 px-4 sm:px-8 lg:px-12">
+      <main className="relative z-10 md:ml-64 pt-20 md:pt-8 pb-12 px-4 sm:px-8 lg:px-12 overflow-x-hidden">
         <div className="max-w-[1600px] mx-auto">
           <Outlet />
         </div>
       </main>
 
       {/* Bottom status bar */}
-      <footer className="fixed bottom-0 left-0 md:left-56 right-0 z-30 border-t border-white/5 bg-zinc-950 text-zinc-600">
+      <footer className="fixed bottom-0 left-0 md:left-64 right-0 z-30 border-t border-white/5 bg-zinc-950 text-zinc-600">
         <div className="px-6 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />

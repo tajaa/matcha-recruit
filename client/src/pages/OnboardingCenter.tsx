@@ -80,7 +80,7 @@ export default function OnboardingCenter() {
   }, [loadingGoogle, googleStatus]);
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-6 overflow-x-hidden">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/10 pb-6">
         <div className="text-center sm:text-left">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tighter text-white uppercase">Onboarding Center</h1>

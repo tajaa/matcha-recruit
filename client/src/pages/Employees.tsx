@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { getAccessToken, provisioning } from '../api/client';
 import { Plus, X, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
@@ -113,6 +113,7 @@ interface OnboardingProgress {
 }
 
 export default function Employees() {
+  const location = useLocation();
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -165,6 +166,7 @@ export default function Employees() {
   const [isDragging, setIsDragging] = useState(false);
   const [bulkInviting, setBulkInviting] = useState(false);
   const [bulkInviteResult, setBulkInviteResult] = useState<{ sent: number; failed: number } | null>(null);
+  const [hasAutoOpenedWizard, setHasAutoOpenedWizard] = useState(false);
 
   const normalizedGoogleDomain = (googleWorkspaceStatus?.domain || '')
     .trim()
@@ -176,7 +178,7 @@ export default function Employees() {
       googleWorkspaceStatus.status === 'connected'
   );
 
-  const resetAddEmployeeForm = () => {
+  const resetAddEmployeeForm = useCallback(() => {
     setNewEmployee({
       work_email: '',
       personal_email: '',
@@ -193,9 +195,9 @@ export default function Employees() {
     setSkipGoogleAutoProvision(false);
     setWorkLocationMode('remote');
     setAddWizardStep(1);
-  };
+  }, [googleDomainAvailable]);
 
-  const resetBatchWizard = () => {
+  const resetBatchWizard = useCallback(() => {
     const defaultStartDate = new Date().toISOString().split('T')[0];
     setBatchWizardStep(1);
     setBatchEmailMode(googleDomainAvailable ? 'generated' : 'existing');
@@ -208,7 +210,7 @@ export default function Employees() {
       createBatchRow(defaultStartDate),
     ]);
     setBatchResult(null);
-  };
+  }, [googleDomainAvailable]);
 
   const fetchEmployees = async () => {
     try {
@@ -276,6 +278,21 @@ export default function Employees() {
   useEffect(() => {
     fetchGoogleWorkspaceStatus();
   }, []);
+
+  const isOnboardingEmployeesTab =
+    location.pathname === '/app/matcha/onboarding' &&
+    new URLSearchParams(location.search).get('tab') === 'employees';
+
+  useEffect(() => {
+    if (!isOnboardingEmployeesTab) {
+      setHasAutoOpenedWizard(false);
+      return;
+    }
+    if (hasAutoOpenedWizard) return;
+    resetAddEmployeeForm();
+    setShowAddModal(true);
+    setHasAutoOpenedWizard(true);
+  }, [isOnboardingEmployeesTab, hasAutoOpenedWizard, resetAddEmployeeForm]);
 
   useEffect(() => {
     if (!showAddModal) return;
@@ -750,7 +767,7 @@ export default function Employees() {
   const googleBadge = googleAutoProvisionBadge();
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="max-w-7xl mx-auto space-y-8 overflow-x-hidden">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 border-b border-white/10 pb-8">
         <div>
@@ -784,7 +801,7 @@ export default function Employees() {
             }`}
           >
             <HelpCircle size={14} />
-            <span className="hidden xs:inline">Help</span>
+            <span>Help</span>
             <ChevronDown size={12} className={`transition-transform ${showHelp ? 'rotate-180' : ''}`} />
           </button>
           
@@ -798,7 +815,7 @@ export default function Employees() {
               }`}
             >
               <Settings size={14} />
-              <span className="hidden xs:inline">Tools</span>
+              <span>Tools</span>
             </button>
             {showSettingsDropdown && (
               <>
@@ -828,7 +845,7 @@ export default function Employees() {
             className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
           >
             <Upload size={14} />
-            <span className="hidden xs:inline">Bulk</span>
+            <span>Bulk CSV</span>
           </button>
 
           <button
@@ -839,7 +856,7 @@ export default function Employees() {
             className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
           >
             <ClipboardCheck size={14} />
-            <span className="hidden xs:inline">Batch</span>
+            <span>Batch Wizard</span>
           </button>
           
           <button
@@ -851,9 +868,18 @@ export default function Employees() {
             className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
           >
             <Plus size={14} />
-            Add
+            Add Employee
           </button>
         </div>
+      </div>
+
+      <div className="border border-white/10 bg-zinc-900/40 p-4 text-[11px] text-zinc-300 space-y-1">
+        <p className="uppercase tracking-wider text-zinc-400">Onboarding flows</p>
+        <p>
+          Use <span className="text-white">Add Employee</span> for one hire,{' '}
+          <span className="text-white">Batch Wizard</span> for up to 50 hires, or{' '}
+          <span className="text-white">Bulk CSV</span> when you already have a spreadsheet.
+        </p>
       </div>
 
       {/* Help Panel */}
@@ -908,7 +934,10 @@ export default function Employees() {
           <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">Onboard your first employee</h3>
           <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Your directory is empty. Start your onboarding process now.</p>
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              resetAddEmployeeForm();
+              setShowAddModal(true);
+            }}
             className="flex items-center gap-2 mx-auto px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
           >
             <Plus size={14} />
@@ -1041,6 +1070,20 @@ export default function Employees() {
 
               <form onSubmit={handleAddEmployee} className="flex-1 overflow-y-auto p-8">
                 <div className="space-y-6">
+                  <div className="rounded border border-white/10 bg-zinc-900/40 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-400">
+                      Step {addWizardStep} of 3
+                    </p>
+                    <p className="text-xs text-zinc-300 mt-1">
+                      {addWizardStep === 1 &&
+                        'Start with name and optional personal email. Work email setup comes next.'}
+                      {addWizardStep === 2 &&
+                        'Choose generated or existing work email. Generated mode uses your configured Google domain.'}
+                      {addWizardStep === 3 &&
+                        'Set remote state or office/store, confirm details, then create the employee.'}
+                    </p>
+                  </div>
+
                   <div className="flex items-center gap-3">
                     {[1, 2, 3].map((step) => (
                       <div key={step} className="flex items-center gap-3">
@@ -1060,6 +1103,9 @@ export default function Employees() {
 
                   {addWizardStep === 1 && (
                     <div className="space-y-6">
+                      <p className="text-[11px] text-zinc-500">
+                        Required now: first and last name.
+                      </p>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
@@ -1110,6 +1156,9 @@ export default function Employees() {
 
                   {addWizardStep === 2 && (
                     <div className="space-y-6">
+                      <p className="text-[11px] text-zinc-500">
+                        Choose generated email for new Workspace accounts, or existing email for already provisioned employees.
+                      </p>
                       <div className="space-y-3">
                         <label className="block text-[10px] uppercase tracking-wider text-zinc-500">
                           Work Email Setup <span className="text-red-500">*</span>
@@ -1232,6 +1281,9 @@ export default function Employees() {
 
                   {addWizardStep === 3 && (
                     <div className="space-y-6">
+                      <p className="text-[11px] text-zinc-500">
+                        Final step: define where they work and verify a quick summary before creating.
+                      </p>
                       <div className="space-y-2">
                         <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
                           Work Location
@@ -1416,6 +1468,20 @@ export default function Employees() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="rounded border border-white/10 bg-zinc-900/40 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-zinc-400">
+                  Step {batchWizardStep} of 3
+                </p>
+                <p className="text-xs text-zinc-300 mt-1">
+                  {batchWizardStep === 1 &&
+                    'Set defaults for email and location handling. These apply to every row in step 2.'}
+                  {batchWizardStep === 2 &&
+                    'Enter up to 50 rows. Only rows with data are submitted, and invalid rows are blocked.'}
+                  {batchWizardStep === 3 &&
+                    'Review counts and submit. Any failed rows will be listed with row-level errors.'}
+                </p>
+              </div>
+
               <div className="flex items-center gap-3">
                 {[1, 2, 3].map((step) => (
                   <div key={step} className="flex items-center gap-3">
@@ -1508,6 +1574,7 @@ export default function Employees() {
                   <div className="rounded border border-white/10 bg-zinc-900/40 p-3 text-[11px] text-zinc-500 space-y-1">
                     <p>Step 2 lets you enter up to 50 rows.</p>
                     <p>Only non-empty rows are processed.</p>
+                    <p>Use Add Row for more lines, and remove any line with the X action.</p>
                   </div>
                 </div>
               )}
