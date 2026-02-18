@@ -58,7 +58,6 @@ const Jurisdictions = lazy(() => import('./pages/admin/Jurisdictions'));
 const PosterOrders = lazy(() => import('./pages/admin/PosterOrders'));
 const HRNews = lazy(() => import('./pages/admin/HRNews'));
 const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
-const CompanyProfile = lazy(() => import('./pages/CompanyProfile'));
 const BulkImport = lazy(() => import('./pages/BulkImport'));
 
 // Employee Management (Admin)
@@ -82,6 +81,7 @@ const PortalOnboarding = lazy(() => import('./pages/portal/PortalOnboarding'));
 const PortalVibeCheck = lazy(() => import('./pages/portal/PortalVibeCheck'));
 const PortalENPS = lazy(() => import('./pages/portal/PortalENPS'));
 const PortalReviews = lazy(() => import('./pages/portal/PortalReviews'));
+const CandidateRankings = lazy(() => import('./pages/CandidateRankings'));
 const BrokerClients = lazy(() => import('./pages/broker/BrokerClients'));
 const BrokerReporting = lazy(() => import('./pages/broker/BrokerReporting'));
 
@@ -588,6 +588,15 @@ function App() {
               />
 
 
+
+              <Route
+                path="matcha/rankings"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <CandidateRankings />
+                  </ProtectedRoute>
+                }
+              />
 
               <Route
                 path="import"

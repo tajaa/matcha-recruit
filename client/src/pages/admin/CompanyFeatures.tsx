@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { adminCompanyFeatures } from '../../api/client';
 import type { CompanyWithFeatures, EnabledFeatures } from '../../types';
 import { Building2 } from 'lucide-react';
@@ -21,6 +22,7 @@ const FEATURE_CONFIG: { key: string; label: string; section: string }[] = [
 ];
 
 export function CompanyFeatures() {
+  const navigate = useNavigate();
   const [companies, setCompanies] = useState<CompanyWithFeatures[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

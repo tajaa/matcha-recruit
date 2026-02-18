@@ -204,6 +204,37 @@ export interface FitScore {
   reasoning: string;
 }
 
+// Ranking types
+export interface SignalDetail {
+  score: number | null;
+  weight: number;
+  weighted_contribution: number;
+  sub_scores?: Record<string, number | null | string | undefined>;
+  culture_fit_breakdown?: CultureFitBreakdown | null;
+}
+
+export interface SignalBreakdown {
+  screening?: SignalDetail;
+  culture_alignment?: SignalDetail;
+  conversation_quality?: SignalDetail;
+  mode: 'full_signal' | 'partial_signal' | 'resume_only';
+}
+
+export interface RankedCandidate {
+  id: string;
+  company_id: string;
+  candidate_id: string;
+  candidate_name: string | null;
+  overall_rank_score: number;
+  screening_score: number | null;
+  conversation_score: number | null;
+  culture_alignment_score: number | null;
+  has_interview_data: boolean;
+  signal_breakdown: SignalBreakdown | null;
+  interview_ids: string[] | null;
+  created_at: string;
+}
+
 // WebSocket message types
 export interface WSMessage {
   type: 'user' | 'assistant' | 'status' | 'system';

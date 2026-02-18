@@ -1,6 +1,7 @@
 import type {
   Company,
   CompanyCreate,
+  RankedCandidate,
   Interview,
   InterviewCreate,
   InterviewStart,
@@ -638,6 +639,21 @@ export const candidates = {
 
   listForCompany: () =>
     request<{id: string, name: string, email: string}[]>(`/candidates/company`),
+};
+
+// Rankings
+export const rankings = {
+  run: (companyId: string, candidateIds?: string[]) =>
+    request<{ status: string; count: number; rankings: RankedCandidate[] }>(
+      `/companies/${companyId}/rankings/run`,
+      {
+        method: 'POST',
+        body: JSON.stringify(candidateIds ? { candidate_ids: candidateIds } : {}),
+      }
+    ),
+
+  list: (companyId: string) =>
+    request<RankedCandidate[]>(`/companies/${companyId}/rankings`),
 };
 
 // Matching
@@ -2500,6 +2516,7 @@ export const api = {
   provisioning,
   interviews,
   candidates,
+  rankings,
   matching,
   positions,
   bulkImport,

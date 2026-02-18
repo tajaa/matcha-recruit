@@ -368,6 +368,22 @@ async def init_db():
             END $$;
         """)
 
+        # Add candidate_id FK to interviews now that candidates table exists
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'interviews' AND column_name = 'candidate_id'
+                ) THEN
+                    ALTER TABLE interviews ADD COLUMN candidate_id UUID REFERENCES candidates(id) ON DELETE SET NULL;
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id)
+        """)
+
         # Match results table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS match_results (
@@ -380,6 +396,30 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT NOW(),
                 UNIQUE(company_id, candidate_id)
             )
+        """)
+
+        # Ranked results table (multi-signal scoring)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ranked_results (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+                candidate_id UUID REFERENCES candidates(id) ON DELETE CASCADE,
+                overall_rank_score FLOAT,
+                screening_score FLOAT,
+                conversation_score FLOAT,
+                culture_alignment_score FLOAT,
+                signal_breakdown JSONB,
+                has_interview_data BOOLEAN DEFAULT false,
+                interview_ids JSONB,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(company_id, candidate_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ranked_results_company_id ON ranked_results(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ranked_results_candidate_id ON ranked_results(candidate_id)
         """)
 
         # Positions table

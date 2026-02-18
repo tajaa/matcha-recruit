@@ -13,6 +13,7 @@ from .invitations import router as invitations_router
 from .offer_letters import router as offer_letters_router
 from .openings import router as openings_router
 from .matching import router as matching_router
+from .ranking import router as ranking_router
 from .er_copilot import router as er_copilot_router
 from .ir_incidents import router as ir_incidents_router
 from .accommodations import router as accommodations_router
@@ -45,6 +46,7 @@ matcha_router.include_router(offer_letters_router, prefix="/offer-letters", tags
                              dependencies=[Depends(require_feature("offer_letters"))])
 matcha_router.include_router(openings_router, prefix="/openings", tags=["openings"])
 matcha_router.include_router(matching_router, tags=["matching"])
+matcha_router.include_router(ranking_router, tags=["rankings"])
 matcha_router.include_router(er_copilot_router, prefix="/er/cases", tags=["er-copilot"],
                              dependencies=[Depends(require_feature("er_copilot"))])
 matcha_router.include_router(ir_incidents_router, prefix="/ir/incidents", tags=["ir-incidents"],
@@ -74,6 +76,7 @@ __all__ = [
     "offer_letters_router",
     "openings_router",
     "matching_router",
+    "ranking_router",
     "er_copilot_router",
     "ir_incidents_router",
     "job_search_router",
