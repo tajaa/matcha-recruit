@@ -121,8 +121,8 @@ const navSections: NavSection[] = [
     roles: ['admin', 'client', 'candidate'],
     items: [
       {
-        path: '/app/tutor',
-        label: 'Tutor',
+        path: '/app/interviewer',
+        label: 'Interviewer',
         roles: ['admin', 'client'],
         betaFeature: 'interview_prep',
         icon: (
@@ -134,8 +134,8 @@ const navSections: NavSection[] = [
         ),
       },
       {
-        path: '/app/admin/tutor-metrics',
-        label: 'Tutor Metrics',
+        path: '/app/admin/candidate-metrics',
+        label: 'Candidate Metrics',
         roles: ['admin', 'client'],
         feature: 'interview_prep',
         icon: (

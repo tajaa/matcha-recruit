@@ -205,7 +205,7 @@ export function CompanyFeatures() {
                       <td className="text-center px-4 py-4">
                         <div className="flex flex-col items-center justify-center gap-1">
                           <button
-                            onClick={() => navigate(`/app/admin/tutor-metrics?company_id=${company.id}`)}
+                            onClick={() => navigate(`/app/admin/candidate-metrics?company_id=${company.id}`)}
                             className="text-[9px] px-2 py-1 text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 transition-colors uppercase tracking-wider mb-1 w-full"
                           >
                             Metrics
@@ -261,7 +261,7 @@ export function CompanyFeatures() {
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button
-                        onClick={() => navigate(`/app/admin/tutor-metrics?company_id=${company.id}`)}
+                        onClick={() => navigate(`/app/admin/candidate-metrics?company_id=${company.id}`)}
                         className="text-[9px] px-2 py-1 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider"
                       >
                         Metrics

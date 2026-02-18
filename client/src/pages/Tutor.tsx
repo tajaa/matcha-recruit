@@ -285,7 +285,7 @@ export function Tutor() {
               )}
               {!isPracticeMode && !completedCompanyMode && user?.role === 'admin' && (
                 <Button
-                  onClick={() => navigate(`/app/admin/tutor-metrics/${interviewId}`)}
+                  onClick={() => navigate(`/app/admin/candidate-metrics/${interviewId}`)}
                   className="bg-white text-black hover:bg-zinc-200 font-bold uppercase tracking-wider"
                   style={{ boxShadow: '0 0 20px rgba(255,255,255,0.1)' }}
                 >
@@ -311,7 +311,7 @@ export function Tutor() {
 
         {user?.role === 'admin' && (
           <div className="text-center">
-            <Link to="/app/admin/tutor-metrics" className="text-[10px] text-zinc-600 hover:text-zinc-400 uppercase tracking-widest flex items-center justify-center gap-1 transition-colors">
+            <Link to="/app/admin/candidate-metrics" className="text-[10px] text-zinc-600 hover:text-zinc-400 uppercase tracking-widest flex items-center justify-center gap-1 transition-colors">
               View All Sessions <ChevronRight size={10} />
             </Link>
           </div>

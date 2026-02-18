@@ -382,7 +382,7 @@ export function TutorMetrics() {
                 Filtered by: {filteredCompanyName || 'Company'}
               </div>
               <button 
-                onClick={() => navigate('/app/admin/tutor-metrics')}
+                onClick={() => navigate('/app/admin/candidate-metrics')}
                 className="text-[10px] text-zinc-500 hover:text-white uppercase tracking-widest underline underline-offset-4"
               >
                 Clear Filter
@@ -741,7 +741,7 @@ export function TutorMetrics() {
           sessions.map((session) => (
             <div
               key={session.id}
-              onClick={() => navigate(isCompanyInterviewType(session.interview_type) ? `/app/analysis/${session.id}` : `/app/admin/tutor-metrics/${session.id}`)}
+              onClick={() => navigate(isCompanyInterviewType(session.interview_type) ? `/app/analysis/${session.id}` : `/app/admin/candidate-metrics/${session.id}`)}
               className="group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 px-6 flex items-center gap-4 cursor-pointer"
             >
               <div className="flex-1">
