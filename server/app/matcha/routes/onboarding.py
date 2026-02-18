@@ -11,6 +11,12 @@ from pydantic import BaseModel
 
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
+from ..services.onboarding_state_machine import (
+    BLOCK_REASONS,
+    all_states,
+    event_schema_contract,
+    state_machine_map,
+)
 from ...core.models.auth import CurrentUser
 
 router = APIRouter()
@@ -53,6 +59,15 @@ class OnboardingTaskTemplateResponse(BaseModel):
         from_attributes = True
 
 
+class OnboardingStateMachineResponse(BaseModel):
+    states: List[str]
+    transitions: dict[str, List[str]]
+    block_reasons: List[str]
+    event_schema_version: str
+    event_required_fields: List[str]
+    event_optional_fields: List[str]
+
+
 # Default templates to create for new companies
 DEFAULT_TEMPLATES = [
     # Documents
@@ -79,6 +94,27 @@ DEFAULT_TEMPLATES = [
     {"title": "Benefits Reinstatement Review", "description": "Verify benefits and leave balances are current", "category": "return_to_work", "is_employee_task": False, "due_days": 5, "sort_order": 5},
     {"title": "Manager Check-in", "description": "Schedule return meeting with direct manager", "category": "return_to_work", "is_employee_task": True, "due_days": 3, "sort_order": 6},
 ]
+
+
+@router.get("/state-machine", response_model=OnboardingStateMachineResponse)
+async def get_onboarding_state_machine(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """
+    Return canonical onboarding lifecycle and event schema contracts.
+
+    This is the phase-1 source of truth for backend/frontend alignment.
+    """
+    _ = await get_client_company_id(current_user)
+    event_contract = event_schema_contract()
+    return OnboardingStateMachineResponse(
+        states=all_states(),
+        transitions=state_machine_map(),
+        block_reasons=list(BLOCK_REASONS),
+        event_schema_version=event_contract["version"],
+        event_required_fields=event_contract["required_fields"],
+        event_optional_fields=event_contract["optional_fields"],
+    )
 
 
 @router.get("/templates", response_model=List[OnboardingTaskTemplateResponse])
