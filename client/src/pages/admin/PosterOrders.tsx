@@ -203,34 +203,34 @@ export function PosterOrders() {
       </div>
 
       {/* Stats grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 xs:grid-cols-4 gap-3 md:gap-4">
         <div className="bg-zinc-900/50 border border-white/10 p-4">
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Templates</div>
-          <div className="text-2xl font-bold font-mono text-white">{templates.length}</div>
+          <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Templates</div>
+          <div className="text-xl md:text-2xl font-bold font-mono text-white">{templates.length}</div>
         </div>
         <div className="bg-zinc-900/50 border border-white/10 p-4">
-          <div className="text-[10px] text-emerald-500 uppercase tracking-widest font-mono font-bold mb-2">Generated</div>
-          <div className="text-2xl font-bold font-mono text-emerald-400">{generatedCount}</div>
+          <div className="text-[9px] text-emerald-500 uppercase tracking-widest font-mono font-bold mb-2">Generated</div>
+          <div className="text-xl md:text-2xl font-bold font-mono text-emerald-400">{generatedCount}</div>
         </div>
         <div className="bg-zinc-900/50 border border-white/10 p-4">
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Orders</div>
-          <div className="text-2xl font-bold font-mono text-white">{orders.length}</div>
+          <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2">Orders</div>
+          <div className="text-xl md:text-2xl font-bold font-mono text-white">{orders.length}</div>
         </div>
         <div className="bg-zinc-900/50 border border-white/10 p-4">
-          <div className="text-[10px] text-amber-500 uppercase tracking-widest font-mono font-bold mb-2">Pending</div>
-          <div className="text-2xl font-bold font-mono text-amber-400">
+          <div className="text-[9px] text-amber-500 uppercase tracking-widest font-mono font-bold mb-2">Pending</div>
+          <div className="text-xl md:text-2xl font-bold font-mono text-amber-400">
             {orders.filter(o => o.status === 'requested' || o.status === 'quoted').length}
           </div>
         </div>
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-0 border-b border-white/5">
+      <div className="flex overflow-x-auto no-scrollbar border-b border-white/5 bg-zinc-900/40">
         <button
           onClick={() => setTab('templates')}
-          className={`px-4 py-2.5 text-[10px] uppercase tracking-[0.15em] font-mono font-bold transition-colors border-b-2 -mb-px ${
+          className={`px-5 py-3 text-[9px] uppercase tracking-[0.2em] font-mono font-bold transition-colors border-b-2 whitespace-nowrap ${
             tab === 'templates'
-              ? 'border-white text-white'
+              ? 'border-white text-white bg-white/[0.03]'
               : 'border-transparent text-zinc-600 hover:text-zinc-400'
           }`}
         >
@@ -238,9 +238,9 @@ export function PosterOrders() {
         </button>
         <button
           onClick={() => setTab('orders')}
-          className={`px-4 py-2.5 text-[10px] uppercase tracking-[0.15em] font-mono font-bold transition-colors border-b-2 -mb-px ${
+          className={`px-5 py-3 text-[9px] uppercase tracking-[0.2em] font-mono font-bold transition-colors border-b-2 whitespace-nowrap ${
             tab === 'orders'
-              ? 'border-white text-white'
+              ? 'border-white text-white bg-white/[0.03]'
               : 'border-transparent text-zinc-600 hover:text-zinc-400'
           }`}
         >

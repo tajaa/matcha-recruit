@@ -281,7 +281,7 @@ export function CompanyFeatures() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2">
                     {FEATURE_CONFIG.map(feat => {
                       const enabled = company.enabled_features[feat.key] ?? false;
                       const isToggling = toggling === `${company.id}-${feat.key}`;
@@ -290,15 +290,18 @@ export function CompanyFeatures() {
                           key={feat.key}
                           onClick={() => handleToggle(company.id, feat.key, enabled)}
                           disabled={isToggling}
-                          className={`flex items-center justify-between gap-2 px-3 py-2 border transition-colors ${
+                          className={`flex items-center justify-between gap-3 px-3 py-2.5 border transition-all active:scale-[0.98] ${
                             enabled
-                              ? 'bg-emerald-500/10 border-emerald-500/20'
-                              : 'bg-zinc-900/50 border-zinc-800'
+                              ? 'bg-emerald-500/10 border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.05)]'
+                              : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'
                           } ${isToggling ? 'opacity-50' : ''}`}
                         >
-                          <span className={`text-[10px] font-mono ${enabled ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                            {feat.label}
-                          </span>
+                          <div className="min-w-0 flex flex-col items-start">
+                            <span className="text-[7px] text-zinc-600 uppercase tracking-widest leading-none mb-1">{feat.section}</span>
+                            <span className={`text-[10px] font-bold uppercase tracking-wider truncate w-full text-left ${enabled ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                              {feat.label}
+                            </span>
+                          </div>
                           <div className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${
                             enabled ? 'bg-emerald-500' : 'bg-zinc-700'
                           }`}>

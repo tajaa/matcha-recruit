@@ -77,26 +77,26 @@ export default function HRNews() {
   return (
     <div className="max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-zinc-800 border border-zinc-700/50 flex items-center justify-center">
-            <Newspaper size={16} className="text-zinc-400" />
+          <div className="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-700/50 flex items-center justify-center shrink-0">
+            <Newspaper size={20} className="text-zinc-400" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-zinc-100">HR News</h1>
-            <p className="text-xs text-zinc-500">Latest HR industry news from top sources</p>
+            <h1 className="text-xl font-bold text-zinc-100 uppercase tracking-tight">HR News</h1>
+            <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wide">Latest industry insights</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {refreshMessage && (
-            <span className="text-xs text-zinc-400 bg-zinc-800/50 px-3 py-1.5 rounded-lg border border-zinc-700/30">
+            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/5 px-3 py-1.5 border border-emerald-500/10">
               {refreshMessage}
             </span>
           )}
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg border border-zinc-700/50 transition-colors disabled:opacity-50"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border border-zinc-700/50 transition-colors disabled:opacity-50"
           >
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
             {refreshing ? 'Refreshing...' : 'Refresh Feeds'}
@@ -105,13 +105,13 @@ export default function HRNews() {
       </div>
 
       {/* Source Filter Tabs */}
-      <div className="flex gap-1 mb-4 overflow-x-auto pb-1">
+      <div className="flex gap-1 mb-6 overflow-x-auto no-scrollbar pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
         <button
           onClick={() => { setSourceFilter(null); setOffset(0); }}
-          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors whitespace-nowrap ${
+          className={`px-4 py-2 text-[10px] uppercase tracking-widest font-bold border transition-colors whitespace-nowrap ${
             !sourceFilter
-              ? 'bg-zinc-700 text-zinc-100 border-zinc-600'
-              : 'bg-zinc-800/50 text-zinc-400 border-zinc-700/30 hover:bg-zinc-800 hover:text-zinc-300'
+              ? 'bg-white text-black border-white'
+              : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
           }`}
         >
           All Sources
@@ -120,10 +120,10 @@ export default function HRNews() {
           <button
             key={s}
             onClick={() => { setSourceFilter(s); setOffset(0); }}
-            className={`px-3 py-1.5 text-xs rounded-lg border transition-colors whitespace-nowrap ${
+            className={`px-4 py-2 text-[10px] uppercase tracking-widest font-bold border transition-colors whitespace-nowrap ${
               sourceFilter === s
-                ? 'bg-zinc-700 text-zinc-100 border-zinc-600'
-                : 'bg-zinc-800/50 text-zinc-400 border-zinc-700/30 hover:bg-zinc-800 hover:text-zinc-300'
+                ? 'bg-white text-black border-white'
+                : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
             }`}
           >
             {s}

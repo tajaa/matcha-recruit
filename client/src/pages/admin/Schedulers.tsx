@@ -176,7 +176,7 @@ export function Schedulers() {
         <>
           {/* Stats Bar */}
           {stats && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 xs:grid-cols-4 gap-3 md:gap-4">
               {[
                 { label: 'Total Locations', value: stats.overview.total_locations },
                 { label: 'Auto-Check Enabled', value: stats.overview.auto_check_enabled },
@@ -184,8 +184,8 @@ export function Schedulers() {
                 { label: 'Failed (24h)', value: stats.overview.failed_24h, alert: stats.overview.failed_24h > 0 },
               ].map((stat) => (
                 <div key={stat.label} className="bg-zinc-900/50 border border-white/10 p-4">
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-2">{stat.label}</div>
-                  <div className={`text-2xl font-bold font-mono ${stat.alert ? 'text-red-400' : 'text-white'}`}>
+                  <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-2">{stat.label}</div>
+                  <div className={`text-xl md:text-2xl font-bold font-mono ${stat.alert ? 'text-red-400' : 'text-white'}`}>
                     {stat.value}
                   </div>
                 </div>

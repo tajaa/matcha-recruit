@@ -157,93 +157,117 @@ export function AdminOverview() {
       )}
 
       <div className="border border-white/10 bg-zinc-900/30 p-4 md:p-6">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-8 h-8 bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+        <div className="flex items-start gap-3 mb-6">
+          <div className="w-8 h-8 bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
             <KeyRound size={15} className="text-zinc-300" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h2 className="text-sm font-bold text-white uppercase tracking-wider">Provision Test Account</h2>
-            <p className="text-[11px] text-zinc-500 font-mono uppercase tracking-wide mt-1">
+            <p className="text-[11px] text-zinc-500 font-mono uppercase tracking-wide mt-1 leading-relaxed">
               Admin-only account with all features enabled and seeded demo data
             </p>
           </div>
         </div>
 
         <form className="space-y-4" onSubmit={handleCreateTestAccount}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input
-              type="text"
-              placeholder="Owner name"
-              value={testAccountForm.name}
-              onChange={(e) => setTestAccountForm(prev => ({ ...prev, name: e.target.value }))}
-              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
-            />
-            <input
-              type="email"
-              placeholder="Owner email"
-              value={testAccountForm.email}
-              onChange={(e) => setTestAccountForm(prev => ({ ...prev, email: e.target.value }))}
-              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
-            />
-            <input
-              type="text"
-              placeholder="Password (optional, auto-generate if blank)"
-              value={testAccountForm.password}
-              onChange={(e) => setTestAccountForm(prev => ({ ...prev, password: e.target.value }))}
-              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <label className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold ml-1">Owner Name</label>
+              <input
+                type="text"
+                placeholder="Owner name"
+                value={testAccountForm.name}
+                onChange={(e) => setTestAccountForm(prev => ({ ...prev, name: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none transition-colors"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold ml-1">Email</label>
+              <input
+                type="email"
+                placeholder="Owner email"
+                value={testAccountForm.email}
+                onChange={(e) => setTestAccountForm(prev => ({ ...prev, email: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none transition-colors"
+              />
+            </div>
+            <div className="space-y-1 sm:col-span-2 lg:col-span-1">
+              <label className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold ml-1">Password (Optional)</label>
+              <input
+                type="text"
+                placeholder="Auto-generate if blank"
+                value={testAccountForm.password}
+                onChange={(e) => setTestAccountForm(prev => ({ ...prev, password: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none transition-colors"
+              />
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input
-              type="text"
-              placeholder="Company name (optional)"
-              value={testAccountForm.company_name}
-              onChange={(e) => setTestAccountForm(prev => ({ ...prev, company_name: e.target.value }))}
-              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
-            />
-            <input
-              type="text"
-              placeholder="Industry (optional)"
-              value={testAccountForm.industry}
-              onChange={(e) => setTestAccountForm(prev => ({ ...prev, industry: e.target.value }))}
-              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
-            />
-            <select
-              value={testAccountForm.company_size}
-              onChange={(e) => setTestAccountForm(prev => ({ ...prev, company_size: e.target.value }))}
-              className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none"
-            >
-              <option value="">Company size (optional)</option>
-              {COMPANY_SIZE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <label className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold ml-1">Company Name</label>
+              <input
+                type="text"
+                placeholder="Company name"
+                value={testAccountForm.company_name}
+                onChange={(e) => setTestAccountForm(prev => ({ ...prev, company_name: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none transition-colors"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold ml-1">Industry</label>
+              <input
+                type="text"
+                placeholder="Industry"
+                value={testAccountForm.industry}
+                onChange={(e) => setTestAccountForm(prev => ({ ...prev, industry: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none transition-colors"
+              />
+            </div>
+            <div className="space-y-1 sm:col-span-2 lg:col-span-1">
+              <label className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold ml-1">Company Size</label>
+              <select
+                value={testAccountForm.company_size}
+                onChange={(e) => setTestAccountForm(prev => ({ ...prev, company_size: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm focus:border-zinc-600 outline-none transition-colors appearance-none"
+              >
+                <option value="">Select size</option>
+                {COMPANY_SIZE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {testAccountError && (
-            <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
-              {testAccountError}
+            <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-mono uppercase tracking-wider">
+              Error: {testAccountError}
             </div>
           )}
 
           {createdTestAccount && (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 space-y-1 font-mono">
-              <div>Created: {createdTestAccount.company_name}</div>
-              <div>Email: {createdTestAccount.email}</div>
-              <div>Password: {createdTestAccount.password}</div>
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 space-y-2 font-mono break-all">
+              <div className="flex justify-between">
+                <span className="text-emerald-500 uppercase tracking-widest font-bold">Success</span>
+                <span className="text-emerald-600">Provisioned</span>
+              </div>
+              <div className="pt-2 border-t border-emerald-500/10">
+                <div>Company: {createdTestAccount.company_name}</div>
+                <div>Email: {createdTestAccount.email}</div>
+                <div>Password: {createdTestAccount.password}</div>
+              </div>
             </div>
           )}
 
-          <div>
+          <div className="pt-2">
             <button
               type="submit"
               disabled={creatingTestAccount}
-              className="px-4 py-2 bg-white text-black border border-white text-xs uppercase tracking-wider font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-auto px-8 py-3 bg-white text-black border border-white text-[10px] uppercase tracking-widest font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-200 transition-colors"
             >
-              {creatingTestAccount ? 'Creating...' : 'Create Test Account'}
+              {creatingTestAccount ? 'Provisioning...' : 'Provision Test Account'}
             </button>
           </div>
         </form>

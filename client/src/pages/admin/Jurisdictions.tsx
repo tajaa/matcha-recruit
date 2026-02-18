@@ -143,18 +143,18 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate }: {
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-0 border-b border-white/5">
+      <div className="flex overflow-x-auto no-scrollbar border-b border-white/5 bg-zinc-900/40">
         {tabs.map(t => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-4 py-2.5 text-[10px] uppercase tracking-[0.15em] font-mono font-bold transition-colors ${
+            className={`px-5 py-3 text-[9px] uppercase tracking-[0.2em] font-mono font-bold transition-colors whitespace-nowrap border-b-2 ${
               tab === t.key
-                ? 'text-white border-b-2 border-white'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'text-white border-white bg-white/[0.03]'
+                : 'text-zinc-500 border-transparent hover:text-zinc-300'
             }`}
           >
-            {t.label} <span className="text-zinc-600 ml-1">{t.count}</span>
+            {t.label} <span className="text-zinc-600 ml-1.5">{t.count}</span>
           </button>
         ))}
       </div>
@@ -602,7 +602,7 @@ export function Jurisdictions() {
         <>
           {/* Stats */}
           {totals && stats && (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 xs:grid-cols-3 md:grid-cols-5 gap-3 md:gap-4">
               {[
                 { label: 'Jurisdictions', value: totals.total_jurisdictions },
                 { label: 'Requirements', value: totals.total_requirements },
@@ -611,8 +611,8 @@ export function Jurisdictions() {
                 { label: 'Failed (24h)', value: stats.overview.failed_24h, alert: stats.overview.failed_24h > 0 },
               ].map((stat) => (
                 <div key={stat.label} className="bg-zinc-900/50 border border-white/10 p-4">
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-2">{stat.label}</div>
-                  <div className={`text-2xl font-bold font-mono ${'alert' in stat && stat.alert ? 'text-red-400' : 'text-white'}`}>
+                  <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-2">{stat.label}</div>
+                  <div className={`text-xl md:text-2xl font-bold font-mono ${'alert' in stat && stat.alert ? 'text-red-400' : 'text-white'}`}>
                     {stat.value}
                   </div>
                 </div>

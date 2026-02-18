@@ -241,25 +241,27 @@ function PipelineWizard({
         onClick={toggle}
         className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Recruiting Pipeline</span>
-          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
-            Step {activeStep} of 7
-          </span>
-          <span className="text-[10px] text-zinc-600">
-            {WIZARD_STEPS[activeStep - 1].title}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
+              Step {activeStep} of 7
+            </span>
+            <span className="text-[10px] text-zinc-600 hidden sm:inline">
+              {WIZARD_STEPS[activeStep - 1].title}
+            </span>
+          </div>
         </div>
         <ChevronDown
           size={14}
-          className={`text-zinc-600 transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}
+          className={`text-zinc-600 transition-transform duration-200 shrink-0 ${collapsed ? '' : 'rotate-180'}`}
         />
       </button>
 
       {!collapsed && (
         <div className="border-t border-white/10">
           {/* Step track */}
-          <div className="relative px-5 pt-5 pb-2 overflow-x-auto">
+          <div className="relative px-5 pt-5 pb-2 overflow-x-auto no-scrollbar">
             <div className="flex items-start gap-0 min-w-max">
               {WIZARD_STEPS.map((step, idx) => {
                 const isComplete = step.id < activeStep;

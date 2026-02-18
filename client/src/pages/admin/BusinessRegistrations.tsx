@@ -214,15 +214,15 @@ export function BusinessRegistrations() {
       )}
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex gap-1 overflow-x-auto no-scrollbar pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
         {(['pending', 'approved', 'rejected', 'all'] as const).map((status) => (
           <button
             key={status}
             onClick={() => setStatusFilter(status)}
-            className={`px-3 md:px-4 py-2 text-xs uppercase tracking-wider font-bold border transition-colors ${
+            className={`px-4 py-2 text-[10px] uppercase tracking-widest font-bold border transition-colors whitespace-nowrap ${
               statusFilter === status
                 ? 'bg-white text-black border-white'
-                : 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
+                : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
             }`}
           >
             {status}
