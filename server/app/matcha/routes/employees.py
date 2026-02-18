@@ -71,9 +71,11 @@ class EmployeeCreateRequest(BaseModel):
     first_name: str
     last_name: str
     work_state: Optional[str] = None
+    address: Optional[str] = None
     employment_type: Optional[str] = None
     start_date: Optional[str] = None
     manager_id: Optional[UUID] = None
+    skip_google_workspace_provisioning: bool = False
 
     @model_validator(mode="after")
     def validate_work_email_present(self):
@@ -422,8 +424,8 @@ async def create_employee(
         # Create employee record
         row = await conn.fetchrow(
             """
-            INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, manager_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, address, manager_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id, org_id, email, first_name, last_name, work_state, employment_type,
                       start_date, termination_date, manager_id, user_id, personal_email, phone, address,
                       emergency_contact, created_at, updated_at
@@ -436,6 +438,7 @@ async def create_employee(
             request.work_state,
             request.employment_type,
             start_date,
+            request.address.strip() if request.address else None,
             request.manager_id,
         )
 
@@ -485,7 +488,7 @@ async def create_employee(
             updated_at=row["updated_at"],
         )
 
-        if google_workspace_auto_provision:
+        if google_workspace_auto_provision and not request.skip_google_workspace_provisioning:
             background_tasks.add_task(
                 _run_google_workspace_auto_provisioning,
                 company_id=row["org_id"],

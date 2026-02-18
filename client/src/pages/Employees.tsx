@@ -30,9 +30,32 @@ interface NewEmployee {
   personal_email: string;
   first_name: string;
   last_name: string;
+  office_location: string;
   work_state: string;
   employment_type: string;
   start_date: string;
+}
+
+type EmailEntryMode = 'generated' | 'existing';
+type WorkLocationMode = 'remote' | 'office';
+
+function sanitizeEmailLocalPart(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/['`]/g, '')
+    .replace(/[^a-z0-9._-]+/g, '.')
+    .replace(/\.+/g, '.')
+    .replace(/^[._-]+|[._-]+$/g, '');
+}
+
+function buildGeneratedEmailLocalPart(firstName: string, lastName: string): string {
+  const first = sanitizeEmailLocalPart(firstName);
+  const last = sanitizeEmailLocalPart(lastName);
+  if (first && last) return `${first}.${last}`;
+  return first || last;
 }
 
 interface OnboardingProgress {
@@ -55,10 +78,16 @@ export default function Employees() {
     personal_email: '',
     first_name: '',
     last_name: '',
+    office_location: '',
     work_state: '',
     employment_type: 'full_time',
     start_date: new Date().toISOString().split('T')[0],
   });
+  const [emailEntryMode, setEmailEntryMode] = useState<EmailEntryMode>('existing');
+  const [generatedEmailLocalPart, setGeneratedEmailLocalPart] = useState('');
+  const [generatedEmailEdited, setGeneratedEmailEdited] = useState(false);
+  const [skipGoogleAutoProvision, setSkipGoogleAutoProvision] = useState(false);
+  const [workLocationMode, setWorkLocationMode] = useState<WorkLocationMode>('remote');
   const [submitting, setSubmitting] = useState(false);
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -80,6 +109,34 @@ export default function Employees() {
   const [isDragging, setIsDragging] = useState(false);
   const [bulkInviting, setBulkInviting] = useState(false);
   const [bulkInviteResult, setBulkInviteResult] = useState<{ sent: number; failed: number } | null>(null);
+
+  const normalizedGoogleDomain = (googleWorkspaceStatus?.domain || '')
+    .trim()
+    .replace(/^@/, '')
+    .toLowerCase();
+  const googleDomainAvailable = Boolean(
+    normalizedGoogleDomain &&
+      googleWorkspaceStatus?.connected &&
+      googleWorkspaceStatus.status === 'connected'
+  );
+
+  const resetAddEmployeeForm = () => {
+    setNewEmployee({
+      work_email: '',
+      personal_email: '',
+      first_name: '',
+      last_name: '',
+      office_location: '',
+      work_state: '',
+      employment_type: 'full_time',
+      start_date: new Date().toISOString().split('T')[0],
+    });
+    setEmailEntryMode(googleDomainAvailable ? 'generated' : 'existing');
+    setGeneratedEmailLocalPart('');
+    setGeneratedEmailEdited(false);
+    setSkipGoogleAutoProvision(false);
+    setWorkLocationMode('remote');
+  };
 
   const fetchEmployees = async () => {
     try {
@@ -148,6 +205,27 @@ export default function Employees() {
     fetchGoogleWorkspaceStatus();
   }, []);
 
+  useEffect(() => {
+    if (!showAddModal) return;
+    setEmailEntryMode(googleDomainAvailable ? 'generated' : 'existing');
+    setGeneratedEmailEdited(false);
+    setSkipGoogleAutoProvision(false);
+    setWorkLocationMode('remote');
+    if (!googleDomainAvailable) setGeneratedEmailLocalPart('');
+  }, [showAddModal, googleDomainAvailable]);
+
+  useEffect(() => {
+    if (!showAddModal || emailEntryMode !== 'generated' || generatedEmailEdited) return;
+    const generated = buildGeneratedEmailLocalPart(newEmployee.first_name, newEmployee.last_name);
+    setGeneratedEmailLocalPart(generated);
+  }, [
+    showAddModal,
+    emailEntryMode,
+    generatedEmailEdited,
+    newEmployee.first_name,
+    newEmployee.last_name,
+  ]);
+
   const googleAutoProvisionBadge = () => {
     if (googleWorkspaceStatusLoading) {
       return {
@@ -192,15 +270,30 @@ export default function Employees() {
 
     try {
       const token = getAccessToken();
+      const generatedWorkEmail = googleDomainAvailable && generatedEmailLocalPart
+        ? `${generatedEmailLocalPart}@${normalizedGoogleDomain}`
+        : '';
+      const resolvedWorkEmail = (
+        emailEntryMode === 'generated' ? generatedWorkEmail : newEmployee.work_email
+      )
+        .trim()
+        .toLowerCase();
+      if (!resolvedWorkEmail) {
+        throw new Error('Work email is required');
+      }
+
       const payload = {
-        email: newEmployee.work_email,
-        work_email: newEmployee.work_email,
+        email: resolvedWorkEmail,
+        work_email: resolvedWorkEmail,
         personal_email: newEmployee.personal_email || undefined,
         first_name: newEmployee.first_name,
         last_name: newEmployee.last_name,
-        work_state: newEmployee.work_state,
+        work_state: workLocationMode === 'remote' ? (newEmployee.work_state || undefined) : undefined,
+        address: workLocationMode === 'office' ? (newEmployee.office_location || undefined) : undefined,
         employment_type: newEmployee.employment_type,
         start_date: newEmployee.start_date,
+        skip_google_workspace_provisioning:
+          emailEntryMode === 'existing' && skipGoogleAutoProvision,
       };
       const response = await fetch(`${API_BASE}/employees`, {
         method: 'POST',
@@ -223,15 +316,7 @@ export default function Employees() {
       setNewEmployeeName(`${newEmployee.first_name} ${newEmployee.last_name}`);
       setShowOnboardingPrompt(true);
 
-      setNewEmployee({
-        work_email: '',
-        personal_email: '',
-        first_name: '',
-        last_name: '',
-        work_state: '',
-        employment_type: 'full_time',
-        start_date: new Date().toISOString().split('T')[0],
-      });
+      resetAddEmployeeForm();
       fetchEmployees();
       fetchOnboardingProgress();
     } catch (err) {
@@ -514,7 +599,10 @@ export default function Employees() {
           
           <button
             data-tour="emp-add-btn"
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              resetAddEmployeeForm();
+              setShowAddModal(true);
+            }}
             className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
           >
             <Plus size={14} />
@@ -696,7 +784,10 @@ export default function Employees() {
               <div className="flex items-center justify-between p-6 border-b border-white/10">
                   <h3 className="text-xl font-bold text-white uppercase tracking-tight">Add Personnel</h3>
                   <button 
-                    onClick={() => setShowAddModal(false)}
+                    onClick={() => {
+                      setShowAddModal(false);
+                      resetAddEmployeeForm();
+                    }}
                     className="text-zinc-500 hover:text-white transition-colors"
                   >
                     <X size={20} />
@@ -736,20 +827,122 @@ export default function Employees() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
-                        Work Email <span className="text-red-500">*</span>
+                    <div className="space-y-3">
+                      <label className="block text-[10px] uppercase tracking-wider text-zinc-500">
+                        Work Email Setup <span className="text-red-500">*</span>
                       </label>
-                      <input
-                        type="email"
-                        required
-                        value={newEmployee.work_email}
-                        onChange={(e) =>
-                          setNewEmployee({ ...newEmployee, work_email: e.target.value })
-                        }
-                        className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
-                        placeholder="johnny.bravo@energyco.com"
-                      />
+
+                      {googleDomainAvailable ? (
+                        <div className="space-y-3 rounded border border-white/10 bg-zinc-900/40 p-3">
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="email_entry_mode"
+                              checked={emailEntryMode === 'generated'}
+                              onChange={() => {
+                                setEmailEntryMode('generated');
+                                setSkipGoogleAutoProvision(false);
+                                if (!generatedEmailEdited) {
+                                  setGeneratedEmailLocalPart(
+                                    buildGeneratedEmailLocalPart(newEmployee.first_name, newEmployee.last_name)
+                                  );
+                                }
+                              }}
+                              className="mt-0.5"
+                            />
+                            <div className="space-y-0.5">
+                              <p className="text-xs text-zinc-200 font-medium">Generate from first + last name</p>
+                              <p className="text-[11px] text-zinc-500">
+                                Domain detected from Google Workspace: <span className="text-zinc-300">@{normalizedGoogleDomain}</span>
+                              </p>
+                            </div>
+                          </label>
+
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="email_entry_mode"
+                              checked={emailEntryMode === 'existing'}
+                              onChange={() => {
+                                setEmailEntryMode('existing');
+                                setSkipGoogleAutoProvision(true);
+                                if (!newEmployee.work_email && generatedEmailLocalPart) {
+                                  setNewEmployee({
+                                    ...newEmployee,
+                                    work_email: `${generatedEmailLocalPart}@${normalizedGoogleDomain}`,
+                                  });
+                                }
+                              }}
+                              className="mt-0.5"
+                            />
+                            <div className="space-y-0.5">
+                              <p className="text-xs text-zinc-200 font-medium">Use existing work email</p>
+                              <p className="text-[11px] text-zinc-500">
+                                Use this when the employee already has a company mailbox.
+                              </p>
+                            </div>
+                          </label>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-zinc-500">
+                          Configure Google Workspace domain in onboarding settings to auto-generate work emails.
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      {emailEntryMode === 'generated' && googleDomainAvailable ? (
+                        <div className="space-y-2">
+                          <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                            Work Email Username <span className="text-red-500">*</span>
+                          </label>
+                          <div className="flex items-center border border-zinc-800 bg-zinc-900">
+                            <input
+                              type="text"
+                              required
+                              value={generatedEmailLocalPart}
+                              onChange={(e) => {
+                                setGeneratedEmailEdited(true);
+                                setGeneratedEmailLocalPart(sanitizeEmailLocalPart(e.target.value));
+                              }}
+                              className="w-full px-3 py-2 bg-transparent text-white text-sm focus:outline-none placeholder-zinc-700"
+                              placeholder="firstname.lastname"
+                            />
+                            <span className="px-3 py-2 text-sm text-zinc-400 border-l border-zinc-800">
+                              @{normalizedGoogleDomain}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-zinc-500">
+                            Final email: <span className="text-zinc-300">{generatedEmailLocalPart || 'firstname.lastname'}@{normalizedGoogleDomain}</span>
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                            Work Email <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="email"
+                            required
+                            value={newEmployee.work_email}
+                            onChange={(e) =>
+                              setNewEmployee({ ...newEmployee, work_email: e.target.value })
+                            }
+                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                            placeholder="johnny.bravo@energyco.com"
+                          />
+                          {googleDomainAvailable && (
+                            <label className="inline-flex items-center gap-2 text-[11px] text-zinc-400">
+                              <input
+                                type="checkbox"
+                                checked={skipGoogleAutoProvision}
+                                onChange={(e) => setSkipGoogleAutoProvision(e.target.checked)}
+                              />
+                              Skip Google auto-provisioning (employee already has Workspace account)
+                            </label>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div>
@@ -767,25 +960,74 @@ export default function Employees() {
                       />
                     </div>
 
+                    <div className="space-y-2">
+                      <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                        Work Location
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setWorkLocationMode('remote')}
+                          className={`border px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+                            workLocationMode === 'remote'
+                              ? 'border-white/30 bg-zinc-800 text-white'
+                              : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >
+                          Remote
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWorkLocationMode('office')}
+                          className={`border px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+                            workLocationMode === 'office'
+                              ? 'border-white/30 bg-zinc-800 text-white'
+                              : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >
+                          Office / Store
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
-                          Work State
-                        </label>
-                        <select
-                          value={newEmployee.work_state}
-                          onChange={(e) =>
-                            setNewEmployee({ ...newEmployee, work_state: e.target.value })
-                          }
-                          className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
-                        >
-                          <option value="">Select state</option>
-                          {US_STATES.map((state) => (
-                            <option key={state} value={state}>
-                              {state}
-                            </option>
-                          ))}
-                        </select>
+                        {workLocationMode === 'remote' ? (
+                          <>
+                            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                              Work State
+                            </label>
+                            <select
+                              value={newEmployee.work_state}
+                              onChange={(e) =>
+                                setNewEmployee({ ...newEmployee, work_state: e.target.value })
+                              }
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
+                            >
+                              <option value="">Select state</option>
+                              {US_STATES.map((state) => (
+                                <option key={state} value={state}>
+                                  {state}
+                                </option>
+                              ))}
+                            </select>
+                          </>
+                        ) : (
+                          <>
+                            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                              Office / Store
+                            </label>
+                            <input
+                              type="text"
+                              value={newEmployee.office_location}
+                              onChange={(e) =>
+                                setNewEmployee({ ...newEmployee, office_location: e.target.value })
+                              }
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                              placeholder="Downtown HQ"
+                            />
+                          </>
+                        )}
                       </div>
                       <div>
                         <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
@@ -824,7 +1066,10 @@ export default function Employees() {
                   <div className="mt-8 flex justify-end gap-3 pt-6 border-t border-white/10">
                     <button
                       type="button"
-                      onClick={() => setShowAddModal(false)}
+                      onClick={() => {
+                        setShowAddModal(false);
+                        resetAddEmployeeForm();
+                      }}
                       className="px-4 py-2 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors"
                     >
                       Cancel
