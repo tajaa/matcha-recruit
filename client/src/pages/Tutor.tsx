@@ -669,8 +669,8 @@ export function Tutor() {
                 <select
                   value={selectedCompany}
                   onChange={(e) => setSelectedCompany(e.target.value)}
-                  disabled={!companyModesLoaded || companiesList.length === 0}
-                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors disabled:opacity-50"
+                  disabled={!companyModesLoaded || companiesList.length === 0 || user?.role === 'client'}
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {companiesList.map((company) => (
                     <option key={company.id} value={company.id}>
