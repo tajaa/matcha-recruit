@@ -4,6 +4,7 @@ import { getAccessToken, provisioning } from '../api/client';
 import { Plus, X, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import type { GoogleWorkspaceConnectionStatus } from '../types';
+import OnboardingAgentConsole from '../components/OnboardingAgentConsole';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
 
@@ -148,11 +149,10 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [onboardingProgress, setOnboardingProgress] = useState<Record<string, OnboardingProgress>>({});
-  const [showOnboardingPrompt, setShowOnboardingPrompt] = useState(false);
-  const [newEmployeeId, setNewEmployeeId] = useState<string | null>(null);
-  const [newEmployeeName, setNewEmployeeName] = useState<string>('');
+  const [agentEmployee, setAgentEmployee] = useState<{
+    id: string; name: string; workEmail: string; personalEmail: string;
+  } | null>(null);
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
-  const [assigningOnboarding, setAssigningOnboarding] = useState(false);
   const [googleWorkspaceStatus, setGoogleWorkspaceStatus] = useState<GoogleWorkspaceConnectionStatus | null>(null);
   const [googleWorkspaceStatusLoading, setGoogleWorkspaceStatusLoading] = useState(false);
 
@@ -389,46 +389,19 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
       const createdEmployee = await response.json();
 
-      setShowAddModal(false);
-      setNewEmployeeId(createdEmployee.id);
-      setNewEmployeeName(`${newEmployee.first_name} ${newEmployee.last_name}`);
-      setShowOnboardingPrompt(true);
+      setAgentEmployee({
+        id: createdEmployee.id,
+        name: `${newEmployee.first_name} ${newEmployee.last_name}`,
+        workEmail: resolvedWorkEmail,
+        personalEmail: newEmployee.personal_email,
+      });
 
-      resetAddEmployeeForm();
       fetchEmployees();
       fetchOnboardingProgress();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleAssignOnboarding = async () => {
-    if (!newEmployeeId) return;
-
-    setAssigningOnboarding(true);
-    try {
-      const token = getAccessToken();
-      const response = await fetch(`${API_BASE}/employees/${newEmployeeId}/onboarding/assign-all`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Failed to assign onboarding');
-      }
-
-      setShowOnboardingPrompt(false);
-      navigate(`/app/matcha/employees/${newEmployeeId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-      setShowOnboardingPrompt(false);
-    } finally {
-      setAssigningOnboarding(false);
     }
   };
 
@@ -1069,9 +1042,34 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
             <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm flex flex-col" onClick={(e) => e.stopPropagation()}>
+              {agentEmployee ? (
+                <OnboardingAgentConsole
+                  employeeId={agentEmployee.id}
+                  employeeName={agentEmployee.name}
+                  companyName=""
+                  workEmail={agentEmployee.workEmail}
+                  personalEmail={agentEmployee.personalEmail}
+                  googleEnabled={googleDomainAvailable}
+                  onAddAnother={() => {
+                    setAgentEmployee(null);
+                    resetAddEmployeeForm();
+                  }}
+                  onViewProfile={(id) => {
+                    setShowAddModal(false);
+                    setAgentEmployee(null);
+                    navigate(`/app/matcha/employees/${id}`);
+                  }}
+                  onClose={() => {
+                    setShowAddModal(false);
+                    setAgentEmployee(null);
+                    resetAddEmployeeForm();
+                  }}
+                />
+              ) : (
+              <>
               <div className="flex items-center justify-between p-6 border-b border-white/10">
                   <h3 className="text-xl font-bold text-white uppercase tracking-tight">Add Personnel</h3>
-                  <button 
+                  <button
                     onClick={() => {
                       setShowAddModal(false);
                       resetAddEmployeeForm();
@@ -1457,6 +1455,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                   )}
                 </div>
               </form>
+              </>
+              )}
             </div>
         </div>
       )}
@@ -1849,56 +1849,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                   Done
                 </button>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Onboarding Prompt Modal */}
-      {showOnboardingPrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-white/10">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 text-emerald-400" />
-                </div>
-                <h3 className="text-xl font-bold text-white uppercase tracking-tight">Employee Added</h3>
-              </div>
-              <p className="text-sm text-zinc-400 mt-3">
-                <span className="text-white font-medium">{newEmployeeName}</span> has been added to your directory.
-              </p>
-            </div>
-
-            <div className="p-6">
-              <p className="text-xs text-zinc-500 uppercase tracking-wider mb-4">
-                Would you like to assign the onboarding checklist?
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setShowOnboardingPrompt(false);
-                    setNewEmployeeId(null);
-                  }}
-                  className="flex-1 px-4 py-3 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-xs font-bold uppercase tracking-wider transition-colors"
-                >
-                  Skip for Now
-                </button>
-                <button
-                  onClick={handleAssignOnboarding}
-                  disabled={assigningOnboarding}
-                  className="flex-1 px-4 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {assigningOnboarding ? (
-                    <span className="animate-pulse">Assigning...</span>
-                  ) : (
-                    <>
-                      <ClipboardCheck size={14} />
-                      Assign Checklist
-                    </>
-                  )}
-                </button>
-              </div>
             </div>
           </div>
         </div>

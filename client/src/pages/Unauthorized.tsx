@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components';
 import { useAuth } from '../context/AuthContext';
@@ -21,8 +22,17 @@ function getHomePath(role?: UserRole): string {
 
 export function Unauthorized() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const homePath = getHomePath(user?.role);
+
+  // Authenticated users should never stay on this page — redirect them home.
+  // This handles the case where the post-login `from` redirect targets a route
+  // the current user's role can't access (e.g. different account than last session).
+  useEffect(() => {
+    if (!isLoading && user) {
+      navigate(homePath, { replace: true });
+    }
+  }, [isLoading, user, homePath, navigate]);
 
   return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-4">

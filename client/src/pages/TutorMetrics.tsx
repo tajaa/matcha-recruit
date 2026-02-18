@@ -709,6 +709,7 @@ export function TutorMetrics() {
               <div className="text-xs text-zinc-600">Click "Run Ranking" to score candidates against this company's culture profile.</div>
             </div>
           ) : (
+            <>
             <div className="space-y-px bg-white/10 border border-white/10">
               {/* Header */}
               <div className="flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10">
@@ -878,6 +879,7 @@ export function TutorMetrics() {
                 </div>
               </div>
             )}
+            </>
           )}
         </div>
       )}
