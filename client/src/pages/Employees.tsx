@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { getAccessToken, provisioning } from '../api/client';
 import { Plus, X, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
@@ -113,7 +113,6 @@ interface OnboardingProgress {
 }
 
 export default function Employees() {
-  const location = useLocation();
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,7 +165,6 @@ export default function Employees() {
   const [isDragging, setIsDragging] = useState(false);
   const [bulkInviting, setBulkInviting] = useState(false);
   const [bulkInviteResult, setBulkInviteResult] = useState<{ sent: number; failed: number } | null>(null);
-  const [hasAutoOpenedWizard, setHasAutoOpenedWizard] = useState(false);
 
   const normalizedGoogleDomain = (googleWorkspaceStatus?.domain || '')
     .trim()
@@ -278,21 +276,6 @@ export default function Employees() {
   useEffect(() => {
     fetchGoogleWorkspaceStatus();
   }, []);
-
-  const isOnboardingEmployeesTab =
-    location.pathname === '/app/matcha/onboarding' &&
-    new URLSearchParams(location.search).get('tab') === 'employees';
-
-  useEffect(() => {
-    if (!isOnboardingEmployeesTab) {
-      setHasAutoOpenedWizard(false);
-      return;
-    }
-    if (hasAutoOpenedWizard) return;
-    resetAddEmployeeForm();
-    setShowAddModal(true);
-    setHasAutoOpenedWizard(true);
-  }, [isOnboardingEmployeesTab, hasAutoOpenedWizard, resetAddEmployeeForm]);
 
   useEffect(() => {
     if (!showAddModal) return;

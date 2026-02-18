@@ -33,13 +33,20 @@ export function FeatureGuideTrigger({ guideId, className = '', variant = 'dark' 
         )}
         <button
           onClick={start}
-          className={`text-[10px] font-mono uppercase tracking-widest transition-colors ${
+          className={`inline-flex items-center gap-2 rounded border px-2.5 py-1 text-[10px] font-mono uppercase tracking-widest transition-colors ${
             isDark
-              ? 'text-zinc-500 hover:text-white'
-              : 'text-zinc-400 hover:text-zinc-700'
+              ? active
+                ? 'border-emerald-400/50 bg-emerald-500/25 text-emerald-100 shadow-[0_0_18px_rgba(16,185,129,0.25)]'
+                : 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 hover:text-white'
+              : active
+                ? 'border-emerald-500/60 bg-emerald-100 text-emerald-700'
+                : 'border-emerald-500/50 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
           }`}
+          title="Start interactive walkthrough"
+          aria-label="Start interactive walkthrough"
         >
-          Show Me
+          <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-emerald-200 animate-pulse' : 'bg-emerald-400'}`} />
+          <span>Show Me</span>
         </button>
       </div>
 
