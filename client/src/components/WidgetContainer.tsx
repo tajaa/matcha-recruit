@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { Settings, Eye, EyeOff, GripVertical } from 'lucide-react';
+import { Settings, Eye, EyeOff } from 'lucide-react';
 
 interface Widget {
   id: string;

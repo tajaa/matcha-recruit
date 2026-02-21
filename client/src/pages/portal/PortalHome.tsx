@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, Clock, Calendar, User, ChevronRight, AlertCircle } from 'lucide-react';
+import { FileText, Clock, Calendar, User, ChevronRight, AlertCircle, Sparkles } from 'lucide-react';
 import { portalApi } from '../../api/portal';
 
 interface PortalDashboard {
@@ -214,6 +214,16 @@ export function PortalHome() {
             <div className="flex items-center gap-3">
               <User className="w-5 h-5 text-zinc-400" />
               <span className="text-zinc-900">My Profile</span>
+            </div>
+            <ChevronRight className="w-5 h-5 text-zinc-400" />
+          </Link>
+          <Link
+            to="/app/portal/mobility"
+            className="flex items-center justify-between px-5 py-4 hover:bg-zinc-50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <Sparkles className="w-5 h-5 text-zinc-400" />
+              <span className="text-zinc-900">Internal Mobility</span>
             </div>
             <ChevronRight className="w-5 h-5 text-zinc-400" />
           </Link>

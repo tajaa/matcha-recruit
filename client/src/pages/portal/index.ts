@@ -3,3 +3,4 @@ export { PortalDocuments } from './PortalDocuments';
 export { PortalPTO } from './PortalPTO';
 export { PortalPolicies } from './PortalPolicies';
 export { PortalProfile } from './PortalProfile';
+export { default as PortalMobility } from './PortalMobility';

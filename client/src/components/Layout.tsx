@@ -354,6 +354,19 @@ const navSections: NavSection[] = [
           </svg>
         ),
       },
+      {
+        path: '/app/matcha/internal-mobility',
+        label: 'Internal Mobility',
+        roles: ['admin', 'client'],
+        feature: 'internal_mobility',
+        helpText: 'Publish internal opportunities and review employee applications before talent exits.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 7h16M4 12h10M4 17h16" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14 12l3 3 5-5" />
+          </svg>
+        ),
+      },
     ],
   },
   {
@@ -484,6 +497,18 @@ const navSections: NavSection[] = [
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/app/portal/mobility',
+        label: 'Mobility',
+        roles: ['employee'],
+        feature: 'internal_mobility',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7h8M8 12h8M8 17h5" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14 15l3 3 5-5" />
           </svg>
         ),
       },

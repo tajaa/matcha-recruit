@@ -61,6 +61,7 @@ const PosterOrders = lazy(() => import('./pages/admin/PosterOrders'));
 const HRNews = lazy(() => import('./pages/admin/HRNews'));
 const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
 const BulkImport = lazy(() => import('./pages/BulkImport'));
+const InternalMobility = lazy(() => import('./pages/InternalMobility'));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -79,6 +80,7 @@ const PortalPTO = lazy(() => import('./pages/portal/PortalPTO'));
 const PortalLeave = lazy(() => import('./pages/portal/PortalLeave'));
 const PortalPolicies = lazy(() => import('./pages/portal/PortalPolicies'));
 const PortalProfile = lazy(() => import('./pages/portal/PortalProfile'));
+const PortalMobility = lazy(() => import('./pages/portal/PortalMobility'));
 const PortalOnboarding = lazy(() => import('./pages/portal/PortalOnboarding'));
 const PortalVibeCheck = lazy(() => import('./pages/portal/PortalVibeCheck'));
 const PortalENPS = lazy(() => import('./pages/portal/PortalENPS'));
@@ -409,6 +411,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="accommodations">
                     <Accommodations />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/internal-mobility"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="internal_mobility">
+                    <InternalMobility />
                   </ProtectedRoute>
                 }
               />
@@ -764,6 +774,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['employee']}>
                     <PortalProfile />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="portal/mobility"
+                element={
+                  <ProtectedRoute roles={['employee']} requiredFeature="internal_mobility">
+                    <PortalMobility />
                   </ProtectedRoute>
                 }
               />
