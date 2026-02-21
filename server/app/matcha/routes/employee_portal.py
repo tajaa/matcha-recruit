@@ -8,9 +8,10 @@ Provides API endpoints for employees to:
 - Search company policies
 - Update personal information
 """
+import json
 from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, status, Request, BackgroundTasks
@@ -34,6 +35,15 @@ from ..models.xp import (
     SelfAssessmentSubmit, ManagerReviewSubmit,
     PerformanceReviewResponse
 )
+from ..models.internal_mobility import (
+    EmployeeCareerProfileResponse,
+    EmployeeCareerProfileUpdateRequest,
+    MobilityFeedItem,
+    MobilityFeedResponse,
+    MobilityOpportunityActionResponse,
+    MobilityApplicationCreateRequest,
+    MobilityApplicationResponse,
+)
 from ...core.dependencies import get_current_user
 from ..dependencies import require_employee, require_employee_record, require_feature
 
@@ -45,6 +55,287 @@ _policies_dep = [Depends(require_feature("policies"))]
 _vibe_dep = [Depends(require_feature("vibe_checks"))]
 _enps_dep = [Depends(require_feature("enps"))]
 _reviews_dep = [Depends(require_feature("performance_reviews"))]
+_mobility_dep = [Depends(require_feature("internal_mobility"))]
+
+
+def _parse_json_array(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+
+    result: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            trimmed = item.strip()
+            if trimmed:
+                result.append(trimmed)
+    return result
+
+
+def _normalize_string_list(values: Optional[list[str]]) -> list[str]:
+    if not values:
+        return []
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if not trimmed:
+            continue
+        key = trimmed.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(trimmed)
+    return deduped
+
+
+def _row_to_career_profile(row: Any) -> EmployeeCareerProfileResponse:
+    return EmployeeCareerProfileResponse(
+        id=row["id"],
+        employee_id=row["employee_id"],
+        org_id=row["org_id"],
+        target_roles=_parse_json_array(row["target_roles"]),
+        target_departments=_parse_json_array(row["target_departments"]),
+        skills=_parse_json_array(row["skills"]),
+        interests=_parse_json_array(row["interests"]),
+        mobility_opt_in=bool(row["mobility_opt_in"]),
+        visibility=row["visibility"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+async def _get_or_create_career_profile(conn: Any, employee: dict) -> EmployeeCareerProfileResponse:
+    row = await conn.fetchrow(
+        """
+        SELECT id, employee_id, org_id, target_roles, target_departments, skills, interests,
+               mobility_opt_in, visibility, created_at, updated_at
+        FROM employee_career_profiles
+        WHERE employee_id = $1 AND org_id = $2
+        """,
+        employee["id"],
+        employee["org_id"],
+    )
+    if not row:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO employee_career_profiles (
+                employee_id, org_id, target_roles, target_departments, skills, interests, mobility_opt_in, visibility
+            )
+            VALUES ($1, $2, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, true, 'private')
+            RETURNING id, employee_id, org_id, target_roles, target_departments, skills, interests,
+                      mobility_opt_in, visibility, created_at, updated_at
+            """,
+            employee["id"],
+            employee["org_id"],
+        )
+    return _row_to_career_profile(row)
+
+
+def _ratio(count: int, total: int, empty_default: float = 1.0) -> float:
+    if total <= 0:
+        return empty_default
+    return max(0.0, min(1.0, count / total))
+
+
+def _infer_target_years_from_title(title: str) -> float:
+    normalized = title.lower()
+    if any(keyword in normalized for keyword in ("director", "head", "principal")):
+        return 8.0
+    if any(keyword in normalized for keyword in ("manager", "lead", "senior", " sr ")):
+        return 5.0
+    if any(keyword in normalized for keyword in ("junior", " jr ", "associate", "intern")):
+        return 1.0
+    return 3.0
+
+
+def _compute_level_fit(start_date_value: Optional[date], title: str) -> float:
+    if not start_date_value:
+        return 0.6
+    tenure_years = max((date.today() - start_date_value).days / 365.25, 0.0)
+    target_years = _infer_target_years_from_title(title)
+    delta = abs(tenure_years - target_years)
+    return max(0.0, 1.0 - (delta / max(target_years, 1.0)))
+
+
+def _compute_mobility_match(
+    *,
+    profile: EmployeeCareerProfileResponse,
+    employee_start_date: Optional[date],
+    title: str,
+    department: Optional[str],
+    description: Optional[str],
+    required_skills_raw: Any,
+    preferred_skills_raw: Any,
+) -> tuple[float, dict[str, Any]]:
+    profile_skills = {skill.lower() for skill in profile.skills}
+    profile_roles = {role.lower() for role in profile.target_roles}
+    profile_departments = {dept.lower() for dept in profile.target_departments}
+    profile_interests = {interest.lower() for interest in profile.interests}
+
+    required_skills = _parse_json_array(required_skills_raw)
+    preferred_skills = _parse_json_array(preferred_skills_raw)
+    required_lower = [skill.lower() for skill in required_skills]
+    preferred_lower = [skill.lower() for skill in preferred_skills]
+
+    matched_required = [skill for skill in required_skills if skill.lower() in profile_skills]
+    matched_preferred = [skill for skill in preferred_skills if skill.lower() in profile_skills]
+    missing_required = [skill for skill in required_skills if skill.lower() not in profile_skills]
+
+    required_fit = _ratio(len(matched_required), len(required_skills), empty_default=1.0)
+    preferred_fit = _ratio(len(matched_preferred), len(preferred_skills), empty_default=1.0)
+
+    alignment_signals: list[str] = []
+    alignment_score = 0.0
+    alignment_slots = 0
+
+    normalized_title = title.lower()
+    normalized_department = (department or "").strip().lower()
+    normalized_description = (description or "").strip().lower()
+
+    if profile_roles:
+        alignment_slots += 1
+        if any(role in normalized_title for role in profile_roles):
+            alignment_score += 1
+            alignment_signals.append("target_role_match")
+
+    if profile_departments:
+        alignment_slots += 1
+        if normalized_department and normalized_department in profile_departments:
+            alignment_score += 1
+            alignment_signals.append("target_department_match")
+
+    if profile_interests:
+        alignment_slots += 1
+        if any(interest in normalized_description for interest in profile_interests):
+            alignment_score += 1
+            alignment_signals.append("interest_match")
+
+    interest_alignment = (
+        alignment_score / alignment_slots if alignment_slots > 0 else 0.5
+    )
+    level_fit = _compute_level_fit(employee_start_date, title)
+
+    score = round(
+        (
+            required_fit * 0.50
+            + preferred_fit * 0.20
+            + interest_alignment * 0.20
+            + level_fit * 0.10
+        )
+        * 100.0,
+        1,
+    )
+
+    reasons = {
+        "matched_skills": matched_required,
+        "missing_skills": missing_required,
+        "preferred_matched_skills": matched_preferred,
+        "alignment_signals": alignment_signals,
+        "component_scores": {
+            "required_skill_fit": round(required_fit * 100.0, 1),
+            "preferred_skill_fit": round(preferred_fit * 100.0, 1),
+            "interest_alignment": round(interest_alignment * 100.0, 1),
+            "level_fit": round(level_fit * 100.0, 1),
+        },
+    }
+    return score, reasons
+
+
+async def _get_employee_opportunity(
+    conn: Any,
+    employee: dict,
+    opportunity_id: UUID,
+    *,
+    require_active: bool = True,
+) -> Any:
+    row = await conn.fetchrow(
+        """
+        SELECT id, org_id, type, title, department, description, required_skills, preferred_skills, status
+        FROM internal_opportunities
+        WHERE id = $1 AND org_id = $2
+        """,
+        opportunity_id,
+        employee["org_id"],
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opportunity not found")
+
+    if require_active and row["status"] != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active opportunities can be actioned",
+        )
+    return row
+
+
+async def _ensure_match_for_opportunity(
+    conn: Any,
+    employee: dict,
+    profile: EmployeeCareerProfileResponse,
+    opportunity_row: Any,
+) -> tuple[float, dict[str, Any]]:
+    existing = await conn.fetchrow(
+        """
+        SELECT match_score, reasons
+        FROM internal_opportunity_matches
+        WHERE employee_id = $1 AND opportunity_id = $2
+        """,
+        employee["id"],
+        opportunity_row["id"],
+    )
+
+    existing_reasons = None
+    existing_score = None
+    if existing:
+        existing_score = existing["match_score"]
+        existing_reasons = existing["reasons"]
+        if isinstance(existing_reasons, str):
+            try:
+                existing_reasons = json.loads(existing_reasons)
+            except json.JSONDecodeError:
+                existing_reasons = None
+
+    if existing_score is not None and isinstance(existing_reasons, dict):
+        return float(existing_score), existing_reasons
+
+    computed_score, computed_reasons = _compute_mobility_match(
+        profile=profile,
+        employee_start_date=employee.get("start_date"),
+        title=opportunity_row["title"],
+        department=opportunity_row["department"],
+        description=opportunity_row["description"],
+        required_skills_raw=opportunity_row["required_skills"],
+        preferred_skills_raw=opportunity_row["preferred_skills"],
+    )
+
+    await conn.execute(
+        """
+        INSERT INTO internal_opportunity_matches (
+            employee_id, opportunity_id, match_score, reasons, status
+        )
+        VALUES ($1, $2, $3, $4::jsonb, 'suggested')
+        ON CONFLICT (employee_id, opportunity_id)
+        DO UPDATE SET
+            match_score = $3,
+            reasons = $4::jsonb,
+            updated_at = NOW()
+        """,
+        employee["id"],
+        opportunity_row["id"],
+        computed_score,
+        json.dumps(computed_reasons),
+    )
+
+    return computed_score, computed_reasons
 
 
 # ================================
@@ -184,6 +475,361 @@ async def update_my_profile(
             created_at=updated["created_at"],
             updated_at=updated["updated_at"]
         )
+
+
+@router.get("/me/mobility/profile", response_model=EmployeeCareerProfileResponse, dependencies=_mobility_dep)
+async def get_my_mobility_profile(
+    employee: dict = Depends(require_employee_record),
+):
+    """Get (or initialize) employee career profile used for internal mobility matching."""
+    async with get_connection() as conn:
+        return await _get_or_create_career_profile(conn, employee)
+
+
+@router.put("/me/mobility/profile", response_model=EmployeeCareerProfileResponse, dependencies=_mobility_dep)
+async def update_my_mobility_profile(
+    request: EmployeeCareerProfileUpdateRequest,
+    employee: dict = Depends(require_employee_record),
+):
+    """Update employee career interests/profile for internal mobility."""
+    payload = request.model_dump(exclude_unset=True)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields to update",
+        )
+
+    async with get_connection() as conn:
+        # Ensure row exists before applying partial updates.
+        await _get_or_create_career_profile(conn, employee)
+
+        updates: list[str] = []
+        values: list[Any] = []
+        param_idx = 1
+
+        if "target_roles" in payload:
+            updates.append(f"target_roles = ${param_idx}::jsonb")
+            values.append(json.dumps(_normalize_string_list(payload["target_roles"])))
+            param_idx += 1
+
+        if "target_departments" in payload:
+            updates.append(f"target_departments = ${param_idx}::jsonb")
+            values.append(json.dumps(_normalize_string_list(payload["target_departments"])))
+            param_idx += 1
+
+        if "skills" in payload:
+            updates.append(f"skills = ${param_idx}::jsonb")
+            values.append(json.dumps(_normalize_string_list(payload["skills"])))
+            param_idx += 1
+
+        if "interests" in payload:
+            updates.append(f"interests = ${param_idx}::jsonb")
+            values.append(json.dumps(_normalize_string_list(payload["interests"])))
+            param_idx += 1
+
+        if "mobility_opt_in" in payload:
+            updates.append(f"mobility_opt_in = ${param_idx}")
+            values.append(bool(payload["mobility_opt_in"]))
+            param_idx += 1
+
+        if not updates:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No supported fields to update",
+            )
+
+        updates.append("updated_at = NOW()")
+        values.extend([employee["id"], employee["org_id"]])
+
+        updated = await conn.fetchrow(
+            f"""
+            UPDATE employee_career_profiles
+            SET {', '.join(updates)}
+            WHERE employee_id = ${param_idx} AND org_id = ${param_idx + 1}
+            RETURNING id, employee_id, org_id, target_roles, target_departments, skills, interests,
+                      mobility_opt_in, visibility, created_at, updated_at
+            """,
+            *values,
+        )
+
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update mobility profile",
+            )
+
+        return _row_to_career_profile(updated)
+
+
+@router.get("/me/mobility/feed", response_model=MobilityFeedResponse, dependencies=_mobility_dep)
+async def get_my_mobility_feed(
+    status_filter: str = "active",
+    employee: dict = Depends(require_employee_record),
+):
+    """Return internal opportunities for the employee, with deterministic match scores."""
+    if status_filter not in {"active", "draft", "closed"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="status_filter must be one of: active, draft, closed",
+        )
+
+    async with get_connection() as conn:
+        profile = await _get_or_create_career_profile(conn, employee)
+
+        rows = await conn.fetch(
+            """
+            SELECT
+                io.id as opportunity_id,
+                io.type,
+                io.title,
+                io.department,
+                io.description,
+                io.required_skills,
+                io.preferred_skills,
+                iom.match_score,
+                iom.status as match_status,
+                iom.reasons
+            FROM internal_opportunities io
+            LEFT JOIN internal_opportunity_matches iom
+                ON iom.opportunity_id = io.id
+               AND iom.employee_id = $1
+            WHERE io.org_id = $2
+              AND io.status = $3
+            ORDER BY COALESCE(iom.match_score, -1) DESC, io.created_at DESC
+            """,
+            employee["id"],
+            employee["org_id"],
+            status_filter,
+        )
+
+        items: list[MobilityFeedItem] = []
+        for row in rows:
+            reasons = row["reasons"]
+            if isinstance(reasons, str):
+                try:
+                    reasons = json.loads(reasons)
+                except json.JSONDecodeError:
+                    reasons = None
+
+            match_score = row["match_score"]
+            match_status = row["match_status"] or "suggested"
+
+            # Compute and persist v1 deterministic score if missing.
+            if match_score is None or reasons is None:
+                computed_score, computed_reasons = _compute_mobility_match(
+                    profile=profile,
+                    employee_start_date=employee.get("start_date"),
+                    title=row["title"],
+                    department=row["department"],
+                    description=row["description"],
+                    required_skills_raw=row["required_skills"],
+                    preferred_skills_raw=row["preferred_skills"],
+                )
+
+                upserted = await conn.fetchrow(
+                    """
+                    INSERT INTO internal_opportunity_matches (
+                        employee_id, opportunity_id, match_score, reasons, status
+                    )
+                    VALUES ($1, $2, $3, $4::jsonb, 'suggested')
+                    ON CONFLICT (employee_id, opportunity_id)
+                    DO UPDATE SET
+                        match_score = $3,
+                        reasons = $4::jsonb,
+                        updated_at = NOW()
+                    RETURNING status
+                    """,
+                    employee["id"],
+                    row["opportunity_id"],
+                    computed_score,
+                    json.dumps(computed_reasons),
+                )
+                match_score = computed_score
+                reasons = computed_reasons
+                match_status = upserted["status"] if upserted and upserted["status"] else match_status
+
+            items.append(
+                MobilityFeedItem(
+                    opportunity_id=row["opportunity_id"],
+                    type=row["type"],
+                    title=row["title"],
+                    department=row["department"],
+                    description=row["description"],
+                    match_score=float(match_score) if match_score is not None else None,
+                    status=match_status,
+                    reasons=reasons if isinstance(reasons, dict) else None,
+                )
+            )
+
+        return MobilityFeedResponse(items=items, total=len(items))
+
+
+@router.post(
+    "/me/mobility/opportunities/{opportunity_id}/save",
+    response_model=MobilityOpportunityActionResponse,
+    dependencies=_mobility_dep,
+)
+async def save_mobility_opportunity(
+    opportunity_id: UUID,
+    employee: dict = Depends(require_employee_record),
+):
+    """Mark an opportunity as saved for the current employee."""
+    async with get_connection() as conn:
+        profile = await _get_or_create_career_profile(conn, employee)
+        opportunity = await _get_employee_opportunity(conn, employee, opportunity_id, require_active=True)
+        score, reasons = await _ensure_match_for_opportunity(conn, employee, profile, opportunity)
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO internal_opportunity_matches (
+                employee_id, opportunity_id, match_score, reasons, status
+            )
+            VALUES ($1, $2, $3, $4::jsonb, 'saved')
+            ON CONFLICT (employee_id, opportunity_id)
+            DO UPDATE SET
+                match_score = $3,
+                reasons = $4::jsonb,
+                status = 'saved',
+                updated_at = NOW()
+            RETURNING status
+            """,
+            employee["id"],
+            opportunity_id,
+            score,
+            json.dumps(reasons),
+        )
+
+    return MobilityOpportunityActionResponse(opportunity_id=opportunity_id, status=row["status"])
+
+
+@router.delete(
+    "/me/mobility/opportunities/{opportunity_id}/save",
+    response_model=MobilityOpportunityActionResponse,
+    dependencies=_mobility_dep,
+)
+async def unsave_mobility_opportunity(
+    opportunity_id: UUID,
+    employee: dict = Depends(require_employee_record),
+):
+    """Remove saved state and return the opportunity to suggested state."""
+    async with get_connection() as conn:
+        await _get_employee_opportunity(conn, employee, opportunity_id, require_active=False)
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO internal_opportunity_matches (employee_id, opportunity_id, status)
+            VALUES ($1, $2, 'suggested')
+            ON CONFLICT (employee_id, opportunity_id)
+            DO UPDATE SET
+                status = 'suggested',
+                updated_at = NOW()
+            RETURNING status
+            """,
+            employee["id"],
+            opportunity_id,
+        )
+
+    return MobilityOpportunityActionResponse(opportunity_id=opportunity_id, status=row["status"])
+
+
+@router.post(
+    "/me/mobility/opportunities/{opportunity_id}/dismiss",
+    response_model=MobilityOpportunityActionResponse,
+    dependencies=_mobility_dep,
+)
+async def dismiss_mobility_opportunity(
+    opportunity_id: UUID,
+    employee: dict = Depends(require_employee_record),
+):
+    """Mark an opportunity as dismissed for the current employee."""
+    async with get_connection() as conn:
+        profile = await _get_or_create_career_profile(conn, employee)
+        opportunity = await _get_employee_opportunity(conn, employee, opportunity_id, require_active=False)
+        score, reasons = await _ensure_match_for_opportunity(conn, employee, profile, opportunity)
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO internal_opportunity_matches (
+                employee_id, opportunity_id, match_score, reasons, status
+            )
+            VALUES ($1, $2, $3, $4::jsonb, 'dismissed')
+            ON CONFLICT (employee_id, opportunity_id)
+            DO UPDATE SET
+                match_score = $3,
+                reasons = $4::jsonb,
+                status = 'dismissed',
+                updated_at = NOW()
+            RETURNING status
+            """,
+            employee["id"],
+            opportunity_id,
+            score,
+            json.dumps(reasons),
+        )
+
+    return MobilityOpportunityActionResponse(opportunity_id=opportunity_id, status=row["status"])
+
+
+@router.post(
+    "/me/mobility/opportunities/{opportunity_id}/apply",
+    response_model=MobilityApplicationResponse,
+    dependencies=_mobility_dep,
+)
+async def apply_to_mobility_opportunity(
+    opportunity_id: UUID,
+    request: MobilityApplicationCreateRequest,
+    employee: dict = Depends(require_employee_record),
+):
+    """Create or refresh an internal mobility application for an opportunity."""
+    async with get_connection() as conn:
+        profile = await _get_or_create_career_profile(conn, employee)
+        opportunity = await _get_employee_opportunity(conn, employee, opportunity_id, require_active=True)
+        score, reasons = await _ensure_match_for_opportunity(conn, employee, profile, opportunity)
+
+        app_row = await conn.fetchrow(
+            """
+            INSERT INTO internal_opportunity_applications (
+                employee_id, opportunity_id, status, employee_notes, submitted_at
+            )
+            VALUES ($1, $2, 'new', $3, NOW())
+            ON CONFLICT (employee_id, opportunity_id)
+            DO UPDATE SET
+                status = 'new',
+                employee_notes = $3,
+                submitted_at = NOW(),
+                updated_at = NOW()
+            RETURNING id, status, submitted_at, manager_notified_at
+            """,
+            employee["id"],
+            opportunity_id,
+            request.employee_notes,
+        )
+
+        await conn.execute(
+            """
+            INSERT INTO internal_opportunity_matches (
+                employee_id, opportunity_id, match_score, reasons, status
+            )
+            VALUES ($1, $2, $3, $4::jsonb, 'applied')
+            ON CONFLICT (employee_id, opportunity_id)
+            DO UPDATE SET
+                match_score = $3,
+                reasons = $4::jsonb,
+                status = 'applied',
+                updated_at = NOW()
+            """,
+            employee["id"],
+            opportunity_id,
+            score,
+            json.dumps(reasons),
+        )
+
+    return MobilityApplicationResponse(
+        application_id=app_row["id"],
+        status=app_row["status"],
+        submitted_at=app_row["submitted_at"],
+        manager_notified=app_row["manager_notified_at"] is not None,
+    )
 
 
 @router.get("/me/tasks", response_model=PortalTasks)

@@ -2550,6 +2550,119 @@ const posters = {
     request<{ pdf_url: string; title: string }>(`/compliance/posters/preview/${templateId}`),
 };
 
+export type InternalMobilityOpportunityType = 'role' | 'project';
+export type InternalMobilityOpportunityStatus = 'draft' | 'active' | 'closed';
+export type InternalMobilityApplicationStatus =
+  'new' | 'in_review' | 'shortlisted' | 'aligned' | 'closed';
+
+export interface InternalMobilityOpportunity {
+  id: string;
+  org_id: string;
+  type: InternalMobilityOpportunityType;
+  position_id: string | null;
+  title: string;
+  department: string | null;
+  description: string | null;
+  required_skills: string[];
+  preferred_skills: string[];
+  duration_weeks: number | null;
+  status: InternalMobilityOpportunityStatus;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InternalMobilityOpportunityCreate {
+  type: InternalMobilityOpportunityType;
+  position_id?: string | null;
+  title: string;
+  department?: string | null;
+  description?: string | null;
+  required_skills?: string[];
+  preferred_skills?: string[];
+  duration_weeks?: number | null;
+  status?: InternalMobilityOpportunityStatus;
+}
+
+export interface InternalMobilityOpportunityUpdate {
+  type?: InternalMobilityOpportunityType;
+  position_id?: string | null;
+  title?: string;
+  department?: string | null;
+  description?: string | null;
+  required_skills?: string[];
+  preferred_skills?: string[];
+  duration_weeks?: number | null;
+  status?: InternalMobilityOpportunityStatus;
+}
+
+export interface InternalMobilityApplicationAdmin {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  employee_email: string;
+  opportunity_id: string;
+  opportunity_title: string;
+  opportunity_type: InternalMobilityOpportunityType;
+  status: InternalMobilityApplicationStatus;
+  employee_notes: string | null;
+  submitted_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  manager_notified_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InternalMobilityApplicationUpdate {
+  status?: InternalMobilityApplicationStatus;
+  manager_notified?: boolean;
+}
+
+export const internalMobilityAdmin = {
+  createOpportunity: (data: InternalMobilityOpportunityCreate): Promise<InternalMobilityOpportunity> =>
+    request<InternalMobilityOpportunity>('/internal-mobility/opportunities', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listOpportunities: (params?: {
+    status?: InternalMobilityOpportunityStatus;
+    type?: InternalMobilityOpportunityType;
+  }): Promise<InternalMobilityOpportunity[]> => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.append('status', params.status);
+    if (params?.type) searchParams.append('type', params.type);
+    const query = searchParams.toString();
+    return request<InternalMobilityOpportunity[]>(
+      `/internal-mobility/opportunities${query ? `?${query}` : ''}`
+    );
+  },
+
+  updateOpportunity: (opportunityId: string, data: InternalMobilityOpportunityUpdate): Promise<InternalMobilityOpportunity> =>
+    request<InternalMobilityOpportunity>(`/internal-mobility/opportunities/${opportunityId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  listApplications: (params?: {
+    status?: InternalMobilityApplicationStatus;
+  }): Promise<InternalMobilityApplicationAdmin[]> => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.append('status', params.status);
+    const query = searchParams.toString();
+    return request<InternalMobilityApplicationAdmin[]>(
+      `/internal-mobility/applications${query ? `?${query}` : ''}`
+    );
+  },
+
+  updateApplication: (applicationId: string, data: InternalMobilityApplicationUpdate): Promise<InternalMobilityApplicationAdmin> =>
+    request<InternalMobilityApplicationAdmin>(`/internal-mobility/applications/${applicationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+};
+
 // HR News types
 export interface HRNewsArticle {
   id: string;
@@ -2628,5 +2741,6 @@ export const api = {
   aiChat,
   adminPosters,
   posters,
+  internalMobilityAdmin,
   adminNews,
 };

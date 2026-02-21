@@ -77,4 +77,44 @@ export const portalApi = {
 
   getPolicy: (policyId: string) =>
     fetchWithAuth(`/api/v1/portal/policies/${policyId}`),
+
+  // Internal Mobility
+  getMobilityProfile: () =>
+    fetchWithAuth('/api/v1/portal/me/mobility/profile'),
+
+  updateMobilityProfile: (data: {
+    target_roles?: string[];
+    target_departments?: string[];
+    skills?: string[];
+    interests?: string[];
+    mobility_opt_in?: boolean;
+  }) =>
+    fetchWithAuth('/api/v1/portal/me/mobility/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getMobilityFeed: (statusFilter = 'active') =>
+    fetchWithAuth(`/api/v1/portal/me/mobility/feed?status_filter=${encodeURIComponent(statusFilter)}`),
+
+  saveMobilityOpportunity: (opportunityId: string) =>
+    fetchWithAuth(`/api/v1/portal/me/mobility/opportunities/${opportunityId}/save`, {
+      method: 'POST',
+    }),
+
+  unsaveMobilityOpportunity: (opportunityId: string) =>
+    fetchWithAuth(`/api/v1/portal/me/mobility/opportunities/${opportunityId}/save`, {
+      method: 'DELETE',
+    }),
+
+  dismissMobilityOpportunity: (opportunityId: string) =>
+    fetchWithAuth(`/api/v1/portal/me/mobility/opportunities/${opportunityId}/dismiss`, {
+      method: 'POST',
+    }),
+
+  applyMobilityOpportunity: (opportunityId: string, employeeNotes?: string) =>
+    fetchWithAuth(`/api/v1/portal/me/mobility/opportunities/${opportunityId}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ employee_notes: employeeNotes }),
+    }),
 };
