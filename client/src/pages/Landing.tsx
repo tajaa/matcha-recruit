@@ -319,14 +319,23 @@ export function Landing() {
               onClick={() => scrollTo(systemRef)}
               className="hover:text-[#4ADE80] cursor-pointer transition-colors"
             >
-              Architecture
+              System
             </span>
+            <span
+              onClick={() => setIsContactOpen(true)}
+              className="hover:text-[#4ADE80] cursor-pointer transition-colors"
+            >
+              Pricing
+            </span>
+            <Link to="/terms" className="hover:text-[#4ADE80] transition-colors">
+              Terms
+            </Link>
           </div>
           <Link
             to="/login"
             className="px-6 py-2.5 rounded-full border border-[#F0EFEA]/20 text-[10px] font-mono uppercase tracking-[0.2em] hover:bg-[#F0EFEA] hover:text-[#0A0E0C] transition-colors"
           >
-            Access System
+            Login
           </Link>
         </div>
       </nav>
