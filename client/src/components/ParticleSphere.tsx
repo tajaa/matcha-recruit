@@ -1,11 +1,79 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
-interface ParticleSphereProps {
-  className?: string;
+interface CityMarker {
+  label: string;
+  lat: number;
+  lon: number;
 }
 
-export function ParticleSphere({ className = '' }: ParticleSphereProps) {
+interface ParticleSphereProps {
+  className?: string;
+  showCityMarkers?: boolean;
+  cityMarkers?: CityMarker[];
+}
+
+const DEFAULT_CITY_MARKERS: CityMarker[] = [
+  { label: 'LA', lat: 34.0522, lon: -118.2437 },
+  { label: 'SF', lat: 37.7749, lon: -122.4194 },
+  { label: 'NY', lat: 40.7128, lon: -74.0060 },
+  { label: 'Austin', lat: 30.2672, lon: -97.7431 },
+  { label: 'Miami', lat: 25.7617, lon: -80.1918 },
+  { label: 'Chicago', lat: 41.8781, lon: -87.6298 },
+  { label: 'San Diego', lat: 32.7157, lon: -117.1611 }
+];
+
+const latLonToVector3 = (lat: number, lon: number, radius: number) => {
+  const latRad = THREE.MathUtils.degToRad(lat);
+  const lonRad = THREE.MathUtils.degToRad(lon);
+  const cosLat = Math.cos(latRad);
+
+  return new THREE.Vector3(
+    radius * cosLat * Math.sin(lonRad),
+    radius * Math.sin(latRad),
+    radius * cosLat * Math.cos(lonRad)
+  );
+};
+
+const createCityLabel = (text: string) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = '500 24px "Plus Jakarta Sans", "Inter", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255, 171, 107, 0.95)';
+  ctx.shadowColor = 'rgba(255, 108, 24, 0.55)';
+  ctx.shadowBlur = 12;
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    opacity: 0.88
+  });
+
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(0.36, 0.11, 1);
+  return { sprite, material, texture };
+};
+
+export function ParticleSphere({
+  className = '',
+  showCityMarkers = false,
+  cityMarkers = DEFAULT_CITY_MARKERS
+}: ParticleSphereProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const frameRef = useRef<number>(0);
@@ -28,6 +96,8 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     camera.position.z = 2.5;
+    const sphereGroup = new THREE.Group();
+    scene.add(sphereGroup);
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({
@@ -127,7 +197,7 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     });
 
     const particles = new THREE.Points(geometry, material);
-    scene.add(particles);
+    sphereGroup.add(particles);
 
     // Add wireframe sphere for structure hint
     const wireGeometry = new THREE.SphereGeometry(1.02, 32, 32);
@@ -138,7 +208,7 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
       opacity: 0.05
     });
     const wireSphere = new THREE.Mesh(wireGeometry, wireMaterial);
-    scene.add(wireSphere);
+    sphereGroup.add(wireSphere);
 
     // Add glow ring around equator
     const ringGeometry = new THREE.RingGeometry(1.15, 1.18, 64);
@@ -152,20 +222,120 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
     ring.rotation.x = Math.PI / 2;
     scene.add(ring);
 
+    const markersGroup = new THREE.Group();
+    sphereGroup.add(markersGroup);
+
+    type MarkerInstance = {
+      normal: THREE.Vector3;
+      dotMaterial: THREE.MeshBasicMaterial;
+      pulse: THREE.Mesh;
+      pulseMaterial: THREE.MeshBasicMaterial;
+      labelMaterial?: THREE.SpriteMaterial;
+      lineMaterial?: THREE.LineBasicMaterial;
+    };
+
+    const markerInstances: MarkerInstance[] = [];
+    const markerDotGeometry = new THREE.SphereGeometry(0.016, 16, 16);
+    const markerPulseGeometry = new THREE.SphereGeometry(0.028, 14, 14);
+    const labelTextures: THREE.CanvasTexture[] = [];
+    const labelMaterials: THREE.SpriteMaterial[] = [];
+    const lineGeometries: THREE.BufferGeometry[] = [];
+
+    if (showCityMarkers) {
+      cityMarkers.forEach((city, index) => {
+        const normal = latLonToVector3(city.lat, city.lon, 1).normalize();
+        const markerPosition = normal.clone().multiplyScalar(1.03);
+        const labelAnchor = normal.clone().multiplyScalar(1.18);
+
+        const dotMaterial = new THREE.MeshBasicMaterial({
+          color: 0xff6f1f,
+          transparent: true,
+          opacity: 0.9
+        });
+        const dot = new THREE.Mesh(markerDotGeometry, dotMaterial);
+        dot.position.copy(markerPosition);
+        markersGroup.add(dot);
+
+        const pulseMaterial = new THREE.MeshBasicMaterial({
+          color: 0xff8a3d,
+          transparent: true,
+          opacity: 0.22
+        });
+        const pulse = new THREE.Mesh(markerPulseGeometry, pulseMaterial);
+        pulse.position.copy(markerPosition);
+        markersGroup.add(pulse);
+
+        const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+          normal.clone().multiplyScalar(1.06),
+          normal.clone().multiplyScalar(1.13)
+        ]);
+        const lineMaterial = new THREE.LineBasicMaterial({
+          color: 0xff9b57,
+          transparent: true,
+          opacity: 0.45
+        });
+        const line = new THREE.Line(lineGeometry, lineMaterial);
+        markersGroup.add(line);
+        lineGeometries.push(lineGeometry);
+
+        let labelMaterial: THREE.SpriteMaterial | undefined;
+        const labelData = createCityLabel(city.label);
+        if (labelData) {
+          labelData.sprite.position.copy(labelAnchor);
+          markersGroup.add(labelData.sprite);
+          labelTextures.push(labelData.texture);
+          labelMaterials.push(labelData.material);
+          labelMaterial = labelData.material;
+        }
+
+        markerInstances.push({
+          normal: normal.clone(),
+          dotMaterial,
+          pulse,
+          pulseMaterial,
+          labelMaterial,
+          lineMaterial
+        });
+
+        pulse.scale.setScalar(1 + index * 0.02);
+      });
+    }
+
     // Animation
     let time = 0;
+    const markerNormalWorld = new THREE.Vector3();
+    const toCamera = new THREE.Vector3();
     const animate = () => {
       frameRef.current = requestAnimationFrame(animate);
       time += 0.01;
 
       // Slow rotation
-      particles.rotation.y += 0.001;
-      particles.rotation.x = Math.sin(time * 0.2) * 0.1;
-
-      wireSphere.rotation.y = particles.rotation.y;
-      wireSphere.rotation.x = particles.rotation.x;
+      sphereGroup.rotation.y += 0.001;
+      sphereGroup.rotation.x = Math.sin(time * 0.2) * 0.1;
 
       ring.rotation.z += 0.0005;
+
+      markerInstances.forEach((marker, index) => {
+        marker.pulse.scale.setScalar(1 + Math.sin(time * 2.2 + index) * 0.18);
+
+        markerNormalWorld
+          .copy(marker.normal)
+          .applyQuaternion(sphereGroup.quaternion)
+          .normalize();
+        toCamera.copy(camera.position).normalize();
+
+        const facing = markerNormalWorld.dot(toCamera);
+        const visibility = THREE.MathUtils.clamp((facing - 0.05) / 0.35, 0, 1);
+
+        marker.dotMaterial.opacity = 0.22 + visibility * 0.75;
+        marker.pulseMaterial.opacity = 0.06 + visibility * 0.24;
+        if (marker.labelMaterial) {
+          marker.labelMaterial.opacity = visibility;
+        }
+        if (marker.lineMaterial) {
+          marker.lineMaterial.opacity = visibility * 0.55;
+        }
+      });
 
       material.uniforms.time.value = time;
 
@@ -193,7 +363,9 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
       cancelAnimationFrame(frameRef.current);
 
       if (rendererRef.current && containerRef.current) {
-        containerRef.current.removeChild(rendererRef.current.domElement);
+        if (containerRef.current.contains(rendererRef.current.domElement)) {
+          containerRef.current.removeChild(rendererRef.current.domElement);
+        }
         rendererRef.current.dispose();
       }
 
@@ -203,8 +375,18 @@ export function ParticleSphere({ className = '' }: ParticleSphereProps) {
       wireMaterial.dispose();
       ringGeometry.dispose();
       ringMaterial.dispose();
+      markerDotGeometry.dispose();
+      markerPulseGeometry.dispose();
+      markerInstances.forEach((marker) => {
+        marker.dotMaterial.dispose();
+        marker.pulseMaterial.dispose();
+        marker.lineMaterial?.dispose();
+      });
+      labelMaterials.forEach((material) => material.dispose());
+      labelTextures.forEach((texture) => texture.dispose());
+      lineGeometries.forEach((lineGeometry) => lineGeometry.dispose());
     };
-  }, []);
+  }, [showCityMarkers, cityMarkers]);
 
   return (
     <div

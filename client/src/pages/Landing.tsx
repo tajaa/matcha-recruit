@@ -5,16 +5,13 @@ import React, {
   useLayoutEffect,
   lazy,
   Suspense,
-  useMemo,
 } from "react";
 import { Link } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import gsap from "gsap";
 import ScrollTrigger from "gsap/ScrollTrigger";
 import {
   MapPin,
-  X,
-  Send,
   Activity,
   ShieldCheck,
   Database,
@@ -25,14 +22,6 @@ import {
 const ParticleSphere = lazy(() => import("../components/ParticleSphere"));
 
 gsap.registerPlugin(ScrollTrigger);
-
-// --- SYNTHESIZED DESIGN TOKENS ---
-const theme = {
-  obsidian: "#0A0E0C",
-  cream: "#F0EFEA",
-  moss: "#4ADE80", // Glowing organic tech (Neon)
-  clay: "#D95A38", // Biological warmth
-};
 
 const fonts = {
   sans: '"Plus Jakarta Sans", "Inter", sans-serif',
@@ -402,7 +391,10 @@ export function Landing() {
               }
             >
               <div className="absolute inset-0 bg-[#4ADE80]/5 blur-[100px] rounded-full mix-blend-screen pointer-events-none" />
-              <ParticleSphere className="w-full h-full scale-110 lg:scale-125" />
+              <ParticleSphere
+                className="w-full h-full scale-110 lg:scale-125"
+                showCityMarkers
+              />
             </Suspense>
           </div>
         </div>
