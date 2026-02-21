@@ -1,4 +1,6 @@
 import React, {
+  memo,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -29,6 +31,9 @@ const fonts = {
   mono: '"JetBrains Mono", monospace',
 };
 
+const ER_INFERENCE_WIDTHS = [0.4, 0.8, 0.3, 0.9, 0.5, 0.7];
+const POLICY_DOTS = Array.from({ length: 100 }, (_, index) => index);
+
 const LOCAL_JURISDICTIONS = [
   "San Francisco Local",
   "West Hollywood Local",
@@ -39,7 +44,7 @@ const LOCAL_JURISDICTIONS = [
 // --- PERFORMANCE OPTIMIZED MICRO-COMPONENTS ---
 
 // Optimized CSS Noise (Hardware Accelerated, no mix-blend-screen over full viewport)
-const CinematicNoise = () => (
+const CinematicNoise = memo(() => (
   <div
     className="pointer-events-none fixed inset-0 z-[100] opacity-[0.03]"
     style={{
@@ -47,10 +52,10 @@ const CinematicNoise = () => (
       backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
     }}
   />
-);
+));
 
 // High-Performance ASCII Component (Bypasses React State for animations)
-const HorizontalAsciiEntity = () => {
+const HorizontalAsciiEntity = memo(() => {
   const preRef = useRef<HTMLPreElement>(null);
   const phaseRef = useRef(0);
 
@@ -108,36 +113,40 @@ const HorizontalAsciiEntity = () => {
       </div>
     </div>
   );
-};
+});
 
-// Dynamic Telemetry Badge
-const TelemetryBadge = ({
-  text,
-  active = false,
-}: {
+interface TelemetryBadgeProps {
   text: string;
   active?: boolean;
-}) => (
-  <span
-    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[9px] font-mono uppercase tracking-widest transition-colors duration-500
-    ${active ? "border-[#4ADE80]/30 bg-[#4ADE80]/10 text-[#4ADE80]" : "border-[#F0EFEA]/10 bg-[#F0EFEA]/5 text-[#F0EFEA]/60"}`}
-  >
-    {active && (
-      <span className="w-1.5 h-1.5 bg-[#4ADE80] rounded-full animate-pulse shadow-[0_0_8px_#4ADE80]" />
-    )}
-    {text}
-  </span>
-);
+}
+
+// Dynamic Telemetry Badge
+const TelemetryBadge = memo(function TelemetryBadge({
+  text,
+  active = false,
+}: TelemetryBadgeProps) {
+  return (
+    <span
+      className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[9px] font-mono uppercase tracking-widest transition-colors duration-500
+      ${active ? "border-[#4ADE80]/30 bg-[#4ADE80]/10 text-[#4ADE80]" : "border-[#F0EFEA]/10 bg-[#F0EFEA]/5 text-[#F0EFEA]/60"}`}
+    >
+      {active && (
+        <span className="w-1.5 h-1.5 bg-[#4ADE80] rounded-full animate-pulse shadow-[0_0_8px_#4ADE80]" />
+      )}
+      {text}
+    </span>
+  );
+});
 
 // --- ARCHITECTURE MICRO-INTERFACES (Replaces static icons) ---
 
-const ERInferenceEngine = () => (
+const ERInferenceEngine = memo(() => (
   <div className="w-full h-full flex flex-col justify-center gap-4 p-8">
     <div className="flex justify-between text-[8px] font-mono text-[#4ADE80]/50 uppercase tracking-widest mb-4">
       <span>Neural Map</span>
       <span className="animate-pulse">Processing</span>
     </div>
-    {[0.4, 0.8, 0.3, 0.9, 0.5, 0.7].map((width, i) => (
+    {ER_INFERENCE_WIDTHS.map((width, i) => (
       <div
         key={i}
         className="h-1 w-full bg-white/5 rounded-full overflow-hidden"
@@ -161,16 +170,15 @@ const ERInferenceEngine = () => (
       className="text-[#4ADE80]/20 absolute bottom-8 right-8"
     />
   </div>
-);
+));
 
-const PolicyMatrixScanner = () => {
-  const dots = Array.from({ length: 100 });
+const PolicyMatrixScanner = memo(() => {
   return (
     <div className="w-full h-full relative p-8 flex items-center justify-center overflow-hidden">
       <div className="grid grid-cols-10 gap-3 relative z-10">
-        {dots.map((_, i) => (
+        {POLICY_DOTS.map((dotIndex) => (
           <div
-            key={i}
+            key={dotIndex}
             className="w-1.5 h-1.5 rounded-full bg-[#0A0E0C]/10 transition-colors duration-500 hover:bg-[#D95A38]"
           />
         ))}
@@ -187,9 +195,9 @@ const PolicyMatrixScanner = () => {
       />
     </div>
   );
-};
+});
 
-const IncidentAuditRing = () => (
+const IncidentAuditRing = memo(() => (
   <div className="w-full h-full relative flex items-center justify-center">
     <div className="absolute inset-0 border border-[#F0EFEA]/10 rounded-full scale-[0.6] animate-[ping_4s_cubic-bezier(0,0,0.2,1)_infinite]" />
     <div className="absolute inset-0 border border-[#F0EFEA]/20 rounded-full scale-[0.4] animate-[spin_10s_linear_infinite] border-t-transparent" />
@@ -200,7 +208,46 @@ const IncidentAuditRing = () => (
       className="text-[#F0EFEA]/30 absolute top-8 right-8"
     />
   </div>
-);
+));
+
+const JurisdictionRows = memo(function JurisdictionRows() {
+  const [jurisdictionIndex, setJurisdictionIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setJurisdictionIndex((prev) => (prev + 1) % LOCAL_JURISDICTIONS.length);
+    }, 4000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between p-4 bg-white/[0.03] rounded-[1rem] border border-white/5">
+        <span
+          className="text-xs font-medium text-[#F0EFEA] tracking-wide"
+          style={{ fontFamily: fonts.sans }}
+        >
+          Minimum Wage
+        </span>
+        <span className="px-3 py-1 rounded-md bg-white/5 text-[#4ADE80] text-[9px] font-mono uppercase tracking-[0.2em] border border-[#4ADE80]/20">
+          {LOCAL_JURISDICTIONS[jurisdictionIndex]}
+        </span>
+      </div>
+      <div className="flex items-center justify-between p-4 bg-white/[0.03] rounded-[1rem] border border-white/5">
+        <span
+          className="text-xs font-medium text-[#F0EFEA] tracking-wide"
+          style={{ fontFamily: fonts.sans }}
+        >
+          Predictive Scheduling
+        </span>
+        <span className="px-3 py-1 rounded-md bg-white/5 text-[#4ADE80] text-[9px] font-mono uppercase tracking-[0.2em] border border-[#4ADE80]/20">
+          San Francisco City
+        </span>
+      </div>
+    </div>
+  );
+});
 
 // --- MAIN LANDING PAGE ---
 
@@ -209,28 +256,34 @@ export function Landing() {
   const manifestoRef = useRef<HTMLDivElement>(null);
   const systemRef = useRef<HTMLDivElement>(null);
 
-  const [jurisdictionIndex, setJurisdictionIndex] = useState(0);
   const [scrolled, setScrolled] = useState(false);
+  const scrolledRef = useRef(false);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setJurisdictionIndex((prev) => (prev + 1) % LOCAL_JURISDICTIONS.length);
-    }, 4000);
-
     let ticking = false;
+    let frameId = 0;
+    const updateScrolled = () => {
+      const nextScrolled = window.scrollY > 50;
+      if (nextScrolled !== scrolledRef.current) {
+        scrolledRef.current = nextScrolled;
+        setScrolled(nextScrolled);
+      }
+      ticking = false;
+    };
+
     const handleScroll = () => {
       if (!ticking) {
-        window.requestAnimationFrame(() => {
-          setScrolled(window.scrollY > 50);
-          ticking = false;
-        });
+        frameId = window.requestAnimationFrame(updateScrolled);
         ticking = true;
       }
     };
 
+    updateScrolled();
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
-      clearInterval(timer);
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
       window.removeEventListener("scroll", handleScroll);
     };
   }, []);
@@ -280,9 +333,9 @@ export function Landing() {
     return () => ctx.revert();
   }, []);
 
-  const scrollTo = (ref: React.RefObject<HTMLDivElement | null>) => {
+  const scrollTo = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
     ref.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  }, []);
 
   return (
     <div
@@ -321,10 +374,7 @@ export function Landing() {
             >
               System
             </span>
-            <span
-              onClick={() => setIsContactOpen(true)}
-              className="hover:text-[#4ADE80] cursor-pointer transition-colors"
-            >
+            <span className="text-[#F0EFEA]/35 cursor-default">
               Pricing
             </span>
             <Link to="/terms" className="hover:text-[#4ADE80] transition-colors">
@@ -447,33 +497,7 @@ export function Landing() {
                 </div>
                 <TelemetryBadge text="Syncing" active />
               </div>
-              <div className="space-y-3">
-                {[
-                  {
-                    label: "Minimum Wage",
-                    badge: LOCAL_JURISDICTIONS[jurisdictionIndex],
-                  },
-                  {
-                    label: "Predictive Scheduling",
-                    badge: "San Francisco City",
-                  },
-                ].map((row, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between p-4 bg-white/[0.03] rounded-[1rem] border border-white/5"
-                  >
-                    <span
-                      className="text-xs font-medium text-[#F0EFEA] tracking-wide"
-                      style={{ fontFamily: fonts.sans }}
-                    >
-                      {row.label}
-                    </span>
-                    <span className="px-3 py-1 rounded-md bg-white/5 text-[#4ADE80] text-[9px] font-mono uppercase tracking-[0.2em] border border-[#4ADE80]/20">
-                      {row.badge}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <JurisdictionRows />
             </div>
           </div>
         </div>
