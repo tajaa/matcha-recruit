@@ -73,6 +73,7 @@ export function Dashboard() {
       change: dashStats?.active_policies === 0 ? 'No policies yet' : 'Active',
       icon: FileText,
       color: 'text-emerald-500',
+      path: '/app/matcha/policies'
     },
     {
       label: 'Pending Signatures',
@@ -80,6 +81,7 @@ export function Dashboard() {
       change: dashStats?.pending_signatures === 0 ? 'All signed' : 'Action required',
       icon: Clock,
       color: 'text-amber-500',
+      path: '/app/matcha/policies'
     },
     {
       label: 'Total Employees',
@@ -87,6 +89,7 @@ export function Dashboard() {
       change: dashStats?.total_employees === 0 ? 'No employees yet' : 'Active',
       icon: Users,
       color: 'text-white',
+      path: '/app/matcha/employees'
     },
     {
       label: 'Compliance Rate',
@@ -94,6 +97,7 @@ export function Dashboard() {
       change: dashStats?.compliance_rate === 0 ? 'No data yet' : 'Current',
       icon: CheckCircle2,
       color: 'text-emerald-500',
+      path: '/app/matcha/compliance'
     },
   ];
 
@@ -149,31 +153,36 @@ export function Dashboard() {
           <div className="space-y-12">
             {/* Stats Grid */}
             {visibleWidgets.has('stats') && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 border border-white/10">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 border border-white/10">
                 {stats.map((stat) => (
-                  <div key={stat.label} className="bg-zinc-950 p-8 hover:bg-zinc-900/50 transition-colors group relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 group-hover:scale-110 transition-all duration-500">
-                       <stat.icon className="w-24 h-24 text-white" strokeWidth={0.5} />
+                  <button
+                    key={stat.label}
+                    onClick={() => navigate(stat.path)}
+                    className="bg-zinc-950 p-6 hover:bg-zinc-900 transition-all group relative overflow-hidden text-left"
+                  >
+                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 group-hover:scale-110 transition-all duration-500">
+                       <stat.icon className="w-16 h-16 text-white" strokeWidth={0.5} />
                     </div>
 
                     <div className="relative z-10">
-                      <div className="flex items-center gap-3 mb-6">
-                         <div className={`p-2 rounded bg-white/5 ${stat.color}`}>
-                            <stat.icon className="w-4 h-4" />
+                      <div className="flex items-center gap-2 mb-4">
+                         <div className={`p-1.5 rounded bg-white/5 ${stat.color}`}>
+                            <stat.icon className="w-3.5 h-3.5" />
                          </div>
-                         <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold">{stat.label}</span>
+                         <span className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-bold">{stat.label}</span>
                       </div>
 
-                      <div className="text-4xl font-light text-white mb-2 tabular-nums tracking-tight">{stat.value}</div>
-                      <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-400 uppercase">
-                         <span className="w-1 h-1 bg-zinc-600 rounded-full" />
+                      <div className="text-3xl font-light text-white mb-1 tabular-nums tracking-tight group-hover:text-emerald-400 transition-colors">{stat.value}</div>
+                      <div className="flex items-center gap-2 text-[8px] font-mono text-zinc-500 uppercase">
+                         <span className="w-1 h-1 bg-zinc-700 rounded-full" />
                          {stat.change}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
+
 
             {/* Quick Setup — shown for new businesses with no employees and no policies */}
             {visibleWidgets.has('setup') && dashStats && dashStats.total_employees === 0 && dashStats.active_policies === 0 && (
