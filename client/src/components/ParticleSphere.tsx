@@ -97,6 +97,8 @@ export function ParticleSphere({
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     camera.position.z = 2.5;
     const sphereGroup = new THREE.Group();
+    // Pre-rotate so US cities (avg lon ≈ -100°) face the camera (+Z axis)
+    sphereGroup.rotation.y = THREE.MathUtils.degToRad(100);
     scene.add(sphereGroup);
 
     // Renderer

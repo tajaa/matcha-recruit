@@ -335,10 +335,9 @@ export function Landing() {
       <section className="relative min-h-screen flex flex-col justify-center px-6 md:px-16 overflow-hidden">
         <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
           <div
-            className="parallax-bg absolute -inset-[10%] bg-cover bg-center opacity-30 mix-blend-screen grayscale"
+            className="parallax-bg absolute -inset-[10%] bg-cover bg-center opacity-[0.18]"
             style={{
-              backgroundImage: `url('https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=3500&auto=format&fit=crop')`,
-              willChange: "transform",
+              backgroundImage: `url('https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?q=80&w=3500&auto=format&fit=crop')`,
             }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-[#0A0E0C] via-[#0A0E0C]/80 to-transparent" />
