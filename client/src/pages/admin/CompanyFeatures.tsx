@@ -19,6 +19,7 @@ const FEATURE_CONFIG: { key: string; label: string; section: string }[] = [
   { key: 'time_off', label: 'Time Off', section: 'HR Tools' },
   { key: 'accommodations', label: 'Accommodations', section: 'HR Tools' },
   { key: 'interview_prep', label: 'Tutor', section: 'HR Tools' },
+  { key: 'internal_mobility', label: 'Internal Mobility', section: 'Employee Experience' },
 ];
 
 export function CompanyFeatures() {

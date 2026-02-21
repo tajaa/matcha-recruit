@@ -34,6 +34,7 @@ KNOWN_FEATURES = {
     "incidents",
     "time_off",
     "accommodations",
+    "internal_mobility",
 }
 
 EDITABLE_SETUP_STATUSES = {"draft", "invited"}

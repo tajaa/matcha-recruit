@@ -305,3 +305,212 @@ Output per match:
 - What minimum data is required to auto-create mobility profiles for existing employees?
 - Which status transition should trigger manager notification by default?
 
+## 17. Implementation Kickoff (Execution Plan)
+
+This section turns the plan into concrete engineering work items in this repository.
+
+### 17.1 Sprint 1 Goals (Build First Vertical Slice)
+
+1. Create DB schema for internal mobility entities.
+2. Add feature flag and admin toggle support.
+3. Add backend APIs for:
+   - employee profile (read/write)
+   - employee feed (read)
+   - save/apply actions
+   - admin opportunity CRUD
+4. Add basic portal UI:
+   - mobility feed page
+   - mobility profile form
+5. Add admin queue page for internal applications.
+
+### 17.2 Delivery Strategy
+
+1. Ship backend and DB first.
+2. Wire frontend once stable endpoint contracts are in place.
+3. Keep matching deterministic for v1.
+4. Hide all new UI behind `internal_mobility` feature flag.
+
+## 18. File-Level Implementation Map
+
+### 18.1 Backend: Database and Feature Flags
+
+1. Add migration file:
+   - `server/alembic/versions/<new_revision>_add_internal_mobility_tables.py`
+2. Update default company feature map:
+   - `server/app/core/feature_flags.py`
+3. Allow admin toggle:
+   - `server/app/core/routes/admin.py` (add `internal_mobility` to `KNOWN_FEATURES`)
+
+### 18.2 Backend: Matcha Domain
+
+1. Add models:
+   - `server/app/matcha/models/internal_mobility.py`
+2. Add deterministic matcher service:
+   - `server/app/matcha/services/internal_mobility_matcher.py`
+3. Add routes:
+   - `server/app/matcha/routes/internal_mobility.py`
+4. Register router:
+   - `server/app/matcha/routes/__init__.py`
+5. Add portal endpoints (either in new route file or `employee_portal.py`):
+   - `server/app/matcha/routes/employee_portal.py`
+
+### 18.3 Frontend: Types and API Clients
+
+1. Add types:
+   - `client/src/types/index.ts`
+2. Add portal API methods:
+   - `client/src/api/portal.ts`
+3. Add admin/client API methods:
+   - `client/src/api/client.ts`
+
+### 18.4 Frontend: Pages and Navigation
+
+1. Add portal pages:
+   - `client/src/pages/portal/PortalMobility.tsx`
+   - `client/src/pages/portal/PortalMobilityProfile.tsx` (or combine into one tabbed page)
+2. Add admin page:
+   - `client/src/pages/InternalMobilityAdmin.tsx`
+3. Add routes:
+   - `client/src/App.tsx`
+4. Add quick links:
+   - `client/src/pages/portal/PortalHome.tsx`
+5. Add optional left-nav item for admin/client:
+   - `client/src/components/Layout.tsx`
+
+## 19. Sprint 1 Detailed Checklist
+
+- [ ] Create Alembic migration for 4 mobility tables.
+- [ ] Add indexes + unique constraints exactly as defined in Section 8.
+- [ ] Add `internal_mobility` to feature flags (`default false` recommended for controlled rollout).
+- [ ] Add backend Pydantic models for requests/responses.
+- [ ] Implement `GET/PUT /api/v1/portal/mobility/profile`.
+- [ ] Implement `GET /api/v1/portal/mobility/feed`.
+- [ ] Implement save/dismiss/apply endpoints for employees.
+- [ ] Implement admin opportunity CRUD endpoints.
+- [ ] Implement admin application list/update endpoints.
+- [ ] Register routes in Matcha router.
+- [ ] Add TS types and API clients.
+- [ ] Build employee portal mobility page (feed + actions).
+- [ ] Build employee profile form page.
+- [ ] Build admin queue page.
+- [ ] Gate all pages and routes behind `internal_mobility` feature.
+- [ ] Add backend tests for access control and org scoping.
+- [ ] Add frontend smoke tests for page rendering + action calls.
+
+## 20. Endpoint Contracts (Initial Payload Shapes)
+
+### 20.1 `PUT /api/v1/portal/mobility/profile`
+
+Request:
+
+```json
+{
+  "target_roles": ["Senior Data Analyst", "Analytics Engineer"],
+  "target_departments": ["Data", "Operations"],
+  "skills": ["SQL", "Python", "Looker"],
+  "interests": ["cross-functional projects", "mentorship"],
+  "mobility_opt_in": true
+}
+```
+
+Response:
+
+```json
+{
+  "employee_id": "uuid",
+  "org_id": "uuid",
+  "target_roles": ["Senior Data Analyst", "Analytics Engineer"],
+  "target_departments": ["Data", "Operations"],
+  "skills": ["SQL", "Python", "Looker"],
+  "interests": ["cross-functional projects", "mentorship"],
+  "mobility_opt_in": true,
+  "visibility": "private",
+  "updated_at": "2026-02-21T00:00:00Z"
+}
+```
+
+### 20.2 `GET /api/v1/portal/mobility/feed`
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "opportunity_id": "uuid",
+      "type": "role",
+      "title": "Operations Analyst",
+      "department": "Operations",
+      "description": "Drive process efficiency initiatives",
+      "match_score": 78.2,
+      "status": "suggested",
+      "reasons": {
+        "matched_skills": ["SQL", "Operations"],
+        "missing_skills": ["Tableau"],
+        "alignment_signals": ["target_department_match"]
+      }
+    }
+  ],
+  "total": 1
+}
+```
+
+### 20.3 `POST /api/v1/portal/mobility/opportunities/{id}/apply`
+
+Request:
+
+```json
+{
+  "employee_notes": "Interested in this role for cross-functional growth."
+}
+```
+
+Response:
+
+```json
+{
+  "application_id": "uuid",
+  "status": "new",
+  "submitted_at": "2026-02-21T00:00:00Z",
+  "manager_notified": false
+}
+```
+
+## 21. Access-Control Matrix (Implementation)
+
+1. Employee:
+   - Can CRUD own mobility profile.
+   - Can only read own feed and own applications.
+2. Admin/Client:
+   - Can manage opportunities and all applications for own `org_id`.
+3. Manager:
+   - No dedicated mobility endpoints in MVP.
+4. Security rule:
+   - Every query must filter by `org_id` derived from auth context.
+
+## 22. Acceptance Criteria (Sprint 1)
+
+1. Employee with `internal_mobility` enabled can:
+   - update profile
+   - view feed
+   - save/apply to an opportunity
+2. Employee cannot see another employee's application/profile.
+3. Admin/client can:
+   - create/edit/close opportunities
+   - review application statuses
+4. Manager is not notified on browse/save/apply by default.
+5. All new APIs return 403 when feature is disabled.
+
+## 23. Seed and Demo Data Plan
+
+1. Seed 5-10 opportunities across `role` and `project` types.
+2. Seed at least 3 employee mobility profiles with different interests.
+3. Run matcher once to pre-populate feed and confirm score distribution.
+
+## 24. Definition of Done (MVP v1)
+
+1. Migration applied and reversible.
+2. Backend endpoints implemented and tested.
+3. Frontend portal and admin surfaces shipped behind feature flag.
+4. Org scoping and privacy behavior validated.
+5. Document updated with final endpoint paths and any deviations from this spec.
