@@ -44,6 +44,7 @@ type FeedResponse = {
 
 const FEED_FILTERS = ['active', 'draft', 'closed'] as const;
 type FeedFilter = (typeof FEED_FILTERS)[number];
+const APPLY_NOTE_MAX_LENGTH = 500;
 
 function parseCommaSeparated(value: string): string[] {
   const seen = new Set<string>();
@@ -100,6 +101,7 @@ export default function PortalMobility() {
   const [actionKey, setActionKey] = useState<string | null>(null);
   const [activeApplyId, setActiveApplyId] = useState<string | null>(null);
   const [applyDrafts, setApplyDrafts] = useState<Record<string, string>>({});
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -201,14 +203,33 @@ export default function PortalMobility() {
     );
   }, []);
 
+  const clearActionError = useCallback((opportunityId: string) => {
+    setActionErrors((current) => {
+      if (!(opportunityId in current)) return current;
+      const next = { ...current };
+      delete next[opportunityId];
+      return next;
+    });
+  }, []);
+
   const handleFeedAction = async (
     item: FeedItem,
     action: 'save' | 'unsave' | 'dismiss' | 'apply',
     employeeNotes?: string,
   ) => {
     setActionKey(`${action}:${item.opportunity_id}`);
-    setError(null);
+    clearActionError(item.opportunity_id);
     setNotice(null);
+
+    if (action === 'apply' && employeeNotes && employeeNotes.length > APPLY_NOTE_MAX_LENGTH) {
+      setActionErrors((current) => ({
+        ...current,
+        [item.opportunity_id]: `Notes must be ${APPLY_NOTE_MAX_LENGTH} characters or fewer.`,
+      }));
+      setActionKey(null);
+      return;
+    }
+
     const previousFeed = feed;
     const optimisticStatus: FeedStatus =
       action === 'save' ? 'saved' : action === 'unsave' ? 'suggested' : action === 'dismiss' ? 'dismissed' : 'applied';
@@ -254,7 +275,10 @@ export default function PortalMobility() {
       }
     } catch (err) {
       setFeed(previousFeed);
-      setError(err instanceof Error ? err.message : 'Failed to update opportunity');
+      setActionErrors((current) => ({
+        ...current,
+        [item.opportunity_id]: err instanceof Error ? err.message : 'Failed to update opportunity',
+      }));
     } finally {
       setActionKey(null);
     }
@@ -502,8 +526,18 @@ export default function PortalMobility() {
                           }))
                         }
                         placeholder="Why this role or project fits your growth goals."
+                        maxLength={APPLY_NOTE_MAX_LENGTH}
                         className="w-full px-3 py-2 border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 resize-y bg-white"
                       />
+                      <div
+                        className={`text-[11px] text-right ${
+                          (applyDrafts[item.opportunity_id] || '').length >= APPLY_NOTE_MAX_LENGTH
+                            ? 'text-red-600'
+                            : 'text-zinc-500'
+                        }`}
+                      >
+                        {(applyDrafts[item.opportunity_id] || '').length}/{APPLY_NOTE_MAX_LENGTH}
+                      </div>
                     </label>
                     <div className="flex flex-wrap gap-2">
                       <button
@@ -528,6 +562,12 @@ export default function PortalMobility() {
                         {actionKey === `apply:${item.opportunity_id}` ? 'Submitting...' : 'Submit Application'}
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {actionErrors[item.opportunity_id] && (
+                  <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+                    {actionErrors[item.opportunity_id]}
                   </div>
                 )}
               </article>
