@@ -33,7 +33,7 @@ const CATEGORIES = [
 ];
 
 async function fetchWithAuth(url: string, options: RequestInit = {}) {
-  const token = localStorage.getItem('access_token');
+  const token = localStorage.getItem('matcha_access_token');
   const response = await fetch(url, {
     ...options,
     headers: {
