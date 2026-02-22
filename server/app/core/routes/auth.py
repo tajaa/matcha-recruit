@@ -158,8 +158,8 @@ async def _seed_test_account_data(
     """Seed representative data for enabled product features."""
     today = datetime.utcnow().date()
     suffix = str(company_id).split("-")[0]
-    manager_seed_email = f"manager+{suffix}@test-account.local"
-    sample_seed_email = f"employee+{suffix}@test-account.local"
+    manager_seed_email = f"manager+{suffix}@matcha-seed.dev"
+    sample_seed_email = f"employee+{suffix}@matcha-seed.dev"
     owner_first, owner_last = _split_name(owner_name)
 
     manager_employee_id = None
