@@ -11,8 +11,14 @@ from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Request
 from fastapi.responses import StreamingResponse
 
 from ...database import get_connection
-from ..models.offer_letter import OfferLetter, OfferLetterCreate, OfferLetterUpdate
-from ..dependencies import require_admin_or_client, get_client_company_id
+from ..models.offer_letter import (
+    OfferGuidanceRequest,
+    OfferGuidanceResponse,
+    OfferLetter,
+    OfferLetterCreate,
+    OfferLetterUpdate,
+)
+from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
 
@@ -31,6 +37,143 @@ ALLOWED_UPDATE_COLUMNS = {
     "benefits_holidays", "benefits_other",
     "contingency_background_check", "contingency_credit_check", "contingency_drug_screening",
 }
+
+ROLE_BASE_RANGES = {
+    "software_engineering": (130_000, 205_000),
+    "data_analytics": (95_000, 155_000),
+    "product_management": (120_000, 195_000),
+    "design": (95_000, 165_000),
+    "sales": (85_000, 150_000),
+    "marketing": (90_000, 150_000),
+    "operations": (90_000, 155_000),
+    "human_resources": (95_000, 160_000),
+    "finance": (100_000, 170_000),
+    "customer_success": (85_000, 145_000),
+    "general_professional": (90_000, 145_000),
+}
+
+ROLE_KEYWORDS = {
+    "software_engineering": ("software", "engineer", "developer", "backend", "frontend", "full stack", "sre", "devops"),
+    "data_analytics": ("data", "analytics", "analyst", "bi", "machine learning", "ml", "scientist"),
+    "product_management": ("product manager", "product owner"),
+    "design": ("designer", "ux", "ui", "product design"),
+    "sales": ("sales", "account executive", "business development representative", "sales development representative", "partnership"),
+    "marketing": ("marketing", "growth", "content", "demand gen"),
+    "operations": ("operations", "ops", "program manager", "project manager"),
+    "human_resources": ("hr", "human resources", "people ops", "talent"),
+    "finance": ("finance", "accounting", "controller", "fp&a"),
+    "customer_success": ("customer success", "customer support", "support", "implementation"),
+}
+
+ROLE_BONUS_TARGETS = {
+    "software_engineering": (8, 15),
+    "data_analytics": (8, 15),
+    "product_management": (10, 20),
+    "design": (8, 15),
+    "sales": (20, 45),
+    "marketing": (8, 18),
+    "operations": (8, 15),
+    "human_resources": (8, 15),
+    "finance": (10, 20),
+    "customer_success": (8, 18),
+    "general_professional": (8, 15),
+}
+
+ROLE_EQUITY_GUIDANCE = {
+    "software_engineering": "Commonly 0.02%-0.10% equity depending on seniority and company stage.",
+    "data_analytics": "Commonly 0.01%-0.06% equity for IC and analytics leadership tracks.",
+    "product_management": "Commonly 0.02%-0.10% equity; higher at smaller growth-stage companies.",
+    "design": "Commonly 0.01%-0.07% equity depending on scope and level.",
+    "sales": "Equity is often lighter than engineering/product; prioritize cash + variable comp clarity.",
+    "marketing": "Typically 0.01%-0.05% equity, with higher grants for growth leadership roles.",
+    "operations": "Typically 0.01%-0.05% equity for senior operations ownership roles.",
+    "human_resources": "Typically 0.01%-0.05% equity, often weighted toward cash compensation.",
+    "finance": "Typically 0.01%-0.06% equity for strategic finance and leadership paths.",
+    "customer_success": "Typically 0.01%-0.05% equity for post-sales leadership or strategic ownership.",
+    "general_professional": "Use a balanced cash-focused package with selective long-term equity grants.",
+}
+
+CITY_COST_MULTIPLIERS = {
+    "Atlanta": 1.00,
+    "Austin": 1.03,
+    "Boston": 1.16,
+    "Chicago": 1.08,
+    "Dallas": 1.00,
+    "Denver": 1.04,
+    "Los Angeles": 1.15,
+    "Miami": 1.04,
+    "New York City": 1.27,
+    "Philadelphia": 1.05,
+    "Phoenix": 0.97,
+    "San Diego": 1.10,
+    "San Francisco": 1.33,
+    "San Jose": 1.30,
+    "Seattle": 1.18,
+    "Salt Lake City": 0.98,
+    "Washington": 1.14,
+}
+
+CITY_ALIASES = {
+    "nyc": "New York City",
+    "new york": "New York City",
+    "new york city": "New York City",
+    "sf": "San Francisco",
+    "san fran": "San Francisco",
+    "la": "Los Angeles",
+    "washington dc": "Washington",
+    "washington d.c.": "Washington",
+    "sfo": "San Francisco",
+}
+
+EMPLOYMENT_TYPE_MULTIPLIERS = {
+    "full-time exempt": 1.00,
+    "full-time hourly": 1.00,
+    "part-time hourly": 0.55,
+    "contract": 1.08,
+    "internship": 0.45,
+}
+
+
+def _normalize_city(city: str) -> str:
+    value = " ".join(city.strip().split())
+    if not value:
+        return ""
+    lowered = value.lower()
+    if lowered in CITY_ALIASES:
+        return CITY_ALIASES[lowered]
+    return " ".join(part.capitalize() for part in value.split(" "))
+
+
+def _normalize_state(state: str | None) -> str | None:
+    if not state:
+        return None
+    value = state.strip()
+    if not value:
+        return None
+    return value.upper() if len(value) <= 3 else value.title()
+
+
+def _infer_role_family(role_title: str) -> str:
+    lowered = role_title.lower()
+    for family, keywords in ROLE_KEYWORDS.items():
+        if any(keyword in lowered for keyword in keywords):
+            return family
+    return "general_professional"
+
+
+def _experience_multiplier(years_experience: int) -> float:
+    # Keeps guidance conservative at low tenure and progressively raises comp bands.
+    return max(0.82, min(1.45, 0.82 + (years_experience * 0.04)))
+
+
+def _employment_type_multiplier(employment_type: str | None) -> float:
+    if not employment_type:
+        return 1.0
+    return EMPLOYMENT_TYPE_MULTIPLIERS.get(employment_type.strip().lower(), 1.0)
+
+
+def _round_to_thousand(value: float) -> int:
+    return int(round(value / 1000.0) * 1000)
 
 
 @router.get("", response_model=List[OfferLetter])
@@ -129,6 +272,92 @@ async def create_offer_letter(
             offer.company_logo_url,
         )
         return OfferLetter(**dict(row))
+
+
+@router.post(
+    "/plus/recommendation",
+    response_model=OfferGuidanceResponse,
+    dependencies=[Depends(require_feature("offer_letters_plus")), Depends(require_admin_or_client)],
+)
+async def get_offer_package_recommendation(
+    payload: OfferGuidanceRequest,
+):
+    """Generate a compensation recommendation using role, location, and experience heuristics."""
+    normalized_city = _normalize_city(payload.city)
+    normalized_state = _normalize_state(payload.state)
+    role_family = _infer_role_family(payload.role_title)
+    role_known = role_family != "general_professional"
+    city_known = normalized_city in CITY_COST_MULTIPLIERS
+
+    city_multiplier = CITY_COST_MULTIPLIERS.get(normalized_city, 1.0)
+    exp_multiplier = _experience_multiplier(payload.years_experience)
+    employment_multiplier = _employment_type_multiplier(payload.employment_type)
+
+    base_low, base_high = ROLE_BASE_RANGES.get(
+        role_family,
+        ROLE_BASE_RANGES["general_professional"],
+    )
+
+    salary_low = _round_to_thousand(base_low * city_multiplier * exp_multiplier * employment_multiplier)
+    salary_high = _round_to_thousand(base_high * city_multiplier * exp_multiplier * employment_multiplier)
+    if salary_high < salary_low:
+        salary_high = salary_low
+    salary_mid = _round_to_thousand((salary_low + salary_high) / 2.0)
+
+    bonus_low, bonus_high = ROLE_BONUS_TARGETS.get(
+        role_family,
+        ROLE_BONUS_TARGETS["general_professional"],
+    )
+    if payload.years_experience >= 10:
+        bonus_low += 2
+        bonus_high += 3
+
+    normalized_employment_type = (payload.employment_type or "").strip().lower()
+    if normalized_employment_type in {"part-time hourly", "internship"}:
+        bonus_low = 0
+        bonus_high = max(5, bonus_high // 2)
+
+    equity_guidance = ROLE_EQUITY_GUIDANCE.get(
+        role_family,
+        ROLE_EQUITY_GUIDANCE["general_professional"],
+    )
+    if normalized_employment_type in {"part-time hourly", "internship"}:
+        equity_guidance = "Equity is uncommon for this employment type; focus on hourly/term cash terms."
+
+    confidence = 0.70
+    if role_known:
+        confidence += 0.12
+    if city_known:
+        confidence += 0.10
+    if normalized_state:
+        confidence += 0.03
+    confidence = min(0.95, round(confidence, 2))
+
+    rationale = [
+        f"Role family inferred as '{role_family.replace('_', ' ')}' from title '{payload.role_title}'.",
+        f"Applied a {city_multiplier:.2f} location multiplier for {normalized_city or payload.city}.",
+        f"Applied an experience multiplier of {exp_multiplier:.2f} for {payload.years_experience} years.",
+    ]
+    if payload.employment_type:
+        rationale.append(
+            f"Applied an employment-type multiplier of {employment_multiplier:.2f} for '{payload.employment_type}'."
+        )
+    if not city_known:
+        rationale.append("City not in curated metro table; fallback national location factor was used.")
+
+    return OfferGuidanceResponse(
+        role_family=role_family,
+        normalized_city=normalized_city or payload.city.strip(),
+        normalized_state=normalized_state,
+        salary_low=salary_low,
+        salary_mid=salary_mid,
+        salary_high=salary_high,
+        bonus_target_pct_low=bonus_low,
+        bonus_target_pct_high=bonus_high,
+        equity_guidance=equity_guidance,
+        confidence=confidence,
+        rationale=rationale,
+    )
 
 
 @router.get("/{offer_id}", response_model=OfferLetter)

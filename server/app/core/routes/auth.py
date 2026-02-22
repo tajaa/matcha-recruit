@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 TEST_ACCOUNT_FEATURES = {
     "offer_letters": True,
+    "offer_letters_plus": True,
     "policies": True,
     "handbooks": True,
     "compliance": True,
@@ -1917,13 +1918,14 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                 """
                 SELECT c.id, c.user_id, c.company_id, comp.name as company_name,
                        comp.status as company_status, comp.rejection_reason,
-                       COALESCE(comp.enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features,
+                       COALESCE(comp.enabled_features, $2::jsonb) as enabled_features,
                        c.name, c.phone, c.job_title, c.created_at
                 FROM clients c
                 JOIN companies comp ON c.company_id = comp.id
                 WHERE c.user_id = $1
                 """,
-                current_user.id
+                current_user.id,
+                default_company_features_json(),
             )
 
             # Compute which enabled features still need onboarding setup
@@ -1993,14 +1995,15 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
             profile = await conn.fetchrow(
                 """
                 SELECT e.id, e.user_id, e.org_id, c.name as company_name,
-                       COALESCE(c.enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features,
+                       COALESCE(c.enabled_features, $2::jsonb) as enabled_features,
                        e.first_name, e.last_name, e.email, e.work_state,
                        e.employment_type, e.start_date, e.manager_id, e.created_at
                 FROM employees e
                 JOIN companies c ON e.org_id = c.id
                 WHERE e.user_id = $1
                 """,
-                current_user.id
+                current_user.id,
+                default_company_features_json(),
             )
             return {
                 "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},

@@ -90,6 +90,28 @@ class OfferLetterUpdate(BaseModel):
     company_logo_url: Optional[str] = None
 
 
+class OfferGuidanceRequest(BaseModel):
+    role_title: str = Field(..., min_length=2, max_length=120)
+    city: str = Field(..., min_length=2, max_length=120)
+    state: Optional[str] = Field(default=None, min_length=2, max_length=80)
+    years_experience: int = Field(..., ge=0, le=40)
+    employment_type: Optional[str] = Field(default=None, max_length=80)
+
+
+class OfferGuidanceResponse(BaseModel):
+    role_family: str
+    normalized_city: str
+    normalized_state: Optional[str] = None
+    salary_low: int
+    salary_mid: int
+    salary_high: int
+    bonus_target_pct_low: int
+    bonus_target_pct_high: int
+    equity_guidance: str
+    confidence: float
+    rationale: list[str]
+
+
 class OfferLetter(OfferLetterBase):
     id: UUID
     status: OfferLetterStatus

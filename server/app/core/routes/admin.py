@@ -140,7 +140,7 @@ async def admin_overview():
 
 # Known feature keys that can be toggled
 KNOWN_FEATURES = {
-    "offer_letters", "policies", "handbooks", "compliance", "compliance_plus",
+    "offer_letters", "offer_letters_plus", "policies", "handbooks", "compliance", "compliance_plus",
     "employees", "vibe_checks", "enps", "performance_reviews",
     "er_copilot", "incidents", "time_off", "accommodations", "interview_prep",
     "internal_mobility",
@@ -536,10 +536,11 @@ async def list_company_features():
         rows = await conn.fetch(
             """
             SELECT id, name as company_name, industry, size, status,
-                   COALESCE(enabled_features, '{"offer_letters": true}'::jsonb) as enabled_features
+                   COALESCE(enabled_features, $1::jsonb) as enabled_features
             FROM companies
             ORDER BY name
-            """
+            """,
+            default_company_features_json(),
         )
 
         return [

@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 
-from ..core.feature_flags import merge_company_features
+from ..core.feature_flags import default_company_features_json, merge_company_features
 from ..core.dependencies import get_current_user, require_roles
 from ..database import get_connection
 
@@ -386,11 +386,12 @@ def require_feature(feature_name: str):
         async with get_connection() as conn:
             enabled_features = await conn.fetchval(
                 """
-                SELECT COALESCE(enabled_features, '{"offer_letters": true}'::jsonb)
+                SELECT COALESCE(enabled_features, $2::jsonb)
                 FROM companies
                 WHERE id = $1
                 """,
                 company_id,
+                default_company_features_json(),
             )
             if enabled_features is None:
                 raise HTTPException(

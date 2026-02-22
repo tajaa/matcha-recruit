@@ -22,6 +22,7 @@ router = APIRouter()
 
 KNOWN_FEATURES = {
     "offer_letters",
+    "offer_letters_plus",
     "policies",
     "handbooks",
     "compliance",

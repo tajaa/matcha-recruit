@@ -128,6 +128,8 @@ import type {
   HandbookAcknowledgementSummary,
   OfferLetter,
   OfferLetterCreate,
+  OfferGuidanceRequest,
+  OfferGuidanceResponse,
   OfferLetterUpdate,
     BlogPost,
     BlogPostCreate,
@@ -2289,6 +2291,12 @@ export const offerLetters = {
   update: (id: string, data: OfferLetterUpdate) =>
     request<OfferLetter>(`/offer-letters/${id}`, {
       method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  getPlusRecommendation: (data: OfferGuidanceRequest) =>
+    request<OfferGuidanceResponse>('/offer-letters/plus/recommendation', {
+      method: 'POST',
       body: JSON.stringify(data),
     }),
 

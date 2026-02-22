@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { Button } from '../components/Button';
 import { ChevronRight, Check, ArrowRight, ArrowLeft, Upload, X } from 'lucide-react';
 import { offerLetters as offerLettersApi } from '../api/client';
-import type { OfferLetter, OfferLetterCreate } from '../types';
+import { useAuth } from '../context/AuthContext';
+import type { OfferGuidanceResponse, OfferLetter, OfferLetterCreate } from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const EMPLOYMENT_TYPES = [
@@ -12,6 +13,36 @@ const EMPLOYMENT_TYPES = [
   'Contract',
   'Internship',
 ] as const;
+
+const OFFER_GUIDANCE_CITY_STATE: Record<string, string> = {
+  'Atlanta': 'GA',
+  'Austin': 'TX',
+  'Boston': 'MA',
+  'Chicago': 'IL',
+  'Dallas': 'TX',
+  'Denver': 'CO',
+  'Los Angeles': 'CA',
+  'Miami': 'FL',
+  'New York City': 'NY',
+  'Philadelphia': 'PA',
+  'Phoenix': 'AZ',
+  'San Diego': 'CA',
+  'San Francisco': 'CA',
+  'San Jose': 'CA',
+  'Seattle': 'WA',
+  'Salt Lake City': 'UT',
+  'Washington': 'DC',
+};
+
+const OFFER_GUIDANCE_CITY_OPTIONS = Object.keys(OFFER_GUIDANCE_CITY_STATE);
+
+function formatUsd(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(value);
+}
 
 const initialFormData: OfferLetterCreate = {
   candidate_name: '',
@@ -264,6 +295,8 @@ function ChevronDownIcon({ className = '' }: { className?: string }) {
 }
 
 export function OfferLetters() {
+  const { hasFeature } = useAuth();
+  const offerLettersPlusEnabled = hasFeature('offer_letters_plus');
   const [offerLetters, setOfferLetters] = useState<OfferLetter[]>([]);
   const [selectedLetter, setSelectedLetter] = useState<OfferLetter | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -281,6 +314,16 @@ export function OfferLetters() {
 
   // Form state
   const [formData, setFormData] = useState<OfferLetterCreate>(initialFormData);
+
+  // Offer Guidance Plus state
+  const [guidanceRoleTitle, setGuidanceRoleTitle] = useState('');
+  const [guidanceCity, setGuidanceCity] = useState('San Francisco');
+  const [guidanceState, setGuidanceState] = useState('CA');
+  const [guidanceYearsExperience, setGuidanceYearsExperience] = useState(5);
+  const [guidanceEmploymentType, setGuidanceEmploymentType] = useState<string>('Full-Time Exempt');
+  const [guidanceLoading, setGuidanceLoading] = useState(false);
+  const [guidanceError, setGuidanceError] = useState<string | null>(null);
+  const [guidanceResult, setGuidanceResult] = useState<OfferGuidanceResponse | null>(null);
 
   useEffect(() => {
     loadOfferLetters();
@@ -407,6 +450,43 @@ export function OfferLetters() {
     setFormData({ ...formData, company_logo_url: '' });
     if (logoInputRef.current) {
       logoInputRef.current.value = '';
+    }
+  };
+
+  const handleGuidanceCityChange = (city: string) => {
+    setGuidanceCity(city);
+    const mappedState = OFFER_GUIDANCE_CITY_STATE[city];
+    if (mappedState) {
+      setGuidanceState(mappedState);
+    }
+  };
+
+  const handleGenerateGuidance = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (guidanceLoading) return;
+
+    const trimmedRole = guidanceRoleTitle.trim();
+    if (!trimmedRole) {
+      setGuidanceError('Role title is required');
+      return;
+    }
+
+    try {
+      setGuidanceLoading(true);
+      setGuidanceError(null);
+      const result = await offerLettersApi.getPlusRecommendation({
+        role_title: trimmedRole,
+        city: guidanceCity,
+        state: guidanceState,
+        years_experience: guidanceYearsExperience,
+        employment_type: guidanceEmploymentType,
+      });
+      setGuidanceResult(result);
+    } catch (error) {
+      console.error('Failed to generate offer guidance:', error);
+      setGuidanceError(error instanceof Error ? error.message : 'Failed to generate guidance');
+    } finally {
+      setGuidanceLoading(false);
     }
   };
 
@@ -907,6 +987,148 @@ export function OfferLetters() {
       </div>
 
       <OfferCycleWizard offerLetters={offerLetters} />
+
+      {offerLettersPlusEnabled && (
+        <section className="mb-8 border border-white/10 bg-zinc-950/70">
+          <div className="border-b border-white/10 px-4 py-3 sm:px-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xs font-bold text-white uppercase tracking-widest">Offer Guidance Plus</h2>
+              <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-400/10 text-amber-300 border border-amber-400/30">
+                Plus Feature
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Generate compensation guidance by role, city, and experience before drafting the offer.
+            </p>
+          </div>
+
+          <form className="px-4 py-4 sm:px-5 sm:py-5" onSubmit={handleGenerateGuidance}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
+              <div className="lg:col-span-2">
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Role Title</label>
+                <input
+                  type="text"
+                  value={guidanceRoleTitle}
+                  onChange={(e) => setGuidanceRoleTitle(e.target.value)}
+                  placeholder="e.g. Senior Product Manager"
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">City</label>
+                <select
+                  value={guidanceCity}
+                  onChange={(e) => handleGuidanceCityChange(e.target.value)}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
+                >
+                  {OFFER_GUIDANCE_CITY_OPTIONS.map((city) => (
+                    <option key={city} value={city}>{city}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">State</label>
+                <input
+                  type="text"
+                  value={guidanceState}
+                  onChange={(e) => setGuidanceState(e.target.value)}
+                  maxLength={3}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Experience (Years)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={40}
+                  value={guidanceYearsExperience}
+                  onChange={(e) => setGuidanceYearsExperience(Math.max(0, Math.min(40, Number(e.target.value) || 0)))}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="w-full sm:w-64">
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Employment Type</label>
+                <select
+                  value={guidanceEmploymentType}
+                  onChange={(e) => setGuidanceEmploymentType(e.target.value)}
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
+                >
+                  {EMPLOYMENT_TYPES.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="submit"
+                disabled={guidanceLoading}
+                className="inline-flex items-center justify-center px-5 py-2 bg-white text-black text-xs font-bold uppercase tracking-wider hover:bg-zinc-200 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              >
+                {guidanceLoading ? 'Generating...' : 'Generate Guidance'}
+              </button>
+            </div>
+
+            {guidanceError && (
+              <p className="mt-3 text-xs text-red-400">{guidanceError}</p>
+            )}
+
+            {guidanceResult && (
+              <div className="mt-5 border border-white/10 bg-zinc-900/50 p-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-500">Base Salary Range</p>
+                    <p className="mt-1 text-sm font-bold text-white">
+                      {formatUsd(guidanceResult.salary_low)} - {formatUsd(guidanceResult.salary_high)}
+                    </p>
+                    <p className="text-[11px] text-zinc-500">Midpoint: {formatUsd(guidanceResult.salary_mid)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-500">Bonus Target</p>
+                    <p className="mt-1 text-sm font-bold text-white">
+                      {guidanceResult.bonus_target_pct_low}% - {guidanceResult.bonus_target_pct_high}%
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-500">Role Family</p>
+                    <p className="mt-1 text-sm font-bold text-white capitalize">
+                      {guidanceResult.role_family.replace(/_/g, ' ')}
+                    </p>
+                    <p className="text-[11px] text-zinc-500">
+                      {guidanceResult.normalized_city}
+                      {guidanceResult.normalized_state ? `, ${guidanceResult.normalized_state}` : ''}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-500">Confidence</p>
+                    <p className="mt-1 text-sm font-bold text-white">{Math.round(guidanceResult.confidence * 100)}%</p>
+                    <div className="mt-2 h-1.5 w-full bg-zinc-800">
+                      <div
+                        className="h-full bg-emerald-400 transition-all"
+                        style={{ width: `${Math.round(guidanceResult.confidence * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <p className="text-[10px] uppercase tracking-wider text-zinc-500">Equity Guidance</p>
+                  <p className="mt-1 text-xs text-zinc-300">{guidanceResult.equity_guidance}</p>
+                </div>
+                <div className="mt-4">
+                  <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Rationale</p>
+                  <ul className="space-y-1.5 text-xs text-zinc-400">
+                    {guidanceResult.rationale.map((line) => (
+                      <li key={line}>• {line}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </form>
+        </section>
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center min-h-[20vh]">

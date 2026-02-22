@@ -2267,6 +2267,28 @@ export interface OfferLetterUpdate {
   company_logo_url?: string;
 }
 
+export interface OfferGuidanceRequest {
+  role_title: string;
+  city: string;
+  state?: string;
+  years_experience: number;
+  employment_type?: string;
+}
+
+export interface OfferGuidanceResponse {
+  role_family: string;
+  normalized_city: string;
+  normalized_state: string | null;
+  salary_low: number;
+  salary_mid: number;
+  salary_high: number;
+  bonus_target_pct_low: number;
+  bonus_target_pct_high: number;
+  equity_guidance: string;
+  confidence: number;
+  rationale: string[];
+}
+
 // Business Registration types
 export type BusinessRegistrationStatus = 'pending' | 'approved' | 'rejected';
 

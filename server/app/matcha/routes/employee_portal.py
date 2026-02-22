@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from ...database import get_connection
 from ...config import get_settings
+from ...core.feature_flags import default_company_features_json
 from ...core.models.auth import CurrentUser
 from ...core.services.policy_service import SignatureService
 from ..models.employee import (
@@ -970,9 +971,10 @@ async def get_pending_tasks(
 
         # Only show PTO approval tasks if time_off feature is enabled
         features_row = await conn.fetchval(
-            """SELECT COALESCE(comp.enabled_features, '{"offer_letters": true}'::jsonb)
+            """SELECT COALESCE(comp.enabled_features, $2::jsonb)
                FROM companies comp WHERE comp.id = $1""",
-            employee["org_id"]
+            employee["org_id"],
+            default_company_features_json(),
         )
         features = _json.loads(features_row) if isinstance(features_row, str) else (features_row or {})
 
