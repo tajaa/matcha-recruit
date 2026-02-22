@@ -1,6 +1,7 @@
 """Admin routes for business registration approval workflow and company feature management."""
 
 import asyncio
+import difflib
 import json
 import logging
 import re
@@ -9,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Any, AsyncGenerator
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, HTTPException, Depends, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -52,6 +54,27 @@ TOP_15_METROS: list[dict[str, str]] = [
     {"city": "columbus", "state": "OH", "label": "Columbus"},
     {"city": "charlotte", "state": "NC", "label": "Charlotte"},
 ]
+
+# Fallback allowlist for environments where jurisdiction_reference is unavailable.
+# Keep this intentionally constrained and canonical.
+FALLBACK_ALLOWED_CITIES_BY_STATE: dict[str, set[str]] = {
+    "NY": {"new york"},
+    "CA": {"los angeles", "san diego", "san jose"},
+    "IL": {"chicago"},
+    "TX": {"houston", "san antonio", "dallas", "austin", "fort worth"},
+    "AZ": {"phoenix"},
+    "PA": {"philadelphia"},
+    "FL": {"jacksonville"},
+    "OH": {"columbus"},
+    "NC": {"charlotte"},
+    "UT": {"salt lake city"},
+}
+
+FALLBACK_CITY_ALIASES: dict[tuple[str, str], str] = {
+    ("NY", "new york city"): "new york",
+    ("NY", "nyc"): "new york",
+    ("UT", "salt lake"): "salt lake city",
+}
 
 
 @router.get("/api-usage", dependencies=[Depends(require_admin)])
@@ -1789,17 +1812,148 @@ class JurisdictionCreateRequest(BaseModel):
     parent_id: Optional[UUID] = None
 
 
+def _normalize_city_input(city: str) -> str:
+    normalized = city.lower().strip()
+    normalized = normalized.replace(".", "")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
+def _city_display(city: str) -> str:
+    return " ".join(part.capitalize() for part in city.split())
+
+
+def _canonicalize_city_fallback(city: str, state: str) -> str:
+    state_key = state.upper().strip()[:2]
+    city_key = _normalize_city_input(city)
+    city_key = FALLBACK_CITY_ALIASES.get((state_key, city_key), city_key)
+
+    allowed = FALLBACK_ALLOWED_CITIES_BY_STATE.get(state_key, set())
+    if city_key in allowed:
+        return city_key
+
+    suggestion = None
+    if allowed:
+        suggestion_match = difflib.get_close_matches(city_key, sorted(allowed), n=1, cutoff=0.72)
+        suggestion = suggestion_match[0] if suggestion_match else None
+
+    suggestion_msg = f" Did you mean '{_city_display(suggestion)}'?" if suggestion else ""
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            f"Unsupported city '{city.strip()}' for state {state_key}."
+            f"{suggestion_msg}"
+        ),
+    )
+
+
+async def _canonicalize_city_from_reference(conn: asyncpg.Connection, city: str, state: str) -> str:
+    state_key = state.upper().strip()[:2]
+    city_key = _normalize_city_input(city)
+    city_key = FALLBACK_CITY_ALIASES.get((state_key, city_key), city_key)
+
+    match = await conn.fetchrow(
+        """
+        SELECT city
+        FROM jurisdiction_reference
+        WHERE state = $2
+          AND (
+            city = $1
+            OR EXISTS (
+              SELECT 1
+              FROM unnest(COALESCE(aliases, ARRAY[]::text[])) AS alias
+              WHERE LOWER(alias) = $1
+            )
+          )
+        LIMIT 1
+        """,
+        city_key,
+        state_key,
+    )
+    if match:
+        return match["city"]
+
+    candidates = await conn.fetch(
+        "SELECT city FROM jurisdiction_reference WHERE state = $1 ORDER BY city",
+        state_key,
+    )
+    candidate_cities = [row["city"] for row in candidates]
+    suggestion = None
+    if candidate_cities:
+        suggestion_match = difflib.get_close_matches(city_key, candidate_cities, n=1, cutoff=0.72)
+        suggestion = suggestion_match[0] if suggestion_match else None
+
+    suggestion_msg = f" Did you mean '{_city_display(suggestion)}'?" if suggestion else ""
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            f"Unsupported city '{city.strip()}' for state {state_key}."
+            f"{suggestion_msg}"
+        ),
+    )
+
+
+async def _canonicalize_city(conn: asyncpg.Connection, city: str, state: str) -> str:
+    try:
+        return await _canonicalize_city_from_reference(conn, city, state)
+    except asyncpg.UndefinedTableError:
+        return _canonicalize_city_fallback(city, state)
+
+
+async def _is_supported_city(conn: asyncpg.Connection, city: str, state: str) -> bool:
+    state_key = state.upper().strip()[:2]
+    city_key = _normalize_city_input(city)
+    city_key = FALLBACK_CITY_ALIASES.get((state_key, city_key), city_key)
+
+    try:
+        exists = await conn.fetchval(
+            """
+            SELECT 1
+            FROM jurisdiction_reference
+            WHERE state = $2
+              AND (
+                city = $1
+                OR EXISTS (
+                  SELECT 1
+                  FROM unnest(COALESCE(aliases, ARRAY[]::text[])) AS alias
+                  WHERE LOWER(alias) = $1
+                )
+              )
+            LIMIT 1
+            """,
+            city_key,
+            state_key,
+        )
+        return bool(exists)
+    except asyncpg.UndefinedTableError:
+        return city_key in FALLBACK_ALLOWED_CITIES_BY_STATE.get(state_key, set())
+
+
 @router.post("/jurisdictions", dependencies=[Depends(require_admin)])
 async def create_jurisdiction(request: JurisdictionCreateRequest):
     """Create or upsert a jurisdiction. Idempotent on (city, state)."""
-    city = request.city.lower().strip()
+    raw_city = request.city.strip()
     state = request.state.upper().strip()[:2]
     county = request.county.strip() if request.county else None
 
-    if not city or not state:
+    if not raw_city or not state:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="City and state are required")
 
     async with get_connection() as conn:
+        city = await _canonicalize_city(conn, raw_city, state)
+
+        if not county:
+            try:
+                county_from_ref = await conn.fetchval(
+                    "SELECT county FROM jurisdiction_reference WHERE city = $1 AND state = $2",
+                    city,
+                    state,
+                )
+                if county_from_ref:
+                    county = county_from_ref
+            except asyncpg.UndefinedTableError:
+                pass
+
         # Validate parent_id if provided
         if request.parent_id is not None:
             parent = await conn.fetchrow("SELECT id FROM jurisdictions WHERE id = $1", request.parent_id)
@@ -2065,6 +2219,14 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
         j = await conn.fetchrow("SELECT * FROM jurisdictions WHERE id = $1", jurisdiction_id)
         if not j:
             raise HTTPException(status_code=404, detail="Jurisdiction not found")
+        if not await _is_supported_city(conn, j["city"], j["state"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Unsupported city '{_city_display(_normalize_city_input(j['city']))}, {j['state']}' "
+                    "for research. Use a supported canonical city (for example: 'Salt Lake City')."
+                ),
+            )
 
         # Fetch children
         children = await conn.fetch(
@@ -2870,6 +3032,8 @@ async def check_jurisdiction(jurisdiction_id: UUID):
                     yield ": heartbeat\n\n"
                 else:
                     yield _to_sse(event)
+        except HTTPException as exc:
+            yield _to_sse({"type": "error", "message": str(exc.detail)})
         except Exception:
             logger.error("Jurisdiction check failed for %s", jurisdiction_id, exc_info=True)
             yield _to_sse({"type": "error", "message": "Jurisdiction check failed"})
