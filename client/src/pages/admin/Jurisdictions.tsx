@@ -380,6 +380,16 @@ export function Jurisdictions() {
     );
   }, [jurisdictions, search]);
 
+  const groupedByState = useMemo(() => {
+    const groups: Record<string, Jurisdiction[]> = {};
+    for (const j of filteredJurisdictions) {
+      const key = j.state || '—';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(j);
+    }
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+  }, [filteredJurisdictions]);
+
   const handleToggle = async (taskKey: string, currentEnabled: boolean) => {
     setToggling(taskKey);
     try {
@@ -774,7 +784,14 @@ export function Jurisdictions() {
                       <div className="w-7" />
                     </div>
                   </div>
-                  {filteredJurisdictions.map((j) => {
+                  {groupedByState.map(([state, stateJurisdictions]) => (
+                    <div key={state}>
+                      {/* State group header */}
+                      <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/80 border-b border-white/[0.05]">
+                        <span className="text-[9px] uppercase tracking-[0.2em] font-mono font-bold text-zinc-400">{state}</span>
+                        <span className="text-[9px] font-mono text-zinc-600">{stateJurisdictions.length}</span>
+                      </div>
+                      {stateJurisdictions.map((j) => {
                     const isExpanded = expanded === j.id;
                     const detail = detailCache[j.id];
                     const isLoading = detailLoading === j.id;
@@ -1037,6 +1054,8 @@ export function Jurisdictions() {
                       </div>
                     );
                   })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
