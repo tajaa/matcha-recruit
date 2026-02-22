@@ -803,6 +803,13 @@ export const internalMobilityWalkthrough: WalkthroughConfig = {
       action: 'Click Show Me anytime to replay this walkthrough.',
     },
     {
+      target: 'internal-mobility-wizard',
+      title: 'Step-by-Step Wizard',
+      content: 'This cycle wizard explains exactly what to do next and includes shortcuts to Create and Applications.',
+      placement: 'bottom',
+      action: 'Use Step and Current Step labels to track progress from setup to alignment.',
+    },
+    {
       target: 'internal-mobility-create-form',
       title: 'Create Opportunity',
       content: 'Create role or project opportunities with skills, department, and duration so employees can discover growth paths.',
@@ -819,9 +826,16 @@ export const internalMobilityWalkthrough: WalkthroughConfig = {
     {
       target: 'internal-mobility-opportunities-list',
       title: 'Opportunity List',
-      content: 'Review each opportunity card, validate required skills, and adjust status directly from this list.',
+      content: 'Review each opportunity card, validate required skills, adjust status, and jump straight to matching applicants.',
       placement: 'top',
       ifMissing: 'No opportunities match the active filters. Create your first opportunity above.',
+    },
+    {
+      target: 'internal-mobility-opportunity-view-apps',
+      title: 'View Applications',
+      content: 'Each opportunity card includes a button to filter the queue to just that opportunity and scroll to applications.',
+      placement: 'top',
+      ifMissing: 'This appears when at least one opportunity card is visible.',
     },
     {
       target: 'internal-mobility-applications-list',
@@ -836,6 +850,13 @@ export const internalMobilityWalkthrough: WalkthroughConfig = {
       content: 'Move applications through stages and record manager notification to keep transitions coordinated and private.',
       placement: 'left',
       ifMissing: 'Status controls appear once at least one application exists.',
+    },
+    {
+      target: 'internal-mobility-application-detail',
+      title: 'Application Detail Panel',
+      content: 'Open any application card to inspect submission context, notes, review timestamps, and manager-notified timing.',
+      placement: 'top',
+      ifMissing: 'Click "View Details" on an application to open this panel.',
     },
   ],
 };

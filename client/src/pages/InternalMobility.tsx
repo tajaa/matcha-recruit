@@ -80,6 +80,181 @@ function statusPillClass(status: string): string {
   }
 }
 
+type MobilityCycleStep = {
+  id: number;
+  title: string;
+  description: string;
+  action: string;
+};
+
+const MOBILITY_CYCLE_STEPS: MobilityCycleStep[] = [
+  {
+    id: 1,
+    title: 'Set Scope',
+    description: 'Choose the company scope (admin) and launch the guide so actions run against the right tenant.',
+    action: 'Enter company UUID and confirm data loads.',
+  },
+  {
+    id: 2,
+    title: 'Create Opportunity',
+    description: 'Add role/project opportunities with clear skill requirements and department context.',
+    action: 'Create at least one draft or active opportunity.',
+  },
+  {
+    id: 3,
+    title: 'Activate Opportunities',
+    description: 'Move ready opportunities to Active so employees can discover and apply in the portal.',
+    action: 'Set status to Active for publish-ready roles/projects.',
+  },
+  {
+    id: 4,
+    title: 'Collect Interest',
+    description: 'Employees save/apply from their portal feed; applications appear in your queue below.',
+    action: 'Click "View Applications" on an opportunity to jump to matching applicants.',
+  },
+  {
+    id: 5,
+    title: 'Review + Align',
+    description: 'Advance applications through review stages and record manager notification timing.',
+    action: 'Open an application, update status, then mark manager notified.',
+  },
+];
+
+function ChevronDownIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function MobilityCycleWizard({
+  opportunitiesByStatus,
+  applicationsByStatus,
+  onJumpCreate,
+  onJumpApplications,
+}: {
+  opportunitiesByStatus: Record<string, number>;
+  applicationsByStatus: Record<string, number>;
+  onJumpCreate: () => void;
+  onJumpApplications: () => void;
+}) {
+  const storageKey = 'internal-mobility-wizard-collapsed-v1';
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(storageKey) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try {
+      localStorage.setItem(storageKey, String(next));
+    } catch {
+      // Ignore localStorage write failures.
+    }
+  };
+
+  const activeOpportunityCount = opportunitiesByStatus.active || 0;
+  const totalOpportunityCount = Object.values(opportunitiesByStatus).reduce((sum, value) => sum + value, 0);
+  const totalApplicationCount = Object.values(applicationsByStatus).reduce((sum, value) => sum + value, 0);
+  const reviewedApplicationCount =
+    (applicationsByStatus.in_review || 0) +
+    (applicationsByStatus.shortlisted || 0) +
+    (applicationsByStatus.aligned || 0) +
+    (applicationsByStatus.closed || 0);
+
+  const activeStep =
+    reviewedApplicationCount > 0
+      ? 5
+      : totalApplicationCount > 0
+      ? 4
+      : activeOpportunityCount > 0
+      ? 3
+      : totalOpportunityCount > 0
+      ? 2
+      : 1;
+
+  const currentStep = MOBILITY_CYCLE_STEPS[activeStep - 1];
+
+  return (
+    <section className="border border-white/10 bg-zinc-950/60" data-tour="internal-mobility-wizard">
+      <button
+        type="button"
+        onClick={toggle}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Mobility Cycle</span>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
+              Step {activeStep} of 5
+            </span>
+            <span className="text-[10px] text-zinc-600 hidden sm:inline">{currentStep.title}</span>
+          </div>
+        </div>
+        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-200 shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
+      </button>
+
+      {!collapsed && (
+        <div className="border-t border-white/10">
+          <ol className="px-5 pt-5 pb-2 grid grid-cols-1 md:grid-cols-5 gap-2">
+            {MOBILITY_CYCLE_STEPS.map((step) => {
+              const isComplete = step.id < activeStep;
+              const isActive = step.id === activeStep;
+              return (
+                <li
+                  key={step.id}
+                  className={`p-3 border text-[10px] uppercase tracking-wider ${
+                    isActive
+                      ? 'border-white text-white bg-white/[0.05]'
+                      : isComplete
+                      ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
+                      : 'border-zinc-800 text-zinc-500 bg-zinc-900/40'
+                  }`}
+                >
+                  <div className="font-bold">Step {step.id}</div>
+                  <div className="mt-1">{step.title}</div>
+                </li>
+              );
+            })}
+          </ol>
+
+          <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="text-xs font-bold text-white uppercase tracking-wider">{currentStep.title}</span>
+              <span className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-white/10 text-zinc-300 border border-white/10">
+                Current Step
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-400 leading-relaxed">{currentStep.description}</p>
+            <p className="text-[11px] text-emerald-300/80 font-medium mt-2">→ {currentStep.action}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onJumpCreate}
+                className="px-3 py-1.5 border border-zinc-700 text-[10px] uppercase tracking-widest text-zinc-200"
+              >
+                Jump to Create
+              </button>
+              <button
+                type="button"
+                onClick={onJumpApplications}
+                className="px-3 py-1.5 border border-zinc-700 text-[10px] uppercase tracking-widest text-zinc-200"
+              >
+                Jump to Applications
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function InternalMobility() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -90,6 +265,9 @@ export default function InternalMobility() {
   const [opportunityStatusFilter, setOpportunityStatusFilter] = useState<string>('');
   const [opportunityTypeFilter, setOpportunityTypeFilter] = useState<string>('');
   const [applicationStatusFilter, setApplicationStatusFilter] = useState<string>('');
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
+  const [selectedOpportunityLabel, setSelectedOpportunityLabel] = useState<string | null>(null);
+  const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [loadingOpportunities, setLoadingOpportunities] = useState(true);
   const [loadingApplications, setLoadingApplications] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -115,6 +293,59 @@ export default function InternalMobility() {
       return acc;
     }, {});
   }, [applications]);
+
+  const applicationCountsByOpportunity = useMemo(() => {
+    return applications.reduce<Record<string, number>>((acc, item) => {
+      acc[item.opportunity_id] = (acc[item.opportunity_id] || 0) + 1;
+      return acc;
+    }, {});
+  }, [applications]);
+
+  const filteredApplications = useMemo(() => {
+    if (!selectedOpportunityId) return applications;
+    return applications.filter((application) => application.opportunity_id === selectedOpportunityId);
+  }, [applications, selectedOpportunityId]);
+
+  const selectedApplication = useMemo(() => {
+    if (!selectedApplicationId) return null;
+    return filteredApplications.find((application) => application.id === selectedApplicationId) || null;
+  }, [filteredApplications, selectedApplicationId]);
+
+  const jumpToSection = useCallback((tourId: string) => {
+    const section = document.querySelector(`[data-tour="${tourId}"]`);
+    if (section) {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
+
+  const jumpToCreate = useCallback(() => {
+    jumpToSection('internal-mobility-create-form');
+  }, [jumpToSection]);
+
+  const jumpToApplications = useCallback(() => {
+    jumpToSection('internal-mobility-applications-list');
+  }, [jumpToSection]);
+
+  const handleOpportunityApplicationsView = useCallback(
+    (opportunity: InternalMobilityOpportunity) => {
+      setSelectedOpportunityId(opportunity.id);
+      setSelectedOpportunityLabel(opportunity.title);
+      setSelectedApplicationId(null);
+      if (applicationStatusFilter) {
+        setApplicationStatusFilter('');
+      }
+      jumpToApplications();
+      setNotice(`Showing applications for "${opportunity.title}".`);
+      setError(null);
+    },
+    [applicationStatusFilter, jumpToApplications],
+  );
+
+  const clearOpportunityApplicationFilter = useCallback(() => {
+    setSelectedOpportunityId(null);
+    setSelectedOpportunityLabel(null);
+    setSelectedApplicationId(null);
+  }, []);
 
   const loadOpportunities = useCallback(async () => {
     if (adminScopeMissing) {
@@ -168,6 +399,21 @@ export default function InternalMobility() {
   useEffect(() => {
     void loadApplications();
   }, [loadApplications]);
+
+  useEffect(() => {
+    if (!selectedApplicationId) return;
+    const stillVisible = filteredApplications.some((application) => application.id === selectedApplicationId);
+    if (!stillVisible) {
+      setSelectedApplicationId(null);
+    }
+  }, [filteredApplications, selectedApplicationId]);
+
+  useEffect(() => {
+    if (!adminScopeMissing) return;
+    setSelectedOpportunityId(null);
+    setSelectedOpportunityLabel(null);
+    setSelectedApplicationId(null);
+  }, [adminScopeMissing]);
 
   const handleCreateOpportunity = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -334,6 +580,13 @@ export default function InternalMobility() {
           {notice}
         </div>
       )}
+
+      <MobilityCycleWizard
+        opportunitiesByStatus={opportunitiesByStatus}
+        applicationsByStatus={applicationsByStatus}
+        onJumpCreate={jumpToCreate}
+        onJumpApplications={jumpToApplications}
+      />
 
       <section className="border border-white/10 bg-zinc-900/40 p-5 md:p-6" data-tour="internal-mobility-create-form">
         <h2 className="text-sm font-bold text-white uppercase tracking-wider">Create Opportunity</h2>
@@ -579,6 +832,18 @@ export default function InternalMobility() {
                     </span>
                   </div>
                 </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2" data-tour="internal-mobility-opportunity-view-apps">
+                  <button
+                    type="button"
+                    onClick={() => handleOpportunityApplicationsView(opportunity)}
+                    className="px-3 py-1.5 border border-zinc-700 text-xs text-zinc-200 hover:bg-zinc-900/60"
+                  >
+                    View Applications ({applicationCountsByOpportunity[opportunity.id] || 0})
+                  </button>
+                  <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                    Click to jump to applicant queue for this opportunity
+                  </span>
+                </div>
               </article>
             ))}
           </div>
@@ -614,6 +879,15 @@ export default function InternalMobility() {
           >
             Refresh
           </button>
+          {selectedOpportunityId && (
+            <button
+              type="button"
+              onClick={clearOpportunityApplicationFilter}
+              className="px-3 py-2 border border-zinc-700 text-zinc-200 text-[10px] uppercase tracking-widest"
+            >
+              Show All Opportunities
+            </button>
+          )}
         </div>
 
         <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono">
@@ -622,18 +896,35 @@ export default function InternalMobility() {
           {applicationsByStatus.closed || 0}
         </div>
 
+        {selectedOpportunityId && (
+          <div className="text-xs text-zinc-300 border border-zinc-700 bg-zinc-950/60 px-3 py-2">
+            Showing applications for <span className="font-semibold text-white">{selectedOpportunityLabel || 'selected opportunity'}</span>
+            {' '}({filteredApplications.length})
+          </div>
+        )}
+
         {adminScopeMissing ? (
           <div className="text-sm text-zinc-500 py-8">Enter a company scope to view applications.</div>
         ) : loadingApplications ? (
           <div className="text-xs text-zinc-500 uppercase tracking-wider py-8">Loading applications...</div>
-        ) : applications.length === 0 ? (
-          <div className="text-sm text-zinc-500 py-8">No applications match current filters.</div>
+        ) : filteredApplications.length === 0 ? (
+          <div className="text-sm text-zinc-500 py-8">
+            {selectedOpportunityId
+              ? 'No applications found for the selected opportunity.'
+              : 'No applications match current filters.'}
+          </div>
         ) : (
           <div className="space-y-3">
-            {applications.map((application) => {
+            {filteredApplications.map((application) => {
               const managerNotified = Boolean(application.manager_notified_at);
+              const isSelected = selectedApplicationId === application.id;
               return (
-                <article key={application.id} className="border border-white/10 bg-zinc-950/70 p-4">
+                <article
+                  key={application.id}
+                  className={`border p-4 ${
+                    isSelected ? 'border-emerald-500/40 bg-zinc-900/70' : 'border-white/10 bg-zinc-950/70'
+                  }`}
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -651,6 +942,13 @@ export default function InternalMobility() {
                       )}
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedApplicationId(application.id)}
+                        className="self-end px-3 py-1.5 border border-zinc-700 text-xs text-zinc-200"
+                      >
+                        {isSelected ? 'Viewing Details' : 'View Details'}
+                      </button>
                       <label className="space-y-1">
                         <span className="block text-[9px] uppercase tracking-widest text-zinc-500 font-bold">
                           Status
@@ -702,6 +1000,57 @@ export default function InternalMobility() {
               );
             })}
           </div>
+        )}
+
+        {selectedApplication && (
+          <aside className="border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3" data-tour="internal-mobility-application-detail">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider">Application Detail</h3>
+              <span className="text-[10px] text-zinc-400 font-mono">ID: {selectedApplication.id}</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div>
+                <span className="text-zinc-500 uppercase tracking-wider">Employee</span>
+                <div className="text-zinc-200 mt-1">
+                  {selectedApplication.employee_name} ({selectedApplication.employee_email})
+                </div>
+              </div>
+              <div>
+                <span className="text-zinc-500 uppercase tracking-wider">Opportunity</span>
+                <div className="text-zinc-200 mt-1">
+                  {selectedApplication.opportunity_title} ({formatStatus(selectedApplication.opportunity_type)})
+                </div>
+              </div>
+              <div>
+                <span className="text-zinc-500 uppercase tracking-wider">Submitted</span>
+                <div className="text-zinc-200 mt-1">{formatDate(selectedApplication.submitted_at)}</div>
+              </div>
+              <div>
+                <span className="text-zinc-500 uppercase tracking-wider">Current Status</span>
+                <div className="text-zinc-200 mt-1">{formatStatus(selectedApplication.status)}</div>
+              </div>
+              <div>
+                <span className="text-zinc-500 uppercase tracking-wider">Reviewed At</span>
+                <div className="text-zinc-200 mt-1">
+                  {selectedApplication.reviewed_at ? formatDate(selectedApplication.reviewed_at) : 'Not reviewed yet'}
+                </div>
+              </div>
+              <div>
+                <span className="text-zinc-500 uppercase tracking-wider">Manager Notified</span>
+                <div className="text-zinc-200 mt-1">
+                  {selectedApplication.manager_notified_at
+                    ? formatDate(selectedApplication.manager_notified_at)
+                    : 'Not recorded'}
+                </div>
+              </div>
+            </div>
+            <div>
+              <span className="text-zinc-500 uppercase tracking-wider text-xs">Employee Notes</span>
+              <p className="text-sm text-zinc-200 mt-1 whitespace-pre-wrap">
+                {selectedApplication.employee_notes || 'No note provided.'}
+              </p>
+            </div>
+          </aside>
         )}
       </section>
     </div>
