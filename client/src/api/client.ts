@@ -1820,6 +1820,7 @@ export interface Jurisdiction {
   legislation_count: number;
   location_count: number;
   auto_check_count: number;
+  inherits_from_parent: boolean;
   last_verified_at: string | null;
   created_at: string | null;
   locations: JurisdictionLocation[];
@@ -1841,6 +1842,14 @@ export interface JurisdictionTotals {
 export interface JurisdictionsResponse {
   jurisdictions: Jurisdiction[];
   totals: JurisdictionTotals;
+}
+
+export interface JurisdictionDeleteResponse {
+  status: string;
+  id: string;
+  city: string;
+  state: string;
+  detached_children: number;
 }
 
 export interface JurisdictionRequirement {
@@ -1904,6 +1913,9 @@ export const adminJurisdictions = {
 
   create: (data: JurisdictionCreate): Promise<Jurisdiction> =>
     request<Jurisdiction>('/admin/jurisdictions', { method: 'POST', body: JSON.stringify(data) }),
+
+  delete: (id: string): Promise<JurisdictionDeleteResponse> =>
+    request<JurisdictionDeleteResponse>(`/admin/jurisdictions/${id}`, { method: 'DELETE' }),
 
   check: async (id: string): Promise<Response> => {
     const token = getAccessToken();

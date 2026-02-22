@@ -63,6 +63,12 @@ function formatFuture(iso: string | null): string {
   return `in ${diffDays}d`;
 }
 
+function formatInheritanceParent(city: string, state: string | null): string {
+  const normalized = city.trim().toLowerCase();
+  const cityLabel = normalized === 'los angeles' ? 'LA' : city;
+  return state ? `${cityLabel}, ${state}` : cityLabel;
+}
+
 const categoryLabel: Record<string, string> = {
   minimum_wage: 'Minimum Wage',
   overtime: 'Overtime',
@@ -91,10 +97,11 @@ const legStatusColor: Record<string, string> = {
 
 type DetailTab = 'requirements' | 'legislation' | 'locations';
 
-function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate }: {
+function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inheritsFromParent }: {
   detail: JurisdictionDetail;
   parentJurisdiction?: Jurisdiction | null;
   onNavigate?: (id: string) => void;
+  inheritsFromParent?: boolean;
 }) {
   const [tab, setTab] = useState<DetailTab>('requirements');
 
@@ -139,6 +146,14 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate }: {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {inheritsFromParent && detail.parent_id && parentJurisdiction && (
+        <div className="px-6 py-2 border-b border-emerald-500/20 bg-emerald-500/[0.04]">
+          <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-300">
+            Inherits from {formatInheritanceParent(parentJurisdiction.city, parentJurisdiction.state)}
+          </span>
         </div>
       )}
 
@@ -314,9 +329,11 @@ export function Jurisdictions() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState<JurisdictionCreate>({ city: '', state: '' });
   const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [checkTargetId, setCheckTargetId] = useState<string | null>(null);
   const [checkMessages, setCheckMessages] = useState<{ type: string; status?: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -391,6 +408,7 @@ export function Jurisdictions() {
   const handleCreate = async () => {
     if (!createForm.city.trim() || !createForm.state) return;
     setCreating(true);
+    setNotice(null);
     try {
       await adminJurisdictions.create({
         city: createForm.city.trim(),
@@ -402,11 +420,58 @@ export function Jurisdictions() {
       setShowCreateForm(false);
       setDetailCache({});
       await fetchData();
+      setNotice('Jurisdiction created.');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to create jurisdiction';
       setError(msg);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDelete = async (jurisdiction: Jurisdiction) => {
+    if (deletingId || checkingId) return;
+    setError(null);
+    setNotice(null);
+
+    if (jurisdiction.location_count > 0) {
+      setError(
+        `Cannot delete ${jurisdiction.city}, ${jurisdiction.state} while ${jurisdiction.location_count} location(s) are linked.`,
+      );
+      return;
+    }
+
+    const confirmMessage = jurisdiction.children_count > 0
+      ? `Delete ${jurisdiction.city}, ${jurisdiction.state}? This will detach ${jurisdiction.children_count} child jurisdiction(s).`
+      : `Delete ${jurisdiction.city}, ${jurisdiction.state}?`;
+    if (!window.confirm(confirmMessage)) return;
+
+    setDeletingId(jurisdiction.id);
+    try {
+      const result = await adminJurisdictions.delete(jurisdiction.id);
+      setDetailCache((prev) => {
+        const next = { ...prev };
+        delete next[jurisdiction.id];
+        return next;
+      });
+      if (expanded === jurisdiction.id) {
+        setExpanded(null);
+      }
+      if (checkTargetId === jurisdiction.id) {
+        setCheckTargetId(null);
+        setCheckMessages([]);
+      }
+      await fetchData();
+      setNotice(
+        result.detached_children > 0
+          ? `Deleted ${result.city}, ${result.state}. Detached ${result.detached_children} child jurisdictions.`
+          : `Deleted ${result.city}, ${result.state}.`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete jurisdiction';
+      setError(msg);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -525,6 +590,12 @@ export function Jurisdictions() {
         <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono">
           {error}
           <button onClick={() => setError(null)} className="ml-4 underline hover:text-red-300">Dismiss</button>
+        </div>
+      )}
+      {notice && (
+        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-mono">
+          {notice}
+          <button onClick={() => setNotice(null)} className="ml-4 underline hover:text-emerald-200">Dismiss</button>
         </div>
       )}
 
@@ -683,7 +754,7 @@ export function Jurisdictions() {
                     <div key={j.id} className="relative">
                       <button
                         onClick={() => handleExpand(j.id)}
-                        className="w-full px-4 py-3 pr-4 md:pr-28 hover:bg-white/5 transition-colors text-left"
+                        className="w-full px-4 py-3 pr-4 md:pr-44 hover:bg-white/5 transition-colors text-left"
                       >
                         <div className="flex items-center gap-2 md:gap-3 min-w-0">
                           <span className={`text-[10px] font-mono transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
@@ -694,8 +765,14 @@ export function Jurisdictions() {
                             <span className="text-[9px] text-zinc-600 font-mono hidden sm:inline">({j.county} County)</span>
                           )}
                           {j.parent_id && j.parent_city && (
-                            <span className="text-[8px] px-1.5 py-0.5 font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20 hidden sm:inline">
-                              child of {j.parent_city}, {j.parent_state}
+                            <span className={`text-[8px] px-1.5 py-0.5 font-mono border hidden sm:inline ${
+                              j.inherits_from_parent
+                                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            }`}>
+                              {j.inherits_from_parent
+                                ? `inherits from ${formatInheritanceParent(j.parent_city, j.parent_state)}`
+                                : `child of ${j.parent_city}, ${j.parent_state}`}
                             </span>
                           )}
                           {j.children_count > 0 && (
@@ -712,7 +789,7 @@ export function Jurisdictions() {
                           </span>
                         </div>
                         {/* Desktop stats row */}
-                        <div className="hidden md:flex items-center gap-4 mt-0 absolute right-28 top-1/2 -translate-y-1/2">
+                        <div className="hidden md:flex items-center gap-4 mt-0 absolute right-44 top-1/2 -translate-y-1/2">
                           <div className="text-right">
                             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Reqs</div>
                             <div className="text-xs text-zinc-300 font-mono font-bold">{j.requirement_count}</div>
@@ -739,10 +816,10 @@ export function Jurisdictions() {
                         </div>
                       </button>
                       {/* Research button — outside the expand toggle */}
-                      <div className="absolute top-2 right-2 md:right-4 z-10">
+                      <div className="absolute top-2 right-2 md:right-4 z-10 flex items-center gap-2">
                         <button
                           onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
-                          disabled={checkingId !== null}
+                          disabled={checkingId !== null || deletingId !== null}
                           className={`group relative px-2 md:px-3 py-1.5 text-[9px] tracking-[0.12em] uppercase font-mono border bg-zinc-900 transition-all duration-300 overflow-hidden ${
                             checkingId === j.id
                               ? 'text-blue-300 border-blue-500/40'
@@ -761,6 +838,18 @@ export function Jurisdictions() {
                               </>
                             ) : 'Research'}
                           </span>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); void handleDelete(j); }}
+                          disabled={checkingId !== null || deletingId !== null}
+                          className={`px-2 md:px-3 py-1.5 text-[9px] tracking-[0.12em] uppercase font-mono border transition-colors ${
+                            deletingId === j.id
+                              ? 'text-red-300 border-red-500/50 bg-red-500/10'
+                              : 'text-red-300 border-red-700 hover:border-red-500 hover:bg-red-500/10 disabled:opacity-30'
+                          }`}
+                          title="Delete jurisdiction"
+                        >
+                          {deletingId === j.id ? 'Deleting...' : 'Delete'}
                         </button>
                       </div>
                       {/* Check progress panel */}
@@ -913,6 +1002,7 @@ export function Jurisdictions() {
                           detail={detail}
                           parentJurisdiction={detail.parent_id ? jurisdictions.find(p => p.id === detail.parent_id) : null}
                           onNavigate={handleNavigate}
+                          inheritsFromParent={j.inherits_from_parent}
                         />
                       )}
                     </div>

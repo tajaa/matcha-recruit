@@ -1862,8 +1862,71 @@ async def list_jurisdictions():
             ORDER BY j.state, j.city
         """)
 
-        # Batch-fetch all locations for all jurisdictions in one query (avoids N+1)
         jurisdiction_ids = [row["id"] for row in rows]
+        parent_relationships: dict[UUID, UUID] = {
+            row["id"]: row["parent_id"]
+            for row in rows
+            if row["parent_id"] is not None
+        }
+
+        inherits_from_parent_map: dict[UUID, bool] = {}
+        if parent_relationships:
+            related_jurisdiction_ids = list(set(jurisdiction_ids + list(parent_relationships.values())))
+
+            requirement_rows = await conn.fetch(
+                """
+                SELECT jurisdiction_id, requirement_key, current_value, numeric_value, effective_date, expiration_date
+                FROM jurisdiction_requirements
+                WHERE jurisdiction_id = ANY($1::uuid[])
+                """,
+                related_jurisdiction_ids,
+            )
+            legislation_rows = await conn.fetch(
+                """
+                SELECT jurisdiction_id, legislation_key, current_status, expected_effective_date
+                FROM jurisdiction_legislation
+                WHERE jurisdiction_id = ANY($1::uuid[])
+                """,
+                related_jurisdiction_ids,
+            )
+
+            requirements_by_jurisdiction: dict[UUID, dict[str, tuple[str, str, str, str]]] = {}
+            for req in requirement_rows:
+                requirements_by_jurisdiction.setdefault(req["jurisdiction_id"], {})[req["requirement_key"]] = (
+                    req["current_value"] or "",
+                    str(req["numeric_value"]) if req["numeric_value"] is not None else "",
+                    req["effective_date"].isoformat() if req["effective_date"] else "",
+                    req["expiration_date"].isoformat() if req["expiration_date"] else "",
+                )
+
+            legislation_by_jurisdiction: dict[UUID, dict[str, tuple[str, str]]] = {}
+            for leg in legislation_rows:
+                legislation_by_jurisdiction.setdefault(leg["jurisdiction_id"], {})[leg["legislation_key"]] = (
+                    leg["current_status"] or "",
+                    leg["expected_effective_date"].isoformat() if leg["expected_effective_date"] else "",
+                )
+
+            for child_id, parent_id in parent_relationships.items():
+                child_requirements = requirements_by_jurisdiction.get(child_id, {})
+                parent_requirements = requirements_by_jurisdiction.get(parent_id, {})
+                child_legislation = legislation_by_jurisdiction.get(child_id, {})
+                parent_legislation = legislation_by_jurisdiction.get(parent_id, {})
+
+                parent_has_content = bool(parent_requirements) or bool(parent_legislation)
+                requirements_match_parent = all(
+                    parent_requirements.get(req_key) == req_signature
+                    for req_key, req_signature in child_requirements.items()
+                )
+                legislation_match_parent = all(
+                    parent_legislation.get(leg_key) == leg_signature
+                    for leg_key, leg_signature in child_legislation.items()
+                )
+
+                inherits_from_parent_map[child_id] = (
+                    parent_has_content and requirements_match_parent and legislation_match_parent
+                )
+
+        # Batch-fetch all locations for all jurisdictions in one query (avoids N+1)
         all_locations = await conn.fetch("""
             SELECT bl.id, bl.jurisdiction_id, bl.name, bl.city, bl.state, bl.company_id,
                    c.name AS company_name, bl.auto_check_enabled, bl.auto_check_interval_days,
@@ -1895,6 +1958,7 @@ async def list_jurisdictions():
                 "legislation_count": row["legislation_count"] or 0,
                 "location_count": row["location_count"],
                 "auto_check_count": row["auto_check_count"],
+                "inherits_from_parent": inherits_from_parent_map.get(row["id"], False),
                 "last_verified_at": row["last_verified_at"].isoformat() if row["last_verified_at"] else None,
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                 "locations": [
@@ -1929,6 +1993,45 @@ async def list_jurisdictions():
                 "total_requirements": totals["total_requirements"],
                 "total_legislation": totals["total_legislation"],
             },
+        }
+
+
+@router.delete("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
+async def delete_jurisdiction(jurisdiction_id: UUID):
+    """Delete a jurisdiction if it has no linked business locations."""
+    async with get_connection() as conn:
+        jurisdiction = await conn.fetchrow(
+            "SELECT id, city, state FROM jurisdictions WHERE id = $1",
+            jurisdiction_id,
+        )
+        if not jurisdiction:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jurisdiction not found")
+
+        linked_location_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM business_locations WHERE jurisdiction_id = $1",
+            jurisdiction_id,
+        )
+        if linked_location_count and linked_location_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Cannot delete {jurisdiction['city']}, {jurisdiction['state']} while "
+                    f"{linked_location_count} location(s) are linked."
+                ),
+            )
+
+        detached_children = await conn.fetchval(
+            "SELECT COUNT(*) FROM jurisdictions WHERE parent_id = $1",
+            jurisdiction_id,
+        )
+        await conn.execute("DELETE FROM jurisdictions WHERE id = $1", jurisdiction_id)
+
+        return {
+            "status": "deleted",
+            "id": str(jurisdiction["id"]),
+            "city": jurisdiction["city"],
+            "state": jurisdiction["state"],
+            "detached_children": int(detached_children or 0),
         }
 
 
