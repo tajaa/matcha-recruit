@@ -117,25 +117,25 @@ export function PortalPTO() {
     switch (status) {
       case 'pending':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-            <Clock className="w-3 h-3" /> Pending
+          <span className="inline-flex items-center px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[9px] uppercase tracking-widest font-bold">
+            <Clock className="w-3 h-3 mr-1.5" /> Pending
           </span>
         );
       case 'approved':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-            <CheckCircle className="w-3 h-3" /> Approved
+          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] uppercase tracking-widest font-bold">
+            <CheckCircle className="w-3 h-3 mr-1.5" /> Approved
           </span>
         );
       case 'denied':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-            <XCircle className="w-3 h-3" /> Denied
+          <span className="inline-flex items-center px-2.5 py-1 bg-red-500/10 text-red-400 border border-red-500/20 text-[9px] uppercase tracking-widest font-bold">
+            <XCircle className="w-3 h-3 mr-1.5" /> Denied
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-zinc-100 text-zinc-800">
+          <span className="inline-flex items-center px-2.5 py-1 bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 text-[9px] uppercase tracking-widest font-bold">
             {status}
           </span>
         );
@@ -146,7 +146,7 @@ export function PortalPTO() {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-zinc-400 animate-pulse" />
+          <div className="w-2 h-2 rounded-full bg-zinc-600 animate-pulse" />
           <span className="text-xs text-zinc-500 font-mono uppercase tracking-wider">Loading</span>
         </div>
       </div>
@@ -156,161 +156,168 @@ export function PortalPTO() {
   const availablePTO = balance ? balance.balance_hours - balance.used_hours : 0;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-white/10 pb-6">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-mono font-medium text-zinc-900">Time Off</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white uppercase">Time Off</h1>
             <FeatureGuideTrigger guideId="portal-pto" variant="light" />
           </div>
-          <p className="text-sm text-zinc-500 mt-1">Manage your PTO requests</p>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Manage your PTO requests</p>
         </div>
         <button
           data-tour="portal-pto-request-btn"
           onClick={() => setShowRequestModal(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors"
+          className="inline-flex items-center gap-2 px-6 py-2 bg-white text-black text-[10px] uppercase tracking-widest font-bold border border-white hover:bg-zinc-200 transition-colors"
         >
           <Plus className="w-4 h-4" /> Request Time Off
         </button>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-red-500" />
-          <span className="text-red-700">{error}</span>
+        <div className="bg-red-500/10 border border-red-500/20 p-4 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-red-400" />
+          <span className="text-red-400 font-mono text-sm uppercase">{error}</span>
         </div>
       )}
 
       {/* Balance Cards */}
       {balance && (
-        <div data-tour="portal-pto-balance" className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white border border-zinc-200 rounded-lg p-5">
-            <span className="text-xs font-mono uppercase tracking-wider text-zinc-500">Available</span>
-            <div className="text-3xl font-mono font-medium text-zinc-900 mt-1">
+        <div data-tour="portal-pto-balance" className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          <div className="bg-zinc-900/50 border border-dashed border-white/10 p-6">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Available</span>
+            <div className="text-3xl font-bold text-white tracking-tight mt-2">
               {availablePTO.toFixed(1)}
-              <span className="text-lg text-zinc-400 ml-1">hrs</span>
+              <span className="text-sm font-normal text-zinc-500 ml-2">hrs</span>
             </div>
           </div>
-          <div className="bg-white border border-zinc-200 rounded-lg p-5">
-            <span className="text-xs font-mono uppercase tracking-wider text-zinc-500">Total Balance</span>
-            <div className="text-3xl font-mono font-medium text-zinc-900 mt-1">
+          <div className="bg-zinc-900/50 border border-dashed border-white/10 p-6">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Total Balance</span>
+            <div className="text-3xl font-bold text-white tracking-tight mt-2">
               {balance.balance_hours.toFixed(1)}
-              <span className="text-lg text-zinc-400 ml-1">hrs</span>
+              <span className="text-sm font-normal text-zinc-500 ml-2">hrs</span>
             </div>
           </div>
-          <div className="bg-white border border-zinc-200 rounded-lg p-5">
-            <span className="text-xs font-mono uppercase tracking-wider text-zinc-500">Used</span>
-            <div className="text-3xl font-mono font-medium text-zinc-900 mt-1">
+          <div className="bg-zinc-900/50 border border-dashed border-white/10 p-6">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Used</span>
+            <div className="text-3xl font-bold text-white tracking-tight mt-2">
               {balance.used_hours.toFixed(1)}
-              <span className="text-lg text-zinc-400 ml-1">hrs</span>
+              <span className="text-sm font-normal text-zinc-500 ml-2">hrs</span>
             </div>
           </div>
-          <div className="bg-white border border-zinc-200 rounded-lg p-5">
-            <span className="text-xs font-mono uppercase tracking-wider text-zinc-500">Accrued YTD</span>
-            <div className="text-3xl font-mono font-medium text-zinc-900 mt-1">
+          <div className="bg-zinc-900/50 border border-dashed border-white/10 p-6">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Accrued YTD</span>
+            <div className="text-3xl font-bold text-white tracking-tight mt-2">
               {balance.accrued_hours.toFixed(1)}
-              <span className="text-lg text-zinc-400 ml-1">hrs</span>
+              <span className="text-sm font-normal text-zinc-500 ml-2">hrs</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Pending Requests */}
-      {pendingRequests.length > 0 && (
-        <div data-tour="portal-pto-pending" className="bg-white border border-zinc-200 rounded-lg">
-          <div className="px-5 py-4 border-b border-zinc-100">
-            <h2 className="text-sm font-mono uppercase tracking-wider text-zinc-500">Pending Requests</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Pending Requests */}
+        <div data-tour="portal-pto-pending" className="bg-zinc-900/30 border border-white/10">
+          <div className="px-6 py-4 border-b border-white/10 bg-white/5">
+            <h2 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Pending Requests</h2>
           </div>
-          <div className="divide-y divide-zinc-100">
-            {pendingRequests.map((req) => (
-              <div key={req.id} className="p-5 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center">
-                    <Calendar className="w-5 h-5 text-amber-600" />
-                  </div>
-                  <div>
-                    <div className="font-medium text-zinc-900">
-                      {new Date(req.start_date).toLocaleDateString()} - {new Date(req.end_date).toLocaleDateString()}
+          {pendingRequests.length === 0 ? (
+            <div className="p-16 text-center">
+                <Clock className="w-10 h-10 mx-auto text-zinc-700 mb-4 opacity-50" />
+                <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest">No pending requests</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-white/5">
+                {pendingRequests.map((req) => (
+                <div key={req.id} className="p-6 flex items-center justify-between hover:bg-white/5 transition-colors group">
+                    <div className="flex items-center gap-5">
+                    <div className="w-10 h-10 border border-white/10 bg-amber-900/20 flex items-center justify-center">
+                        <Calendar className="w-4 h-4 text-amber-400" />
                     </div>
-                    <div className="text-sm text-zinc-500">
-                      {req.hours} hours - {req.request_type}
-                      {req.reason && ` - ${req.reason}`}
+                    <div>
+                        <div className="text-sm font-bold text-white tracking-tight">
+                        {new Date(req.start_date).toLocaleDateString()} - {new Date(req.end_date).toLocaleDateString()}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 mt-0.5">
+                        {req.hours} hours &bull; {req.request_type}
+                        {req.reason && ` &bull; ${req.reason}`}
+                        </div>
                     </div>
-                  </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                    {getStatusBadge(req.status)}
+                    <button
+                        data-tour="portal-pto-cancel-btn"
+                        onClick={() => handleCancelRequest(req.id)}
+                        className="p-2 text-zinc-600 hover:text-red-400 transition-colors"
+                        title="Cancel request"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                    </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  {getStatusBadge(req.status)}
-                  <button
-                    data-tour="portal-pto-cancel-btn"
-                    onClick={() => handleCancelRequest(req.id)}
-                    className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                    title="Cancel request"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+                ))}
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Approved Requests */}
-      <div data-tour="portal-pto-approved" className="bg-white border border-zinc-200 rounded-lg">
-        <div className="px-5 py-4 border-b border-zinc-100">
-          <h2 className="text-sm font-mono uppercase tracking-wider text-zinc-500">Approved Time Off</h2>
-        </div>
-        {approvedRequests.length === 0 ? (
-          <div className="p-8 text-center text-zinc-500">
-            <Calendar className="w-12 h-12 mx-auto text-zinc-300 mb-3" />
-            <p>No approved time off this year</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-zinc-100">
-            {approvedRequests.map((req) => (
-              <div key={req.id} className="p-5 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
-                    <Calendar className="w-5 h-5 text-green-600" />
-                  </div>
-                  <div>
-                    <div className="font-medium text-zinc-900">
-                      {new Date(req.start_date).toLocaleDateString()} - {new Date(req.end_date).toLocaleDateString()}
+        {/* Approved Requests */}
+        <div data-tour="portal-pto-approved" className="bg-zinc-900/30 border border-white/10">
+            <div className="px-6 py-4 border-b border-white/10 bg-white/5">
+            <h2 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Approved Time Off</h2>
+            </div>
+            {approvedRequests.length === 0 ? (
+            <div className="p-16 text-center">
+                <Calendar className="w-10 h-10 mx-auto text-zinc-700 mb-4 opacity-50" />
+                <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest">No approved time off this year</p>
+            </div>
+            ) : (
+            <div className="divide-y divide-white/5">
+                {approvedRequests.map((req) => (
+                <div key={req.id} className="p-6 flex items-center justify-between hover:bg-white/5 transition-colors group">
+                    <div className="flex items-center gap-5">
+                    <div className="w-10 h-10 border border-white/10 bg-emerald-900/20 flex items-center justify-center">
+                        <Calendar className="w-4 h-4 text-emerald-400" />
                     </div>
-                    <div className="text-sm text-zinc-500">
-                      {req.hours} hours - {req.request_type}
+                    <div>
+                        <div className="text-sm font-bold text-white tracking-tight">
+                        {new Date(req.start_date).toLocaleDateString()} - {new Date(req.end_date).toLocaleDateString()}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 mt-0.5">
+                        {req.hours} hours &bull; {req.request_type}
+                        </div>
                     </div>
-                  </div>
+                    </div>
+                    {getStatusBadge(req.status)}
                 </div>
-                {getStatusBadge(req.status)}
-              </div>
-            ))}
-          </div>
-        )}
+                ))}
+            </div>
+            )}
+        </div>
       </div>
 
       {/* Request Modal */}
       {showRequestModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-medium text-zinc-900">Request Time Off</h2>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-zinc-950 border border-white/10 p-8 w-full max-w-md animate-in fade-in zoom-in duration-200 shadow-2xl">
+            <div className="flex items-center justify-between mb-8">
+              <h2 className="text-lg font-bold text-white uppercase tracking-tight">Request Time Off</h2>
               <button
                 onClick={() => setShowRequestModal(false)}
-                className="p-1 hover:bg-zinc-100 rounded-lg transition-colors"
+                className="p-1 hover:bg-white/5 transition-colors"
               >
                 <X className="w-5 h-5 text-zinc-500" />
               </button>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-zinc-700 mb-2">Request Type</label>
+                <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2 ml-1">Request Type</label>
                 <select
                   value={requestType}
                   onChange={(e) => setRequestType(e.target.value)}
-                  className="w-full px-4 py-3 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                  className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 text-sm focus:border-white transition-colors outline-none appearance-none font-mono"
                 >
                   <option value="vacation">Vacation</option>
                   <option value="sick">Sick Leave</option>
@@ -319,64 +326,64 @@ export function PortalPTO() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 mb-2">Start Date</label>
+                  <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2 ml-1">Start Date</label>
                   <input
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
                     min={new Date().toISOString().split('T')[0]}
-                    className="w-full px-4 py-3 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 text-sm focus:border-white transition-colors outline-none font-mono"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 mb-2">End Date</label>
+                  <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2 ml-1">End Date</label>
                   <input
                     type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
                     min={startDate || new Date().toISOString().split('T')[0]}
-                    className="w-full px-4 py-3 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 text-sm focus:border-white transition-colors outline-none font-mono"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 mb-2">Hours</label>
+                <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2 ml-1">Hours</label>
                 <input
                   type="number"
                   value={hours}
                   onChange={(e) => setHours(e.target.value)}
                   min="1"
                   step="0.5"
-                  className="w-full px-4 py-3 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                  className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 text-sm focus:border-white transition-colors outline-none font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 mb-2">Reason (optional)</label>
+                <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2 ml-1">Reason (optional)</label>
                 <textarea
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   rows={3}
                   placeholder="Brief description of your time off"
-                  className="w-full px-4 py-3 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 resize-none"
+                  className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 text-sm focus:border-white transition-colors outline-none resize-none font-mono leading-relaxed"
                 />
               </div>
             </div>
 
-            <div className="flex gap-3 mt-6">
+            <div className="flex gap-4 mt-8">
               <button
                 onClick={() => setShowRequestModal(false)}
-                className="flex-1 px-4 py-2 border border-zinc-200 text-zinc-700 rounded-lg hover:bg-zinc-50 transition-colors"
+                className="flex-1 px-4 py-3 border border-white/10 text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSubmitRequest}
                 disabled={!startDate || !endDate || !hours || submitting}
-                className="flex-1 px-4 py-2 bg-zinc-900 text-white rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-4 py-3 bg-white text-black text-[10px] font-bold uppercase tracking-widest border border-white hover:bg-zinc-200 transition-colors disabled:opacity-50"
               >
                 {submitting ? 'Submitting...' : 'Submit Request'}
               </button>
