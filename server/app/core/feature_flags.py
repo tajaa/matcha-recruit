@@ -4,7 +4,6 @@ from typing import Any
 DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "offer_letters": True,
     "handbooks": True,
-    "employees": True,
     "internal_mobility": False,
 }
 

@@ -36,14 +36,14 @@ export function ProtectedRoute({ children, roles, requiredFeature, anyRequiredFe
   // Check feature flags (admin always passes via hasFeature)
   if (requiredFeature && !hasFeature(requiredFeature)) {
     if (user?.role === 'employee') {
-      return <Navigate to="/app/portal" replace />;
+      return <Navigate to="/app/portal-unavailable" replace />;
     }
     return <Navigate to="/app" replace />;
   }
 
   if (anyRequiredFeature && !anyRequiredFeature.some(f => hasFeature(f))) {
     if (user?.role === 'employee') {
-      return <Navigate to="/app/portal" replace />;
+      return <Navigate to="/app/portal-unavailable" replace />;
     }
     return <Navigate to="/app" replace />;
   }

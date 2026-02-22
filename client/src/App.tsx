@@ -86,6 +86,7 @@ const PortalOnboarding = lazy(() => import('./pages/portal/PortalOnboarding'));
 const PortalVibeCheck = lazy(() => import('./pages/portal/PortalVibeCheck'));
 const PortalENPS = lazy(() => import('./pages/portal/PortalENPS'));
 const PortalReviews = lazy(() => import('./pages/portal/PortalReviews'));
+const PortalUnavailable = lazy(() => import('./pages/portal/PortalUnavailable'));
 const CandidateRankings = lazy(() => import('./pages/CandidateRankings'));
 const Projects = lazy(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
@@ -745,7 +746,7 @@ function App() {
               <Route
                 path="portal"
                 element={
-                  <ProtectedRoute roles={['employee']}>
+                  <ProtectedRoute roles={['employee']} requiredFeature="employees">
                     <PortalHome />
                   </ProtectedRoute>
                 }
@@ -753,7 +754,7 @@ function App() {
               <Route
                 path="portal/documents"
                 element={
-                  <ProtectedRoute roles={['employee']}>
+                  <ProtectedRoute roles={['employee']} requiredFeature="employees">
                     <PortalDocuments />
                   </ProtectedRoute>
                 }
@@ -785,7 +786,7 @@ function App() {
               <Route
                 path="portal/profile"
                 element={
-                  <ProtectedRoute roles={['employee']}>
+                  <ProtectedRoute roles={['employee']} requiredFeature="employees">
                     <PortalProfile />
                   </ProtectedRoute>
                 }
@@ -801,7 +802,7 @@ function App() {
               <Route
                 path="portal/onboarding"
                 element={
-                  <ProtectedRoute roles={['employee']}>
+                  <ProtectedRoute roles={['employee']} requiredFeature="employees">
                     <PortalOnboarding />
                   </ProtectedRoute>
                 }
@@ -827,6 +828,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['employee']} requiredFeature="performance_reviews">
                     <PortalReviews />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="portal-unavailable"
+                element={
+                  <ProtectedRoute>
+                    <PortalUnavailable />
                   </ProtectedRoute>
                 }
               />
