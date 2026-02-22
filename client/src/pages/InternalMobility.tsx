@@ -7,6 +7,7 @@ import {
   type InternalMobilityOpportunityStatus,
   type InternalMobilityOpportunityType,
 } from '../api/client';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const OPPORTUNITY_STATUSES: InternalMobilityOpportunityStatus[] = ['draft', 'active', 'closed'];
 const OPPORTUNITY_TYPES: InternalMobilityOpportunityType[] = ['role', 'project'];
@@ -243,9 +244,12 @@ export default function InternalMobility() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       <div className="border-b border-white/10 pb-6 md:pb-8">
-        <h1 className="text-2xl md:text-4xl font-bold tracking-tighter text-white uppercase">
-          Internal Mobility
-        </h1>
+        <div className="flex items-center gap-3" data-tour="internal-mobility-guide">
+          <h1 className="text-2xl md:text-4xl font-bold tracking-tighter text-white uppercase">
+            Internal Mobility
+          </h1>
+          <FeatureGuideTrigger guideId="internal-mobility" />
+        </div>
         <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
           Launch opportunities and review employee applications
         </p>
@@ -262,7 +266,7 @@ export default function InternalMobility() {
         </div>
       )}
 
-      <section className="border border-white/10 bg-zinc-900/40 p-5 md:p-6">
+      <section className="border border-white/10 bg-zinc-900/40 p-5 md:p-6" data-tour="internal-mobility-create-form">
         <h2 className="text-sm font-bold text-white uppercase tracking-wider">Create Opportunity</h2>
         <form className="mt-5 space-y-4" onSubmit={handleCreateOpportunity}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -388,7 +392,7 @@ export default function InternalMobility() {
       </section>
 
       <section className="border border-white/10 bg-zinc-900/30 p-5 md:p-6 space-y-4">
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-3" data-tour="internal-mobility-opportunities-filters">
           <h2 className="text-sm font-bold text-white uppercase tracking-wider mr-4">Opportunities</h2>
           <label className="space-y-1">
             <span className="block text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Status</span>
@@ -439,7 +443,7 @@ export default function InternalMobility() {
         ) : opportunities.length === 0 ? (
           <div className="text-sm text-zinc-500 py-8">No opportunities match current filters.</div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3" data-tour="internal-mobility-opportunities-list">
             {opportunities.map((opportunity) => (
               <article key={opportunity.id} className="border border-white/10 bg-zinc-950/70 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -509,7 +513,10 @@ export default function InternalMobility() {
         )}
       </section>
 
-      <section className="border border-white/10 bg-zinc-900/30 p-5 md:p-6 space-y-4">
+      <section
+        className="border border-white/10 bg-zinc-900/30 p-5 md:p-6 space-y-4"
+        data-tour="internal-mobility-applications-list"
+      >
         <div className="flex flex-wrap items-end gap-3">
           <h2 className="text-sm font-bold text-white uppercase tracking-wider mr-4">Applications</h2>
           <label className="space-y-1">
@@ -574,6 +581,7 @@ export default function InternalMobility() {
                           Status
                         </span>
                         <select
+                          data-tour="internal-mobility-application-status"
                           value={application.status}
                           onChange={(event) =>
                             void handleApplicationStatusUpdate(

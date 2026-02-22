@@ -23,6 +23,7 @@ import {
   employeesWalkthrough,
   companySetupWalkthrough,
   googleWorkspaceWalkthrough,
+  internalMobilityWalkthrough,
   brokerClientsWalkthrough,
   brokerReportingWalkthrough,
 } from './admin';
@@ -31,6 +32,7 @@ import {
   portalDocumentsWalkthrough,
   portalPTOWalkthrough,
   portalLeaveWalkthrough,
+  portalMobilityWalkthrough,
 } from './portal';
 
 export const WALKTHROUGH_CONFIGS: Record<GuideKey, WalkthroughConfig> = {
@@ -55,10 +57,12 @@ export const WALKTHROUGH_CONFIGS: Record<GuideKey, WalkthroughConfig> = {
   employees: employeesWalkthrough,
   'company-setup': companySetupWalkthrough,
   'google-workspace': googleWorkspaceWalkthrough,
+  'internal-mobility': internalMobilityWalkthrough,
   'broker-clients': brokerClientsWalkthrough,
   'broker-reporting': brokerReportingWalkthrough,
   'portal-onboarding': portalOnboardingWalkthrough,
   'portal-documents': portalDocumentsWalkthrough,
   'portal-pto': portalPTOWalkthrough,
   'portal-leave': portalLeaveWalkthrough,
+  'portal-mobility': portalMobilityWalkthrough,
 };

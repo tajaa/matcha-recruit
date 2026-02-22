@@ -153,10 +153,13 @@ async def _seed_test_account_data(
     owner_name: str,
     owner_email: str,
     company_name: str,
-) -> None:
+    seed_password: str,
+) -> dict[str, str | None]:
     """Seed representative data for enabled product features."""
     today = datetime.utcnow().date()
     suffix = str(company_id).split("-")[0]
+    manager_seed_email = f"manager+{suffix}@test-account.local"
+    sample_seed_email = f"employee+{suffix}@test-account.local"
     owner_first, owner_last = _split_name(owner_name)
 
     manager_employee_id = None
@@ -164,40 +167,322 @@ async def _seed_test_account_data(
     leave_request_id = None
     location_id = None
     er_case_id = None
+    seeded_manager_email: str | None = None
+    seeded_employee_email: str | None = None
+    seeded_portal_password: str | None = None
 
     if await _table_exists(conn, "employees"):
-        manager = await conn.fetchrow(
-            """
-            INSERT INTO employees (org_id, email, first_name, last_name, work_state, employment_type, start_date)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id
-            """,
-            company_id,
-            f"manager+{suffix}@test-account.local",
-            owner_first,
-            owner_last,
-            "CA",
-            "full_time",
-            today - timedelta(days=420),
-        )
+        employees_has_user_id = await _column_exists(conn, "employees", "user_id")
+        manager_user_id = None
+        sample_user_id = None
+
+        if employees_has_user_id and await _table_exists(conn, "users"):
+            manager_user = await conn.fetchrow(
+                """
+                INSERT INTO users (email, password_hash, role)
+                VALUES ($1, $2, 'employee')
+                RETURNING id
+                """,
+                manager_seed_email,
+                hash_password(seed_password),
+            )
+            sample_user = await conn.fetchrow(
+                """
+                INSERT INTO users (email, password_hash, role)
+                VALUES ($1, $2, 'employee')
+                RETURNING id
+                """,
+                sample_seed_email,
+                hash_password(seed_password),
+            )
+            manager_user_id = manager_user["id"] if manager_user else None
+            sample_user_id = sample_user["id"] if sample_user else None
+            if manager_user_id:
+                seeded_manager_email = manager_seed_email
+            if sample_user_id:
+                seeded_employee_email = sample_seed_email
+            if manager_user_id or sample_user_id:
+                seeded_portal_password = seed_password
+
+        if employees_has_user_id and manager_user_id:
+            manager = await conn.fetchrow(
+                """
+                INSERT INTO employees (
+                    org_id, user_id, email, first_name, last_name, work_state, employment_type, start_date
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id
+                """,
+                company_id,
+                manager_user_id,
+                manager_seed_email,
+                owner_first,
+                owner_last,
+                "CA",
+                "full_time",
+                today - timedelta(days=420),
+            )
+        else:
+            manager = await conn.fetchrow(
+                """
+                INSERT INTO employees (org_id, email, first_name, last_name, work_state, employment_type, start_date)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id
+                """,
+                company_id,
+                manager_seed_email,
+                owner_first,
+                owner_last,
+                "CA",
+                "full_time",
+                today - timedelta(days=420),
+            )
         manager_employee_id = manager["id"] if manager else None
 
-        sample = await conn.fetchrow(
+        if employees_has_user_id and sample_user_id:
+            sample = await conn.fetchrow(
+                """
+                INSERT INTO employees (
+                    org_id, user_id, email, first_name, last_name, work_state, employment_type, start_date, manager_id
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                RETURNING id
+                """,
+                company_id,
+                sample_user_id,
+                sample_seed_email,
+                "Jordan",
+                "Case",
+                "CA",
+                "full_time",
+                today - timedelta(days=210),
+                manager_employee_id,
+            )
+        else:
+            sample = await conn.fetchrow(
+                """
+                INSERT INTO employees (org_id, email, first_name, last_name, work_state, employment_type, start_date, manager_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id
+                """,
+                company_id,
+                sample_seed_email,
+                "Jordan",
+                "Case",
+                "CA",
+                "full_time",
+                today - timedelta(days=210),
+                manager_employee_id,
+            )
+        sample_employee_id = sample["id"] if sample else None
+
+    if await _table_exists(conn, "employee_career_profiles"):
+        if sample_employee_id:
+            await conn.execute(
+                """
+                INSERT INTO employee_career_profiles (
+                    employee_id, org_id, target_roles, target_departments, skills, interests, mobility_opt_in, visibility
+                )
+                VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, true, 'private')
+                ON CONFLICT (employee_id)
+                DO UPDATE SET
+                    target_roles = EXCLUDED.target_roles,
+                    target_departments = EXCLUDED.target_departments,
+                    skills = EXCLUDED.skills,
+                    interests = EXCLUDED.interests,
+                    mobility_opt_in = EXCLUDED.mobility_opt_in,
+                    visibility = EXCLUDED.visibility,
+                    updated_at = NOW()
+                """,
+                sample_employee_id,
+                company_id,
+                json.dumps(["Senior Data Analyst", "Analytics Manager"]),
+                json.dumps(["Data", "Operations"]),
+                json.dumps(["SQL", "Python", "A/B Testing", "Stakeholder Communication"]),
+                json.dumps(["forecasting", "process improvement", "cross-functional projects"]),
+            )
+
+        if manager_employee_id:
+            await conn.execute(
+                """
+                INSERT INTO employee_career_profiles (
+                    employee_id, org_id, target_roles, target_departments, skills, interests, mobility_opt_in, visibility
+                )
+                VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, false, 'manager_visible')
+                ON CONFLICT (employee_id)
+                DO UPDATE SET
+                    target_roles = EXCLUDED.target_roles,
+                    target_departments = EXCLUDED.target_departments,
+                    skills = EXCLUDED.skills,
+                    interests = EXCLUDED.interests,
+                    mobility_opt_in = EXCLUDED.mobility_opt_in,
+                    visibility = EXCLUDED.visibility,
+                    updated_at = NOW()
+                """,
+                manager_employee_id,
+                company_id,
+                json.dumps(["People Manager"]),
+                json.dumps(["Operations"]),
+                json.dumps(["Coaching", "Project Planning", "Stakeholder Management"]),
+                json.dumps(["leadership development", "retention"]),
+            )
+
+    role_opportunity_id = None
+    project_opportunity_id = None
+    if await _table_exists(conn, "internal_opportunities"):
+        role_row = await conn.fetchrow(
             """
-            INSERT INTO employees (org_id, email, first_name, last_name, work_state, employment_type, start_date, manager_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO internal_opportunities (
+                org_id, type, title, department, description,
+                required_skills, preferred_skills, duration_weeks, status, created_by
+            )
+            VALUES ($1, 'role', $2, $3, $4, $5::jsonb, $6::jsonb, NULL, 'active', $7)
             RETURNING id
             """,
             company_id,
-            f"employee+{suffix}@test-account.local",
-            "Jordan",
-            "Case",
-            "CA",
-            "full_time",
-            today - timedelta(days=210),
-            manager_employee_id,
+            "Senior Data Analyst (Internal Mobility Pilot)",
+            "Data",
+            (
+                "Partner with Product and Operations to shape KPI strategy, "
+                "run experiments, and deliver monthly leadership insights."
+            ),
+            json.dumps(["SQL", "Python", "Stakeholder Communication"]),
+            json.dumps(["Looker", "Experimentation", "Roadmapping"]),
+            client_user_id,
         )
-        sample_employee_id = sample["id"] if sample else None
+        role_opportunity_id = role_row["id"] if role_row else None
+
+        project_row = await conn.fetchrow(
+            """
+            INSERT INTO internal_opportunities (
+                org_id, type, title, department, description,
+                required_skills, preferred_skills, duration_weeks, status, created_by
+            )
+            VALUES ($1, 'project', $2, $3, $4, $5::jsonb, $6::jsonb, 10, 'active', $7)
+            RETURNING id
+            """,
+            company_id,
+            "Revenue Operations Sprint",
+            "Operations",
+            (
+                "Join a 10-week cross-functional sprint to redesign lead routing, "
+                "instrument conversion metrics, and improve handoff quality."
+            ),
+            json.dumps(["SQL", "Process Mapping", "Cross-functional Collaboration"]),
+            json.dumps(["CRM Analytics", "Change Management"]),
+            client_user_id,
+        )
+        project_opportunity_id = project_row["id"] if project_row else None
+
+        await conn.execute(
+            """
+            INSERT INTO internal_opportunities (
+                org_id, type, title, department, description,
+                required_skills, preferred_skills, duration_weeks, status, created_by
+            )
+            VALUES ($1, 'role', $2, $3, $4, $5::jsonb, $6::jsonb, NULL, 'draft', $7)
+            """,
+            company_id,
+            "People Analytics Lead",
+            "People",
+            "Draft opening planned for next quarter to stand up workforce planning analytics.",
+            json.dumps(["Workforce Analytics", "SQL", "Storytelling"]),
+            json.dumps(["Tableau", "Org Design"]),
+            client_user_id,
+        )
+
+    if sample_employee_id and await _table_exists(conn, "internal_opportunity_matches"):
+        if role_opportunity_id:
+            await conn.execute(
+                """
+                INSERT INTO internal_opportunity_matches (
+                    employee_id, opportunity_id, match_score, reasons, status
+                )
+                VALUES ($1, $2, 92.4, $3::jsonb, 'applied')
+                ON CONFLICT (employee_id, opportunity_id)
+                DO UPDATE SET
+                    match_score = EXCLUDED.match_score,
+                    reasons = EXCLUDED.reasons,
+                    status = EXCLUDED.status,
+                    updated_at = NOW()
+                """,
+                sample_employee_id,
+                role_opportunity_id,
+                json.dumps(
+                    {
+                        "matched_skills": ["SQL", "Python", "Stakeholder Communication"],
+                        "missing_skills": [],
+                        "preferred_matched_skills": ["Experimentation"],
+                        "alignment_signals": ["target_role_match", "target_department_match"],
+                        "component_scores": {
+                            "required_skill_fit": 100.0,
+                            "preferred_skill_fit": 33.3,
+                            "interest_alignment": 100.0,
+                            "level_fit": 88.0,
+                        },
+                    }
+                ),
+            )
+
+        if project_opportunity_id:
+            await conn.execute(
+                """
+                INSERT INTO internal_opportunity_matches (
+                    employee_id, opportunity_id, match_score, reasons, status
+                )
+                VALUES ($1, $2, 84.1, $3::jsonb, 'saved')
+                ON CONFLICT (employee_id, opportunity_id)
+                DO UPDATE SET
+                    match_score = EXCLUDED.match_score,
+                    reasons = EXCLUDED.reasons,
+                    status = EXCLUDED.status,
+                    updated_at = NOW()
+                """,
+                sample_employee_id,
+                project_opportunity_id,
+                json.dumps(
+                    {
+                        "matched_skills": ["SQL", "Cross-functional Collaboration"],
+                        "missing_skills": ["Process Mapping"],
+                        "preferred_matched_skills": [],
+                        "alignment_signals": ["target_department_match", "interest_match"],
+                        "component_scores": {
+                            "required_skill_fit": 66.7,
+                            "preferred_skill_fit": 0.0,
+                            "interest_alignment": 100.0,
+                            "level_fit": 90.0,
+                        },
+                    }
+                ),
+            )
+
+    if (
+        sample_employee_id
+        and role_opportunity_id
+        and await _table_exists(conn, "internal_opportunity_applications")
+    ):
+        await conn.execute(
+            """
+            INSERT INTO internal_opportunity_applications (
+                employee_id, opportunity_id, status, employee_notes,
+                submitted_at, reviewed_by, reviewed_at, manager_notified_at
+            )
+            VALUES ($1, $2, 'in_review', $3, NOW() - INTERVAL '2 days', $4, NOW() - INTERVAL '1 day', NOW() - INTERVAL '12 hours')
+            ON CONFLICT (employee_id, opportunity_id)
+            DO UPDATE SET
+                status = EXCLUDED.status,
+                employee_notes = EXCLUDED.employee_notes,
+                submitted_at = EXCLUDED.submitted_at,
+                reviewed_by = EXCLUDED.reviewed_by,
+                reviewed_at = EXCLUDED.reviewed_at,
+                manager_notified_at = EXCLUDED.manager_notified_at,
+                updated_at = NOW()
+            """,
+            sample_employee_id,
+            role_opportunity_id,
+            "I have led weekly KPI reviews and want broader ownership across Product and Operations.",
+            client_user_id,
+        )
 
     if sample_employee_id and await _table_exists(conn, "pto_balances"):
         current_year = today.year
@@ -761,6 +1046,12 @@ async def _seed_test_account_data(
             sample_employee_id,
             manager_employee_id,
         )
+
+    return {
+        "seeded_manager_email": seeded_manager_email,
+        "seeded_employee_email": seeded_employee_email,
+        "seeded_portal_password": seeded_portal_password,
+    }
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -1457,13 +1748,14 @@ async def register_test_account(
                 company_id,
             )
 
-            await _seed_test_account_data(
+            seeded_data = await _seed_test_account_data(
                 conn,
                 company_id=company_id,
                 client_user_id=user["id"],
                 owner_name=request.name,
                 owner_email=request.email,
                 company_name=company_name,
+                seed_password=password,
             )
 
             logger.info(
@@ -1482,6 +1774,9 @@ async def register_test_account(
             email=user["email"],
             password=password,
             generated_password=generated_password,
+            seeded_manager_email=seeded_data.get("seeded_manager_email"),
+            seeded_employee_email=seeded_data.get("seeded_employee_email"),
+            seeded_portal_password=seeded_data.get("seeded_portal_password"),
         )
 
 

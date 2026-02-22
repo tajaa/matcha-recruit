@@ -169,3 +169,52 @@ export const portalLeaveWalkthrough: WalkthroughConfig = {
     },
   ],
 };
+
+export const portalMobilityWalkthrough: WalkthroughConfig = {
+  id: 'portal-mobility',
+  title: 'Internal Mobility',
+  category: 'employee',
+  steps: [
+    {
+      target: 'portal-mobility-guide',
+      title: 'Private Growth Workspace',
+      content: 'Use this page to quietly share your career goals and discover internal opportunities tailored to your profile.',
+      placement: 'left',
+      action: 'Click Show Me anytime to replay this guide.',
+    },
+    {
+      target: 'portal-mobility-profile',
+      title: 'Career Interests',
+      content: 'Add target roles, departments, skills, and interests so recommendations reflect where you want to grow next.',
+      placement: 'bottom',
+      action: 'Save after editing to refresh matching scores.',
+    },
+    {
+      target: 'portal-mobility-feed-filter',
+      title: 'Opportunity Feed Filter',
+      content: 'Switch between active, draft, and closed role statuses depending on what you want to explore.',
+      placement: 'bottom',
+    },
+    {
+      target: 'portal-mobility-card',
+      title: 'Opportunity Card',
+      content: 'Each card shows match score, skill alignment, and context so you can evaluate fit quickly.',
+      placement: 'top',
+      ifMissing: 'No opportunities are available for this filter yet.',
+    },
+    {
+      target: 'portal-mobility-actions',
+      title: 'Save, Dismiss, or Apply',
+      content: 'Save options you want to revisit, dismiss low-fit roles, or start an application immediately.',
+      placement: 'left',
+      ifMissing: 'Actions appear when at least one opportunity card is available.',
+    },
+    {
+      target: 'portal-mobility-apply',
+      title: 'Application Note',
+      content: 'Add an optional note to give recruiters context on why the opportunity aligns with your growth plan.',
+      placement: 'top',
+      ifMissing: 'Open Apply on an opportunity card to reveal the note panel.',
+    },
+  ],
+};

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Bookmark, CheckCircle2, CircleDashed, Sparkles, XCircle } from 'lucide-react';
 import { portalApi } from '../../api/portal';
+import { FeatureGuideTrigger } from '../../features/feature-guides';
 
 type ProfileVisibility = 'private' | 'hr_only' | 'manager_visible';
 type FeedStatus = 'suggested' | 'saved' | 'dismissed' | 'applied';
@@ -299,7 +300,10 @@ export default function PortalMobility() {
     <div className="p-6 space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-mono font-medium text-zinc-900">Internal Mobility</h1>
+          <div className="flex items-center gap-3" data-tour="portal-mobility-guide">
+            <h1 className="text-2xl font-mono font-medium text-zinc-900">Internal Mobility</h1>
+            <FeatureGuideTrigger guideId="portal-mobility" variant="light" />
+          </div>
           <p className="text-sm text-zinc-500 mt-1">
             Set your growth goals and explore internal opportunities privately.
           </p>
@@ -327,7 +331,7 @@ export default function PortalMobility() {
         </div>
       )}
 
-      <section className="bg-white border border-zinc-200 rounded-lg p-5 md:p-6 space-y-4">
+      <section className="bg-white border border-zinc-200 rounded-lg p-5 md:p-6 space-y-4" data-tour="portal-mobility-profile">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-sm font-mono uppercase tracking-wider text-zinc-500">Career Interests</h2>
           <div className="text-xs text-zinc-500">
@@ -396,7 +400,7 @@ export default function PortalMobility() {
               Dismissed: {statusCounts.dismissed}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" data-tour="portal-mobility-feed-filter">
             <label className="text-xs text-zinc-600">Role Status</label>
             <select
               value={feedFilter}
@@ -419,7 +423,11 @@ export default function PortalMobility() {
         ) : (
           <div className="space-y-4">
             {feed.map((item) => (
-              <article key={item.opportunity_id} className="border border-zinc-200 rounded-lg p-4 md:p-5">
+              <article
+                key={item.opportunity_id}
+                className="border border-zinc-200 rounded-lg p-4 md:p-5"
+                data-tour="portal-mobility-card"
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -464,7 +472,7 @@ export default function PortalMobility() {
                   </div>
                 )}
 
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-4 flex flex-wrap gap-2" data-tour="portal-mobility-actions">
                   {item.status === 'saved' ? (
                     <button
                       type="button"
@@ -511,7 +519,10 @@ export default function PortalMobility() {
                 </div>
 
                 {activeApplyId === item.opportunity_id && item.status !== 'applied' && (
-                  <div className="mt-3 p-3 border border-zinc-200 rounded-lg bg-zinc-50 space-y-3">
+                  <div
+                    className="mt-3 p-3 border border-zinc-200 rounded-lg bg-zinc-50 space-y-3"
+                    data-tour="portal-mobility-apply"
+                  >
                     <label className="block space-y-1">
                       <span className="text-xs text-zinc-600">
                         Optional note for recruiter/hiring manager

@@ -129,6 +129,9 @@ class TestAccountProvisionResponse(BaseModel):
     email: str
     password: str
     generated_password: bool = False
+    seeded_manager_email: Optional[str] = None
+    seeded_employee_email: Optional[str] = None
+    seeded_portal_password: Optional[str] = None
 
 
 # Profile models

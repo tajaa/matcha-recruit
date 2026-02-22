@@ -39,9 +39,11 @@ export type GuideKey =
   | 'employees'
   | 'company-setup'
   | 'google-workspace'
+  | 'internal-mobility'
   | 'broker-clients'
   | 'broker-reporting'
   | 'portal-onboarding'
   | 'portal-documents'
   | 'portal-pto'
-  | 'portal-leave';
+  | 'portal-leave'
+  | 'portal-mobility';

@@ -789,3 +789,53 @@ export const brokerReportingWalkthrough: WalkthroughConfig = {
     },
   ],
 };
+
+export const internalMobilityWalkthrough: WalkthroughConfig = {
+  id: 'internal-mobility',
+  title: 'Internal Mobility',
+  category: 'admin',
+  steps: [
+    {
+      target: 'internal-mobility-guide',
+      title: 'Mobility Command Center',
+      content: 'Use this workflow to publish internal opportunities and retain high-potential employees before they look externally.',
+      placement: 'left',
+      action: 'Click Show Me anytime to replay this walkthrough.',
+    },
+    {
+      target: 'internal-mobility-create-form',
+      title: 'Create Opportunity',
+      content: 'Create role or project opportunities with skills, department, and duration so employees can discover growth paths.',
+      placement: 'bottom',
+      action: 'Publish as Active when the opportunity is ready to be discoverable in the employee portal.',
+    },
+    {
+      target: 'internal-mobility-opportunities-filters',
+      title: 'Opportunity Filters',
+      content: 'Filter by status and type to quickly review what is live, in draft, or closed.',
+      placement: 'bottom',
+      action: 'Use Refresh after updates to validate the latest state.',
+    },
+    {
+      target: 'internal-mobility-opportunities-list',
+      title: 'Opportunity List',
+      content: 'Review each opportunity card, validate required skills, and adjust status directly from this list.',
+      placement: 'top',
+      ifMissing: 'No opportunities match the active filters. Create your first opportunity above.',
+    },
+    {
+      target: 'internal-mobility-applications-list',
+      title: 'Application Queue',
+      content: 'Track employee interest and progression from new applications through aligned or closed outcomes.',
+      placement: 'top',
+      ifMissing: 'Applications appear after employees apply through the portal experience.',
+    },
+    {
+      target: 'internal-mobility-application-status',
+      title: 'Status + Manager Signals',
+      content: 'Move applications through stages and record manager notification to keep transitions coordinated and private.',
+      placement: 'left',
+      ifMissing: 'Status controls appear once at least one application exists.',
+    },
+  ],
+};

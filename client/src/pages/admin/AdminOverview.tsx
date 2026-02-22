@@ -257,6 +257,21 @@ export function AdminOverview() {
                 <div>Company: {createdTestAccount.company_name}</div>
                 <div>Email: {createdTestAccount.email}</div>
                 <div>Password: {createdTestAccount.password}</div>
+                {createdTestAccount.seeded_employee_email && (
+                  <div className="pt-2 mt-2 border-t border-emerald-500/10 space-y-1">
+                    <div className="text-emerald-500 uppercase tracking-widest font-bold text-[10px]">
+                      Portal Demo User
+                    </div>
+                    <div>Employee Email: {createdTestAccount.seeded_employee_email}</div>
+                    {createdTestAccount.seeded_manager_email && (
+                      <div>Manager Email: {createdTestAccount.seeded_manager_email}</div>
+                    )}
+                    <div>
+                      Portal Password:{' '}
+                      {createdTestAccount.seeded_portal_password || createdTestAccount.password}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -534,6 +534,9 @@ export interface TestAccountProvisionResponse {
   email: string;
   password: string;
   generated_password: boolean;
+  seeded_manager_email?: string | null;
+  seeded_employee_email?: string | null;
+  seeded_portal_password?: string | null;
 }
 
 export interface BusinessInvite {
