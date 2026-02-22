@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { adminJurisdictions, adminSchedulers } from '../../api/client';
 import type {
   Jurisdiction, JurisdictionTotals, JurisdictionDetail, JurisdictionCreate,
@@ -69,6 +69,14 @@ function formatInheritanceParent(city: string, state: string | null): string {
   return state ? `${cityLabel}, ${state}` : cityLabel;
 }
 
+function displayCity(city: string): string {
+  if (!city.trim()) return '(unnamed)';
+  return city
+    .replace(/^_county_/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
 const categoryLabel: Record<string, string> = {
   minimum_wage: 'Minimum Wage',
   overtime: 'Overtime',
@@ -113,7 +121,6 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
     { key: 'locations', label: 'Locations', count: detail.locations.length },
   ];
 
-  // Group requirements by category
   const reqsByCategory: Record<string, JurisdictionRequirement[]> = {};
   for (const r of detail.requirements) {
     const cat = r.category || 'other';
@@ -123,7 +130,6 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
 
   return (
     <div className="border-t border-white/5 bg-zinc-950/50">
-      {/* Metro Group */}
       {hasMetroGroup && (
         <div className="px-6 py-3 border-b border-white/5 bg-zinc-900/60">
           <div className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500 mb-2">Metro Group</div>
@@ -157,24 +163,22 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
         </div>
       )}
 
-      {/* Tab bar */}
-      <div className="flex overflow-x-auto no-scrollbar border-b border-white/5 bg-zinc-900/40">
+      <div className="flex overflow-x-auto border-b border-white/5 bg-zinc-900/40">
         {tabs.map(t => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-5 py-3 text-[9px] uppercase tracking-[0.2em] font-mono font-bold transition-colors whitespace-nowrap border-b-2 ${
+            className={`px-5 py-2.5 text-[9px] uppercase tracking-[0.2em] font-mono font-bold transition-colors whitespace-nowrap border-b-2 ${
               tab === t.key
                 ? 'text-white border-white bg-white/[0.03]'
                 : 'text-zinc-500 border-transparent hover:text-zinc-300'
             }`}
           >
-            {t.label} <span className="text-zinc-600 ml-1.5">{t.count}</span>
+            {t.label} <span className="text-zinc-600 ml-1">{t.count}</span>
           </button>
         ))}
       </div>
 
-      {/* Requirements tab */}
       {tab === 'requirements' && (
         <div className="divide-y divide-white/5">
           {detail.requirements.length === 0 && (
@@ -182,11 +186,11 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
           )}
           {Object.entries(reqsByCategory).map(([cat, reqs]) => (
             <div key={cat}>
-              <div className="px-6 py-2 bg-zinc-900/80">
+              <div className="px-6 py-2 bg-zinc-900/80 flex items-center gap-2">
                 <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500">
                   {categoryLabel[cat] || cat.replace(/_/g, ' ')}
                 </span>
-                <span className="text-[9px] text-zinc-600 font-mono ml-2">{reqs.length}</span>
+                <span className="text-[9px] text-zinc-700 font-mono">{reqs.length}</span>
               </div>
               {reqs.map((r: JurisdictionRequirement) => (
                 <div key={r.id} className="px-6 py-3 hover:bg-white/[0.02] transition-colors">
@@ -212,7 +216,7 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
                         <span className="text-[9px] text-zinc-700 font-mono">Verified {formatRelative(r.last_verified_at)}</span>
                       </div>
                     </div>
-                    <div className="text-right flex-shrink-0 min-w-[100px]">
+                    <div className="text-right flex-shrink-0 min-w-[90px]">
                       {r.current_value && (
                         <div className="text-sm text-white font-mono font-bold">{r.current_value}</div>
                       )}
@@ -228,7 +232,6 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
         </div>
       )}
 
-      {/* Legislation tab */}
       {tab === 'legislation' && (
         <div className="divide-y divide-white/5">
           {detail.legislation.length === 0 && (
@@ -265,7 +268,7 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
                     <span className="text-[9px] text-zinc-700 font-mono">Verified {formatRelative(l.last_verified_at)}</span>
                   </div>
                 </div>
-                <div className="text-right flex-shrink-0 min-w-[100px]">
+                <div className="text-right flex-shrink-0 min-w-[90px]">
                   {l.expected_effective_date && (
                     <div className="text-xs text-zinc-300 font-mono">{l.expected_effective_date}</div>
                   )}
@@ -276,7 +279,6 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
         </div>
       )}
 
-      {/* Locations tab */}
       {tab === 'locations' && (
         <div className="divide-y divide-white/5">
           {detail.locations.length === 0 && (
@@ -284,7 +286,7 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
           )}
           {detail.locations.map((loc: JurisdictionLocation) => (
             <div key={loc.id} className="px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 hover:bg-white/[0.02]">
-              <div className="min-w-[180px] flex-1">
+              <div className="min-w-[160px] flex-1">
                 <div className="text-xs text-zinc-300 font-mono">{loc.name || `${loc.city}, ${loc.state}`}</div>
                 <div className="text-[10px] text-zinc-600 font-mono">{loc.company_name}</div>
               </div>
@@ -314,6 +316,15 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
   );
 }
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 mb-3">
+      <span className="text-[9px] uppercase tracking-[0.2em] font-mono font-bold text-zinc-500 shrink-0">{children}</span>
+      <div className="flex-1 h-px bg-white/[0.06]" />
+    </div>
+  );
+}
+
 export function Jurisdictions() {
   const [jurisdictions, setJurisdictions] = useState<Jurisdiction[]>([]);
   const [totals, setTotals] = useState<JurisdictionTotals | null>(null);
@@ -334,6 +345,7 @@ export function Jurisdictions() {
   const [checkTargetId, setCheckTargetId] = useState<string | null>(null);
   const [checkMessages, setCheckMessages] = useState<{ type: string; status?: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const fetchData = useCallback(async () => {
     try {
@@ -357,6 +369,16 @@ export function Jurisdictions() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const filteredJurisdictions = useMemo(() => {
+    if (!search.trim()) return jurisdictions;
+    const q = search.trim().toLowerCase();
+    return jurisdictions.filter(j =>
+      j.city.toLowerCase().includes(q) ||
+      (j.state && j.state.toLowerCase().includes(q)) ||
+      (j.county && j.county.toLowerCase().includes(q))
+    );
+  }, [jurisdictions, search]);
 
   const handleToggle = async (taskKey: string, currentEnabled: boolean) => {
     setToggling(taskKey);
@@ -454,9 +476,7 @@ export function Jurisdictions() {
         delete next[jurisdiction.id];
         return next;
       });
-      if (expanded === jurisdiction.id) {
-        setExpanded(null);
-      }
+      if (expanded === jurisdiction.id) setExpanded(null);
       if (checkTargetId === jurisdiction.id) {
         setCheckTargetId(null);
         setCheckMessages([]);
@@ -520,7 +540,6 @@ export function Jurisdictions() {
           } catch { /* skip malformed */ }
         }
       }
-      // Refresh data after check completes
       setDetailCache({});
       await fetchData();
     } catch (err: unknown) {
@@ -541,7 +560,7 @@ export function Jurisdictions() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="max-w-7xl mx-auto space-y-6">
       <style>{`
         @keyframes scanX {
           0% { transform: translateX(-100%); }
@@ -561,6 +580,7 @@ export function Jurisdictions() {
           100% { opacity: 1; transform: scale(1); }
         }
       `}</style>
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 border-b border-white/10 pb-6 md:pb-8">
         <div>
@@ -586,42 +606,41 @@ export function Jurisdictions() {
         </div>
       </div>
 
+      {/* Banners */}
       {error && (
-        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono">
-          {error}
-          <button onClick={() => setError(null)} className="ml-4 underline hover:text-red-300">Dismiss</button>
+        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono flex items-center justify-between gap-4">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-[10px] uppercase tracking-wider underline hover:text-red-300 shrink-0">Dismiss</button>
         </div>
       )}
       {notice && (
-        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-mono">
-          {notice}
-          <button onClick={() => setNotice(null)} className="ml-4 underline hover:text-emerald-200">Dismiss</button>
+        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-mono flex items-center justify-between gap-4">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="text-[10px] uppercase tracking-wider underline hover:text-emerald-200 shrink-0">Dismiss</button>
         </div>
       )}
 
-      {/* Create Jurisdiction Form */}
+      {/* Create form */}
       {showCreateForm && (
-        <div className="border border-white/10 bg-zinc-900/50 p-6 space-y-4">
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-3">
-            New Jurisdiction
-          </div>
+        <div className="border border-white/10 bg-zinc-900/60 p-6 space-y-4">
+          <div className="text-[9px] uppercase tracking-[0.2em] font-mono font-bold text-zinc-400">New Jurisdiction</div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">City *</label>
+              <label className="block text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-1.5">City *</label>
               <input
                 type="text"
                 value={createForm.city}
                 onChange={e => setCreateForm(f => ({ ...f, city: e.target.value }))}
                 placeholder="e.g. manhattan"
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
               />
             </div>
             <div>
-              <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">State *</label>
+              <label className="block text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-1.5">State *</label>
               <select
                 value={createForm.state}
                 onChange={e => setCreateForm(f => ({ ...f, state: e.target.value }))}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono focus:outline-none focus:border-zinc-500"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono focus:outline-none focus:border-zinc-500 transition-colors"
               >
                 <option value="">Select state</option>
                 {US_STATES.map(s => (
@@ -630,21 +649,21 @@ export function Jurisdictions() {
               </select>
             </div>
             <div>
-              <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">County</label>
+              <label className="block text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-1.5">County</label>
               <input
                 type="text"
                 value={createForm.county || ''}
                 onChange={e => setCreateForm(f => ({ ...f, county: e.target.value }))}
                 placeholder="optional"
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
               />
             </div>
             <div>
-              <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">Parent</label>
+              <label className="block text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-1.5">Parent</label>
               <select
                 value={createForm.parent_id || ''}
                 onChange={e => setCreateForm(f => ({ ...f, parent_id: e.target.value || undefined }))}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono focus:outline-none focus:border-zinc-500"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono focus:outline-none focus:border-zinc-500 transition-colors"
               >
                 <option value="">None (top-level)</option>
                 {jurisdictions.map(j => (
@@ -666,24 +685,30 @@ export function Jurisdictions() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-24">
-          <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse font-mono">Loading...</div>
+        <div className="flex items-center justify-center py-32">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-zinc-400 opacity-30" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-zinc-500" />
+            </span>
+            <span className="text-xs text-zinc-500 uppercase tracking-widest font-mono">Loading</span>
+          </div>
         </div>
       ) : (
         <>
-          {/* Stats */}
+          {/* Stats strip */}
           {totals && stats && (
-            <div className="grid grid-cols-2 xs:grid-cols-3 md:grid-cols-5 gap-3 md:gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-white/[0.06] border border-white/[0.06]">
               {[
-                { label: 'Jurisdictions', value: totals.total_jurisdictions },
-                { label: 'Requirements', value: totals.total_requirements },
-                { label: 'Legislation', value: totals.total_legislation },
-                { label: 'Checks (24h)', value: stats.overview.checks_24h },
-                { label: 'Failed (24h)', value: stats.overview.failed_24h, alert: stats.overview.failed_24h > 0 },
+                { label: 'Jurisdictions', value: totals.total_jurisdictions, dim: false },
+                { label: 'Requirements', value: totals.total_requirements, dim: false },
+                { label: 'Legislation', value: totals.total_legislation, dim: false },
+                { label: 'Checks (24h)', value: stats.overview.checks_24h, dim: false },
+                { label: 'Failed (24h)', value: stats.overview.failed_24h, dim: false, alert: stats.overview.failed_24h > 0 },
               ].map((stat) => (
-                <div key={stat.label} className="bg-zinc-900/50 border border-white/10 p-4">
+                <div key={stat.label} className="bg-zinc-950 px-5 py-4">
                   <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-2">{stat.label}</div>
-                  <div className={`text-xl md:text-2xl font-bold font-mono ${'alert' in stat && stat.alert ? 'text-red-400' : 'text-white'}`}>
+                  <div className={`text-2xl font-bold font-mono tabular-nums ${'alert' in stat && stat.alert ? 'text-red-400' : 'text-white'}`}>
                     {stat.value}
                   </div>
                 </div>
@@ -691,410 +716,416 @@ export function Jurisdictions() {
             </div>
           )}
 
-          {/* Scheduler Job Cards */}
-          <div className="space-y-4">
-            <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">
-              Scheduled Jobs
-            </div>
-            {schedulers.map((sched) => (
-              <div key={sched.task_key} className="bg-zinc-900/50 border border-white/10">
-                <div className="p-4 md:p-6">
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-base md:text-lg font-bold text-white tracking-tight">{sched.display_name}</h3>
-                        <span className={`text-[9px] px-2 py-0.5 uppercase tracking-wider font-bold border ${
-                          sched.enabled
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                            : 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30'
-                        }`}>
-                          {sched.enabled ? 'Active' : 'Disabled'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-zinc-500 font-mono leading-relaxed">{sched.description}</p>
+          {/* Main two-column layout */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+
+            {/* Jurisdictions list — 2/3 width on xl */}
+            <div className="xl:col-span-2 space-y-3">
+              <SectionLabel>
+                Jurisdictions{jurisdictions.length > 0 ? ` (${jurisdictions.length})` : ''}
+              </SectionLabel>
+
+              {/* Search */}
+              {jurisdictions.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                      placeholder="Filter by city, state, or county..."
+                      className="w-full pl-9 pr-3 py-2 bg-zinc-900 border border-zinc-800 text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                    />
+                  </div>
+                  {search && (
+                    <span className="text-[10px] font-mono text-zinc-500 shrink-0">
+                      {filteredJurisdictions.length}/{jurisdictions.length}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* List */}
+              {jurisdictions.length === 0 ? (
+                <div className="border border-white/10 bg-zinc-900/30 p-8 text-center">
+                  <div className="text-xs text-zinc-500 font-mono">No jurisdictions yet. They are created automatically when locations are added.</div>
+                </div>
+              ) : filteredJurisdictions.length === 0 ? (
+                <div className="border border-white/10 bg-zinc-900/30 p-6 text-center">
+                  <div className="text-xs text-zinc-500 font-mono">No jurisdictions match "{search}"</div>
+                </div>
+              ) : (
+                <div className="border border-white/10 divide-y divide-white/[0.05]">
+                  {/* Column header */}
+                  <div className="hidden xl:flex items-center gap-2 px-4 py-2 bg-zinc-950/70 border-b border-white/[0.05]">
+                    <div className="flex-1 min-w-0" />
+                    <div className="flex items-center gap-4 shrink-0">
+                      <div className="w-10 text-right text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Reqs</div>
+                      <div className="w-10 text-right text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Leg</div>
+                      <div className="w-10 text-right text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Locs</div>
+                      <div className="w-16 text-right text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Verified</div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <button
-                        onClick={() => handleToggle(sched.task_key, sched.enabled)}
-                        disabled={toggling === sched.task_key}
-                        className={`relative w-10 h-5 rounded-full transition-colors ${
-                          sched.enabled ? 'bg-emerald-600' : 'bg-zinc-700'
-                        } ${toggling === sched.task_key ? 'opacity-50' : ''}`}
-                      >
-                        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                          sched.enabled ? 'translate-x-5' : 'translate-x-0.5'
-                        }`} />
-                      </button>
-                      <button
-                        onClick={() => handleTrigger(sched.task_key)}
-                        disabled={triggering === sched.task_key}
-                        className="px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase font-mono text-white bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 hover:border-zinc-500 transition-colors disabled:opacity-50"
-                      >
-                        {triggering === sched.task_key ? 'Triggering...' : 'Run Now'}
-                      </button>
+                    <div className="hidden sm:block w-[77px]" />
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="w-[88px]" />
+                      <div className="w-7" />
                     </div>
                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
+                  {filteredJurisdictions.map((j) => {
+                    const isExpanded = expanded === j.id;
+                    const detail = detailCache[j.id];
+                    const isLoading = detailLoading === j.id;
+                    return (
+                      <div key={j.id} className={isExpanded ? 'bg-white/[0.015]' : ''}>
+                        {/* Row */}
+                        <div className="flex items-center gap-2 px-4 py-3 hover:bg-white/[0.03] transition-colors group">
+                          {/* Expand + main info */}
+                          <button
+                            onClick={() => handleExpand(j.id)}
+                            className="flex-1 min-w-0 flex items-center gap-2.5 text-left"
+                          >
+                            <span className={`text-[9px] font-mono text-zinc-600 shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
+                            <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                              <span className="text-sm text-white font-medium">{displayCity(j.city)}, {j.state}</span>
+                              {j.county && <span className="text-[9px] text-zinc-600 font-mono hidden md:inline">({j.county})</span>}
+                              {j.parent_id && j.parent_city && (
+                                <span className={`text-[8px] px-1.5 py-0.5 font-mono border hidden sm:inline ${
+                                  j.inherits_from_parent
+                                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                }`}>
+                                  {j.inherits_from_parent
+                                    ? `inherits ${formatInheritanceParent(displayCity(j.parent_city), j.parent_state)}`
+                                    : `↳ ${displayCity(j.parent_city)}`}
+                                </span>
+                              )}
+                              {j.children_count > 0 && (
+                                <span className="text-[8px] px-1.5 py-0.5 font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 hidden lg:inline">
+                                  {j.children_count} {j.children_count === 1 ? 'child' : 'children'}
+                                </span>
+                              )}
+                            </div>
+                          </button>
 
-          {/* Jurisdictions Table */}
-          {jurisdictions.length > 0 && (
-            <div className="space-y-3">
-              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">
-                Jurisdictions
-              </div>
-              <div className="border border-white/10 bg-zinc-900/30 divide-y divide-white/5">
-                {jurisdictions.map((j) => {
-                  const isExpanded = expanded === j.id;
-                  const detail = detailCache[j.id];
-                  const isLoading = detailLoading === j.id;
-                  return (
-                    <div key={j.id} className="relative">
-                      <button
-                        onClick={() => handleExpand(j.id)}
-                        className="w-full px-4 py-3 pr-4 md:pr-44 hover:bg-white/5 transition-colors text-left"
-                      >
-                        <div className="flex items-center gap-2 md:gap-3 min-w-0">
-                          <span className={`text-[10px] font-mono transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
-                          <span className="text-sm text-white font-medium">
-                            {j.city}, {j.state}
-                          </span>
-                          {j.county && (
-                            <span className="text-[9px] text-zinc-600 font-mono hidden sm:inline">({j.county} County)</span>
-                          )}
-                          {j.parent_id && j.parent_city && (
-                            <span className={`text-[8px] px-1.5 py-0.5 font-mono border hidden sm:inline ${
-                              j.inherits_from_parent
-                                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
-                                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                            }`}>
-                              {j.inherits_from_parent
-                                ? `inherits from ${formatInheritanceParent(j.parent_city, j.parent_state)}`
-                                : `child of ${j.parent_city}, ${j.parent_state}`}
-                            </span>
-                          )}
-                          {j.children_count > 0 && (
-                            <span className="text-[8px] px-1.5 py-0.5 font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 hidden sm:inline">
-                              {j.children_count} {j.children_count === 1 ? 'child' : 'children'}
-                            </span>
-                          )}
-                          <span className={`text-[9px] px-2 py-0.5 uppercase tracking-wider font-bold border ml-auto md:hidden shrink-0 ${
+                          {/* Stats — desktop only */}
+                          <div className="hidden xl:flex items-center gap-4 shrink-0">
+                            <div className="w-10 text-right text-xs text-zinc-300 font-mono font-bold tabular-nums">{j.requirement_count}</div>
+                            <div className="w-10 text-right text-xs text-zinc-300 font-mono font-bold tabular-nums">{j.legislation_count}</div>
+                            <div className="w-10 text-right text-xs text-zinc-300 font-mono font-bold tabular-nums">{j.location_count}</div>
+                            <div className="w-16 text-right text-xs text-zinc-500 font-mono">{formatRelative(j.last_verified_at)}</div>
+                          </div>
+
+                          {/* Status badge */}
+                          <span className={`hidden sm:inline text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border shrink-0 ${
                             j.requirement_count > 0
                               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                              : 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30'
-                          }`}>
-                            {j.requirement_count > 0 ? `${j.requirement_count} reqs` : 'Empty'}
-                          </span>
-                        </div>
-                        {/* Desktop stats row */}
-                        <div className="hidden md:flex items-center gap-4 mt-0 absolute right-44 top-1/2 -translate-y-1/2">
-                          <div className="text-right">
-                            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Reqs</div>
-                            <div className="text-xs text-zinc-300 font-mono font-bold">{j.requirement_count}</div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Leg.</div>
-                            <div className="text-xs text-zinc-300 font-mono font-bold">{j.legislation_count}</div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Locations</div>
-                            <div className="text-xs text-zinc-300 font-mono font-bold">{j.location_count}</div>
-                          </div>
-                          <div className="text-right min-w-[80px]">
-                            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Verified</div>
-                            <div className="text-xs text-zinc-400 font-mono">{formatRelative(j.last_verified_at)}</div>
-                          </div>
-                          <span className={`text-[9px] px-2 py-0.5 uppercase tracking-wider font-bold border ${
-                            j.requirement_count > 0
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                              : 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30'
+                              : 'bg-zinc-800/40 text-zinc-600 border-zinc-700/30'
                           }`}>
                             {j.requirement_count > 0 ? 'Populated' : 'Empty'}
                           </span>
-                        </div>
-                      </button>
-                      {/* Research button — outside the expand toggle */}
-                      <div className="absolute top-2 right-2 md:right-4 z-10 flex items-center gap-2">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
-                          disabled={checkingId !== null || deletingId !== null}
-                          className={`group relative px-2 md:px-3 py-1.5 text-[9px] tracking-[0.12em] uppercase font-mono border bg-zinc-900 transition-all duration-300 overflow-hidden ${
-                            checkingId === j.id
-                              ? 'text-blue-300 border-blue-500/40'
-                              : 'text-zinc-400 border-zinc-700 hover:text-white hover:border-zinc-400 disabled:opacity-30'
-                          }`}
-                        >
-                          {checkingId === j.id && (
-                            <span className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/10 to-transparent" style={{ animation: 'scanX 1.5s ease-in-out infinite' }} />
-                          )}
-                          <span className="relative flex items-center gap-1.5">
-                            {checkingId === j.id ? (
-                              <>
-                                <svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>
-                                <span className="hidden sm:inline">Researching</span>
-                                <span className="sm:hidden">...</span>
-                              </>
-                            ) : 'Research'}
-                          </span>
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); void handleDelete(j); }}
-                          disabled={checkingId !== null || deletingId !== null}
-                          className={`px-2 md:px-3 py-1.5 text-[9px] tracking-[0.12em] uppercase font-mono border transition-colors ${
-                            deletingId === j.id
-                              ? 'text-red-300 border-red-500/50 bg-red-500/10'
-                              : 'text-red-300 border-red-700 hover:border-red-500 hover:bg-red-500/10 disabled:opacity-30'
-                          }`}
-                          title="Delete jurisdiction"
-                        >
-                          {deletingId === j.id ? 'Deleting...' : 'Delete'}
-                        </button>
-                      </div>
-                      {/* Check progress panel */}
-                      {isExpanded && checkTargetId === j.id && checkMessages.length > 0 && (() => {
-                        const isActive = checkingId === j.id;
-                        const completed = checkMessages.find(m => m.type === 'completed');
-                        const hasError = checkMessages.some(m => m.type === 'error');
-                        const resultCount = checkMessages.filter(m => m.type === 'result').length;
-                        return (
-                        <div className="border-t border-white/5 overflow-hidden">
-                          {/* Scanning progress bar */}
-                          {isActive && (
-                            <div className="h-[2px] w-full bg-zinc-800 overflow-hidden">
-                              <div className="h-full w-1/3 bg-gradient-to-r from-transparent via-blue-400 to-transparent" style={{ animation: 'scanX 1.2s ease-in-out infinite' }} />
-                            </div>
-                          )}
-                          {/* Completed glow bar */}
-                          {completed && !isActive && (
-                            <div className="h-[2px] w-full bg-emerald-500/60" style={{ animation: 'fadeIn 0.4s ease-out' }} />
-                          )}
-                          {/* Error bar */}
-                          {hasError && !isActive && (
-                            <div className="h-[2px] w-full bg-red-500/60" style={{ animation: 'fadeIn 0.4s ease-out' }} />
-                          )}
 
-                          {/* Legend */}
-                          {resultCount > 0 && (
-                            <div className="flex items-center gap-4 px-6 pt-3 pb-2 border-b border-white/5 bg-zinc-950/40" style={{ animation: 'fadeSlideDown 0.3s ease-out' }}>
-                              <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> New
-                              </span>
-                              <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Updated
-                              </span>
-                              <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
-                                <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" /> Existing
-                              </span>
-                              {isActive && <span className="ml-auto text-[10px] text-zinc-600 font-mono tabular-nums">{resultCount} found</span>}
-                            </div>
-                          )}
-
-                          {/* Messages */}
-                          <div className="max-h-56 overflow-y-auto bg-zinc-950/30">
-                            {checkMessages.map((msg, i) => {
-                              const isLast = i === checkMessages.length - 1;
-                              const isResult = msg.type === 'result';
-                              return (
-                              <div
-                                key={i}
-                                className="flex items-center gap-2.5 text-xs font-mono px-6 py-1.5 transition-colors duration-150 hover:bg-white/[0.02]"
-                                style={{ animation: `fadeSlideDown 0.25s ease-out ${Math.min(i * 0.04, 0.4)}s both` }}
-                              >
-                                {/* Icon */}
-                                {msg.type === 'error' ? (
-                                  <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-red-400">
-                                    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
-                                  </span>
-                                ) : msg.type === 'completed' ? (
-                                  <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-emerald-400" style={{ animation: 'popIn 0.3s ease-out' }}>
-                                    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                  </span>
-                                ) : isActive && isLast ? (
-                                  <span className="w-4 h-4 flex items-center justify-center flex-shrink-0">
-                                    <span className="relative flex h-2.5 w-2.5">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-40" />
-                                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-400" />
-                                    </span>
-                                  </span>
+                          {/* Actions */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
+                              disabled={checkingId !== null || deletingId !== null}
+                              className={`relative px-2.5 py-1.5 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
+                                checkingId === j.id
+                                  ? 'text-blue-300 border-blue-500/40 bg-blue-500/5'
+                                  : 'text-zinc-500 border-zinc-700/60 hover:text-white hover:border-zinc-500 disabled:opacity-30'
+                              }`}
+                            >
+                              {checkingId === j.id && (
+                                <span className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/10 to-transparent" style={{ animation: 'scanX 1.5s ease-in-out infinite' }} />
+                              )}
+                              <span className="relative flex items-center gap-1.5">
+                                {checkingId === j.id ? (
+                                  <>
+                                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none">
+                                      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
+                                    </svg>
+                                    <span className="hidden sm:inline">Scanning</span>
+                                  </>
                                 ) : (
-                                  <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-zinc-700">
-                                    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                  </span>
+                                  <>
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
+                                    <span className="hidden sm:inline">Research</span>
+                                  </>
                                 )}
-
-                                {/* Status badge for results */}
-                                {isResult && msg.status && (
-                                  <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 border flex-shrink-0 ${
-                                    msg.status === 'new' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' :
-                                    msg.status === 'updated' ? 'bg-amber-500/15 text-amber-400 border-amber-500/25' :
-                                    'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'
-                                  }`} style={{ animation: `fadeSlideDown 0.2s ease-out` }}>
-                                    {msg.status === 'existing' ? 'same' : msg.status}
-                                  </span>
-                                )}
-
-                                {/* Phase badge for non-result steps */}
-                                {!isResult && msg.type !== 'completed' && msg.type !== 'error' && msg.type !== 'started' && (
-                                  <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 border flex-shrink-0 ${
-                                    msg.type === 'researching' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                                    msg.type === 'scanning' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
-                                    msg.type === 'verifying' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
-                                    msg.type === 'legislation' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
-                                    'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'
-                                  }`}>
-                                    {msg.type}
-                                  </span>
-                                )}
-
-                                {/* Message text */}
-                                <span className={`truncate ${
-                                  msg.type === 'error' ? 'text-red-400' :
-                                  msg.type === 'completed' ? 'text-emerald-300 font-medium' :
-                                  isResult && msg.status === 'new' ? 'text-emerald-300/80' :
-                                  isResult && msg.status === 'updated' ? 'text-amber-300/80' :
-                                  isActive && isLast ? 'text-zinc-200' :
-                                  isResult ? 'text-zinc-500' :
-                                  'text-zinc-500'
-                                }`}>
-                                  {msg.type === 'completed'
-                                    ? `Complete — ${msg.new ?? 0} requirements, ${msg.updated ?? 0} updated`
-                                    : msg.message || msg.location || ''}
-                                </span>
-                              </div>
-                              );
-                            })}
+                              </span>
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); void handleDelete(j); }}
+                              disabled={checkingId !== null || deletingId !== null}
+                              className={`p-1.5 border transition-colors disabled:opacity-30 ${
+                                deletingId === j.id
+                                  ? 'text-red-300 border-red-500/40 bg-red-500/5'
+                                  : 'text-zinc-700 border-zinc-800 hover:text-red-400 hover:border-red-700/60'
+                              }`}
+                              title="Delete jurisdiction"
+                            >
+                              {deletingId === j.id ? (
+                                <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 16 16" fill="none">
+                                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
+                                </svg>
+                              ) : (
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              )}
+                            </button>
                           </div>
+                        </div>
 
-                          {/* Completed summary */}
-                          {completed && !isActive && (
-                            <div className="px-6 py-3 border-t border-emerald-500/10 bg-emerald-500/[0.03]" style={{ animation: 'fadeSlideDown 0.4s ease-out' }}>
-                              <div className="flex items-center gap-4">
-                                <div className="flex items-center gap-2">
-                                  <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40 animate-ping" style={{ animationDuration: '2s' }} /><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" /></span>
-                                  <span className="text-[10px] uppercase tracking-widest font-mono font-bold text-emerald-400">Research Complete</span>
+                        {/* Check progress panel */}
+                        {isExpanded && checkTargetId === j.id && checkMessages.length > 0 && (() => {
+                          const isActive = checkingId === j.id;
+                          const completed = checkMessages.find(m => m.type === 'completed');
+                          const hasError = checkMessages.some(m => m.type === 'error');
+                          const resultCount = checkMessages.filter(m => m.type === 'result').length;
+                          return (
+                            <div className="border-t border-white/5 overflow-hidden">
+                              {isActive && (
+                                <div className="h-[2px] w-full bg-zinc-800 overflow-hidden">
+                                  <div className="h-full w-1/3 bg-gradient-to-r from-transparent via-blue-400 to-transparent" style={{ animation: 'scanX 1.2s ease-in-out infinite' }} />
                                 </div>
-                                <div className="flex items-center gap-3 ml-auto text-[11px] font-mono">
-                                  <span className="text-emerald-400">{completed.new ?? 0} <span className="text-zinc-600">reqs</span></span>
-                                  <span className="text-amber-400">{completed.updated ?? 0} <span className="text-zinc-600">updated</span></span>
-                                  <span className="text-zinc-500">{completed.alerts ?? 0} <span className="text-zinc-600">alerts</span></span>
+                              )}
+                              {completed && !isActive && (
+                                <div className="h-[2px] w-full bg-emerald-500/60" style={{ animation: 'fadeIn 0.4s ease-out' }} />
+                              )}
+                              {hasError && !isActive && (
+                                <div className="h-[2px] w-full bg-red-500/60" style={{ animation: 'fadeIn 0.4s ease-out' }} />
+                              )}
+
+                              {resultCount > 0 && (
+                                <div className="flex items-center gap-4 px-6 pt-3 pb-2 border-b border-white/5 bg-zinc-950/40" style={{ animation: 'fadeSlideDown 0.3s ease-out' }}>
+                                  <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> New
+                                  </span>
+                                  <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Updated
+                                  </span>
+                                  <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" /> Existing
+                                  </span>
+                                  {isActive && <span className="ml-auto text-[10px] text-zinc-600 font-mono tabular-nums">{resultCount} found</span>}
                                 </div>
+                              )}
+
+                              <div className="max-h-56 overflow-y-auto bg-zinc-950/30">
+                                {checkMessages.map((msg, i) => {
+                                  const isLast = i === checkMessages.length - 1;
+                                  const isResult = msg.type === 'result';
+                                  return (
+                                    <div
+                                      key={i}
+                                      className="flex items-center gap-2.5 text-xs font-mono px-6 py-1.5 hover:bg-white/[0.02]"
+                                      style={{ animation: `fadeSlideDown 0.25s ease-out ${Math.min(i * 0.04, 0.4)}s both` }}
+                                    >
+                                      {msg.type === 'error' ? (
+                                        <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-red-400">
+                                          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                                        </span>
+                                      ) : msg.type === 'completed' ? (
+                                        <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-emerald-400" style={{ animation: 'popIn 0.3s ease-out' }}>
+                                          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                                        </span>
+                                      ) : isActive && isLast ? (
+                                        <span className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                                          <span className="relative flex h-2.5 w-2.5">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-40" />
+                                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-400" />
+                                          </span>
+                                        </span>
+                                      ) : (
+                                        <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-zinc-700">
+                                          <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                                        </span>
+                                      )}
+
+                                      {isResult && msg.status && (
+                                        <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 border flex-shrink-0 ${
+                                          msg.status === 'new' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' :
+                                          msg.status === 'updated' ? 'bg-amber-500/15 text-amber-400 border-amber-500/25' :
+                                          'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'
+                                        }`}>
+                                          {msg.status === 'existing' ? 'same' : msg.status}
+                                        </span>
+                                      )}
+
+                                      {!isResult && msg.type !== 'completed' && msg.type !== 'error' && msg.type !== 'started' && (
+                                        <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 border flex-shrink-0 ${
+                                          msg.type === 'researching' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                                          msg.type === 'scanning' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                                          msg.type === 'verifying' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
+                                          msg.type === 'legislation' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                                          'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'
+                                        }`}>
+                                          {msg.type}
+                                        </span>
+                                      )}
+
+                                      <span className={`truncate ${
+                                        msg.type === 'error' ? 'text-red-400' :
+                                        msg.type === 'completed' ? 'text-emerald-300 font-medium' :
+                                        isResult && msg.status === 'new' ? 'text-emerald-300/80' :
+                                        isResult && msg.status === 'updated' ? 'text-amber-300/80' :
+                                        isActive && isLast ? 'text-zinc-200' :
+                                        'text-zinc-500'
+                                      }`}>
+                                        {msg.type === 'completed'
+                                          ? `Complete — ${msg.new ?? 0} requirements, ${msg.updated ?? 0} updated`
+                                          : msg.message || msg.location || ''}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
                               </div>
+
+                              {completed && !isActive && (
+                                <div className="px-6 py-3 border-t border-emerald-500/10 bg-emerald-500/[0.03]" style={{ animation: 'fadeSlideDown 0.4s ease-out' }}>
+                                  <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2">
+                                      <span className="relative flex h-2 w-2">
+                                        <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40 animate-ping" style={{ animationDuration: '2s' }} />
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+                                      </span>
+                                      <span className="text-[10px] uppercase tracking-widest font-mono font-bold text-emerald-400">Research Complete</span>
+                                    </div>
+                                    <div className="flex items-center gap-3 ml-auto text-[11px] font-mono">
+                                      <span className="text-emerald-400">{completed.new ?? 0} <span className="text-zinc-600">reqs</span></span>
+                                      <span className="text-amber-400">{completed.updated ?? 0} <span className="text-zinc-600">updated</span></span>
+                                      <span className="text-zinc-500">{completed.alerts ?? 0} <span className="text-zinc-600">alerts</span></span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                        );
-                      })()}
-                      {isExpanded && isLoading && (
-                        <div className="border-t border-white/5 overflow-hidden">
-                          <div className="h-[2px] w-full bg-zinc-800 overflow-hidden">
-                            <div className="h-full w-1/4 bg-gradient-to-r from-transparent via-zinc-500 to-transparent" style={{ animation: 'scanX 1s ease-in-out infinite' }} />
+                          );
+                        })()}
+
+                        {/* Detail loading */}
+                        {isExpanded && isLoading && (
+                          <div className="border-t border-white/5 overflow-hidden">
+                            <div className="h-[2px] w-full bg-zinc-800 overflow-hidden">
+                              <div className="h-full w-1/4 bg-gradient-to-r from-transparent via-zinc-500 to-transparent" style={{ animation: 'scanX 1s ease-in-out infinite' }} />
+                            </div>
+                            <div className="px-6 py-5 flex items-center justify-center gap-2">
+                              <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-zinc-400 opacity-30" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-zinc-500" />
+                              </span>
+                              <span className="text-xs text-zinc-500 uppercase tracking-wider font-mono">Loading detail</span>
+                            </div>
                           </div>
-                          <div className="px-6 py-5 flex items-center justify-center gap-2">
-                            <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-zinc-400 opacity-30" /><span className="relative inline-flex rounded-full h-2 w-2 bg-zinc-500" /></span>
-                            <span className="text-xs text-zinc-500 uppercase tracking-wider font-mono">Loading detail</span>
+                        )}
+
+                        {/* Detail panel */}
+                        {isExpanded && detail && (
+                          <JurisdictionDetailPanel
+                            detail={detail}
+                            parentJurisdiction={detail.parent_id ? jurisdictions.find(p => p.id === detail.parent_id) : null}
+                            onNavigate={handleNavigate}
+                            inheritsFromParent={j.inherits_from_parent}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Right sidebar: Schedulers + Activity */}
+            <div className="space-y-8">
+              {/* Scheduled Jobs */}
+              {schedulers.length > 0 && (
+                <div>
+                  <SectionLabel>Scheduled Jobs</SectionLabel>
+                  <div className="border border-white/10 divide-y divide-white/[0.05]">
+                    {schedulers.map((sched) => (
+                      <div key={sched.task_key} className="p-4 space-y-3">
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs text-white font-medium leading-tight">{sched.display_name}</span>
+                              <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border shrink-0 ${
+                                sched.enabled
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                  : 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30'
+                              }`}>
+                                {sched.enabled ? 'On' : 'Off'}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-zinc-600 font-mono leading-relaxed line-clamp-2">{sched.description}</p>
                           </div>
                         </div>
-                      )}
-                      {isExpanded && detail && (
-                        <JurisdictionDetailPanel
-                          detail={detail}
-                          parentJurisdiction={detail.parent_id ? jurisdictions.find(p => p.id === detail.parent_id) : null}
-                          onNavigate={handleNavigate}
-                          inheritsFromParent={j.inherits_from_parent}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {jurisdictions.length === 0 && !loading && (
-            <div className="border border-white/10 bg-zinc-900/30 p-8 text-center">
-              <div className="text-xs text-zinc-500 font-mono">No jurisdictions yet. They are created automatically when locations are added.</div>
-            </div>
-          )}
-
-          {/* Recent Activity Log */}
-          {stats && stats.recent_logs.length > 0 && (
-            <div className="space-y-3">
-              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">
-                Recent Activity
-              </div>
-              <div className="border border-white/10 bg-zinc-900/30">
-                {/* Desktop table */}
-                <div className="hidden md:block overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-white/10 bg-zinc-950">
-                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Location</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Type</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Started</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Duration</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">New</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Updated</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Alerts</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stats.recent_logs.map((log: SchedulerLogEntry) => (
-                        <tr key={log.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                          <td className="px-4 py-3 text-xs text-zinc-300 font-mono">{log.location_name || log.location_id.slice(0, 8)}</td>
-                          <td className="px-4 py-3">
-                            <span className="text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-400 bg-zinc-800 border border-zinc-700">
-                              {log.check_type}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${statusColor(log.status)}`}>
-                              {log.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono">{formatRelative(log.started_at)}</td>
-                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">
-                            {log.duration_seconds != null ? `${Math.round(log.duration_seconds)}s` : '—'}
-                          </td>
-                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.new_count}</td>
-                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.updated_count}</td>
-                          <td className="px-4 py-3 text-xs text-zinc-400 font-mono text-right">{log.alert_count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                        <div className="flex items-center justify-between gap-3">
+                          <button
+                            onClick={() => handleToggle(sched.task_key, sched.enabled)}
+                            disabled={toggling === sched.task_key}
+                            className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
+                              sched.enabled ? 'bg-emerald-600' : 'bg-zinc-700'
+                            } ${toggling === sched.task_key ? 'opacity-50' : ''}`}
+                          >
+                            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                              sched.enabled ? 'translate-x-4' : 'translate-x-0.5'
+                            }`} />
+                          </button>
+                          <button
+                            onClick={() => handleTrigger(sched.task_key)}
+                            disabled={triggering === sched.task_key}
+                            className="flex-1 px-3 py-1.5 text-[9px] tracking-[0.12em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50 text-center"
+                          >
+                            {triggering === sched.task_key ? 'Running...' : 'Run Now'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
+              )}
 
-                {/* Mobile card layout */}
-                <div className="md:hidden divide-y divide-white/5">
-                  {stats.recent_logs.map((log: SchedulerLogEntry) => (
-                    <div key={log.id} className="p-4 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs text-zinc-300 font-mono truncate">{log.location_name || log.location_id.slice(0, 8)}</span>
-                        <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border shrink-0 ${statusColor(log.status)}`}>
-                          {log.status}
-                        </span>
+              {/* Recent Activity */}
+              {stats && stats.recent_logs.length > 0 && (
+                <div>
+                  <SectionLabel>Recent Activity</SectionLabel>
+                  <div className="border border-white/10 divide-y divide-white/[0.05]">
+                    {stats.recent_logs.map((log: SchedulerLogEntry) => (
+                      <div key={log.id} className="px-4 py-3 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-zinc-300 font-mono truncate">
+                            {log.location_name || log.location_id.slice(0, 8)}
+                          </span>
+                          <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border shrink-0 ${statusColor(log.status)}`}>
+                            {log.status}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px] font-mono text-zinc-600 flex-wrap">
+                          <span>{formatRelative(log.started_at)}</span>
+                          {log.duration_seconds != null && <span>{Math.round(log.duration_seconds)}s</span>}
+                          <span className="text-[8px] px-1 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-500">{log.check_type}</span>
+                        </div>
+                        {(log.new_count > 0 || log.updated_count > 0 || log.alert_count > 0) && (
+                          <div className="flex items-center gap-3 text-[10px] font-mono">
+                            {log.new_count > 0 && <span className="text-emerald-400">{log.new_count} new</span>}
+                            {log.updated_count > 0 && <span className="text-amber-400">{log.updated_count} updated</span>}
+                            {log.alert_count > 0 && <span className="text-red-400">{log.alert_count} alerts</span>}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
-                        <span className="text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-400 bg-zinc-800 border border-zinc-700">
-                          {log.check_type}
-                        </span>
-                        <span>{formatRelative(log.started_at)}</span>
-                        {log.duration_seconds != null && <span>{Math.round(log.duration_seconds)}s</span>}
-                      </div>
-                      <div className="flex items-center gap-4 text-[10px] font-mono">
-                        <span className="text-emerald-400">{log.new_count} new</span>
-                        <span className="text-amber-400">{log.updated_count} updated</span>
-                        <span className="text-zinc-500">{log.alert_count} alerts</span>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
-          )}
+
+          </div>
         </>
       )}
     </div>
