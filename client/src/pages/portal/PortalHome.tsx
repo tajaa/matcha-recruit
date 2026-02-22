@@ -66,9 +66,9 @@ export function PortalHome() {
   if (error || !dashboard) {
     return (
       <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-red-500" />
-          <span className="text-red-700">{error || 'Failed to load dashboard'}</span>
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-red-400" />
+          <span className="text-red-400">{error || 'Failed to load dashboard'}</span>
         </div>
       </div>
     );
@@ -79,153 +79,153 @@ export function PortalHome() {
     : 0;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-mono font-medium text-zinc-900">
+      <div className="border-b border-white/10 pb-6">
+        <h1 className="text-2xl font-bold tracking-tight text-white uppercase">
           Welcome, {dashboard.employee.first_name}
         </h1>
-        <p className="text-sm text-zinc-500 mt-1">
+        <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
           Employee Self-Service Portal
         </p>
       </div>
 
       {/* Pending Tasks Alert */}
       {dashboard.pending_tasks_count > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center justify-between">
+        <div className="bg-amber-500/10 border border-dashed border-amber-500/20 p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-600" />
-            <span className="text-amber-800">
+            <AlertCircle className="w-5 h-5 text-amber-500" />
+            <span className="text-amber-200 text-sm">
               You have {dashboard.pending_tasks_count} pending task{dashboard.pending_tasks_count > 1 ? 's' : ''}
             </span>
           </div>
           <Link
             to="/portal/documents"
-            className="text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"
+            className="text-xs text-amber-400 hover:text-amber-300 font-bold uppercase tracking-wider flex items-center gap-1"
           >
-            View <ChevronRight className="w-4 h-4" />
+            View <ChevronRight className="w-3 h-3" />
           </Link>
         </div>
       )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* PTO Balance */}
-        <div className="bg-white border border-zinc-200 rounded-lg p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-lg bg-zinc-100 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-zinc-600" />
+        <div className="bg-zinc-900/50 border border-dashed border-white/10 p-6 hover:border-white/20 transition-colors group">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-zinc-800 border border-zinc-700 flex items-center justify-center group-hover:bg-zinc-700 transition-colors">
+              <Clock className="w-5 h-5 text-zinc-400 group-hover:text-white" />
             </div>
-            <span className="text-xs font-mono uppercase tracking-wider text-zinc-500">PTO Available</span>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 font-bold">PTO Available</span>
           </div>
-          <div className="text-3xl font-mono font-medium text-zinc-900">
+          <div className="text-3xl font-bold text-white tracking-tight">
             {availablePTO.toFixed(1)}
-            <span className="text-lg text-zinc-400 ml-1">hrs</span>
+            <span className="text-sm font-normal text-zinc-500 ml-2">hrs</span>
           </div>
           <Link
             to="/portal/pto"
-            className="text-sm text-zinc-500 hover:text-zinc-700 mt-2 inline-flex items-center gap-1"
+            className="text-[10px] uppercase tracking-widest text-zinc-500 hover:text-white mt-4 inline-flex items-center gap-1 transition-colors"
           >
-            Manage PTO <ChevronRight className="w-4 h-4" />
+            Manage PTO <ChevronRight className="w-3 h-3" />
           </Link>
         </div>
 
         {/* Pending Documents */}
-        <div className="bg-white border border-zinc-200 rounded-lg p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-lg bg-zinc-100 flex items-center justify-center">
-              <FileText className="w-5 h-5 text-zinc-600" />
+        <div className="bg-zinc-900/50 border border-dashed border-white/10 p-6 hover:border-white/20 transition-colors group">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-zinc-800 border border-zinc-700 flex items-center justify-center group-hover:bg-zinc-700 transition-colors">
+              <FileText className="w-5 h-5 text-zinc-400 group-hover:text-white" />
             </div>
-            <span className="text-xs font-mono uppercase tracking-wider text-zinc-500">Documents</span>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 font-bold">Documents</span>
           </div>
-          <div className="text-3xl font-mono font-medium text-zinc-900">
+          <div className="text-3xl font-bold text-white tracking-tight">
             {dashboard.pending_documents_count}
-            <span className="text-lg text-zinc-400 ml-1">pending</span>
+            <span className="text-sm font-normal text-zinc-500 ml-2">pending</span>
           </div>
           <Link
             to="/portal/documents"
-            className="text-sm text-zinc-500 hover:text-zinc-700 mt-2 inline-flex items-center gap-1"
+            className="text-[10px] uppercase tracking-widest text-zinc-500 hover:text-white mt-4 inline-flex items-center gap-1 transition-colors"
           >
-            View documents <ChevronRight className="w-4 h-4" />
+            View documents <ChevronRight className="w-3 h-3" />
           </Link>
         </div>
 
         {/* PTO Requests */}
-        <div className="bg-white border border-zinc-200 rounded-lg p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-lg bg-zinc-100 flex items-center justify-center">
-              <Calendar className="w-5 h-5 text-zinc-600" />
+        <div className="bg-zinc-900/50 border border-dashed border-white/10 p-6 hover:border-white/20 transition-colors group">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-zinc-800 border border-zinc-700 flex items-center justify-center group-hover:bg-zinc-700 transition-colors">
+              <Calendar className="w-5 h-5 text-zinc-400 group-hover:text-white" />
             </div>
-            <span className="text-xs font-mono uppercase tracking-wider text-zinc-500">PTO Requests</span>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 font-bold">PTO Requests</span>
           </div>
-          <div className="text-3xl font-mono font-medium text-zinc-900">
+          <div className="text-3xl font-bold text-white tracking-tight">
             {dashboard.pending_pto_requests_count}
-            <span className="text-lg text-zinc-400 ml-1">pending</span>
+            <span className="text-sm font-normal text-zinc-500 ml-2">pending</span>
           </div>
           <Link
             to="/portal/pto"
-            className="text-sm text-zinc-500 hover:text-zinc-700 mt-2 inline-flex items-center gap-1"
+            className="text-[10px] uppercase tracking-widest text-zinc-500 hover:text-white mt-4 inline-flex items-center gap-1 transition-colors"
           >
-            Request time off <ChevronRight className="w-4 h-4" />
+            Request time off <ChevronRight className="w-3 h-3" />
           </Link>
         </div>
       </div>
 
       {/* Quick Links */}
-      <div className="bg-white border border-zinc-200 rounded-lg">
-        <div className="px-5 py-4 border-b border-zinc-100">
-          <h2 className="text-sm font-mono uppercase tracking-wider text-zinc-500">Quick Links</h2>
+      <div className="bg-zinc-900/30 border border-white/10">
+        <div className="px-6 py-4 border-b border-white/10 bg-white/5">
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Quick Links</h2>
         </div>
-        <div className="divide-y divide-zinc-100">
+        <div className="divide-y divide-white/5">
           <Link
             to="/portal/documents"
-            className="flex items-center justify-between px-5 py-4 hover:bg-zinc-50 transition-colors"
+            className="flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors group"
           >
-            <div className="flex items-center gap-3">
-              <FileText className="w-5 h-5 text-zinc-400" />
-              <span className="text-zinc-900">My Documents</span>
+            <div className="flex items-center gap-4">
+              <FileText className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+              <span className="text-sm text-zinc-300 group-hover:text-white transition-colors">My Documents</span>
             </div>
-            <ChevronRight className="w-5 h-5 text-zinc-400" />
+            <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
           </Link>
           <Link
             to="/portal/pto"
-            className="flex items-center justify-between px-5 py-4 hover:bg-zinc-50 transition-colors"
+            className="flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors group"
           >
-            <div className="flex items-center gap-3">
-              <Calendar className="w-5 h-5 text-zinc-400" />
-              <span className="text-zinc-900">Time Off</span>
+            <div className="flex items-center gap-4">
+              <Calendar className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+              <span className="text-sm text-zinc-300 group-hover:text-white transition-colors">Time Off</span>
             </div>
-            <ChevronRight className="w-5 h-5 text-zinc-400" />
+            <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
           </Link>
           <Link
             to="/portal/policies"
-            className="flex items-center justify-between px-5 py-4 hover:bg-zinc-50 transition-colors"
+            className="flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors group"
           >
-            <div className="flex items-center gap-3">
-              <FileText className="w-5 h-5 text-zinc-400" />
-              <span className="text-zinc-900">Company Policies</span>
+            <div className="flex items-center gap-4">
+              <FileText className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+              <span className="text-sm text-zinc-300 group-hover:text-white transition-colors">Company Policies</span>
             </div>
-            <ChevronRight className="w-5 h-5 text-zinc-400" />
+            <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
           </Link>
           <Link
             to="/portal/profile"
-            className="flex items-center justify-between px-5 py-4 hover:bg-zinc-50 transition-colors"
+            className="flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors group"
           >
-            <div className="flex items-center gap-3">
-              <User className="w-5 h-5 text-zinc-400" />
-              <span className="text-zinc-900">My Profile</span>
+            <div className="flex items-center gap-4">
+              <User className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+              <span className="text-sm text-zinc-300 group-hover:text-white transition-colors">My Profile</span>
             </div>
-            <ChevronRight className="w-5 h-5 text-zinc-400" />
+            <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
           </Link>
           <Link
             to="/app/portal/mobility"
-            className="flex items-center justify-between px-5 py-4 hover:bg-zinc-50 transition-colors"
+            className="flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors group"
           >
-            <div className="flex items-center gap-3">
-              <Sparkles className="w-5 h-5 text-zinc-400" />
-              <span className="text-zinc-900">Internal Mobility</span>
+            <div className="flex items-center gap-4">
+              <Sparkles className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+              <span className="text-sm text-zinc-300 group-hover:text-white transition-colors">Internal Mobility</span>
             </div>
-            <ChevronRight className="w-5 h-5 text-zinc-400" />
+            <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
           </Link>
         </div>
       </div>

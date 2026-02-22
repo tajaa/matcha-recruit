@@ -424,7 +424,7 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: 'Employee Portal',
+    title: 'My Workspace',
     roles: ['employee'],
     items: [
       {
@@ -447,6 +447,22 @@ const navSections: NavSection[] = [
           </svg>
         ),
       },
+      {
+        path: '/app/portal/profile',
+        label: 'My Profile',
+        roles: ['employee'],
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    title: 'HR & Benefits',
+    roles: ['employee'],
+    items: [
       {
         path: '/app/portal/documents',
         label: 'My Documents',
@@ -490,16 +506,12 @@ const navSections: NavSection[] = [
           </svg>
         ),
       },
-      {
-        path: '/app/portal/profile',
-        label: 'My Profile',
-        roles: ['employee'],
-        icon: (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
-        ),
-      },
+    ],
+  },
+  {
+    title: 'Culture & Growth',
+    roles: ['employee'],
+    items: [
       {
         path: '/app/portal/mobility',
         label: 'Mobility',
