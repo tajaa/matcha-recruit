@@ -2619,9 +2619,18 @@ export interface InternalMobilityApplicationUpdate {
   manager_notified?: boolean;
 }
 
+function withCompanyScope(path: string, companyId?: string): string {
+  if (!companyId) return path;
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}company_id=${encodeURIComponent(companyId)}`;
+}
+
 export const internalMobilityAdmin = {
-  createOpportunity: (data: InternalMobilityOpportunityCreate): Promise<InternalMobilityOpportunity> =>
-    request<InternalMobilityOpportunity>('/internal-mobility/opportunities', {
+  createOpportunity: (
+    data: InternalMobilityOpportunityCreate,
+    companyId?: string,
+  ): Promise<InternalMobilityOpportunity> =>
+    request<InternalMobilityOpportunity>(withCompanyScope('/internal-mobility/opportunities', companyId), {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -2629,35 +2638,55 @@ export const internalMobilityAdmin = {
   listOpportunities: (params?: {
     status?: InternalMobilityOpportunityStatus;
     type?: InternalMobilityOpportunityType;
+    limit?: number;
+    offset?: number;
+    company_id?: string;
   }): Promise<InternalMobilityOpportunity[]> => {
     const searchParams = new URLSearchParams();
     if (params?.status) searchParams.append('status', params.status);
     if (params?.type) searchParams.append('type', params.type);
+    if (typeof params?.limit === 'number') searchParams.append('limit', String(params.limit));
+    if (typeof params?.offset === 'number') searchParams.append('offset', String(params.offset));
+    if (params?.company_id) searchParams.append('company_id', params.company_id);
     const query = searchParams.toString();
     return request<InternalMobilityOpportunity[]>(
       `/internal-mobility/opportunities${query ? `?${query}` : ''}`
     );
   },
 
-  updateOpportunity: (opportunityId: string, data: InternalMobilityOpportunityUpdate): Promise<InternalMobilityOpportunity> =>
-    request<InternalMobilityOpportunity>(`/internal-mobility/opportunities/${opportunityId}`, {
+  updateOpportunity: (
+    opportunityId: string,
+    data: InternalMobilityOpportunityUpdate,
+    companyId?: string,
+  ): Promise<InternalMobilityOpportunity> =>
+    request<InternalMobilityOpportunity>(withCompanyScope(`/internal-mobility/opportunities/${opportunityId}`, companyId), {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
 
   listApplications: (params?: {
     status?: InternalMobilityApplicationStatus;
+    limit?: number;
+    offset?: number;
+    company_id?: string;
   }): Promise<InternalMobilityApplicationAdmin[]> => {
     const searchParams = new URLSearchParams();
     if (params?.status) searchParams.append('status', params.status);
+    if (typeof params?.limit === 'number') searchParams.append('limit', String(params.limit));
+    if (typeof params?.offset === 'number') searchParams.append('offset', String(params.offset));
+    if (params?.company_id) searchParams.append('company_id', params.company_id);
     const query = searchParams.toString();
     return request<InternalMobilityApplicationAdmin[]>(
       `/internal-mobility/applications${query ? `?${query}` : ''}`
     );
   },
 
-  updateApplication: (applicationId: string, data: InternalMobilityApplicationUpdate): Promise<InternalMobilityApplicationAdmin> =>
-    request<InternalMobilityApplicationAdmin>(`/internal-mobility/applications/${applicationId}`, {
+  updateApplication: (
+    applicationId: string,
+    data: InternalMobilityApplicationUpdate,
+    companyId?: string,
+  ): Promise<InternalMobilityApplicationAdmin> =>
+    request<InternalMobilityApplicationAdmin>(withCompanyScope(`/internal-mobility/applications/${applicationId}`, companyId), {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),

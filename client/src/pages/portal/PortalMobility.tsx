@@ -43,7 +43,7 @@ type FeedResponse = {
   total: number;
 };
 
-const FEED_FILTERS = ['active', 'draft', 'closed'] as const;
+const FEED_FILTERS = ['active'] as const;
 type FeedFilter = (typeof FEED_FILTERS)[number];
 const APPLY_NOTE_MAX_LENGTH = 500;
 
@@ -418,8 +418,12 @@ export default function PortalMobility() {
 
         {loadingFeed ? (
           <div className="text-xs text-zinc-500 font-mono uppercase tracking-wider py-6">Loading opportunities...</div>
+        ) : !mobilityOptIn ? (
+          <div className="text-sm text-zinc-500 py-6">
+            Mobility recommendations are paused. Turn the setting back on and save your profile to resume suggestions.
+          </div>
         ) : feed.length === 0 ? (
-          <div className="text-sm text-zinc-500 py-6">No opportunities are currently available for this filter.</div>
+          <div className="text-sm text-zinc-500 py-6">No active opportunities are currently available.</div>
         ) : (
           <div className="space-y-4">
             {feed.map((item) => (

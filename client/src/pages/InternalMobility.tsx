@@ -7,6 +7,7 @@ import {
   type InternalMobilityOpportunityStatus,
   type InternalMobilityOpportunityType,
 } from '../api/client';
+import { useAuth } from '../context';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const OPPORTUNITY_STATUSES: InternalMobilityOpportunityStatus[] = ['draft', 'active', 'closed'];
@@ -80,9 +81,12 @@ function statusPillClass(status: string): string {
 }
 
 export default function InternalMobility() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [form, setForm] = useState<OpportunityFormState>(INITIAL_FORM);
   const [opportunities, setOpportunities] = useState<InternalMobilityOpportunity[]>([]);
   const [applications, setApplications] = useState<InternalMobilityApplicationAdmin[]>([]);
+  const [adminCompanyId, setAdminCompanyId] = useState('');
   const [opportunityStatusFilter, setOpportunityStatusFilter] = useState<string>('');
   const [opportunityTypeFilter, setOpportunityTypeFilter] = useState<string>('');
   const [applicationStatusFilter, setApplicationStatusFilter] = useState<string>('');
@@ -92,6 +96,11 @@ export default function InternalMobility() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const scopedCompanyId = useMemo(() => {
+    const trimmed = adminCompanyId.trim();
+    return trimmed || undefined;
+  }, [adminCompanyId]);
+  const adminScopeMissing = isAdmin && !scopedCompanyId;
 
   const opportunitiesByStatus = useMemo(() => {
     return opportunities.reduce<Record<string, number>>((acc, item) => {
@@ -108,11 +117,19 @@ export default function InternalMobility() {
   }, [applications]);
 
   const loadOpportunities = useCallback(async () => {
+    if (adminScopeMissing) {
+      setOpportunities([]);
+      setLoadingOpportunities(false);
+      return;
+    }
     setLoadingOpportunities(true);
     try {
       const data = await internalMobilityAdmin.listOpportunities({
         status: (opportunityStatusFilter || undefined) as InternalMobilityOpportunityStatus | undefined,
         type: (opportunityTypeFilter || undefined) as InternalMobilityOpportunityType | undefined,
+        limit: 100,
+        offset: 0,
+        company_id: scopedCompanyId,
       });
       setOpportunities(data);
     } catch (err) {
@@ -120,13 +137,21 @@ export default function InternalMobility() {
     } finally {
       setLoadingOpportunities(false);
     }
-  }, [opportunityStatusFilter, opportunityTypeFilter]);
+  }, [adminScopeMissing, opportunityStatusFilter, opportunityTypeFilter, scopedCompanyId]);
 
   const loadApplications = useCallback(async () => {
+    if (adminScopeMissing) {
+      setApplications([]);
+      setLoadingApplications(false);
+      return;
+    }
     setLoadingApplications(true);
     try {
       const data = await internalMobilityAdmin.listApplications({
         status: (applicationStatusFilter || undefined) as InternalMobilityApplicationStatus | undefined,
+        limit: 100,
+        offset: 0,
+        company_id: scopedCompanyId,
       });
       setApplications(data);
     } catch (err) {
@@ -134,7 +159,7 @@ export default function InternalMobility() {
     } finally {
       setLoadingApplications(false);
     }
-  }, [applicationStatusFilter]);
+  }, [adminScopeMissing, applicationStatusFilter, scopedCompanyId]);
 
   useEffect(() => {
     void loadOpportunities();
@@ -148,6 +173,10 @@ export default function InternalMobility() {
     event.preventDefault();
     setNotice(null);
     setError(null);
+    if (adminScopeMissing) {
+      setError('Enter a company ID before creating opportunities.');
+      return;
+    }
     const trimmedTitle = form.title.trim();
     if (!trimmedTitle) {
       setError('Title is required.');
@@ -166,16 +195,19 @@ export default function InternalMobility() {
 
     setSubmitting(true);
     try {
-      await internalMobilityAdmin.createOpportunity({
-        type: form.type,
-        title: trimmedTitle,
-        department: form.department.trim() || null,
-        description: form.description.trim() || null,
-        required_skills: parseListInput(form.requiredSkills),
-        preferred_skills: parseListInput(form.preferredSkills),
-        duration_weeks: durationWeeks,
-        status: form.status,
-      });
+      await internalMobilityAdmin.createOpportunity(
+        {
+          type: form.type,
+          title: trimmedTitle,
+          department: form.department.trim() || null,
+          description: form.description.trim() || null,
+          required_skills: parseListInput(form.requiredSkills),
+          preferred_skills: parseListInput(form.preferredSkills),
+          duration_weeks: durationWeeks,
+          status: form.status,
+        },
+        scopedCompanyId,
+      );
       setForm(INITIAL_FORM);
       setNotice('Opportunity created.');
       await loadOpportunities();
@@ -191,11 +223,15 @@ export default function InternalMobility() {
     nextStatus: InternalMobilityOpportunityStatus,
   ) => {
     if (opportunity.status === nextStatus) return;
+    if (adminScopeMissing) {
+      setError('Enter a company ID before updating opportunities.');
+      return;
+    }
     setBusyKey(`opp:${opportunity.id}`);
     setError(null);
     setNotice(null);
     try {
-      const updated = await internalMobilityAdmin.updateOpportunity(opportunity.id, { status: nextStatus });
+      const updated = await internalMobilityAdmin.updateOpportunity(opportunity.id, { status: nextStatus }, scopedCompanyId);
       setOpportunities((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setNotice(`Opportunity "${updated.title}" updated to ${formatStatus(updated.status)}.`);
     } catch (err) {
@@ -210,11 +246,15 @@ export default function InternalMobility() {
     nextStatus: InternalMobilityApplicationStatus,
   ) => {
     if (application.status === nextStatus) return;
+    if (adminScopeMissing) {
+      setError('Enter a company ID before updating applications.');
+      return;
+    }
     setBusyKey(`app-status:${application.id}`);
     setError(null);
     setNotice(null);
     try {
-      const updated = await internalMobilityAdmin.updateApplication(application.id, { status: nextStatus });
+      const updated = await internalMobilityAdmin.updateApplication(application.id, { status: nextStatus }, scopedCompanyId);
       setApplications((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setNotice(`Application moved to ${formatStatus(updated.status)}.`);
     } catch (err) {
@@ -225,13 +265,21 @@ export default function InternalMobility() {
   };
 
   const handleManagerNotifiedUpdate = async (application: InternalMobilityApplicationAdmin, notify: boolean) => {
+    if (adminScopeMissing) {
+      setError('Enter a company ID before updating applications.');
+      return;
+    }
     setBusyKey(`app-manager:${application.id}`);
     setError(null);
     setNotice(null);
     try {
-      const updated = await internalMobilityAdmin.updateApplication(application.id, {
-        manager_notified: notify,
-      });
+      const updated = await internalMobilityAdmin.updateApplication(
+        application.id,
+        {
+          manager_notified: notify,
+        },
+        scopedCompanyId,
+      );
       setApplications((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setNotice(notify ? 'Manager notification recorded.' : 'Manager notification reset.');
     } catch (err) {
@@ -253,6 +301,27 @@ export default function InternalMobility() {
         <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
           Launch opportunities and review employee applications
         </p>
+        {isAdmin && (
+          <div className="mt-4 max-w-xl space-y-2">
+            <label className="block space-y-1">
+              <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">
+                Company Scope (admin required)
+              </span>
+              <input
+                type="text"
+                value={adminCompanyId}
+                onChange={(event) => setAdminCompanyId(event.target.value)}
+                placeholder="Company UUID"
+                className="w-full bg-zinc-950 border border-zinc-800 text-white px-3 py-2 text-sm outline-none focus:border-zinc-500"
+              />
+            </label>
+            {adminScopeMissing && (
+              <p className="text-xs text-amber-300">
+                Enter a company UUID to load or update internal mobility data.
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {error && (
@@ -383,7 +452,7 @@ export default function InternalMobility() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || adminScopeMissing}
             className="px-6 py-2 bg-white text-black border border-white text-[10px] uppercase tracking-widest font-bold disabled:opacity-50"
           >
             {submitting ? 'Creating...' : 'Create Opportunity'}
@@ -427,6 +496,7 @@ export default function InternalMobility() {
           <button
             type="button"
             onClick={() => void loadOpportunities()}
+            disabled={adminScopeMissing}
             className="px-4 py-2 border border-zinc-700 text-zinc-200 text-[10px] uppercase tracking-widest"
           >
             Refresh
@@ -438,7 +508,9 @@ export default function InternalMobility() {
           {opportunitiesByStatus.closed || 0}
         </div>
 
-        {loadingOpportunities ? (
+        {adminScopeMissing ? (
+          <div className="text-sm text-zinc-500 py-8">Enter a company scope to view opportunities.</div>
+        ) : loadingOpportunities ? (
           <div className="text-xs text-zinc-500 uppercase tracking-wider py-8">Loading opportunities...</div>
         ) : opportunities.length === 0 ? (
           <div className="text-sm text-zinc-500 py-8">No opportunities match current filters.</div>
@@ -537,6 +609,7 @@ export default function InternalMobility() {
           <button
             type="button"
             onClick={() => void loadApplications()}
+            disabled={adminScopeMissing}
             className="px-4 py-2 border border-zinc-700 text-zinc-200 text-[10px] uppercase tracking-widest"
           >
             Refresh
@@ -549,7 +622,9 @@ export default function InternalMobility() {
           {applicationsByStatus.closed || 0}
         </div>
 
-        {loadingApplications ? (
+        {adminScopeMissing ? (
+          <div className="text-sm text-zinc-500 py-8">Enter a company scope to view applications.</div>
+        ) : loadingApplications ? (
           <div className="text-xs text-zinc-500 uppercase tracking-wider py-8">Loading applications...</div>
         ) : applications.length === 0 ? (
           <div className="text-sm text-zinc-500 py-8">No applications match current filters.</div>

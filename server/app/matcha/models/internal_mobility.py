@@ -59,7 +59,7 @@ class MobilityOpportunityActionResponse(BaseModel):
 
 
 class MobilityApplicationCreateRequest(BaseModel):
-    employee_notes: Optional[str] = None
+    employee_notes: Optional[str] = Field(default=None, max_length=500)
 
 
 class MobilityApplicationResponse(BaseModel):

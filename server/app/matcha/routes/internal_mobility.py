@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...core.models.auth import CurrentUser
 from ...database import get_connection
-from ..dependencies import get_client_company_id, require_admin_or_client
+from ..dependencies import require_admin_or_client, resolve_accessible_company_scope
 from ..models.internal_mobility import (
     InternalMobilityApplicationAdminResponse,
     InternalMobilityApplicationUpdateRequest,
@@ -16,6 +16,23 @@ from ..models.internal_mobility import (
 )
 
 router = APIRouter()
+
+
+async def _resolve_internal_mobility_org_id(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: Optional[UUID] = Query(None, alias="company_id"),
+) -> UUID:
+    if current_user.role == "admin" and company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="company_id query parameter is required for admin users",
+        )
+
+    scope = await resolve_accessible_company_scope(current_user, requested_company_id=company_id)
+    scoped_company_id = scope.get("company_id")
+    if not scoped_company_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company not found")
+    return scoped_company_id
 
 
 def _parse_json_array(value: Any) -> list[str]:
@@ -109,11 +126,8 @@ def _row_to_application(row: Any) -> InternalMobilityApplicationAdminResponse:
 async def create_internal_opportunity(
     request: InternalOpportunityCreateRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
-    org_id: Optional[UUID] = Depends(get_client_company_id),
+    org_id: UUID = Depends(_resolve_internal_mobility_org_id),
 ):
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company not found")
-
     if request.duration_weeks is not None and request.duration_weeks <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -153,13 +167,10 @@ async def create_internal_opportunity(
 async def list_internal_opportunities(
     status_filter: Optional[str] = Query(None, alias="status"),
     type_filter: Optional[str] = Query(None, alias="type"),
-    current_user: CurrentUser = Depends(require_admin_or_client),
-    org_id: Optional[UUID] = Depends(get_client_company_id),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    org_id: UUID = Depends(_resolve_internal_mobility_org_id),
 ):
-    _ = current_user
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company not found")
-
     if status_filter and status_filter not in {"draft", "active", "closed"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status filter")
     if type_filter and type_filter not in {"role", "project"}:
@@ -182,7 +193,8 @@ async def list_internal_opportunities(
         query += f" AND type = ${param_idx}"
         params.append(type_filter)
         param_idx += 1
-    query += " ORDER BY created_at DESC"
+    query += f" ORDER BY created_at DESC LIMIT ${param_idx} OFFSET ${param_idx + 1}"
+    params.extend([limit, offset])
 
     async with get_connection() as conn:
         rows = await conn.fetch(query, *params)
@@ -193,13 +205,8 @@ async def list_internal_opportunities(
 async def update_internal_opportunity(
     opportunity_id: UUID,
     request: InternalOpportunityUpdateRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-    org_id: Optional[UUID] = Depends(get_client_company_id),
+    org_id: UUID = Depends(_resolve_internal_mobility_org_id),
 ):
-    _ = current_user
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company not found")
-
     payload = request.model_dump(exclude_unset=True)
     if not payload:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
@@ -279,12 +286,10 @@ async def update_internal_opportunity(
 @router.get("/applications", response_model=list[InternalMobilityApplicationAdminResponse])
 async def list_internal_mobility_applications(
     status_filter: Optional[str] = Query(None, alias="status"),
-    current_user: CurrentUser = Depends(require_admin_or_client),
-    org_id: Optional[UUID] = Depends(get_client_company_id),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    org_id: UUID = Depends(_resolve_internal_mobility_org_id),
 ):
-    _ = current_user
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company not found")
     if status_filter and status_filter not in {"new", "in_review", "shortlisted", "aligned", "closed"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status filter")
 
@@ -311,10 +316,13 @@ async def list_internal_mobility_applications(
         WHERE io.org_id = $1
     """
     params: list[Any] = [org_id]
+    param_idx = 2
     if status_filter:
-        query += " AND ia.status = $2"
+        query += f" AND ia.status = ${param_idx}"
         params.append(status_filter)
-    query += " ORDER BY ia.submitted_at DESC"
+        param_idx += 1
+    query += f" ORDER BY ia.submitted_at DESC LIMIT ${param_idx} OFFSET ${param_idx + 1}"
+    params.extend([limit, offset])
 
     async with get_connection() as conn:
         rows = await conn.fetch(query, *params)
@@ -326,11 +334,8 @@ async def update_internal_mobility_application(
     application_id: UUID,
     request: InternalMobilityApplicationUpdateRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
-    org_id: Optional[UUID] = Depends(get_client_company_id),
+    org_id: UUID = Depends(_resolve_internal_mobility_org_id),
 ):
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company not found")
-
     payload = request.model_dump(exclude_unset=True)
     if not payload:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")

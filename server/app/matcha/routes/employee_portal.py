@@ -8,13 +8,14 @@ Provides API endpoints for employees to:
 - Search company policies
 - Update personal information
 """
+from contextlib import asynccontextmanager
 import json
 from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, status, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, status, Request, BackgroundTasks, Query
 from pydantic import BaseModel
 
 from ...database import get_connection
@@ -188,8 +189,6 @@ def _compute_mobility_match(
 
     required_skills = _parse_json_array(required_skills_raw)
     preferred_skills = _parse_json_array(preferred_skills_raw)
-    required_lower = [skill.lower() for skill in required_skills]
-    preferred_lower = [skill.lower() for skill in preferred_skills]
 
     matched_required = [skill for skill in required_skills if skill.lower() in profile_skills]
     matched_preferred = [skill for skill in preferred_skills if skill.lower() in profile_skills]
@@ -255,6 +254,55 @@ def _compute_mobility_match(
     return score, reasons
 
 
+def _normalize_dt(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _is_match_record_stale(
+    *,
+    match_updated_at: Optional[datetime],
+    profile_updated_at: Optional[datetime],
+    opportunity_updated_at: Optional[datetime],
+) -> bool:
+    normalized_match_updated_at = _normalize_dt(match_updated_at)
+    if normalized_match_updated_at is None:
+        return True
+
+    normalized_candidates = [
+        candidate
+        for candidate in (
+            _normalize_dt(profile_updated_at),
+            _normalize_dt(opportunity_updated_at),
+        )
+        if candidate is not None
+    ]
+    if not normalized_candidates:
+        return False
+    return normalized_match_updated_at < max(normalized_candidates)
+
+
+def _ensure_mobility_opted_in(profile: EmployeeCareerProfileResponse) -> None:
+    if not profile.mobility_opt_in:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Mobility recommendations are paused. Re-enable mobility recommendations in your profile to continue.",
+        )
+
+
+@asynccontextmanager
+async def _maybe_transaction(conn: Any):
+    tx_factory = getattr(conn, "transaction", None)
+    if callable(tx_factory):
+        async with tx_factory():
+            yield
+        return
+    yield
+
+
 async def _get_employee_opportunity(
     conn: Any,
     employee: dict,
@@ -264,7 +312,8 @@ async def _get_employee_opportunity(
 ) -> Any:
     row = await conn.fetchrow(
         """
-        SELECT id, org_id, type, title, department, description, required_skills, preferred_skills, status
+        SELECT id, org_id, type, title, department, description,
+               required_skills, preferred_skills, status, updated_at
         FROM internal_opportunities
         WHERE id = $1 AND org_id = $2
         """,
@@ -290,7 +339,7 @@ async def _ensure_match_for_opportunity(
 ) -> tuple[float, dict[str, Any]]:
     existing = await conn.fetchrow(
         """
-        SELECT match_score, reasons
+        SELECT match_score, reasons, updated_at
         FROM internal_opportunity_matches
         WHERE employee_id = $1 AND opportunity_id = $2
         """,
@@ -300,16 +349,26 @@ async def _ensure_match_for_opportunity(
 
     existing_reasons = None
     existing_score = None
+    existing_updated_at = None
     if existing:
         existing_score = existing["match_score"]
         existing_reasons = existing["reasons"]
+        existing_updated_at = existing["updated_at"]
         if isinstance(existing_reasons, str):
             try:
                 existing_reasons = json.loads(existing_reasons)
             except json.JSONDecodeError:
                 existing_reasons = None
 
-    if existing_score is not None and isinstance(existing_reasons, dict):
+    if (
+        existing_score is not None
+        and isinstance(existing_reasons, dict)
+        and not _is_match_record_stale(
+            match_updated_at=existing_updated_at,
+            profile_updated_at=profile.updated_at,
+            opportunity_updated_at=opportunity_row["updated_at"],
+        )
+    ):
         return float(existing_score), existing_reasons
 
     computed_score, computed_reasons = _compute_mobility_match(
@@ -568,18 +627,22 @@ async def update_my_mobility_profile(
 
 @router.get("/me/mobility/feed", response_model=MobilityFeedResponse, dependencies=_mobility_dep)
 async def get_my_mobility_feed(
-    status_filter: str = "active",
+    status_filter: str = Query("active"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     employee: dict = Depends(require_employee_record),
 ):
     """Return internal opportunities for the employee, with deterministic match scores."""
-    if status_filter not in {"active", "draft", "closed"}:
+    if status_filter != "active":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="status_filter must be one of: active, draft, closed",
+            detail="Only active opportunities are available in the employee mobility feed",
         )
 
     async with get_connection() as conn:
         profile = await _get_or_create_career_profile(conn, employee)
+        if not profile.mobility_opt_in:
+            return MobilityFeedResponse(items=[], total=0)
 
         rows = await conn.fetch(
             """
@@ -591,9 +654,11 @@ async def get_my_mobility_feed(
                 io.description,
                 io.required_skills,
                 io.preferred_skills,
+                io.updated_at as opportunity_updated_at,
                 iom.match_score,
                 iom.status as match_status,
-                iom.reasons
+                iom.reasons,
+                iom.updated_at as match_updated_at
             FROM internal_opportunities io
             LEFT JOIN internal_opportunity_matches iom
                 ON iom.opportunity_id = io.id
@@ -601,10 +666,13 @@ async def get_my_mobility_feed(
             WHERE io.org_id = $2
               AND io.status = $3
             ORDER BY COALESCE(iom.match_score, -1) DESC, io.created_at DESC
+            LIMIT $4 OFFSET $5
             """,
             employee["id"],
             employee["org_id"],
             status_filter,
+            limit,
+            offset,
         )
 
         items: list[MobilityFeedItem] = []
@@ -619,8 +687,17 @@ async def get_my_mobility_feed(
             match_score = row["match_score"]
             match_status = row["match_status"] or "suggested"
 
-            # Compute and persist v1 deterministic score if missing.
-            if match_score is None or reasons is None:
+            # Recompute when missing or stale vs profile/opportunity updates.
+            needs_recompute = (
+                match_score is None
+                or not isinstance(reasons, dict)
+                or _is_match_record_stale(
+                    match_updated_at=row["match_updated_at"],
+                    profile_updated_at=profile.updated_at,
+                    opportunity_updated_at=row["opportunity_updated_at"],
+                )
+            )
+            if needs_recompute:
                 computed_score, computed_reasons = _compute_mobility_match(
                     profile=profile,
                     employee_start_date=employee.get("start_date"),
@@ -681,6 +758,7 @@ async def save_mobility_opportunity(
     """Mark an opportunity as saved for the current employee."""
     async with get_connection() as conn:
         profile = await _get_or_create_career_profile(conn, employee)
+        _ensure_mobility_opted_in(profile)
         opportunity = await _get_employee_opportunity(conn, employee, opportunity_id, require_active=True)
         score, reasons = await _ensure_match_for_opportunity(conn, employee, profile, opportunity)
 
@@ -749,7 +827,8 @@ async def dismiss_mobility_opportunity(
     """Mark an opportunity as dismissed for the current employee."""
     async with get_connection() as conn:
         profile = await _get_or_create_career_profile(conn, employee)
-        opportunity = await _get_employee_opportunity(conn, employee, opportunity_id, require_active=False)
+        _ensure_mobility_opted_in(profile)
+        opportunity = await _get_employee_opportunity(conn, employee, opportunity_id, require_active=True)
         score, reasons = await _ensure_match_for_opportunity(conn, employee, profile, opportunity)
 
         row = await conn.fetchrow(
@@ -787,47 +866,49 @@ async def apply_to_mobility_opportunity(
 ):
     """Create or refresh an internal mobility application for an opportunity."""
     async with get_connection() as conn:
-        profile = await _get_or_create_career_profile(conn, employee)
-        opportunity = await _get_employee_opportunity(conn, employee, opportunity_id, require_active=True)
-        score, reasons = await _ensure_match_for_opportunity(conn, employee, profile, opportunity)
+        async with _maybe_transaction(conn):
+            profile = await _get_or_create_career_profile(conn, employee)
+            _ensure_mobility_opted_in(profile)
+            opportunity = await _get_employee_opportunity(conn, employee, opportunity_id, require_active=True)
+            score, reasons = await _ensure_match_for_opportunity(conn, employee, profile, opportunity)
 
-        app_row = await conn.fetchrow(
-            """
-            INSERT INTO internal_opportunity_applications (
-                employee_id, opportunity_id, status, employee_notes, submitted_at
+            app_row = await conn.fetchrow(
+                """
+                INSERT INTO internal_opportunity_applications (
+                    employee_id, opportunity_id, status, employee_notes, submitted_at
+                )
+                VALUES ($1, $2, 'new', $3, NOW())
+                ON CONFLICT (employee_id, opportunity_id)
+                DO UPDATE SET
+                    status = 'new',
+                    employee_notes = $3,
+                    submitted_at = NOW(),
+                    updated_at = NOW()
+                RETURNING id, status, submitted_at, manager_notified_at
+                """,
+                employee["id"],
+                opportunity_id,
+                request.employee_notes,
             )
-            VALUES ($1, $2, 'new', $3, NOW())
-            ON CONFLICT (employee_id, opportunity_id)
-            DO UPDATE SET
-                status = 'new',
-                employee_notes = $3,
-                submitted_at = NOW(),
-                updated_at = NOW()
-            RETURNING id, status, submitted_at, manager_notified_at
-            """,
-            employee["id"],
-            opportunity_id,
-            request.employee_notes,
-        )
 
-        await conn.execute(
-            """
-            INSERT INTO internal_opportunity_matches (
-                employee_id, opportunity_id, match_score, reasons, status
+            await conn.execute(
+                """
+                INSERT INTO internal_opportunity_matches (
+                    employee_id, opportunity_id, match_score, reasons, status
+                )
+                VALUES ($1, $2, $3, $4::jsonb, 'applied')
+                ON CONFLICT (employee_id, opportunity_id)
+                DO UPDATE SET
+                    match_score = $3,
+                    reasons = $4::jsonb,
+                    status = 'applied',
+                    updated_at = NOW()
+                """,
+                employee["id"],
+                opportunity_id,
+                score,
+                json.dumps(reasons),
             )
-            VALUES ($1, $2, $3, $4::jsonb, 'applied')
-            ON CONFLICT (employee_id, opportunity_id)
-            DO UPDATE SET
-                match_score = $3,
-                reasons = $4::jsonb,
-                status = 'applied',
-                updated_at = NOW()
-            """,
-            employee["id"],
-            opportunity_id,
-            score,
-            json.dumps(reasons),
-        )
 
     return MobilityApplicationResponse(
         application_id=app_row["id"],
