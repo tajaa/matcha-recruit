@@ -2,28 +2,12 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components';
 import { useAuth } from '../context/AuthContext';
-import type { UserRole } from '../types';
-
-function getHomePath(role?: UserRole): string {
-  switch (role) {
-    case 'candidate':
-      return '/app/jobs';
-    case 'employee':
-      return '/app/portal';
-    case 'broker':
-      return '/app/broker/clients';
-    case 'admin':
-    case 'client':
-      return '/app';
-    default:
-      return '/';
-  }
-}
+import { getAppHomePath } from '../utils/homeRoute';
 
 export function Unauthorized() {
   const navigate = useNavigate();
   const { user, isLoading } = useAuth();
-  const homePath = getHomePath(user?.role);
+  const homePath = getAppHomePath(user?.role);
 
   // Authenticated users should never stay on this page — redirect them home.
   // This handles the case where the post-login `from` redirect targets a route

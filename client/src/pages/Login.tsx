@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { ParticleSphere } from '../components/ParticleSphere';
 import { auth } from '../api/client';
 import type { BrokerBrandingRuntime } from '../types';
+import { getAppHomePath } from '../utils/homeRoute';
 
 export function Login() {
   const [email, setEmail] = useState('');
@@ -68,21 +69,6 @@ export function Login() {
   const primaryColor = branding?.primary_color || '#18181b';
   const showPoweredBy = !branding || branding.powered_by_badge || !branding.hide_matcha_identity;
 
-  const getDefaultRoute = (role: string) => {
-    switch (role) {
-      case 'candidate':
-        return '/app/jobs';
-      case 'employee':
-        return '/app/portal';
-      case 'broker':
-        return '/app/broker/clients';
-      case 'admin':
-      case 'client':
-      default:
-        return '/app';
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -92,7 +78,7 @@ export function Login() {
       const loggedInUser = await login({ email, password });
       const destination = from?.pathname
         ? `${from.pathname}${from.search || ''}${from.hash || ''}`
-        : getDefaultRoute(loggedInUser.role);
+        : getAppHomePath(loggedInUser.role);
       navigate(destination, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');

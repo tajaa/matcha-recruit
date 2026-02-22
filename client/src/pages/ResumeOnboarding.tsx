@@ -8,7 +8,7 @@ type Mode = 'choose' | 'upload' | 'create';
 export function ResumeOnboarding() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const returnTo = searchParams.get('returnTo') || '/app/jobs';
+  const returnTo = searchParams.get('returnTo') || '/app/interviewer';
   const { profile } = useAuth();
 
   const [mode, setMode] = useState<Mode>('choose');

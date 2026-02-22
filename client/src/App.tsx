@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
-import { AuthProvider, ChatAuthProvider } from './context';
+import { AuthProvider, ChatAuthProvider, useAuth } from './context';
 import { Layout, ProtectedRoute } from './components';
+import { getAppHomePath } from './utils/homeRoute';
 
 // Static imports for critical path (landing + auth)
 import { Landing } from './pages/Landing';
@@ -141,6 +142,16 @@ function HandbookAliasEditRedirect() {
   return <Navigate to={`/app/matcha/handbook/${id}/edit`} replace />;
 }
 
+function LegacyJobsRedirect() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <PageLoader />;
+  }
+
+  return <Navigate to={getAppHomePath(user?.role)} replace />;
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -229,6 +240,8 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+
+              <Route path="jobs" element={<LegacyJobsRedirect />} />
 
               {/* Company Profile (business admin) */}
               <Route
