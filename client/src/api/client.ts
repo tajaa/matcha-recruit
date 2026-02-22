@@ -1926,6 +1926,16 @@ export const adminJurisdictions = {
     if (!response.ok) throw new Error('Failed to start jurisdiction check');
     return response;
   },
+
+  checkTopMetros: async (): Promise<Response> => {
+    const token = getAccessToken();
+    const response = await fetch('/api/admin/jurisdictions/top-metros/check', {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error('Failed to start top-metro batch check');
+    return response;
+  },
 };
 
 // Scheduler Admin API

@@ -105,6 +105,31 @@ const legStatusColor: Record<string, string> = {
 
 type DetailTab = 'requirements' | 'legislation' | 'locations';
 
+type CheckMessage = {
+  type: string;
+  status?: string;
+  message?: string;
+  location?: string;
+  new?: number;
+  updated?: number;
+  alerts?: number;
+  confidence?: number;
+  low_confidence?: number;
+};
+
+type MetroRunCity = {
+  city: string;
+  state: string;
+  phase: string;
+  percent: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  message: string;
+  newCount: number;
+  updatedCount: number;
+  alerts: number;
+  lowConfidence: number;
+};
+
 function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inheritsFromParent }: {
   detail: JurisdictionDetail;
   parentJurisdiction?: Jurisdiction | null;
@@ -343,7 +368,16 @@ export function Jurisdictions() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [checkTargetId, setCheckTargetId] = useState<string | null>(null);
-  const [checkMessages, setCheckMessages] = useState<{ type: string; status?: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
+  const [checkMessages, setCheckMessages] = useState<CheckMessage[]>([]);
+  const [topMetroRunning, setTopMetroRunning] = useState(false);
+  const [topMetroCities, setTopMetroCities] = useState<Record<string, MetroRunCity>>({});
+  const [topMetroOrder, setTopMetroOrder] = useState<string[]>([]);
+  const [topMetroSummary, setTopMetroSummary] = useState<{
+    total: number;
+    succeeded: number;
+    failed: number;
+    low_confidence_total: number;
+  } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
@@ -389,6 +423,32 @@ export function Jurisdictions() {
     }
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredJurisdictions]);
+
+  const topMetroRows = useMemo(() => {
+    const all = Object.values(topMetroCities);
+    if (topMetroOrder.length === 0) return all;
+    const ordered = [...all].sort((a, b) => {
+      const aIndex = topMetroOrder.indexOf(a.city);
+      const bIndex = topMetroOrder.indexOf(b.city);
+      const aRank = aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex;
+      const bRank = bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex;
+      return aRank - bRank;
+    });
+    return ordered;
+  }, [topMetroCities, topMetroOrder]);
+
+  const topMetroCompletedCount = useMemo(
+    () => topMetroRows.filter((row) => row.status === 'completed' || row.status === 'failed').length,
+    [topMetroRows],
+  );
+
+  const topMetroGlobalPercent = useMemo(() => {
+    if (topMetroSummary && topMetroSummary.total > 0) {
+      return Math.round(((topMetroSummary.succeeded + topMetroSummary.failed) / topMetroSummary.total) * 100);
+    }
+    if (topMetroRows.length === 0) return 0;
+    return Math.round((topMetroCompletedCount / topMetroRows.length) * 100);
+  }, [topMetroSummary, topMetroRows, topMetroCompletedCount]);
 
   const handleToggle = async (taskKey: string, currentEnabled: boolean) => {
     setToggling(taskKey);
@@ -522,7 +582,7 @@ export function Jurisdictions() {
   };
 
   const handleCheck = async (id: string) => {
-    if (checkingId) return;
+    if (topMetroRunning || checkingId) return;
     setCheckingId(id);
     setCheckTargetId(id);
     setCheckMessages([]);
@@ -557,6 +617,188 @@ export function Jurisdictions() {
       setCheckMessages(prev => [...prev, { type: 'error', message: msg }]);
     } finally {
       setCheckingId(null);
+    }
+  };
+
+  const handleRunTopMetros = async () => {
+    if (topMetroRunning || checkingId || deletingId) return;
+
+    setTopMetroRunning(true);
+    setError(null);
+    setNotice(null);
+    setTopMetroCities({});
+    setTopMetroOrder([]);
+    setTopMetroSummary(null);
+
+    const keyFor = (city: string, state: string) => `${city}__${state}`;
+
+    try {
+      const response = await adminJurisdictions.checkTopMetros();
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+          const payload = trimmed.slice(6);
+          if (payload === '[DONE]') continue;
+          try {
+            const event = JSON.parse(payload) as Record<string, unknown>;
+            const eventType = String(event.type || '');
+
+            if (eventType === 'run_started') {
+              const metros = Array.isArray(event.metros)
+                ? event.metros.filter((item): item is string => typeof item === 'string')
+                : [];
+              if (metros.length > 0) {
+                setTopMetroOrder(metros);
+              }
+              continue;
+            }
+
+            if (eventType === 'city_started') {
+              const city = String(event.city || '');
+              const state = String(event.state || '');
+              const key = keyFor(city, state);
+              setTopMetroOrder((prev) => (prev.includes(city) ? prev : [...prev, city]));
+              setTopMetroCities((prev) => ({
+                ...prev,
+                [key]: {
+                  city,
+                  state,
+                  phase: 'started',
+                  percent: 5,
+                  status: 'running',
+                  message: '',
+                  newCount: 0,
+                  updatedCount: 0,
+                  alerts: 0,
+                  lowConfidence: 0,
+                },
+              }));
+              continue;
+            }
+
+            if (eventType === 'city_progress') {
+              const city = String(event.city || '');
+              const state = String(event.state || '');
+              const key = keyFor(city, state);
+              const percent = Number(event.percent || 0);
+              const phase = String(event.phase || 'running');
+              const message = String(event.message || '');
+              setTopMetroCities((prev) => {
+                const current = prev[key] || {
+                  city,
+                  state,
+                  phase: 'running',
+                  percent: 0,
+                  status: 'running' as const,
+                  message: '',
+                  newCount: 0,
+                  updatedCount: 0,
+                  alerts: 0,
+                  lowConfidence: 0,
+                };
+                return {
+                  ...prev,
+                  [key]: {
+                    ...current,
+                    status: 'running',
+                    phase,
+                    percent: Math.max(current.percent, Number.isFinite(percent) ? percent : current.percent),
+                    message: message || current.message,
+                  },
+                };
+              });
+              continue;
+            }
+
+            if (eventType === 'city_completed') {
+              const city = String(event.city || '');
+              const state = String(event.state || '');
+              const key = keyFor(city, state);
+              const newCount = Number(event.new || 0);
+              const updatedCount = Number(event.updated || 0);
+              const alerts = Number(event.alerts || 0);
+              const lowConfidence = Number(event.low_confidence || 0);
+              setTopMetroCities((prev) => {
+                const current = prev[key];
+                return {
+                  ...prev,
+                  [key]: {
+                    city,
+                    state,
+                    phase: 'completed',
+                    percent: 100,
+                    status: 'completed',
+                    message: current?.message || 'Complete',
+                    newCount,
+                    updatedCount,
+                    alerts,
+                    lowConfidence,
+                  },
+                };
+              });
+              continue;
+            }
+
+            if (eventType === 'city_failed') {
+              const city = String(event.city || '');
+              const state = String(event.state || '');
+              const key = keyFor(city, state);
+              const message = String(event.message || 'Failed');
+              setTopMetroCities((prev) => {
+                const current = prev[key];
+                return {
+                  ...prev,
+                  [key]: {
+                    city,
+                    state,
+                    phase: 'failed',
+                    percent: current?.percent || 100,
+                    status: 'failed',
+                    message,
+                    newCount: current?.newCount || 0,
+                    updatedCount: current?.updatedCount || 0,
+                    alerts: current?.alerts || 0,
+                    lowConfidence: current?.lowConfidence || 0,
+                  },
+                };
+              });
+              continue;
+            }
+
+            if (eventType === 'run_completed') {
+              setTopMetroSummary({
+                total: Number(event.total || 0),
+                succeeded: Number(event.succeeded || 0),
+                failed: Number(event.failed || 0),
+                low_confidence_total: Number(event.low_confidence_total || 0),
+              });
+            }
+          } catch {
+            // skip malformed event
+          }
+        }
+      }
+
+      setDetailCache({});
+      await fetchData();
+      setNotice('Top-15 metro batch run complete.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to run top-metro batch check';
+      setError(msg);
+    } finally {
+      setTopMetroRunning(false);
     }
   };
 
@@ -601,6 +843,13 @@ export function Jurisdictions() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => { void handleRunTopMetros(); }}
+            disabled={topMetroRunning || checkingId !== null || deletingId !== null}
+            className="px-3 md:px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-blue-300 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 hover:border-blue-400/50 transition-colors disabled:opacity-50"
+          >
+            {topMetroRunning ? 'Running Top 15...' : 'Run Top 15'}
+          </button>
+          <button
             onClick={() => setShowCreateForm(v => !v)}
             className="px-3 md:px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-white bg-white/10 border border-zinc-600 hover:bg-white/20 hover:border-zinc-400 transition-colors"
           >
@@ -627,6 +876,75 @@ export function Jurisdictions() {
         <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-mono flex items-center justify-between gap-4">
           <span>{notice}</span>
           <button onClick={() => setNotice(null)} className="text-[10px] uppercase tracking-wider underline hover:text-emerald-200 shrink-0">Dismiss</button>
+        </div>
+      )}
+
+      {(topMetroRunning || topMetroRows.length > 0 || topMetroSummary) && (
+        <div className="border border-blue-500/20 bg-blue-500/[0.04]">
+          <div className="px-4 py-3 border-b border-blue-500/20 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] font-mono font-bold text-blue-300">
+                Top-15 Metro Batch Check
+              </div>
+              <div className="text-[10px] font-mono text-blue-200">
+                {(topMetroSummary?.total || topMetroRows.length) > 0
+                  ? `${topMetroCompletedCount}/${topMetroSummary?.total || topMetroRows.length}`
+                  : '0/15'}
+              </div>
+            </div>
+            <div className="h-1 bg-zinc-900 border border-blue-500/20 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-blue-500/60 via-cyan-400/70 to-emerald-400/70 transition-all"
+                style={{ width: `${Math.max(0, Math.min(100, topMetroGlobalPercent))}%` }}
+              />
+            </div>
+            {topMetroSummary && (
+              <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono">
+                <span className="text-emerald-300">{topMetroSummary.succeeded} complete</span>
+                <span className="text-red-300">{topMetroSummary.failed} failed</span>
+                <span className="text-amber-300">{topMetroSummary.low_confidence_total} below 95%</span>
+              </div>
+            )}
+          </div>
+          {topMetroRows.length > 0 && (
+            <div className="max-h-72 overflow-y-auto divide-y divide-blue-500/10">
+              {topMetroRows.map((row) => (
+                <div key={`${row.city}-${row.state}`} className="px-4 py-3 space-y-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs text-zinc-100 font-mono">{row.city}{row.state ? `, ${row.state}` : ''}</div>
+                    <div className={`text-[9px] uppercase tracking-wider font-bold border px-1.5 py-0.5 ${
+                      row.status === 'completed'
+                        ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                        : row.status === 'failed'
+                          ? 'bg-red-500/10 text-red-300 border-red-500/20'
+                          : 'bg-blue-500/10 text-blue-300 border-blue-500/20'
+                    }`}>
+                      {row.status}
+                    </div>
+                  </div>
+                  <div className="h-1 bg-zinc-900 border border-blue-500/10 overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${
+                        row.status === 'failed' ? 'bg-red-500/70' : 'bg-blue-400/70'
+                      }`}
+                      style={{ width: `${Math.max(0, Math.min(100, row.percent))}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-zinc-400 font-mono truncate">
+                    {row.message || row.phase}
+                  </div>
+                  {(row.newCount > 0 || row.updatedCount > 0 || row.alerts > 0 || row.lowConfidence > 0) && (
+                    <div className="flex flex-wrap gap-3 text-[10px] font-mono">
+                      {row.newCount > 0 && <span className="text-emerald-300">{row.newCount} new</span>}
+                      {row.updatedCount > 0 && <span className="text-amber-300">{row.updatedCount} updated</span>}
+                      {row.alerts > 0 && <span className="text-red-300">{row.alerts} alerts</span>}
+                      {row.lowConfidence > 0 && <span className="text-amber-200">{row.lowConfidence} below 95%</span>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -848,7 +1166,7 @@ export function Jurisdictions() {
                           <div className="flex items-center gap-1.5 shrink-0">
                             <button
                               onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
-                              disabled={checkingId !== null || deletingId !== null}
+                              disabled={topMetroRunning || checkingId !== null || deletingId !== null}
                               className={`relative px-2.5 py-1.5 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
                                 checkingId === j.id
                                   ? 'text-blue-300 border-blue-500/40 bg-blue-500/5'
@@ -878,7 +1196,7 @@ export function Jurisdictions() {
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); void handleDelete(j); }}
-                              disabled={checkingId !== null || deletingId !== null}
+                              disabled={topMetroRunning || checkingId !== null || deletingId !== null}
                               className={`p-1.5 border transition-colors disabled:opacity-30 ${
                                 deletingId === j.id
                                   ? 'text-red-300 border-red-500/40 bg-red-500/5'
@@ -980,6 +1298,8 @@ export function Jurisdictions() {
                                           msg.type === 'researching' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
                                           msg.type === 'scanning' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
                                           msg.type === 'verifying' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
+                                          msg.type === 'confidence_retry' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
+                                          msg.type === 'confidence_gate' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
                                           msg.type === 'legislation' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
                                           'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'
                                         }`}>
@@ -996,7 +1316,7 @@ export function Jurisdictions() {
                                         'text-zinc-500'
                                       }`}>
                                         {msg.type === 'completed'
-                                          ? `Complete — ${msg.new ?? 0} requirements, ${msg.updated ?? 0} updated`
+                                          ? `Complete — ${msg.new ?? 0} requirements, ${msg.updated ?? 0} updated, ${msg.low_confidence ?? 0} below 95%`
                                           : msg.message || msg.location || ''}
                                       </span>
                                     </div>
@@ -1018,6 +1338,7 @@ export function Jurisdictions() {
                                       <span className="text-emerald-400">{completed.new ?? 0} <span className="text-zinc-600">reqs</span></span>
                                       <span className="text-amber-400">{completed.updated ?? 0} <span className="text-zinc-600">updated</span></span>
                                       <span className="text-zinc-500">{completed.alerts ?? 0} <span className="text-zinc-600">alerts</span></span>
+                                      <span className="text-amber-200">{completed.low_confidence ?? 0} <span className="text-zinc-600">below 95%</span></span>
                                     </div>
                                   </div>
                                 </div>

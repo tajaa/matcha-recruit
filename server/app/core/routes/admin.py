@@ -6,7 +6,7 @@ import logging
 import re
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Any, AsyncGenerator
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, Query, status
@@ -29,6 +29,29 @@ from ..services.auth import hash_password
 from ...config import get_settings
 
 router = APIRouter()
+
+
+STRICT_CONFIDENCE_THRESHOLD = 0.95
+MAX_CONFIDENCE_REFETCH_ATTEMPTS = 2
+
+# Hardcoded metro preset by design: this keeps execution simple and deterministic.
+TOP_15_METROS: list[dict[str, str]] = [
+    {"city": "new york", "state": "NY", "label": "New York City"},
+    {"city": "los angeles", "state": "CA", "label": "Los Angeles"},
+    {"city": "chicago", "state": "IL", "label": "Chicago"},
+    {"city": "houston", "state": "TX", "label": "Houston"},
+    {"city": "phoenix", "state": "AZ", "label": "Phoenix"},
+    {"city": "philadelphia", "state": "PA", "label": "Philadelphia"},
+    {"city": "san antonio", "state": "TX", "label": "San Antonio"},
+    {"city": "san diego", "state": "CA", "label": "San Diego"},
+    {"city": "dallas", "state": "TX", "label": "Dallas"},
+    {"city": "jacksonville", "state": "FL", "label": "Jacksonville"},
+    {"city": "austin", "state": "TX", "label": "Austin"},
+    {"city": "fort worth", "state": "TX", "label": "Fort Worth"},
+    {"city": "san jose", "state": "CA", "label": "San Jose"},
+    {"city": "columbus", "state": "OH", "label": "Columbus"},
+    {"city": "charlotte", "state": "NC", "label": "Charlotte"},
+]
 
 
 @router.get("/api-usage", dependencies=[Depends(require_admin)])
@@ -2155,9 +2178,75 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
         }
 
 
-@router.post("/jurisdictions/{jurisdiction_id}/check", dependencies=[Depends(require_admin)])
-async def check_jurisdiction(jurisdiction_id: UUID):
-    """Run a compliance research check for a jurisdiction. Returns SSE stream with progress."""
+def _to_sse(event: dict[str, Any]) -> str:
+    return f"data: {json.dumps(event)}\n\n"
+
+
+def _format_city_label(city: str) -> str:
+    if not city:
+        return city
+    parts = city.replace("_", " ").split()
+    return " ".join(part.capitalize() for part in parts)
+
+
+def _phase_percent(phase: str) -> int:
+    mapping = {
+        "started": 5,
+        "researching": 20,
+        "retrying": 24,
+        "confidence_retry": 30,
+        "confidence_gate": 38,
+        "processing": 48,
+        "scanning": 62,
+        "legislation": 70,
+        "syncing": 82,
+        "verifying": 90,
+        "poster_updated": 94,
+        "poster_alerts": 96,
+        "completed": 100,
+        "error": 100,
+    }
+    return mapping.get(phase, 35)
+
+
+def _source_confidence(source_url: Optional[str], source_name: Optional[str]) -> float:
+    from ..services.jurisdiction_context import extract_domain
+
+    domain = extract_domain(source_url or "")
+    if not domain:
+        return 0.0
+
+    score = 0.7
+    if domain.endswith(".gov"):
+        score = 0.98
+    elif domain.endswith(".us"):
+        score = 0.95
+    elif domain.endswith(".org"):
+        score = 0.8
+
+    source_label = (source_name or "").lower()
+    if "department of labor" in source_label or "labor commissioner" in source_label:
+        score = max(score, 0.97)
+    elif "city of" in source_label or "county of" in source_label or "state of" in source_label:
+        score = max(score, 0.93)
+
+    return min(score, 0.99)
+
+
+def _requirement_confidence(req: dict[str, Any]) -> float:
+    return _source_confidence(req.get("source_url"), req.get("source_name"))
+
+
+def _legislation_confidence(item: dict[str, Any]) -> float:
+    raw = item.get("confidence")
+    try:
+        parsed = float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+        parsed = 0.0
+    return max(parsed, _source_confidence(item.get("source_url"), item.get("source_name")))
+
+
+async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerator[dict[str, Any], None]:
     from ..services.gemini_compliance import get_gemini_compliance_service
     from ..services.compliance_service import (
         _upsert_jurisdiction_requirements,
@@ -2167,6 +2256,8 @@ async def check_jurisdiction(jurisdiction_id: UUID):
         _sync_requirements_to_location,
         _create_alert,
         score_verification_confidence,
+        _compute_requirement_key,
+        _normalize_title_key,
     )
     from ..models.compliance import VerificationResult
 
@@ -2175,229 +2266,613 @@ async def check_jurisdiction(jurisdiction_id: UUID):
         if not j:
             raise HTTPException(status_code=404, detail="Jurisdiction not found")
 
-    jurisdiction_name = f"{j['city']}, {j['state']}"
     city, state, county = j["city"], j["state"], j["county"]
+    location_label = f"{_format_city_label(city)}, {state}"
+
+    yield {"type": "started", "location": location_label}
+    yield {"type": "researching", "message": f"Researching requirements for {location_label}..."}
+
+    service = get_gemini_compliance_service()
+    async with get_connection() as conn:
+        used_repository = False
+
+        best_requirements: dict[str, tuple[float, dict[str, Any]]] = {}
+        for pass_index in range(MAX_CONFIDENCE_REFETCH_ATTEMPTS + 1):
+            if pass_index > 0:
+                yield {
+                    "type": "confidence_retry",
+                    "message": (
+                        f"Low-confidence requirements found. Cross-checking {_format_city_label(city)} "
+                        f"against {state} sources (pass {pass_index + 1}/{MAX_CONFIDENCE_REFETCH_ATTEMPTS + 1})..."
+                    ),
+                }
+
+            research_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+            def _on_retry(attempt: int, _error: str):
+                research_queue.put_nowait(
+                    {"type": "retrying", "message": f"Retrying research (attempt {attempt + 1})..."}
+                )
+
+            research_task = asyncio.create_task(
+                service.research_location_compliance(
+                    city=city,
+                    state=state,
+                    county=county,
+                    on_retry=_on_retry,
+                )
+            )
+            try:
+                while not research_task.done():
+                    while not research_queue.empty():
+                        yield research_queue.get_nowait()
+                    done, _ = await asyncio.wait({research_task}, timeout=8)
+                    if done:
+                        break
+                    yield {"type": "heartbeat"}
+            except asyncio.CancelledError:
+                if not research_task.done():
+                    research_task.cancel()
+                raise
+
+            while not research_queue.empty():
+                yield research_queue.get_nowait()
+
+            pass_requirements = research_task.result() or []
+            for req in pass_requirements:
+                req["category"] = _normalize_category(req.get("category")) or req.get("category")
+            pass_requirements = _filter_by_jurisdiction_priority(pass_requirements)
+
+            for req in pass_requirements:
+                req_key = _compute_requirement_key(req)
+                confidence = _requirement_confidence(req)
+                existing = best_requirements.get(req_key)
+                if existing is None or confidence > existing[0]:
+                    best_requirements[req_key] = (confidence, req)
+
+            if best_requirements:
+                low_count = sum(
+                    1 for confidence, _ in best_requirements.values() if confidence < STRICT_CONFIDENCE_THRESHOLD
+                )
+                yield {
+                    "type": "confidence_gate",
+                    "message": (
+                        f"Requirement confidence gate: {low_count} item(s) below "
+                        f"{int(STRICT_CONFIDENCE_THRESHOLD * 100)}% after pass {pass_index + 1}."
+                    ),
+                }
+                if low_count == 0:
+                    break
+
+        requirements = [req for _, req in best_requirements.values()]
+        low_conf_requirement_count = sum(
+            1 for confidence, _ in best_requirements.values() if confidence < STRICT_CONFIDENCE_THRESHOLD
+        )
+
+        if not requirements:
+            cached_rows = await conn.fetch(
+                "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1 ORDER BY category",
+                jurisdiction_id,
+            )
+            if cached_rows:
+                requirements = [_jurisdiction_row_to_dict(dict(row)) for row in cached_rows]
+                used_repository = True
+                logger.warning(
+                    "Falling back to stale repository data (%d cached requirements)", len(requirements)
+                )
+                yield {"type": "fallback", "message": "Using cached data (live research unavailable)"}
+
+        if not requirements:
+            yield {
+                "type": "completed",
+                "location": location_label,
+                "new": 0,
+                "updated": 0,
+                "alerts": 0,
+                "low_confidence": 0,
+                "low_confidence_requirements": 0,
+                "low_confidence_legislation": 0,
+                "low_confidence_changes": 0,
+            }
+            return
+
+        yield {"type": "processing", "message": f"Processing {len(requirements)} requirements..."}
+
+        if not used_repository:
+            await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
+
+        new_count = len(requirements)
+        for req in requirements:
+            req_conf = _requirement_confidence(req)
+            yield {
+                "type": "result",
+                "status": "new",
+                "message": req.get("title", ""),
+                "confidence": round(req_conf, 2),
+            }
+
+        yield {"type": "scanning", "message": "Scanning for upcoming legislation..."}
+        best_legislation: dict[str, tuple[float, dict[str, Any]]] = {}
+        try:
+            for pass_index in range(MAX_CONFIDENCE_REFETCH_ATTEMPTS + 1):
+                if pass_index > 0:
+                    yield {
+                        "type": "confidence_retry",
+                        "message": (
+                            f"Low-confidence legislation found. Re-scanning authoritative sources "
+                            f"(pass {pass_index + 1}/{MAX_CONFIDENCE_REFETCH_ATTEMPTS + 1})..."
+                        ),
+                    }
+
+                leg_task = asyncio.create_task(
+                    service.scan_upcoming_legislation(
+                        city=city,
+                        state=state,
+                        county=county,
+                        current_requirements=[dict(req) for req in requirements],
+                    )
+                )
+                try:
+                    while not leg_task.done():
+                        done, _ = await asyncio.wait({leg_task}, timeout=8)
+                        if done:
+                            break
+                        yield {"type": "heartbeat"}
+                except asyncio.CancelledError:
+                    if not leg_task.done():
+                        leg_task.cancel()
+                    raise
+
+                pass_legislation = leg_task.result() or []
+                for item in pass_legislation:
+                    leg_key = item.get("legislation_key") or _normalize_title_key(item.get("title", ""))
+                    if not leg_key:
+                        continue
+                    item["legislation_key"] = leg_key
+                    confidence = _legislation_confidence(item)
+                    existing = best_legislation.get(leg_key)
+                    if existing is None or confidence > existing[0]:
+                        best_legislation[leg_key] = (confidence, item)
+
+                if best_legislation:
+                    low_count = sum(
+                        1 for confidence, _ in best_legislation.values() if confidence < STRICT_CONFIDENCE_THRESHOLD
+                    )
+                    yield {
+                        "type": "confidence_gate",
+                        "message": (
+                            f"Legislation confidence gate: {low_count} item(s) below "
+                            f"{int(STRICT_CONFIDENCE_THRESHOLD * 100)}% after pass {pass_index + 1}."
+                        ),
+                    }
+                    if low_count == 0:
+                        break
+        except Exception as exc:
+            logger.error("Jurisdiction legislation scan error: %s", exc)
+
+        legislation_items = [item for _, item in best_legislation.values()]
+        low_conf_legislation_count = sum(
+            1 for confidence, _ in best_legislation.values() if confidence < STRICT_CONFIDENCE_THRESHOLD
+        )
+
+        if legislation_items:
+            await _upsert_jurisdiction_legislation(conn, jurisdiction_id, legislation_items)
+            yield {
+                "type": "legislation",
+                "message": (
+                    f"Found {len(legislation_items)} upcoming legislative change(s); "
+                    f"{low_conf_legislation_count} below confidence gate."
+                ),
+            }
+
+        linked_locations = await conn.fetch(
+            "SELECT id, company_id FROM business_locations WHERE jurisdiction_id = $1 AND is_active = true",
+            jurisdiction_id,
+        )
+
+        total_alerts = 0
+        total_updated = 0
+        verified_changes: dict[tuple[str, Any, Any], tuple[float, VerificationResult]] = {}
+
+        if linked_locations:
+            yield {"type": "syncing", "message": f"Syncing to {len(linked_locations)} location(s)..."}
+            for loc in linked_locations:
+                try:
+                    sync_result = await _sync_requirements_to_location(
+                        conn,
+                        loc["id"],
+                        loc["company_id"],
+                        requirements,
+                        create_alerts=True,
+                    )
+                    total_alerts += sync_result["alerts"]
+                    total_updated += sync_result["updated"]
+
+                    for change_info in sync_result["changes_to_verify"]:
+                        req = change_info["req"]
+                        existing = change_info["existing"]
+                        old_val = change_info["old_value"]
+                        new_val = change_info["new_value"]
+                        cat = req.get("category", "")
+
+                        cache_key = (cat, old_val, new_val)
+                        if cache_key not in verified_changes:
+                            try:
+                                verify_task = asyncio.create_task(
+                                    service.verify_compliance_change_adaptive(
+                                        category=cat,
+                                        title=req.get("title", ""),
+                                        jurisdiction_name=req.get("jurisdiction_name", ""),
+                                        old_value=old_val,
+                                        new_value=new_val,
+                                    )
+                                )
+                                try:
+                                    while not verify_task.done():
+                                        done, _ = await asyncio.wait({verify_task}, timeout=8)
+                                        if done:
+                                            break
+                                        yield {"type": "heartbeat"}
+                                except asyncio.CancelledError:
+                                    if not verify_task.done():
+                                        verify_task.cancel()
+                                    raise
+
+                                verification = verify_task.result()
+                                confidence = max(
+                                    score_verification_confidence(verification.sources),
+                                    verification.confidence,
+                                )
+                                for retry_index in range(MAX_CONFIDENCE_REFETCH_ATTEMPTS):
+                                    if confidence >= STRICT_CONFIDENCE_THRESHOLD:
+                                        break
+                                    yield {
+                                        "type": "verifying",
+                                        "message": (
+                                            f"Confidence {confidence:.2f} for '{req.get('title', 'change')}' "
+                                            f"is below {STRICT_CONFIDENCE_THRESHOLD:.2f}; "
+                                            f"re-verifying ({retry_index + 1}/{MAX_CONFIDENCE_REFETCH_ATTEMPTS})..."
+                                        ),
+                                    }
+                                    retry_task = asyncio.create_task(
+                                        service.verify_compliance_change_adaptive(
+                                            category=cat,
+                                            title=req.get("title", ""),
+                                            jurisdiction_name=req.get("jurisdiction_name", ""),
+                                            old_value=old_val,
+                                            new_value=new_val,
+                                        )
+                                    )
+                                    try:
+                                        while not retry_task.done():
+                                            done, _ = await asyncio.wait({retry_task}, timeout=8)
+                                            if done:
+                                                break
+                                            yield {"type": "heartbeat"}
+                                    except asyncio.CancelledError:
+                                        if not retry_task.done():
+                                            retry_task.cancel()
+                                        raise
+
+                                    retry_verification = retry_task.result()
+                                    retry_confidence = max(
+                                        score_verification_confidence(retry_verification.sources),
+                                        retry_verification.confidence,
+                                    )
+                                    if retry_confidence > confidence:
+                                        confidence = retry_confidence
+                                        verification = retry_verification
+                            except Exception as exc:
+                                logger.error("Verification failed: %s", exc)
+                                verification = VerificationResult(
+                                    confirmed=False,
+                                    confidence=0.0,
+                                    sources=[],
+                                    explanation="Verification unavailable",
+                                )
+                                confidence = 0.5
+
+                            verified_changes[cache_key] = (confidence, verification)
+
+                        confidence, verification = verified_changes[cache_key]
+                        change_msg = f"Value changed from {old_val} to {new_val}."
+                        if req.get("description"):
+                            change_msg += f" {req['description']}"
+
+                        if confidence >= STRICT_CONFIDENCE_THRESHOLD:
+                            total_alerts += 1
+                            await _create_alert(
+                                conn,
+                                loc["id"],
+                                loc["company_id"],
+                                existing["id"],
+                                f"Compliance Change: {req.get('title')}",
+                                change_msg,
+                                "warning",
+                                req.get("category"),
+                                source_url=req.get("source_url"),
+                                source_name=req.get("source_name"),
+                                alert_type="change",
+                                confidence_score=round(confidence, 2),
+                                verification_sources=verification.sources,
+                                metadata={
+                                    "source": "jurisdiction_sync",
+                                    "verification_explanation": verification.explanation,
+                                },
+                            )
+                        elif confidence >= 0.6:
+                            total_alerts += 1
+                            await _create_alert(
+                                conn,
+                                loc["id"],
+                                loc["company_id"],
+                                existing["id"],
+                                f"Pending Verification: {req.get('title')}",
+                                change_msg,
+                                "info",
+                                req.get("category"),
+                                source_url=req.get("source_url"),
+                                source_name=req.get("source_name"),
+                                alert_type="change",
+                                confidence_score=round(confidence, 2),
+                                verification_sources=verification.sources,
+                                metadata={
+                                    "source": "jurisdiction_sync",
+                                    "verification_explanation": verification.explanation,
+                                    "unverified": True,
+                                },
+                            )
+                        elif confidence >= 0.3:
+                            total_alerts += 1
+                            await _create_alert(
+                                conn,
+                                loc["id"],
+                                loc["company_id"],
+                                existing["id"],
+                                f"Unverified: {req.get('title')}",
+                                change_msg,
+                                "info",
+                                req.get("category"),
+                                source_url=req.get("source_url"),
+                                source_name=req.get("source_name"),
+                                alert_type="change",
+                                confidence_score=round(confidence, 2),
+                                verification_sources=verification.sources,
+                                metadata={
+                                    "source": "jurisdiction_sync",
+                                    "verification_explanation": verification.explanation,
+                                    "unverified": True,
+                                },
+                            )
+                        else:
+                            logger.warning(
+                                "Low confidence (%.2f) for change: %s, skipping alert",
+                                confidence,
+                                req.get("title"),
+                            )
+
+                    await conn.execute(
+                        "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+                        loc["id"],
+                    )
+                except Exception as exc:
+                    logger.error("Failed to sync location %s: %s", loc["id"], exc)
+
+        low_conf_change_count = sum(
+            1 for confidence, _verification in verified_changes.values() if confidence < STRICT_CONFIDENCE_THRESHOLD
+        )
+
+        try:
+            from ..services.poster_service import check_and_regenerate_poster, create_poster_update_alerts
+
+            poster_result = await check_and_regenerate_poster(conn, jurisdiction_id)
+            if poster_result and poster_result.get("status") == "generated":
+                poster_version = poster_result.get("version", "?")
+                yield {
+                    "type": "poster_updated",
+                    "message": f"Poster PDF regenerated (v{poster_version})",
+                }
+                alert_count = await create_poster_update_alerts(conn, jurisdiction_id)
+                if alert_count:
+                    total_alerts += alert_count
+                    yield {
+                        "type": "poster_alerts",
+                        "message": f"Notified {alert_count} company(s) about poster update",
+                    }
+        except Exception as exc:
+            logger.error("Poster regeneration check failed: %s", exc)
+
+        total_low_confidence = low_conf_requirement_count + low_conf_legislation_count + low_conf_change_count
+        if total_low_confidence > 0:
+            yield {
+                "type": "confidence_gate",
+                "message": (
+                    f"{total_low_confidence} item(s) remain below "
+                    f"{int(STRICT_CONFIDENCE_THRESHOLD * 100)}% confidence after retries."
+                ),
+            }
+
+        yield {
+            "type": "completed",
+            "location": location_label,
+            "new": new_count,
+            "updated": total_updated,
+            "alerts": total_alerts,
+            "low_confidence": total_low_confidence,
+            "low_confidence_requirements": low_conf_requirement_count,
+            "low_confidence_legislation": low_conf_legislation_count,
+            "low_confidence_changes": low_conf_change_count,
+        }
+
+
+async def _get_or_create_metro_jurisdiction(city: str, state: str) -> UUID:
+    city_key = city.lower().strip()
+    state_key = state.upper().strip()[:2]
+    async with get_connection() as conn:
+        try:
+            county = await conn.fetchval(
+                "SELECT county FROM jurisdiction_reference WHERE city = $1 AND state = $2",
+                city_key,
+                state_key,
+            )
+        except Exception:
+            county = None
+        row = await conn.fetchrow(
+            """
+            INSERT INTO jurisdictions (city, state, county)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (city, state) DO UPDATE SET
+                county = COALESCE(jurisdictions.county, EXCLUDED.county)
+            RETURNING id
+            """,
+            city_key,
+            state_key,
+            county,
+        )
+        return row["id"]
+
+
+@router.post("/jurisdictions/top-metros/check", dependencies=[Depends(require_admin)])
+async def check_top_metros():
+    """Run streamed compliance checks for a hardcoded top-15 metro list."""
+
+    async def event_stream():
+        total = len(TOP_15_METROS)
+        succeeded = 0
+        failed = 0
+        low_confidence_total = 0
+
+        yield _to_sse(
+            {
+                "type": "run_started",
+                "total": total,
+                "metros": [m["label"] for m in TOP_15_METROS],
+            }
+        )
+
+        for index, metro in enumerate(TOP_15_METROS, start=1):
+            city = metro["city"]
+            state = metro["state"]
+            label = metro["label"]
+            overall_percent = int(((index - 1) / total) * 100)
+
+            try:
+                jurisdiction_id = await _get_or_create_metro_jurisdiction(city, state)
+                yield _to_sse(
+                    {
+                        "type": "city_started",
+                        "city": label,
+                        "state": state,
+                        "index": index,
+                        "total": total,
+                        "overall_percent": overall_percent,
+                    }
+                )
+
+                city_summary = {
+                    "new": 0,
+                    "updated": 0,
+                    "alerts": 0,
+                    "low_confidence": 0,
+                }
+                async for event in _run_jurisdiction_check_events(jurisdiction_id):
+                    phase = event.get("type")
+                    if phase == "heartbeat":
+                        yield ": heartbeat\n\n"
+                        continue
+
+                    if phase == "completed":
+                        city_summary["new"] = int(event.get("new", 0) or 0)
+                        city_summary["updated"] = int(event.get("updated", 0) or 0)
+                        city_summary["alerts"] = int(event.get("alerts", 0) or 0)
+                        city_summary["low_confidence"] = int(event.get("low_confidence", 0) or 0)
+                    elif phase == "error":
+                        raise RuntimeError(event.get("message") or "Jurisdiction check failed")
+
+                    yield _to_sse(
+                        {
+                            "type": "city_progress",
+                            "city": label,
+                            "state": state,
+                            "index": index,
+                            "total": total,
+                            "phase": phase,
+                            "percent": _phase_percent(phase or ""),
+                            "message": event.get("message") or event.get("location") or "",
+                            "confidence": event.get("confidence"),
+                        }
+                    )
+
+                succeeded += 1
+                low_confidence_total += city_summary["low_confidence"]
+                overall_percent = int(((succeeded + failed) / total) * 100)
+                yield _to_sse(
+                    {
+                        "type": "city_completed",
+                        "city": label,
+                        "state": state,
+                        "index": index,
+                        "total": total,
+                        "overall_percent": overall_percent,
+                        "new": city_summary["new"],
+                        "updated": city_summary["updated"],
+                        "alerts": city_summary["alerts"],
+                        "low_confidence": city_summary["low_confidence"],
+                    }
+                )
+            except Exception as exc:
+                failed += 1
+                overall_percent = int(((succeeded + failed) / total) * 100)
+                logger.error("Top metro check failed for %s, %s: %s", label, state, exc, exc_info=True)
+                yield _to_sse(
+                    {
+                        "type": "city_failed",
+                        "city": label,
+                        "state": state,
+                        "index": index,
+                        "total": total,
+                        "overall_percent": overall_percent,
+                        "message": str(exc),
+                    }
+                )
+
+        yield _to_sse(
+            {
+                "type": "run_completed",
+                "total": total,
+                "succeeded": succeeded,
+                "failed": failed,
+                "low_confidence_total": low_confidence_total,
+            }
+        )
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/jurisdictions/{jurisdiction_id}/check", dependencies=[Depends(require_admin)])
+async def check_jurisdiction(jurisdiction_id: UUID):
+    """Run a compliance research check for a jurisdiction. Returns SSE stream with progress."""
+
+    async with get_connection() as conn:
+        exists = await conn.fetchval("SELECT 1 FROM jurisdictions WHERE id = $1", jurisdiction_id)
+        if not exists:
+            raise HTTPException(status_code=404, detail="Jurisdiction not found")
 
     async def event_stream():
         try:
-            yield f"data: {json.dumps({'type': 'started', 'location': jurisdiction_name})}\n\n"
-            yield f"data: {json.dumps({'type': 'researching', 'message': f'Researching requirements for {jurisdiction_name}...'})}\n\n"
-
-            service = get_gemini_compliance_service()
-
-            # Acquire connection early and hold it for the entire generator lifecycle
-            # to avoid "Database pool not initialized" errors after long Gemini calls
-            async with get_connection() as conn:
-                used_repository = False
-                research_queue = asyncio.Queue()
-                def _on_retry(attempt, error):
-                    research_queue.put_nowait({"type": "retrying", "message": f"Retrying research (attempt {attempt + 1})..."})
-
-                research_task = asyncio.create_task(
-                    service.research_location_compliance(
-                        city=city, state=state, county=county,
-                        on_retry=_on_retry,
-                    )
-                )
-                try:
-                    while not research_task.done():
-                        while not research_queue.empty():
-                            evt = research_queue.get_nowait()
-                            yield f"data: {json.dumps(evt)}\n\n"
-                        done, _ = await asyncio.wait({research_task}, timeout=8)
-                        if done:
-                            break
-                        yield ": heartbeat\n\n"
-                except asyncio.CancelledError:
-                    if not research_task.done():
-                        research_task.cancel()
-                    raise
-                # Final drain of retry events
-                while not research_queue.empty():
-                    evt = research_queue.get_nowait()
-                    yield f"data: {json.dumps(evt)}\n\n"
-                requirements = research_task.result()
-
-                # Stale-data fallback: if Gemini returned nothing, try cached data
-                if not requirements:
-                    j_reqs = await conn.fetch(
-                        "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1 ORDER BY category",
-                        jurisdiction_id,
-                    )
-                    if j_reqs:
-                        requirements = [_jurisdiction_row_to_dict(dict(r)) for r in j_reqs]
-                        used_repository = True
-                        logger.warning("Falling back to stale repository data (%d cached requirements)", len(requirements))
-                        yield f"data: {json.dumps({'type': 'fallback', 'message': 'Using cached data (live research unavailable)'})}\n\n"
-
-                if not requirements:
-                    yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': 0, 'updated': 0, 'alerts': 0})}\n\n"
-                    yield "data: [DONE]\n\n"
-                    return
-
-                for req in requirements:
-                    req["category"] = _normalize_category(req.get("category")) or req.get("category")
-                requirements = _filter_by_jurisdiction_priority(requirements)
-
-                yield f"data: {json.dumps({'type': 'processing', 'message': f'Processing {len(requirements)} requirements...'})}\n\n"
-
-                if not used_repository:
-                    await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
-
-                new_count = len(requirements)
-                for req in requirements:
-                    yield f"data: {json.dumps({'type': 'result', 'status': 'new', 'message': req.get('title', '')})}\n\n"
-
-                # Legislation scan
-                yield f"data: {json.dumps({'type': 'scanning', 'message': 'Scanning for upcoming legislation...'})}\n\n"
-                try:
-                    leg_task = asyncio.create_task(
-                        service.scan_upcoming_legislation(
-                            city=city, state=state, county=county,
-                            current_requirements=[dict(r) for r in requirements],
-                        )
-                    )
-                    try:
-                        while not leg_task.done():
-                            done, _ = await asyncio.wait({leg_task}, timeout=8)
-                            if done:
-                                break
-                            yield ": heartbeat\n\n"
-                    except asyncio.CancelledError:
-                        if not leg_task.done():
-                            leg_task.cancel()
-                        raise
-                    legislation_items = leg_task.result()
-                    await _upsert_jurisdiction_legislation(conn, jurisdiction_id, legislation_items)
-                    leg_count = len(legislation_items)
-                    if leg_count > 0:
-                        yield f"data: {json.dumps({'type': 'legislation', 'message': f'Found {leg_count} upcoming legislative change(s)'})}\n\n"
-                except Exception as e:
-                    logger.error("Jurisdiction legislation scan error: %s", e)
-
-                # Sync to all company locations linked to this jurisdiction
-                linked_locations = await conn.fetch(
-                    "SELECT id, company_id FROM business_locations WHERE jurisdiction_id = $1 AND is_active = true",
-                    jurisdiction_id,
-                )
-                total_alerts = 0
-                total_updated = 0
-                # Cache Gemini verification results keyed by (category, old_value, new_value)
-                # so each unique change is verified only once across all locations.
-                verified_changes: dict[tuple, tuple[float, VerificationResult]] = {}
-
-                if linked_locations:
-                    yield f"data: {json.dumps({'type': 'syncing', 'message': f'Syncing to {len(linked_locations)} location(s)...'})}\n\n"
-                    for loc in linked_locations:
-                        try:
-                            sync_result = await _sync_requirements_to_location(
-                                conn, loc["id"], loc["company_id"], requirements,
-                                create_alerts=True,
-                            )
-                            total_alerts += sync_result["alerts"]
-                            total_updated += sync_result["updated"]
-
-                            # Verify material changes with Gemini — same flow
-                            # as the regular check in compliance_service.py.
-                            for change_info in sync_result["changes_to_verify"]:
-                                req = change_info["req"]
-                                existing = change_info["existing"]
-                                old_val = change_info["old_value"]
-                                new_val = change_info["new_value"]
-                                cat = req.get("category", "")
-
-                                cache_key = (cat, old_val, new_val)
-                                if cache_key not in verified_changes:
-                                    try:
-                                        verify_task = asyncio.create_task(
-                                            service.verify_compliance_change_adaptive(
-                                                category=cat,
-                                                title=req.get("title", ""),
-                                                jurisdiction_name=req.get("jurisdiction_name", ""),
-                                                old_value=old_val,
-                                                new_value=new_val,
-                                            )
-                                        )
-                                        try:
-                                            while not verify_task.done():
-                                                done, _ = await asyncio.wait({verify_task}, timeout=8)
-                                                if done:
-                                                    break
-                                                yield ": heartbeat\n\n"
-                                        except asyncio.CancelledError:
-                                            if not verify_task.done():
-                                                verify_task.cancel()
-                                            raise
-                                        verification = verify_task.result()
-                                        confidence = max(
-                                            score_verification_confidence(verification.sources),
-                                            verification.confidence,
-                                        )
-                                    except Exception as e:
-                                        logger.error("Verification failed: %s", e)
-                                        verification = VerificationResult(
-                                            confirmed=False, confidence=0.0, sources=[],
-                                            explanation="Verification unavailable",
-                                        )
-                                        confidence = 0.5
-                                    verified_changes[cache_key] = (confidence, verification)
-
-                                confidence, verification = verified_changes[cache_key]
-
-                                change_msg = f"Value changed from {old_val} to {new_val}."
-                                if req.get("description"):
-                                    change_msg += f" {req['description']}"
-
-                                if confidence >= 0.6:
-                                    total_alerts += 1
-                                    await _create_alert(
-                                        conn, loc["id"], loc["company_id"], existing["id"],
-                                        f"Compliance Change: {req.get('title')}", change_msg,
-                                        "warning", req.get("category"),
-                                        source_url=req.get("source_url"), source_name=req.get("source_name"),
-                                        alert_type="change", confidence_score=round(confidence, 2),
-                                        verification_sources=verification.sources,
-                                        metadata={"source": "jurisdiction_sync", "verification_explanation": verification.explanation},
-                                    )
-                                elif confidence >= 0.3:
-                                    total_alerts += 1
-                                    await _create_alert(
-                                        conn, loc["id"], loc["company_id"], existing["id"],
-                                        f"Unverified: {req.get('title')}", change_msg,
-                                        "info", req.get("category"),
-                                        source_url=req.get("source_url"), source_name=req.get("source_name"),
-                                        alert_type="change", confidence_score=round(confidence, 2),
-                                        verification_sources=verification.sources,
-                                        metadata={"source": "jurisdiction_sync", "verification_explanation": verification.explanation, "unverified": True},
-                                    )
-                                else:
-                                    logger.warning("Low confidence (%.2f) for change: %s, skipping alert", confidence, req.get('title'))
-
-                            await conn.execute(
-                                "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
-                                loc["id"],
-                            )
-                        except Exception as e:
-                            logger.error("Failed to sync location %s: %s", loc['id'], e)
-
-                # Check if poster template needs regeneration
-                try:
-                    from ..services.poster_service import check_and_regenerate_poster, create_poster_update_alerts
-                    poster_result = await check_and_regenerate_poster(conn, jurisdiction_id)
-                    if poster_result and poster_result.get("status") == "generated":
-                        poster_ver = poster_result.get("version", "?")
-                        yield f"data: {json.dumps({'type': 'poster_updated', 'message': f'Poster PDF regenerated (v{poster_ver})'})}\n\n"
-                        alert_count = await create_poster_update_alerts(conn, jurisdiction_id)
-                        if alert_count:
-                            total_alerts += alert_count
-                            yield f"data: {json.dumps({'type': 'poster_alerts', 'message': f'Notified {alert_count} company(s) about poster update'})}\n\n"
-                except Exception as e:
-                    logger.error("Poster regeneration check failed: %s", e)
-
-                yield f"data: {json.dumps({'type': 'completed', 'location': jurisdiction_name, 'new': new_count, 'updated': total_updated, 'alerts': total_alerts})}\n\n"
-        except Exception as e:
-            logger.error("Jurisdiction check failed for %s: %s", jurisdiction_id, e, exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Jurisdiction check failed'})}\n\n"
+            async for event in _run_jurisdiction_check_events(jurisdiction_id):
+                if event.get("type") == "heartbeat":
+                    yield ": heartbeat\n\n"
+                else:
+                    yield _to_sse(event)
+        except Exception:
+            logger.error("Jurisdiction check failed for %s", jurisdiction_id, exc_info=True)
+            yield _to_sse({"type": "error", "message": "Jurisdiction check failed"})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
