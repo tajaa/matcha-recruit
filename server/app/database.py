@@ -659,6 +659,46 @@ async def init_db():
             END $$;
         """)
 
+        # Migration: Add salary range negotiation columns to offer_letters
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'salary_range_min') THEN
+                    ALTER TABLE offer_letters ADD COLUMN salary_range_min DECIMAL(10,2);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'salary_range_max') THEN
+                    ALTER TABLE offer_letters ADD COLUMN salary_range_max DECIMAL(10,2);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'candidate_range_min') THEN
+                    ALTER TABLE offer_letters ADD COLUMN candidate_range_min DECIMAL(10,2);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'candidate_range_max') THEN
+                    ALTER TABLE offer_letters ADD COLUMN candidate_range_max DECIMAL(10,2);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'matched_salary') THEN
+                    ALTER TABLE offer_letters ADD COLUMN matched_salary DECIMAL(10,2);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'range_match_status') THEN
+                    ALTER TABLE offer_letters ADD COLUMN range_match_status VARCHAR(50);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'candidate_token') THEN
+                    ALTER TABLE offer_letters ADD COLUMN candidate_token VARCHAR(64) UNIQUE;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'candidate_email') THEN
+                    ALTER TABLE offer_letters ADD COLUMN candidate_email VARCHAR(255);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'candidate_token_expires_at') THEN
+                    ALTER TABLE offer_letters ADD COLUMN candidate_token_expires_at TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'negotiation_round') THEN
+                    ALTER TABLE offer_letters ADD COLUMN negotiation_round INTEGER DEFAULT 1;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'offer_letters' AND column_name = 'max_negotiation_rounds') THEN
+                    ALTER TABLE offer_letters ADD COLUMN max_negotiation_rounds INTEGER DEFAULT 3;
+                END IF;
+            END $$;
+        """)
+
         # Tracked companies table (company watchlist)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS tracked_companies (

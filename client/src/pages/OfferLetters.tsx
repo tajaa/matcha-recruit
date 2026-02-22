@@ -307,6 +307,11 @@ export function OfferLetters() {
   const [wizardStep, setWizardStep] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Salary range negotiation state
+  const [salaryType, setSalaryType] = useState<'fixed' | 'range'>('fixed');
+  const [sendRangeEmail, setSendRangeEmail] = useState('');
+  const [showSendRangePrompt, setShowSendRangePrompt] = useState<string | null>(null);
+
   // Logo upload state
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -381,6 +386,7 @@ export function OfferLetters() {
     setEditingId(null);
     setLogoFile(null);
     setLogoPreview(null);
+    setSalaryType('fixed');
     setFormData(initialFormData);
   };
 
@@ -487,6 +493,38 @@ export function OfferLetters() {
       setGuidanceError(error instanceof Error ? error.message : 'Failed to generate guidance');
     } finally {
       setGuidanceLoading(false);
+    }
+  };
+
+  const handleSendRange = async (offerId: string) => {
+    if (!sendRangeEmail) return;
+    const offer = offerLetters.find(o => o.id === offerId);
+    if (!offer?.salary_range_min || !offer?.salary_range_max) return;
+    try {
+      setIsSubmitting(true);
+      const updated = await offerLettersApi.sendRange(offerId, {
+        candidate_email: sendRangeEmail,
+        salary_range_min: offer.salary_range_min,
+        salary_range_max: offer.salary_range_max,
+      });
+      setOfferLetters(prev => prev.map(o => o.id === offerId ? updated : o));
+      if (selectedLetter?.id === offerId) setSelectedLetter(updated);
+      setShowSendRangePrompt(null);
+      setSendRangeEmail('');
+    } catch (error) {
+      console.error('Failed to send range offer:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReNegotiate = async (offerId: string) => {
+    try {
+      const updated = await offerLettersApi.reNegotiate(offerId);
+      setOfferLetters(prev => prev.map(o => o.id === offerId ? updated : o));
+      if (selectedLetter?.id === offerId) setSelectedLetter(updated);
+    } catch (err) {
+      console.error('Re-negotiate failed:', err);
     }
   };
 
@@ -624,17 +662,61 @@ export function OfferLetters() {
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Compensation Package</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <div className="flex gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setSalaryType('fixed')}
+                    className={`px-3 py-1 text-[10px] uppercase tracking-wider font-bold border ${salaryType === 'fixed' ? 'bg-white text-black border-white' : 'border-zinc-700 text-zinc-500 hover:border-zinc-500'}`}
+                  >
+                    Fixed Amount
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSalaryType('range')}
+                    className={`px-3 py-1 text-[10px] uppercase tracking-wider font-bold border ${salaryType === 'range' ? 'bg-white text-black border-white' : 'border-zinc-700 text-zinc-500 hover:border-zinc-500'}`}
+                  >
+                    Salary Range
+                  </button>
+                </div>
+              </div>
+              {salaryType === 'fixed' ? (
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Annual Salary</label>
-                <input 
-                  type="text" 
-                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                   placeholder="e.g. $150,000"
                   value={formData.salary || ''}
                   onChange={(e) => setFormData({...formData, salary: e.target.value})}
                   autoFocus
                 />
               </div>
+              ) : (
+              <div className="sm:col-span-2 flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Min ($)</label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                    placeholder="e.g. 140000"
+                    value={formData.salary_range_min ?? ''}
+                    onChange={(e) => setFormData({...formData, salary_range_min: e.target.value ? parseFloat(e.target.value) : undefined})}
+                    autoFocus
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Max ($)</label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                    placeholder="e.g. 160000"
+                    value={formData.salary_range_max ?? ''}
+                    onChange={(e) => setFormData({...formData, salary_range_max: e.target.value ? parseFloat(e.target.value) : undefined})}
+                  />
+                </div>
+              </div>
+              )}
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Bonus Potential</label>
                 <input 
@@ -1164,6 +1246,28 @@ export function OfferLetters() {
                     {letter.status}
                   </span>
                 </div>
+                {letter.range_match_status && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className={`text-[10px] px-2 py-0.5 font-bold uppercase tracking-wider ${
+                      letter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/30' :
+                      letter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 border border-amber-400/30' :
+                      'bg-red-400/10 text-red-400 border border-red-400/30'
+                    }`}>
+                      {letter.range_match_status === 'matched' && letter.matched_salary
+                        ? `Matched at ${formatUsd(letter.matched_salary)}`
+                        : letter.range_match_status === 'pending_candidate'
+                        ? 'Awaiting candidate'
+                        : letter.range_match_status === 'no_match_low'
+                        ? 'No match - offer too low'
+                        : 'No match - offer too high'}
+                    </span>
+                    {letter.negotiation_round != null && letter.negotiation_round > 0 && (
+                      <span className="text-[10px] text-zinc-600">
+                        Round {letter.negotiation_round} of {letter.max_negotiation_rounds}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <p className="text-xs text-zinc-400 truncate">{letter.position_title}</p>
                   <span className="text-[10px] text-zinc-500 font-mono shrink-0">
@@ -1206,8 +1310,21 @@ export function OfferLetters() {
                    {letter.position_title}
                 </div>
 
-                <div className={`w-32 text-[10px] font-bold ${statusColors[letter.status] || 'text-zinc-500'} uppercase tracking-wider`}>
-                   {letter.status}
+                <div className="w-32 flex flex-col gap-1">
+                   <span className={`text-[10px] font-bold ${statusColors[letter.status] || 'text-zinc-500'} uppercase tracking-wider`}>
+                     {letter.status}
+                   </span>
+                   {letter.range_match_status && (
+                     <span className={`text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-wider inline-block w-fit ${
+                       letter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400' :
+                       letter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400' :
+                       'bg-red-400/10 text-red-400'
+                     }`}>
+                       {letter.range_match_status === 'matched' ? 'Matched' :
+                        letter.range_match_status === 'pending_candidate' ? 'Awaiting' :
+                        'No match'}
+                     </span>
+                   )}
                 </div>
 
                 <div className="w-32 text-right text-[10px] text-zinc-500 font-mono">
@@ -1302,17 +1419,58 @@ export function OfferLetters() {
 
                       <div className="space-y-4">
                         <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Compensation</h3>
+                        <div className="flex gap-2 mb-2">
+                          <button
+                            type="button"
+                            onClick={() => setSalaryType('fixed')}
+                            className={`px-3 py-1 text-[10px] uppercase tracking-wider font-bold border ${salaryType === 'fixed' ? 'bg-white text-black border-white' : 'border-zinc-700 text-zinc-500 hover:border-zinc-500'}`}
+                          >
+                            Fixed Amount
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSalaryType('range')}
+                            className={`px-3 py-1 text-[10px] uppercase tracking-wider font-bold border ${salaryType === 'range' ? 'bg-white text-black border-white' : 'border-zinc-700 text-zinc-500 hover:border-zinc-500'}`}
+                          >
+                            Salary Range
+                          </button>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {salaryType === 'fixed' ? (
                           <div>
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Annual Salary</label>
-                            <input 
-                              type="text" 
-                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
+                            <input
+                              type="text"
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                               placeholder="e.g. $150,000"
                               value={formData.salary || ''}
                               onChange={(e) => setFormData({...formData, salary: e.target.value})}
                             />
                           </div>
+                          ) : (
+                          <div className="md:col-span-2 flex gap-4">
+                            <div className="flex-1">
+                              <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Min ($)</label>
+                              <input
+                                type="number"
+                                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                placeholder="e.g. 140000"
+                                value={formData.salary_range_min ?? ''}
+                                onChange={(e) => setFormData({...formData, salary_range_min: e.target.value ? parseFloat(e.target.value) : undefined})}
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Max ($)</label>
+                              <input
+                                type="number"
+                                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                placeholder="e.g. 160000"
+                                value={formData.salary_range_max ?? ''}
+                                onChange={(e) => setFormData({...formData, salary_range_max: e.target.value ? parseFloat(e.target.value) : undefined})}
+                              />
+                            </div>
+                          </div>
+                          )}
                           <div>
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Bonus Potential</label>
                             <input 
@@ -1556,10 +1714,42 @@ export function OfferLetters() {
                          <p className="text-zinc-300">{selectedLetter.company_name}</p>
                       </div>
                       
+                      {/* Range negotiation status */}
+                      {selectedLetter.range_match_status && (
+                        <div>
+                          <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Range Negotiation</label>
+                          <span className={`text-xs px-2 py-1 font-bold uppercase tracking-wider inline-block ${
+                            selectedLetter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/30' :
+                            selectedLetter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 border border-amber-400/30' :
+                            'bg-red-400/10 text-red-400 border border-red-400/30'
+                          }`}>
+                            {selectedLetter.range_match_status === 'matched' && selectedLetter.matched_salary
+                              ? `Matched at ${formatUsd(selectedLetter.matched_salary)}`
+                              : selectedLetter.range_match_status === 'pending_candidate'
+                              ? 'Awaiting candidate'
+                              : selectedLetter.range_match_status === 'no_match_low'
+                              ? 'No match - offer too low'
+                              : 'No match - offer too high'}
+                          </span>
+                          {selectedLetter.negotiation_round != null && selectedLetter.negotiation_round > 0 && (
+                            <p className="text-[10px] text-zinc-600 mt-1">
+                              Round {selectedLetter.negotiation_round} of {selectedLetter.max_negotiation_rounds}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
                       <div className="pt-6 border-t border-white/10 space-y-3">
                          <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={() => handleDownloadPdf(selectedLetter)}>Download PDF</Button>
                          {selectedLetter.status === 'draft' && (
                            <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={() => handleEditDraft(selectedLetter)}>Edit Draft</Button>
+                         )}
+                         {selectedLetter.salary_range_min != null && selectedLetter.salary_range_max != null && !selectedLetter.range_match_status && (
+                           <Button variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => { setShowSendRangePrompt(selectedLetter.id); setSendRangeEmail(selectedLetter.candidate_email || ''); }}>Send Range Offer</Button>
+                         )}
+                         {(selectedLetter.range_match_status === 'no_match_low' || selectedLetter.range_match_status === 'no_match_high') &&
+                           (selectedLetter.negotiation_round ?? 1) < (selectedLetter.max_negotiation_rounds ?? 3) && (
+                           <Button variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => handleReNegotiate(selectedLetter.id)}>Re-negotiate</Button>
                          )}
                       </div>
                    </div>
@@ -1677,6 +1867,38 @@ export function OfferLetters() {
                    </div>
                 </div>
              </div>
+          </div>
+        </div>
+      )}
+      {/* Send Range Email Prompt */}
+      {showSendRangePrompt && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 shadow-2xl p-6">
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Send Range Offer</h3>
+            <p className="text-xs text-zinc-500 mb-4">Enter the candidate's email to send the salary range negotiation link.</p>
+            <input
+              type="email"
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700 mb-4"
+              placeholder="candidate@email.com"
+              value={sendRangeEmail}
+              onChange={(e) => setSendRangeEmail(e.target.value)}
+              autoFocus
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowSendRangePrompt(null); setSendRangeEmail(''); }}
+                className="flex-1 px-4 py-2 text-xs font-bold uppercase tracking-wider border border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleSendRange(showSendRangePrompt)}
+                disabled={!sendRangeEmail || isSubmitting}
+                className="flex-1 px-4 py-2 text-xs font-bold uppercase tracking-wider bg-white text-black hover:bg-zinc-200 disabled:opacity-50 transition-colors"
+              >
+                {isSubmitting ? 'Sending...' : 'Send'}
+              </button>
+            </div>
           </div>
         </div>
       )}

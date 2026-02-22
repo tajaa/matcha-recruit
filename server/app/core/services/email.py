@@ -20,6 +20,56 @@ class EmailService:
         """Check if email service is properly configured."""
         return bool(self.api_key)
 
+    async def send_email(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        subject: str,
+        html_content: str,
+    ) -> bool:
+        """Send a generic email via MailerSend."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        payload = {
+            "from": {
+                "email": self.from_email,
+                "name": self.from_name,
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_name or to_email,
+                }
+            ],
+            "subject": subject,
+            "html": html_content,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202):
+                    print(f"[Email] Sent email to {to_email}")
+                    return True
+                else:
+                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    return False
+
+        except Exception as e:
+            print(f"[Email] Error sending to {to_email}: {e}")
+            return False
+
     async def send_outreach_email(
         self,
         to_email: str,

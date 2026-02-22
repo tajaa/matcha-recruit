@@ -27,6 +27,7 @@ const TutorSessionDetail = lazy(() => import('./pages/TutorSessionDetail'));
 const ERCopilot = lazy(() => import('./pages/ERCopilot'));
 const ERCaseDetail = lazy(() => import('./pages/ERCaseDetail'));
 const OfferLetters = lazy(() => import('./pages/OfferLetters'));
+const CandidateOffer = lazy(() => import('./pages/CandidateOffer'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Policies = lazy(() => import('./pages/Policies'));
 const Handbooks = lazy(() => import('./pages/Handbooks'));
@@ -200,6 +201,9 @@ function App() {
 
             {/* Employee invitation acceptance (public) */}
             <Route path="/invite/:token" element={<AcceptInvitation />} />
+
+            {/* Candidate salary range negotiation (public, token-based) */}
+            <Route path="/offer/:token" element={<CandidateOffer />} />
 
             {/* Policy signature (public, token-based) */}
             <Route path="/sign/:token" element={<PolicySign />} />

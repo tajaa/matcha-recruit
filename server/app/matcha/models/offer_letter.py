@@ -48,6 +48,11 @@ class OfferLetterBase(BaseModel):
     contingency_drug_screening: bool = False
     # Company logo
     company_logo_url: Optional[str] = None
+    # Salary range negotiation
+    salary_range_min: Optional[float] = None
+    salary_range_max: Optional[float] = None
+    candidate_email: Optional[str] = None
+    max_negotiation_rounds: int = 3
 
 
 class OfferLetterCreate(OfferLetterBase):
@@ -118,3 +123,53 @@ class OfferLetter(OfferLetterBase):
     created_at: datetime
     updated_at: datetime
     sent_at: Optional[datetime] = None
+    matched_salary: Optional[float] = None
+    range_match_status: Optional[str] = None
+    negotiation_round: int = 1
+
+
+class CandidateOfferView(BaseModel):
+    id: UUID
+    position_title: str
+    company_name: str
+    company_logo_url: Optional[str] = None
+    employment_type: Optional[str] = None
+    location: Optional[str] = None
+    salary_range_min: float
+    salary_range_max: float
+    benefits_medical: bool = False
+    benefits_dental: bool = False
+    benefits_vision: bool = False
+    benefits_401k: bool = False
+    benefits_401k_match: Optional[str] = None
+    benefits_pto_vacation: bool = False
+    benefits_pto_sick: bool = False
+    benefits_holidays: bool = False
+    benefits_other: Optional[str] = None
+    start_date: Optional[datetime] = None
+    expiration_date: Optional[datetime] = None
+    range_match_status: str
+    negotiation_round: int
+    max_negotiation_rounds: int
+    matched_salary: Optional[float] = None
+
+
+class SendRangeRequest(BaseModel):
+    candidate_email: str
+    salary_range_min: float
+    salary_range_max: float
+
+
+class CandidateRangeSubmit(BaseModel):
+    range_min: float
+    range_max: float
+
+
+class RangeNegotiateResult(BaseModel):
+    result: str  # matched | no_match_low | no_match_high
+    matched_salary: Optional[float] = None
+
+
+class ReNegotiateRequest(BaseModel):
+    salary_range_min: Optional[float] = None
+    salary_range_max: Optional[float] = None

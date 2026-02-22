@@ -2350,7 +2350,78 @@ export const offerLetters = {
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
   },
+
+  sendRange: (id: string, data: { candidate_email: string; salary_range_min: number; salary_range_max: number }) =>
+    request<OfferLetter>(`/offer-letters/${id}/send-range`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+
+  reNegotiate: (id: string, data?: { salary_range_min?: number; salary_range_max?: number }) =>
+    request<OfferLetter>(`/offer-letters/${id}/re-negotiate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data || {}),
+    }),
 };
+
+// Public request helper (no auth header)
+async function publicRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw { status: response.status, detail: error.detail || 'Request failed' };
+  }
+  return response.json();
+}
+
+export interface CandidateOfferView {
+  id: string;
+  position_title: string;
+  company_name: string;
+  company_logo_url?: string | null;
+  employment_type?: string | null;
+  location?: string | null;
+  salary_range_min: number;
+  salary_range_max: number;
+  benefits_medical: boolean;
+  benefits_dental: boolean;
+  benefits_vision: boolean;
+  benefits_401k: boolean;
+  benefits_401k_match?: string | null;
+  benefits_pto_vacation: boolean;
+  benefits_pto_sick: boolean;
+  benefits_holidays: boolean;
+  benefits_other?: string | null;
+  start_date?: string | null;
+  expiration_date?: string | null;
+  range_match_status: string;
+  negotiation_round: number;
+  max_negotiation_rounds: number;
+  matched_salary?: number | null;
+}
+
+export interface RangeNegotiateResult {
+  result: 'matched' | 'no_match_low' | 'no_match_high';
+  matched_salary?: number | null;
+}
+
+export const getCandidateOffer = (token: string): Promise<CandidateOfferView> =>
+  publicRequest<CandidateOfferView>(`/offer-letters/candidate/${token}`);
+
+export const submitCandidateRange = (token: string, data: { range_min: number; range_max: number }): Promise<RangeNegotiateResult> =>
+  publicRequest<RangeNegotiateResult>(`/offer-letters/candidate/${token}/submit-range`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
 
 // =============================================================================
 // LEADS AGENT API

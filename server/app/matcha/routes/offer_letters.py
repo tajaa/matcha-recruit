@@ -2,6 +2,9 @@ import html
 import logging
 import mimetypes
 import base64
+import secrets
+from datetime import timedelta, timezone
+from datetime import datetime as dt
 from io import BytesIO
 from typing import List
 from urllib.parse import quote
@@ -17,10 +20,17 @@ from ..models.offer_letter import (
     OfferLetter,
     OfferLetterCreate,
     OfferLetterUpdate,
+    CandidateOfferView,
+    SendRangeRequest,
+    CandidateRangeSubmit,
+    RangeNegotiateResult,
+    ReNegotiateRequest,
 )
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
+from ...core.services.email import EmailService
+from ...config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +46,7 @@ ALLOWED_UPDATE_COLUMNS = {
     "benefits_wellness", "benefits_pto_vacation", "benefits_pto_sick",
     "benefits_holidays", "benefits_other",
     "contingency_background_check", "contingency_credit_check", "contingency_drug_screening",
+    "salary_range_min", "salary_range_max", "candidate_email", "max_negotiation_rounds",
 }
 
 ROLE_BASE_RANGES = {
@@ -358,6 +369,324 @@ async def get_offer_package_recommendation(
         confidence=confidence,
         rationale=rationale,
     )
+
+
+def _match_ranges(emp_min, emp_max, cand_min, cand_max):
+    overlap_low = max(emp_min, cand_min)
+    overlap_high = min(emp_max, cand_max)
+    if overlap_low <= overlap_high:
+        midpoint = (overlap_low + overlap_high) / 2
+        return "matched", round(midpoint, 2)
+    elif emp_max < cand_min:
+        return "no_match_low", None   # offer too low for candidate
+    else:
+        return "no_match_high", None  # candidate expects less than employer min
+
+
+async def _send_candidate_range_email(
+    candidate_email: str,
+    company_name: str,
+    position_title: str,
+    token: str,
+    negotiation_round: int,
+) -> None:
+    """Send magic link email to candidate for salary range submission."""
+    settings = get_settings()
+    email_svc = EmailService()
+    if not email_svc.is_configured():
+        logger.warning("[OfferLetters] Email not configured, skipping candidate range email")
+        return
+    frontend_url = getattr(settings, 'app_base_url', 'http://localhost:5174')
+    offer_url = f"{frontend_url}/offer/{token}"
+    round_text = f" (Round {negotiation_round})" if negotiation_round > 1 else ""
+    subject = f"Salary Range Offer from {company_name}{round_text}"
+    html_body = f"""
+<html><body style="font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+<h2 style="color: #16a34a;">You have a salary range offer from {company_name}</h2>
+<p>You have been invited to submit your salary range for the <strong>{position_title}</strong> position at <strong>{company_name}</strong>.</p>
+<p>The offer uses a blind range matching system — neither party sees the other's exact numbers. The system finds the overlap automatically.</p>
+<p style="margin: 24px 0;">
+  <a href="{offer_url}" style="background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+    View Offer &amp; Submit Your Range
+  </a>
+</p>
+<p style="color: #666; font-size: 0.9em;">This link expires in 7 days. If you did not expect this email, you can ignore it.</p>
+</body></html>"""
+    await email_svc.send_email(
+        to_email=candidate_email,
+        to_name=None,
+        subject=subject,
+        html_content=html_body,
+    )
+
+
+async def _send_employer_result_email(
+    employer_email: str,
+    candidate_name: str,
+    position_title: str,
+    result: str,
+    matched_salary: float | None,
+    rounds_remaining: int,
+) -> None:
+    """Notify employer of candidate range submission result."""
+    email_svc = EmailService()
+    if not email_svc.is_configured():
+        logger.warning("[OfferLetters] Email not configured, skipping employer result email")
+        return
+    if result == "matched":
+        subject = f"Offer Accepted — {position_title}"
+        body = f"<p>Great news! Your offer to <strong>{candidate_name}</strong> for <strong>{position_title}</strong> was accepted at <strong>${matched_salary:,.2f}</strong>.</p>"
+    elif result == "no_match_low":
+        subject = f"Salary Range Not Matched — {position_title}"
+        body = f"<p>{candidate_name} submitted their range for <strong>{position_title}</strong>, but the ranges didn't overlap — your offer was below their range.</p>"
+        if rounds_remaining > 0:
+            body += f"<p>You have <strong>{rounds_remaining}</strong> negotiation round(s) remaining. Log in to re-negotiate.</p>"
+        else:
+            body += "<p>The maximum number of negotiation rounds has been reached.</p>"
+    else:
+        subject = f"Salary Range Not Matched — {position_title}"
+        body = f"<p>{candidate_name} submitted their range for <strong>{position_title}</strong>, but the ranges didn't overlap — their expectation was below your minimum.</p>"
+        if rounds_remaining > 0:
+            body += f"<p>You have <strong>{rounds_remaining}</strong> negotiation round(s) remaining. Log in to re-negotiate.</p>"
+        else:
+            body += "<p>The maximum number of negotiation rounds has been reached.</p>"
+    html_body = f"<html><body style='font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;'>{body}</body></html>"
+    await email_svc.send_email(
+        to_email=employer_email,
+        to_name=None,
+        subject=subject,
+        html_content=html_body,
+    )
+
+
+@router.post("/{offer_id}/send-range", response_model=OfferLetter)
+async def send_range_offer(
+    offer_id: UUID,
+    payload: SendRangeRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Set employer salary range and send magic link to candidate."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Offer letter not found")
+    is_admin = current_user.role == "admin"
+    company_filter = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"SELECT * FROM offer_letters WHERE id = $1 AND {company_filter}",
+            offer_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Offer letter not found")
+        offer = dict(row)
+        if offer["status"] not in ("draft", "sent"):
+            raise HTTPException(status_code=400, detail="Offer must be in draft or sent state")
+        token = secrets.token_urlsafe(32)
+        expires_at = dt.now(timezone.utc) + timedelta(days=7)
+        updated = await conn.fetchrow(
+            """
+            UPDATE offer_letters
+            SET salary_range_min = $1, salary_range_max = $2,
+                candidate_email = $3, candidate_token = $4,
+                candidate_token_expires_at = $5,
+                status = 'sent', range_match_status = 'pending_candidate',
+                negotiation_round = COALESCE(negotiation_round, 1),
+                updated_at = NOW()
+            WHERE id = $6
+            RETURNING *
+            """,
+            payload.salary_range_min, payload.salary_range_max,
+            payload.candidate_email, token, expires_at, offer_id,
+        )
+    # Send email (non-blocking)
+    try:
+        await _send_candidate_range_email(
+            candidate_email=payload.candidate_email,
+            company_name=updated["company_name"] or "",
+            position_title=updated["position_title"] or "",
+            token=token,
+            negotiation_round=updated["negotiation_round"] or 1,
+        )
+    except Exception as e:
+        logger.warning("[OfferLetters] Failed to send candidate range email: %s", e)
+    return OfferLetter(**dict(updated))
+
+
+@router.get("/candidate/{token}", response_model=CandidateOfferView)
+async def get_candidate_offer(token: str):
+    """Public endpoint — get offer details by candidate magic token."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM offer_letters WHERE candidate_token = $1", token
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Offer not found")
+        offer = dict(row)
+        expires_at = offer.get("candidate_token_expires_at")
+        if expires_at:
+            now = dt.now(timezone.utc)
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if now > expires_at:
+                raise HTTPException(status_code=410, detail="This offer link has expired")
+        if not offer.get("salary_range_min") or not offer.get("salary_range_max"):
+            raise HTTPException(status_code=400, detail="Offer does not have a salary range set")
+        return CandidateOfferView(
+            id=offer["id"],
+            position_title=offer["position_title"],
+            company_name=offer["company_name"],
+            company_logo_url=offer.get("company_logo_url"),
+            employment_type=offer.get("employment_type"),
+            location=offer.get("location"),
+            salary_range_min=float(offer["salary_range_min"]),
+            salary_range_max=float(offer["salary_range_max"]),
+            benefits_medical=offer.get("benefits_medical") or False,
+            benefits_dental=offer.get("benefits_dental") or False,
+            benefits_vision=offer.get("benefits_vision") or False,
+            benefits_401k=offer.get("benefits_401k") or False,
+            benefits_401k_match=offer.get("benefits_401k_match"),
+            benefits_pto_vacation=offer.get("benefits_pto_vacation") or False,
+            benefits_pto_sick=offer.get("benefits_pto_sick") or False,
+            benefits_holidays=offer.get("benefits_holidays") or False,
+            benefits_other=offer.get("benefits_other"),
+            start_date=offer.get("start_date"),
+            expiration_date=offer.get("expiration_date"),
+            range_match_status=offer.get("range_match_status") or "pending_candidate",
+            negotiation_round=offer.get("negotiation_round") or 1,
+            max_negotiation_rounds=offer.get("max_negotiation_rounds") or 3,
+            matched_salary=float(offer["matched_salary"]) if offer.get("matched_salary") else None,
+        )
+
+
+@router.post("/candidate/{token}/submit-range", response_model=RangeNegotiateResult)
+async def submit_candidate_range(token: str, payload: CandidateRangeSubmit):
+    """Public endpoint — candidate submits their desired salary range."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM offer_letters WHERE candidate_token = $1", token
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Offer not found")
+        offer = dict(row)
+        expires_at = offer.get("candidate_token_expires_at")
+        if expires_at:
+            now = dt.now(timezone.utc)
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if now > expires_at:
+                raise HTTPException(status_code=410, detail="This offer link has expired")
+        if offer.get("range_match_status") not in ("pending_candidate", None):
+            raise HTTPException(status_code=400, detail="Offer is not awaiting candidate range submission")
+        result, matched_salary = _match_ranges(
+            float(offer["salary_range_min"]),
+            float(offer["salary_range_max"]),
+            payload.range_min,
+            payload.range_max,
+        )
+        rounds_remaining = (offer.get("max_negotiation_rounds") or 3) - (offer.get("negotiation_round") or 1)
+        if result == "matched":
+            await conn.fetchrow(
+                """
+                UPDATE offer_letters
+                SET candidate_range_min = $1, candidate_range_max = $2,
+                    matched_salary = $3, range_match_status = 'matched',
+                    status = 'accepted', updated_at = NOW()
+                WHERE candidate_token = $4
+                RETURNING *
+                """,
+                payload.range_min, payload.range_max, matched_salary, token,
+            )
+        else:
+            await conn.fetchrow(
+                """
+                UPDATE offer_letters
+                SET candidate_range_min = $1, candidate_range_max = $2,
+                    range_match_status = $3, updated_at = NOW()
+                WHERE candidate_token = $4
+                RETURNING *
+                """,
+                payload.range_min, payload.range_max, result, token,
+            )
+    # Notify employer
+    try:
+        employer_email = None
+        async with get_connection() as conn2:
+            company_row = await conn2.fetchrow(
+                "SELECT email FROM users WHERE id = (SELECT owner_id FROM companies WHERE id = $1)",
+                offer.get("company_id"),
+            )
+            if company_row:
+                employer_email = company_row["email"]
+        if employer_email:
+            await _send_employer_result_email(
+                employer_email=employer_email,
+                candidate_name=offer.get("candidate_name") or "Candidate",
+                position_title=offer.get("position_title") or "",
+                result=result,
+                matched_salary=matched_salary,
+                rounds_remaining=rounds_remaining,
+            )
+    except Exception as e:
+        logger.warning("[OfferLetters] Failed to send employer result email: %s", e)
+    return RangeNegotiateResult(result=result, matched_salary=matched_salary)
+
+
+@router.post("/{offer_id}/re-negotiate", response_model=OfferLetter)
+async def re_negotiate_offer(
+    offer_id: UUID,
+    payload: ReNegotiateRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Employer re-initiates negotiation after a no-match result."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Offer letter not found")
+    is_admin = current_user.role == "admin"
+    company_filter = "(company_id = $2 OR company_id IS NULL)" if is_admin else "company_id = $2"
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"SELECT * FROM offer_letters WHERE id = $1 AND {company_filter}",
+            offer_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Offer letter not found")
+        offer = dict(row)
+        if offer.get("range_match_status") not in ("no_match_low", "no_match_high"):
+            raise HTTPException(status_code=400, detail="Offer is not in a no-match state")
+        current_round = offer.get("negotiation_round") or 1
+        max_rounds = offer.get("max_negotiation_rounds") or 3
+        if current_round >= max_rounds:
+            raise HTTPException(status_code=400, detail="Maximum negotiation rounds reached")
+        new_token = secrets.token_urlsafe(32)
+        expires_at = dt.now(timezone.utc) + timedelta(days=7)
+        new_min = payload.salary_range_min if payload.salary_range_min is not None else offer.get("salary_range_min")
+        new_max = payload.salary_range_max if payload.salary_range_max is not None else offer.get("salary_range_max")
+        updated = await conn.fetchrow(
+            """
+            UPDATE offer_letters
+            SET salary_range_min = $1, salary_range_max = $2,
+                candidate_range_min = NULL, candidate_range_max = NULL,
+                range_match_status = 'pending_candidate',
+                candidate_token = $3, candidate_token_expires_at = $4,
+                negotiation_round = $5, updated_at = NOW()
+            WHERE id = $6
+            RETURNING *
+            """,
+            new_min, new_max, new_token, expires_at, current_round + 1, offer_id,
+        )
+    candidate_email = offer.get("candidate_email")
+    if candidate_email:
+        try:
+            await _send_candidate_range_email(
+                candidate_email=candidate_email,
+                company_name=updated["company_name"] or "",
+                position_title=updated["position_title"] or "",
+                token=new_token,
+                negotiation_round=current_round + 1,
+            )
+        except Exception as e:
+            logger.warning("[OfferLetters] Failed to send re-negotiate email: %s", e)
+    return OfferLetter(**dict(updated))
 
 
 @router.get("/{offer_id}", response_model=OfferLetter)

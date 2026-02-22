@@ -2194,6 +2194,14 @@ export interface OfferLetter {
   contingency_drug_screening: boolean;
   // Company logo
   company_logo_url: string | null;
+  // Salary range negotiation
+  salary_range_min?: number | null;
+  salary_range_max?: number | null;
+  matched_salary?: number | null;
+  range_match_status?: string | null;
+  negotiation_round?: number;
+  max_negotiation_rounds?: number;
+  candidate_email?: string | null;
 }
 
 export interface OfferLetterCreate {
@@ -2229,6 +2237,11 @@ export interface OfferLetterCreate {
   contingency_drug_screening?: boolean;
   // Company logo
   company_logo_url?: string;
+  // Salary range negotiation
+  salary_range_min?: number | null;
+  salary_range_max?: number | null;
+  candidate_email?: string | null;
+  max_negotiation_rounds?: number;
 }
 
 export interface OfferLetterUpdate {
