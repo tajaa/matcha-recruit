@@ -124,13 +124,18 @@ async def _get_or_create_career_profile(conn: Any, employee: dict) -> EmployeeCa
         employee["id"],
         employee["org_id"],
     )
+
     if not row:
+        # Atomic upsert prevents race conditions when profile + feed endpoints initialize concurrently.
         row = await conn.fetchrow(
             """
             INSERT INTO employee_career_profiles (
                 employee_id, org_id, target_roles, target_departments, skills, interests, mobility_opt_in, visibility
             )
             VALUES ($1, $2, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, true, 'private')
+            ON CONFLICT (employee_id)
+            DO UPDATE SET
+                org_id = EXCLUDED.org_id
             RETURNING id, employee_id, org_id, target_roles, target_departments, skills, interests,
                       mobility_opt_in, visibility, created_at, updated_at
             """,
