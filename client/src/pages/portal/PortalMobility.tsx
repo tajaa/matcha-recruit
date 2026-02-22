@@ -98,6 +98,8 @@ export default function PortalMobility() {
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [actionKey, setActionKey] = useState<string | null>(null);
+  const [activeApplyId, setActiveApplyId] = useState<string | null>(null);
+  const [applyDrafts, setApplyDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -186,28 +188,72 @@ export default function PortalMobility() {
     }
   };
 
-  const handleFeedAction = async (item: FeedItem, action: 'save' | 'unsave' | 'dismiss' | 'apply') => {
+  const setFeedItemStatus = useCallback((opportunityId: string, status: FeedStatus) => {
+    setFeed((current) =>
+      current.map((entry) =>
+        entry.opportunity_id === opportunityId
+          ? {
+              ...entry,
+              status,
+            }
+          : entry,
+      ),
+    );
+  }, []);
+
+  const handleFeedAction = async (
+    item: FeedItem,
+    action: 'save' | 'unsave' | 'dismiss' | 'apply',
+    employeeNotes?: string,
+  ) => {
     setActionKey(`${action}:${item.opportunity_id}`);
     setError(null);
     setNotice(null);
+    const previousFeed = feed;
+    const optimisticStatus: FeedStatus =
+      action === 'save' ? 'saved' : action === 'unsave' ? 'suggested' : action === 'dismiss' ? 'dismissed' : 'applied';
+
+    setFeedItemStatus(item.opportunity_id, optimisticStatus);
+    if (action === 'apply') {
+      setActiveApplyId(null);
+    }
+
     try {
       if (action === 'save') {
-        await portalApi.saveMobilityOpportunity(item.opportunity_id);
-      } else if (action === 'unsave') {
-        await portalApi.unsaveMobilityOpportunity(item.opportunity_id);
-      } else if (action === 'dismiss') {
-        await portalApi.dismissMobilityOpportunity(item.opportunity_id);
-      } else {
-        const employeeNotes = window.prompt('Optional note for recruiters and hiring manager:');
-        if (employeeNotes === null) {
-          setActionKey(null);
-          return;
+        const response = (await portalApi.saveMobilityOpportunity(item.opportunity_id)) as {
+          status?: FeedStatus;
+        };
+        if (response.status) {
+          setFeedItemStatus(item.opportunity_id, response.status);
         }
+        setNotice('Opportunity saved.');
+      } else if (action === 'unsave') {
+        const response = (await portalApi.unsaveMobilityOpportunity(item.opportunity_id)) as {
+          status?: FeedStatus;
+        };
+        if (response.status) {
+          setFeedItemStatus(item.opportunity_id, response.status);
+        }
+        setNotice('Opportunity moved back to suggested.');
+      } else if (action === 'dismiss') {
+        const response = (await portalApi.dismissMobilityOpportunity(item.opportunity_id)) as {
+          status?: FeedStatus;
+        };
+        if (response.status) {
+          setFeedItemStatus(item.opportunity_id, response.status);
+        }
+        setNotice('Opportunity dismissed.');
+      } else {
         await portalApi.applyMobilityOpportunity(item.opportunity_id, employeeNotes || undefined);
+        setFeedItemStatus(item.opportunity_id, 'applied');
+        setApplyDrafts((current) => ({
+          ...current,
+          [item.opportunity_id]: '',
+        }));
+        setNotice('Application submitted.');
       }
-      setNotice('Opportunity status updated.');
-      await refreshFeed();
     } catch (err) {
+      setFeed(previousFeed);
       setError(err instanceof Error ? err.message : 'Failed to update opportunity');
     } finally {
       setActionKey(null);
@@ -397,6 +443,7 @@ export default function PortalMobility() {
                 <div className="mt-4 flex flex-wrap gap-2">
                   {item.status === 'saved' ? (
                     <button
+                      type="button"
                       onClick={() => void handleFeedAction(item, 'unsave')}
                       disabled={actionKey === `unsave:${item.opportunity_id}`}
                       className="px-3 py-2 border border-zinc-300 rounded text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-60"
@@ -405,6 +452,7 @@ export default function PortalMobility() {
                     </button>
                   ) : (
                     <button
+                      type="button"
                       onClick={() => void handleFeedAction(item, 'save')}
                       disabled={actionKey === `save:${item.opportunity_id}` || item.status === 'applied'}
                       className="px-3 py-2 border border-zinc-300 rounded text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-60"
@@ -413,6 +461,7 @@ export default function PortalMobility() {
                     </button>
                   )}
                   <button
+                    type="button"
                     onClick={() => void handleFeedAction(item, 'dismiss')}
                     disabled={actionKey === `dismiss:${item.opportunity_id}` || item.status === 'applied'}
                     className="px-3 py-2 border border-zinc-300 rounded text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-60"
@@ -420,17 +469,67 @@ export default function PortalMobility() {
                     {actionKey === `dismiss:${item.opportunity_id}` ? 'Updating...' : 'Dismiss'}
                   </button>
                   <button
-                    onClick={() => void handleFeedAction(item, 'apply')}
+                    type="button"
+                    onClick={() => {
+                      setActiveApplyId((current) =>
+                        current === item.opportunity_id ? null : item.opportunity_id,
+                      );
+                    }}
                     disabled={actionKey === `apply:${item.opportunity_id}` || item.status === 'applied'}
                     className="px-3 py-2 bg-zinc-900 text-white rounded text-sm hover:bg-zinc-800 disabled:opacity-60"
                   >
                     {item.status === 'applied'
                       ? 'Applied'
-                      : actionKey === `apply:${item.opportunity_id}`
-                      ? 'Submitting...'
-                      : 'Apply'}
+                      : activeApplyId === item.opportunity_id
+                        ? 'Close'
+                        : 'Apply'}
                   </button>
                 </div>
+
+                {activeApplyId === item.opportunity_id && item.status !== 'applied' && (
+                  <div className="mt-3 p-3 border border-zinc-200 rounded-lg bg-zinc-50 space-y-3">
+                    <label className="block space-y-1">
+                      <span className="text-xs text-zinc-600">
+                        Optional note for recruiter/hiring manager
+                      </span>
+                      <textarea
+                        rows={3}
+                        value={applyDrafts[item.opportunity_id] || ''}
+                        onChange={(event) =>
+                          setApplyDrafts((current) => ({
+                            ...current,
+                            [item.opportunity_id]: event.target.value,
+                          }))
+                        }
+                        placeholder="Why this role or project fits your growth goals."
+                        className="w-full px-3 py-2 border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 resize-y bg-white"
+                      />
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveApplyId(null)}
+                        className="px-3 py-2 border border-zinc-300 rounded text-sm text-zinc-700 hover:bg-zinc-100"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleFeedAction(
+                            item,
+                            'apply',
+                            (applyDrafts[item.opportunity_id] || '').trim() || undefined,
+                          )
+                        }
+                        disabled={actionKey === `apply:${item.opportunity_id}`}
+                        className="px-3 py-2 bg-zinc-900 text-white rounded text-sm hover:bg-zinc-800 disabled:opacity-60"
+                      >
+                        {actionKey === `apply:${item.opportunity_id}` ? 'Submitting...' : 'Submit Application'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </article>
             ))}
           </div>
