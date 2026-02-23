@@ -58,6 +58,32 @@ RELEVANCE_KEYWORDS = {
         "paycheck",
         "direct deposit",
     ],
+    "final_pay": [
+        "final paycheck",
+        "final wage",
+        "termination pay",
+        "resignation pay",
+        "payout",
+        "unused vacation",
+        "pto payout",
+    ],
+    "minor_work_permit": [
+        "minor work permit",
+        "youth employment",
+        "child labor",
+        "work permit",
+        "minor hours",
+        "under 18",
+    ],
+    "scheduling_reporting": [
+        "predictive scheduling",
+        "fair workweek",
+        "reporting time pay",
+        "show-up pay",
+        "schedule change",
+        "advance notice schedule",
+        "spread of hours",
+    ],
 }
 
 

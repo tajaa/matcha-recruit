@@ -9,6 +9,11 @@ class ComplianceCategory(str, Enum):
     minimum_wage = "minimum_wage"
     overtime = "overtime"
     sick_leave = "sick_leave"
+    meal_breaks = "meal_breaks"
+    pay_frequency = "pay_frequency"
+    final_pay = "final_pay"
+    minor_work_permit = "minor_work_permit"
+    scheduling_reporting = "scheduling_reporting"
     workers_comp = "workers_comp"
     business_license = "business_license"
     tax_rate = "tax_rate"
@@ -142,6 +147,7 @@ class AutoCheckSettings(BaseModel):
 class RequirementResponse(BaseModel):
     id: str
     category: str
+    rate_type: Optional[str] = None
     jurisdiction_level: str
     jurisdiction_name: str
     title: str

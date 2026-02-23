@@ -49,6 +49,17 @@ MATERIAL_CHANGE_THRESHOLDS = {
 
 JURISDICTION_PRIORITY = {'city': 1, 'county': 2, 'state': 3, 'federal': 4}
 
+REQUIRED_LABOR_CATEGORIES = {
+    "minimum_wage",
+    "overtime",
+    "sick_leave",
+    "meal_breaks",
+    "pay_frequency",
+    "final_pay",
+    "minor_work_permit",
+    "scheduling_reporting",
+}
+
 # State code → state name mapping for jurisdiction relabeling
 _CODE_TO_STATE_NAME = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
@@ -121,7 +132,16 @@ def _filter_city_level_requirements(reqs: list, state: str) -> list:
 
     return non_city + promoted
 # Valid rate_types for minimum_wage requirements
-VALID_RATE_TYPES = {"general", "tipped", "hotel", "fast_food", "healthcare", "large_employer", "small_employer"}
+VALID_RATE_TYPES = {
+    "general",
+    "tipped",
+    "exempt_salary",
+    "hotel",
+    "fast_food",
+    "healthcare",
+    "large_employer",
+    "small_employer",
+}
 
 # Legacy constants kept for backwards compatibility during transition
 # TODO: Remove after migration is complete
@@ -189,6 +209,50 @@ def _normalize_category(category: Optional[str]) -> Optional[str]:
     s = category.strip().lower()
     s = re.sub(r"[\s\-]+", "_", s)
     return s
+
+
+def _normalize_rate_type(rate_type: Optional[str]) -> Optional[str]:
+    if not rate_type:
+        return None
+    s = rate_type.strip().lower()
+    s = re.sub(r"[\s\-]+", "_", s)
+    return s
+
+
+def _coerce_minimum_wage_rate_type(req: dict) -> str:
+    """Normalize/infer minimum_wage rate_type for stable grouping and keys."""
+    normalized = _normalize_rate_type(req.get("rate_type"))
+    if normalized in VALID_RATE_TYPES:
+        return normalized
+
+    text = " ".join(
+        str(req.get(k) or "")
+        for k in ("title", "description", "current_value")
+    ).lower()
+
+    if any(token in text for token in ("exempt", "salary threshold", "salary basis", "annual salary")):
+        return "exempt_salary"
+    if any(token in text for token in ("tipped", "tip credit", "cash wage", "tips")):
+        return "tipped"
+    return "general"
+
+
+def _normalize_requirement_categories(requirements: list[dict]) -> None:
+    """Normalize category names and minimum_wage rate_type in-place."""
+    for req in requirements:
+        req["category"] = _normalize_category(req.get("category")) or req.get("category")
+        if req.get("category") == "minimum_wage":
+            req["rate_type"] = _coerce_minimum_wage_rate_type(req)
+
+
+def _missing_required_categories(requirements: list[dict]) -> list[str]:
+    """Return required labor categories that are missing from the requirement set."""
+    present = {
+        _normalize_category((req or {}).get("category"))
+        for req in requirements
+        if isinstance(req, dict) and (req or {}).get("category")
+    }
+    return sorted(cat for cat in REQUIRED_LABOR_CATEGORIES if cat not in present)
 
 
 def _normalize_title_key(title: Optional[str]) -> str:
@@ -995,9 +1059,15 @@ def _compute_requirement_key(req) -> str:
     base_title = _base_title(title or "", jname)
     base_key = _normalize_title_key(base_title)
 
-    # Include rate_type in key for minimum_wage to allow multiple entries per jurisdiction
-    if cat_key == "minimum_wage" and rate_type:
-        return f"{cat_key}:{rate_type}"
+    # Include rate_type in key for minimum_wage to allow multiple entries per jurisdiction.
+    # Always emit a rate_type key for minimum_wage to keep keys stable.
+    if cat_key == "minimum_wage":
+        normalized_rate_type = (
+            _coerce_minimum_wage_rate_type(req)
+            if isinstance(req, dict)
+            else (_normalize_rate_type(rate_type) or "general")
+        )
+        return f"{cat_key}:{normalized_rate_type}"
 
     return f"{cat_key}:{base_key}"
 
@@ -1756,8 +1826,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             # compliance check pipeline.
             if has_local_ordinance is False:
                 req_dicts = _filter_city_level_requirements(req_dicts, data.state)
-            for req in req_dicts:
-                req["category"] = _normalize_category(req.get("category")) or req.get("category")
+            _normalize_requirement_categories(req_dicts)
             req_dicts = await _filter_with_preemption(conn, req_dicts, data.state)
             for req in req_dicts:
                 _clamp_varchar_fields(req)
@@ -1871,7 +1940,14 @@ async def run_compliance_check_stream(
                     if (_normalize_category(jr.get("category")) or jr.get("category")) not in tier1_categories
                 ]
                 requirements = tier1_data + repo_reqs
-                used_repository = True  # Skip Gemini and fresh-data logic
+                missing_categories = _missing_required_categories(requirements)
+                if missing_categories:
+                    yield {
+                        "type": "researching",
+                        "message": f"Expanding coverage for {location_name}: missing {', '.join(missing_categories)}.",
+                    }
+                else:
+                    used_repository = True  # Skip Gemini and fresh-data logic
 
             # ============================================================
             # TIER 2: Check if jurisdiction repository is fresh enough
@@ -1882,7 +1958,14 @@ async def run_compliance_check_stream(
                 yield {"type": "repository", "message": f"Loading compliance data for {location_name}..."}
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
-                used_repository = True
+                missing_categories = _missing_required_categories(requirements)
+                if missing_categories:
+                    yield {
+                        "type": "researching",
+                        "message": f"Coverage gap detected ({', '.join(missing_categories)}). Running live research...",
+                    }
+                else:
+                    used_repository = True
 
             # ============================================================
             # TIER 2.5: County data reuse for no-local-ordinance cities
@@ -1894,7 +1977,14 @@ async def run_compliance_check_stream(
                 if county_reqs:
                     yield {"type": "repository", "message": f"Using {location.county or 'county'} data for {location.city}..."}
                     requirements = county_reqs
-                    used_repository = True
+                    missing_categories = _missing_required_categories(requirements)
+                    if missing_categories:
+                        yield {
+                            "type": "researching",
+                            "message": f"County cache missing {', '.join(missing_categories)}. Running live research...",
+                        }
+                    else:
+                        used_repository = True
 
             # ============================================================
             # TIER 3: Research with Gemini (stale or missing data)
@@ -1997,8 +2087,7 @@ async def run_compliance_check_stream(
                         r["description"] = desc + note
 
             # Normalize and filter (with preemption awareness)
-            for req in requirements:
-                req["category"] = _normalize_category(req.get("category")) or req.get("category")
+            _normalize_requirement_categories(requirements)
             requirements = await _filter_with_preemption(conn, requirements, location.state)
             for req in requirements:
                 _clamp_varchar_fields(req)
@@ -2256,8 +2345,7 @@ async def get_location_counts(location_id: UUID) -> dict:
         req_dicts = [dict(r) for r in rows]
         if has_local_ordinance is False:
             req_dicts = _filter_city_level_requirements(req_dicts, state)
-        for r in req_dicts:
-            r["category"] = _normalize_category(r.get("category")) or r.get("category")
+        _normalize_requirement_categories(req_dicts)
         filtered = (
             await _filter_with_preemption(conn, req_dicts, state)
             if state
@@ -2400,13 +2488,13 @@ async def get_location_requirements(location_id: UUID, company_id: UUID, categor
         row_dicts = [dict(row) for row in rows]
         if has_local_ordinance is False:
             row_dicts = _filter_city_level_requirements(row_dicts, state)
-        for r in row_dicts:
-            r["category"] = _normalize_category(r.get("category")) or r.get("category")
+        _normalize_requirement_categories(row_dicts)
         filtered = await _filter_with_preemption(conn, row_dicts, state)
         return [
             RequirementResponse(
                 id=str(row["id"]),
                 category=row["category"],
+                rate_type=row.get("rate_type"),
                 jurisdiction_level=row["jurisdiction_level"],
                 jurisdiction_name=row["jurisdiction_name"],
                 title=row["title"],
@@ -2719,8 +2807,7 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
             req_dicts = [dict(r) for r in reqs]
             if loc.get("has_local_ordinance") is False:
                 req_dicts = _filter_city_level_requirements(req_dicts, loc["state"])
-            for r in req_dicts:
-                r["category"] = _normalize_category(r.get("category")) or r.get("category")
+            _normalize_requirement_categories(req_dicts)
             filtered_reqs = await _filter_with_preemption(conn, req_dicts, loc["state"])
             total_requirements += len(filtered_reqs)
 
@@ -2961,18 +3048,39 @@ async def run_compliance_check_background(
                     if (_normalize_category(jr.get("category")) or jr.get("category")) not in tier1_categories
                 ]
                 requirements = tier1_data + repo_reqs
-                used_repository = True
+                missing_categories = _missing_required_categories(requirements)
+                if missing_categories:
+                    print(
+                        f"[Compliance] Coverage gap for {location.city}, {location.state} "
+                        f"({', '.join(missing_categories)}); running live research."
+                    )
+                else:
+                    used_repository = True
             elif await _is_jurisdiction_fresh(conn, jurisdiction_id, threshold):
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
-                used_repository = True
+                missing_categories = _missing_required_categories(requirements)
+                if missing_categories:
+                    print(
+                        f"[Compliance] Fresh cache missing categories for {location.city}, {location.state}: "
+                        f"{', '.join(missing_categories)}. Running live research."
+                    )
+                else:
+                    used_repository = True
 
             # TIER 2.5: County data reuse for no-local-ordinance cities
             if not used_repository and has_local_ordinance is False:
                 county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, threshold)
                 if county_reqs:
                     requirements = county_reqs
-                    used_repository = True
+                    missing_categories = _missing_required_categories(requirements)
+                    if missing_categories:
+                        print(
+                            f"[Compliance] County cache missing categories for {location.city}, {location.state}: "
+                            f"{', '.join(missing_categories)}. Running live research."
+                        )
+                    else:
+                        used_repository = True
 
             # TIER 3: Research with Gemini (stale or missing data)
             if not used_repository:
@@ -3047,8 +3155,7 @@ async def run_compliance_check_background(
                     if note not in desc:
                         r["description"] = desc + note
 
-            for req in requirements:
-                req["category"] = _normalize_category(req.get("category")) or req.get("category")
+            _normalize_requirement_categories(requirements)
             requirements = await _filter_with_preemption(conn, requirements, location.state)
             for req in requirements:
                 _clamp_varchar_fields(req)

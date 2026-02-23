@@ -47,6 +47,7 @@ export interface LocationUpdate {
 export interface ComplianceRequirement {
     id: string;
     category: string;
+    rate_type: string | null;
     jurisdiction_level: string;
     jurisdiction_name: string;
     title: string;
@@ -315,6 +316,9 @@ export const COMPLIANCE_CATEGORY_LABELS: Record<string, string> = {
     sick_leave: 'Sick Leave',
     meal_breaks: 'Meal & Rest Breaks',
     pay_frequency: 'Pay Frequency',
+    final_pay: 'Final Pay',
+    minor_work_permit: 'Minor Work Permits',
+    scheduling_reporting: 'Scheduling & Reporting Time',
     workers_comp: "Workers' Comp",
     business_license: 'Business License',
     tax_rate: 'Tax Rate',

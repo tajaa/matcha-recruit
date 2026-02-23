@@ -69,11 +69,14 @@ Focus on these categories:
 - overtime: Changes to overtime rules or salary thresholds
 - meal_breaks: Changes to meal/rest break requirements
 - pay_frequency: Changes to pay period requirements
+- final_pay: Changes to final paycheck timing and payout rules
+- minor_work_permit: Changes to youth employment/work permit requirements
+- scheduling_reporting: Changes to fair workweek, predictive scheduling, or reporting-time pay
 
 Respond with JSON:
 {{
   "is_relevant": true/false,
-  "category": "minimum_wage" | "sick_leave" | "overtime" | "meal_breaks" | "pay_frequency" | null,
+  "category": "minimum_wage" | "sick_leave" | "overtime" | "meal_breaks" | "pay_frequency" | "final_pay" | "minor_work_permit" | "scheduling_reporting" | null,
   "change_type": "enacted" | "proposed" | "effective_soon" | "informational" | null,
   "summary": "Brief summary of the change (1-2 sentences)",
   "effective_date": "YYYY-MM-DD" or null,

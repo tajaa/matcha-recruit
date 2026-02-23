@@ -16,9 +16,27 @@ from .search_strategy import build_search_strategy_prompt
 # Timeout for individual Gemini API calls (seconds)
 GEMINI_CALL_TIMEOUT = 45
 
-VALID_CATEGORIES = {"minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency"}
+VALID_CATEGORIES = {
+    "minimum_wage",
+    "overtime",
+    "sick_leave",
+    "meal_breaks",
+    "pay_frequency",
+    "final_pay",
+    "minor_work_permit",
+    "scheduling_reporting",
+}
 VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
-VALID_RATE_TYPES = {"general", "tipped", "hotel", "fast_food", "healthcare", "large_employer", "small_employer"}
+VALID_RATE_TYPES = {
+    "general",
+    "tipped",
+    "exempt_salary",
+    "hotel",
+    "fast_food",
+    "healthcare",
+    "large_employer",
+    "small_employer",
+}
 
 # Errors that should not be retried (API config / quota issues)
 _NON_RETRYABLE_KEYWORDS = {"API_KEY", "PERMISSION", "QUOTA", "RATE"}
@@ -143,9 +161,11 @@ If a county/city minimum wage ordinance exists (and is allowed), also include th
 Return SEPARATE requirements for each rate type that exists at each applicable level:
 - "general" - standard minimum wage (ALWAYS include for state baseline)
 - "tipped" - if tip credits allowed
+- "exempt_salary" - minimum exempt salary threshold for overtime exemption (ALWAYS include; if only federal applies, explicitly say so)
 - "hotel", "fast_food", "healthcare" - if special rates exist
 - "large_employer" / "small_employer" - if rates differ by size
-Provide numeric_value for rates (e.g., 16.9) when possible.""",
+For tipped requirements, explicitly describe whether tip crediting is allowed and how it works (cash wage + tip credit structure).
+Provide numeric_value for rates/salary thresholds when possible.""",
 
         "overtime": """Research OVERTIME requirements.
 Always include the STATE baseline overtime rules.
@@ -166,6 +186,23 @@ Include timing, duration, and waiver conditions.""",
 Always include the STATE baseline pay frequency rules.
 If a county/city ordinance exists (and is allowed), also include the local override.
 Include required pay periods and final pay rules.""",
+
+        "final_pay": """Research FINAL PAY requirements.
+Always include the STATE baseline final paycheck rules.
+If local (county/city) final-pay rules exist and are allowed, include local overrides.
+Cover BOTH voluntary resignations and involuntary terminations, including timing and payout method requirements.
+Explicitly state whether accrued vacation/PTO must be paid out, and whether accrued sick leave must be paid out at separation.""",
+
+        "minor_work_permit": """Research MINOR WORK PERMIT / YOUTH EMPLOYMENT requirements.
+Always include the STATE baseline minor-work authorization rules.
+If local (county/city) rules exist and are allowed, include local overrides.
+Include whether work permits are required, age thresholds, hour limits (school-day/non-school-day), prohibited occupations, and who issues permits.""",
+
+        "scheduling_reporting": """Research SCHEDULING AND REPORTING TIME requirements.
+Always include the STATE baseline rules.
+If local fair-workweek/predictive-scheduling ordinances exist (and are allowed), include local overrides.
+Include advance-schedule notice windows, penalties for schedule changes, reporting/show-up pay rules, on-call restrictions, and spread-of-hours pay if applicable.
+If no specific scheduling/reporting-time law applies, explicitly say so.""",
     }
 
     return f"""You are a compliance research expert. Research current {category.replace('_', ' ')} laws for a business operating in {location_str}.
@@ -180,7 +217,7 @@ Respond with JSON:
   "requirements": [
     {{
       "category": "{category}",
-      "rate_type": <for minimum_wage only, else null>,
+      "rate_type": <for minimum_wage only: "general" | "tipped" | "exempt_salary" | "hotel" | "fast_food" | "healthcare" | "large_employer" | "small_employer"; else null>,
       "jurisdiction_level": "state" | "county" | "city",
       "jurisdiction_name": "Name",
       "title": "Short title",
@@ -394,7 +431,16 @@ class GeminiComplianceService:
                     f"Do NOT return city or county level requirements for this category."
                 )
 
-        categories = ["minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency"]
+        categories = [
+            "minimum_wage",
+            "overtime",
+            "sick_leave",
+            "meal_breaks",
+            "pay_frequency",
+            "final_pay",
+            "minor_work_permit",
+            "scheduling_reporting",
+        ]
 
         async def research_category(category: str) -> List[Dict]:
             """Research a single category with retry."""
@@ -426,7 +472,7 @@ class GeminiComplianceService:
                 return []
 
         # Run all categories in parallel
-        print(f"[Gemini Compliance] Researching {location_str} (5 parallel calls)...")
+        print(f"[Gemini Compliance] Researching {location_str} ({len(categories)} parallel calls)...")
         results = await asyncio.gather(*[research_category(c) for c in categories])
 
         # Flatten and validate
@@ -488,6 +534,9 @@ List the authoritative websites for:
 - Overtime rules
 - Meal/rest break requirements
 - Pay frequency requirements
+- Final paycheck and payout requirements
+- Minor/youth work permit rules
+- Scheduling / reporting-time / fair-workweek rules
 
 Respond with JSON:
 {{
@@ -894,6 +943,9 @@ Focus on:
 3. Changes to overtime rules
 4. New meal/rest break requirements
 5. Pay transparency or frequency changes
+6. Final paycheck timing/payout changes (including PTO/vacation payout rules)
+7. Minor/youth work permit or hour-limit changes
+8. Fair-workweek / predictive scheduling / reporting-time changes
 
 For each upcoming change, search for:
 - Bills in the current legislative session
@@ -905,7 +957,7 @@ Respond with a JSON object:
 {{
   "upcoming": [
     {{
-      "category": "minimum_wage" | "overtime" | "sick_leave" | "meal_breaks" | "pay_frequency" | "other",
+      "category": "minimum_wage" | "overtime" | "sick_leave" | "meal_breaks" | "pay_frequency" | "final_pay" | "minor_work_permit" | "scheduling_reporting" | "other",
       "title": "Short descriptive title",
       "description": "Detailed description of the change",
       "current_status": "proposed" | "passed" | "signed" | "effective_soon" | "effective",

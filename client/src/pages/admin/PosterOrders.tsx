@@ -25,6 +25,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   minimum_wage: 'Min Wage',
   overtime: 'Overtime',
   sick_leave: 'Sick Leave',
+  meal_breaks: 'Meal/Rest',
+  pay_frequency: 'Pay Frequency',
+  final_pay: 'Final Pay',
+  minor_work_permit: 'Minor Permits',
+  scheduling_reporting: 'Scheduling',
   workers_comp: 'Workers Comp',
 };
 

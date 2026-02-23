@@ -28,6 +28,18 @@ CATEGORY_SEARCH_STRATEGIES = {
         "search_guidance": "Search state labor department for payday laws. Usually state-level only.",
         "preferred_source_types": [".gov", "state labor department"],
     },
+    "final_pay": {
+        "search_guidance": "Search state labor department for final paycheck timing after resignation/termination and PTO/vacation payout rules.",
+        "preferred_source_types": [".gov", "state wage and hour division"],
+    },
+    "minor_work_permit": {
+        "search_guidance": "Search state labor or education agencies for youth employment permits, age restrictions, and hour limits.",
+        "preferred_source_types": [".gov", "state labor standards"],
+    },
+    "scheduling_reporting": {
+        "search_guidance": "Search state/city labor agencies for predictive scheduling, fair workweek, reporting-time pay, and spread-of-hours rules.",
+        "preferred_source_types": [".gov", "city labor standards office"],
+    },
 }
 
 # States with well-structured government data portals

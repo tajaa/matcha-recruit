@@ -78,6 +78,36 @@ const emptyFormData: LocationFormData = {
     jurisdictionKey: ''
 };
 
+const REQUIREMENT_CATEGORY_ORDER = [
+    'meal_breaks',
+    'minimum_wage',
+    'overtime',
+    'pay_frequency',
+    'sick_leave',
+    'final_pay',
+    'minor_work_permit',
+    'scheduling_reporting',
+    'workers_comp',
+    'business_license',
+    'tax_rate',
+    'posting_requirements',
+];
+
+const RATE_TYPE_LABELS: Record<string, string> = {
+    general: 'General',
+    tipped: 'Tipped / Tip Credit',
+    exempt_salary: 'Exempt Salary',
+    hotel: 'Hotel',
+    fast_food: 'Fast Food',
+    healthcare: 'Healthcare',
+    large_employer: 'Large Employer',
+    small_employer: 'Small Employer',
+};
+
+function normalizeCategoryKey(category: string): string {
+    return category.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
 // ─── Compliance Lifecycle Wizard ──────────────────────────────────────────────
 
 type ComplianceStepIcon = 'locations' | 'research' | 'alerts' | 'posters' | 'audit';
@@ -468,16 +498,27 @@ export function Compliance() {
         }
     });
 
+    const requirementsByCategory = useMemo(() => {
+        if (!requirements) return {};
+        return requirements.reduce((acc, req) => {
+            const category = normalizeCategoryKey(req.category || 'other');
+            if (!acc[category]) acc[category] = [];
+            acc[category].push({ ...req, category });
+            return acc;
+        }, {} as Record<string, ComplianceRequirement[]>);
+    }, [requirements]);
 
-
-
-    const requirementsByCategory = requirements?.reduce((acc, req) => {
-        if (!acc[req.category]) {
-            acc[req.category] = [];
-        }
-        acc[req.category].push(req);
-        return acc;
-    }, {} as Record<string, ComplianceRequirement[]>) || {};
+    const orderedRequirementCategories = useMemo(() => {
+        const orderIndex = new Map(REQUIREMENT_CATEGORY_ORDER.map((cat, idx) => [cat, idx]));
+        return Object.entries(requirementsByCategory).sort(([a], [b]) => {
+            const aIdx = orderIndex.get(a);
+            const bIdx = orderIndex.get(b);
+            if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
+            if (aIdx !== undefined) return -1;
+            if (bIdx !== undefined) return 1;
+            return a.localeCompare(b);
+        });
+    }, [requirementsByCategory]);
 
     const toggleCategory = (category: string) => {
         setExpandedCategories(prev => {
@@ -1224,7 +1265,7 @@ export function Compliance() {
                                         </div>
                                     ) : (
                                         <div className="space-y-px bg-white/10 border border-white/10">
-                                            {Object.entries(requirementsByCategory).map(([category, reqs]) => (
+                                            {orderedRequirementCategories.map(([category, reqs]) => (
                                                 <div key={category} className="bg-zinc-950">
                                                     <button
                                                         onClick={() => toggleCategory(category)}
@@ -1278,6 +1319,11 @@ export function Compliance() {
                                                                                         <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 text-[10px] uppercase tracking-wide rounded">
                                                                                             {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
                                                                                         </span>
+                                                                                        {req.category === 'minimum_wage' && req.rate_type && (
+                                                                                            <span className="px-1.5 py-0.5 bg-zinc-900 text-zinc-300 border border-zinc-700 text-[10px] uppercase tracking-wide rounded">
+                                                                                                {RATE_TYPE_LABELS[req.rate_type] || req.rate_type.replace(/_/g, ' ')}
+                                                                                            </span>
+                                                                                        )}
                                                                                         <span className="text-zinc-500 text-xs font-mono">
                                                                                             {req.jurisdiction_name}
                                                                                         </span>
