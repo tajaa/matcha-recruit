@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -182,3 +182,38 @@ class HandbookAcknowledgementSummary(BaseModel):
     signed_count: int
     pending_count: int
     expired_count: int
+
+
+class HandbookGuidedQuestion(BaseModel):
+    id: str = Field(..., min_length=2, max_length=80)
+    question: str = Field(..., min_length=4, max_length=500)
+    placeholder: Optional[str] = Field(default=None, max_length=255)
+    required: bool = True
+
+
+class HandbookGuidedSectionSuggestion(BaseModel):
+    section_key: str = Field(..., min_length=2, max_length=120)
+    title: str = Field(..., min_length=2, max_length=255)
+    content: str = ""
+    section_order: int = 300
+    section_type: HandbookSectionType = "custom"
+    jurisdiction_scope: dict = Field(default_factory=dict)
+
+
+class HandbookGuidedDraftRequest(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=500)
+    mode: HandbookMode = "single_state"
+    scopes: list[HandbookScopeInput] = Field(default_factory=list)
+    profile: CompanyHandbookProfileInput
+    industry: Optional[str] = Field(default=None, max_length=120)
+    answers: dict[str, str] = Field(default_factory=dict)
+    existing_custom_sections: list[HandbookGuidedSectionSuggestion] = Field(default_factory=list)
+
+
+class HandbookGuidedDraftResponse(BaseModel):
+    industry: str
+    summary: str
+    clarification_needed: bool = False
+    questions: list[HandbookGuidedQuestion] = Field(default_factory=list)
+    profile_updates: dict[str, Any] = Field(default_factory=dict)
+    suggested_sections: list[HandbookGuidedSectionSuggestion] = Field(default_factory=list)

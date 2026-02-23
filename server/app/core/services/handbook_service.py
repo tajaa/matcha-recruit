@@ -1,9 +1,12 @@
+import asyncio
 from datetime import date, datetime, timedelta
 import json
 import html
+import re
 from typing import Any, Optional
 from uuid import UUID
 
+from ...config import get_settings
 from ...database import get_connection
 from .storage import get_storage
 from ..models.handbook import (
@@ -14,6 +17,10 @@ from ..models.handbook import (
     HandbookCreateRequest,
     HandbookDetailResponse,
     HandbookDistributionResponse,
+    HandbookGuidedDraftRequest,
+    HandbookGuidedDraftResponse,
+    HandbookGuidedQuestion,
+    HandbookGuidedSectionSuggestion,
     HandbookListItemResponse,
     HandbookPublishResponse,
     HandbookScopeInput,
@@ -77,6 +84,357 @@ STATE_NAMES = {
     "WY": "Wyoming",
     "DC": "District of Columbia",
 }
+
+ADDENDUM_CORE_CATEGORIES = (
+    "minimum_wage",
+    "overtime",
+    "sick_leave",
+    "meal_breaks",
+    "pay_frequency",
+)
+
+ADDENDUM_FALLBACK_REVIEW_LINE = (
+    "No verified statutory entries were found in the compliance repository for this topic. "
+    "Run a compliance refresh and complete legal review before publishing."
+)
+
+ADDENDUM_KEYWORD_PATTERNS = (
+    "%lactation%",
+    "%pregnan%",
+    "%disability benefit%",
+    "%disability insurance%",
+    "%family leave%",
+    "%paid family%",
+    "%reasonable accommodation%",
+    "%anti-retaliation%",
+    "%domestic violence%",
+)
+
+LEGAL_OPERATIONAL_HOOKS = {
+    "hr_contact_email": "[HR_CONTACT_EMAIL]",
+    "leave_admin_email": "[LEAVE_ADMIN_EMAIL]",
+    "harassment_hotline": "[HARASSMENT_REPORTING_HOTLINE]",
+    "harassment_email": "[HARASSMENT_REPORTING_EMAIL]",
+    "workweek_start_day": "[WORKWEEK_START_DAY]",
+    "workweek_start_time": "[WORKWEEK_START_TIME]",
+    "workweek_timezone": "[WORKWEEK_TIMEZONE]",
+    "payday_frequency": "[PAYDAY_FREQUENCY]",
+    "payday_anchor": "[PAYDAY_ANCHOR_DAY]",
+    "legal_owner": "[LEGAL_REVIEW_OWNER]",
+}
+
+GUIDED_PROFILE_BOOL_KEYS = {
+    "remote_workers",
+    "minors",
+    "tipped_employees",
+    "union_employees",
+    "federal_contracts",
+    "group_health_insurance",
+    "background_checks",
+    "hourly_employees",
+    "salaried_employees",
+    "commissioned_employees",
+    "tip_pooling",
+}
+
+GUIDED_PROFILE_NUMERIC_KEYS = {"headcount"}
+
+GUIDED_COMMON_QUESTIONS = [
+    {
+        "id": "hr_contact_email",
+        "question": "What email should employees use for HR policy questions?",
+        "placeholder": "hr@company.com",
+        "required": True,
+    },
+    {
+        "id": "leave_admin_email",
+        "question": "What email should employees use for leave and accommodation requests?",
+        "placeholder": "leave@company.com",
+        "required": True,
+    },
+    {
+        "id": "harassment_hotline",
+        "question": "What hotline number or reporting channel should be listed for harassment complaints?",
+        "placeholder": "24/7 hotline number or internal reporting channel",
+        "required": True,
+    },
+    {
+        "id": "workweek_definition",
+        "question": "When does your payroll workweek start (day, time, and timezone)?",
+        "placeholder": "Sunday 12:00 AM PT",
+        "required": True,
+    },
+    {
+        "id": "attendance_notice_window",
+        "question": "What call-out notice window should apply for foreseeable absences?",
+        "placeholder": "24 hours advance notice",
+        "required": True,
+    },
+]
+
+GUIDED_INDUSTRY_PLAYBOOK = {
+    "general": {
+        "label": "General Employer",
+        "summary": "General employment baseline with enforceable reporting, wage/hour, leave, and anti-retaliation controls.",
+        "profile_defaults": {
+            "hourly_employees": True,
+        },
+        "questions": [
+            {
+                "id": "discipline_escalation_matrix",
+                "question": "How should corrective action escalate (coaching, written warning, suspension, termination)?",
+                "placeholder": "Define standard escalation path",
+                "required": False,
+            },
+            {
+                "id": "manager_training_frequency",
+                "question": "How often should managers complete policy and anti-retaliation training?",
+                "placeholder": "e.g., annually",
+                "required": False,
+            },
+        ],
+        "sections": [
+            {
+                "title": "Reporting and Escalation Protocol",
+                "content": (
+                    "Employees may report policy concerns to supervisors, Human Resources at [HR_CONTACT_EMAIL], "
+                    "or through [HARASSMENT_REPORTING_HOTLINE]. Reports may be made without fear of retaliation. "
+                    "All managers must escalate complaints to HR within one business day."
+                ),
+            },
+            {
+                "title": "Attendance and Absence Control Matrix",
+                "content": (
+                    "Foreseeable absences require at least [ATTENDANCE_NOTICE_WINDOW] notice unless a protected leave law applies. "
+                    "Unforeseeable absences must be reported before shift start. "
+                    "Excused and unexcused absences are evaluated under company policy and applicable sick leave law."
+                ),
+            },
+        ],
+    },
+    "hospitality": {
+        "label": "Hospitality / Restaurants",
+        "summary": "Adds tipped-employee controls, service-shift scheduling, and tip-pool governance expectations.",
+        "profile_defaults": {
+            "hourly_employees": True,
+            "tipped_employees": True,
+            "tip_pooling": True,
+        },
+        "questions": [
+            {
+                "id": "tip_credit_policy",
+                "question": "Do you use tip credit by location, and if so, where?",
+                "placeholder": "State/local rules where tip credit is used",
+                "required": True,
+            },
+            {
+                "id": "tip_pool_roles",
+                "question": "Which job roles are included/excluded from tip pooling?",
+                "placeholder": "Servers, bartenders, bussers included; managers excluded",
+                "required": True,
+            },
+            {
+                "id": "service_cutoff_reporting",
+                "question": "What same-day escalation process applies to guest incidents and workplace complaints?",
+                "placeholder": "Who must be notified and within what timeframe",
+                "required": False,
+            },
+        ],
+        "sections": [
+            {
+                "title": "Tipped Employee and Tip Pool Compliance",
+                "content": (
+                    "Tip ownership remains with employees unless a lawful tip pool applies. "
+                    "Managers and supervisors may not retain employee tips. "
+                    "Tip pool eligibility and distribution must match state/local law and the approved role matrix."
+                ),
+            },
+            {
+                "title": "Shift Scheduling and Rest Period Controls",
+                "content": (
+                    "Scheduling managers must provide compliant meal/rest opportunities and avoid off-the-clock prep or close-out work. "
+                    "Shift swaps require manager approval and documented coverage confirmation."
+                ),
+            },
+        ],
+    },
+    "healthcare": {
+        "label": "Healthcare",
+        "summary": "Adds patient-facing conduct controls, credentialing checks, and accommodation/escalation expectations.",
+        "profile_defaults": {
+            "hourly_employees": True,
+            "background_checks": True,
+            "group_health_insurance": True,
+        },
+        "questions": [
+            {
+                "id": "credentialing_review_owner",
+                "question": "Who owns credential/licensure verification and escalation for lapses?",
+                "placeholder": "Department + role",
+                "required": True,
+            },
+            {
+                "id": "patient_safety_reporting_window",
+                "question": "What is the required reporting window for patient safety or workplace safety incidents?",
+                "placeholder": "e.g., immediate verbal report + written report within 24h",
+                "required": True,
+            },
+        ],
+        "sections": [
+            {
+                "title": "Credentialing and Scope-of-Practice Compliance",
+                "content": (
+                    "Employees must perform duties within their active licensure and scope-of-practice limits. "
+                    "Managers must verify active credentials before assignment changes and escalate lapses immediately."
+                ),
+            },
+            {
+                "title": "Patient Safety and Non-Retaliation Reporting",
+                "content": (
+                    "Employees must report patient safety and workplace safety concerns immediately through established channels. "
+                    "Good-faith safety reporting is protected from retaliation."
+                ),
+            },
+        ],
+    },
+    "retail": {
+        "label": "Retail",
+        "summary": "Adds shift scheduling, timekeeping integrity, and customer-floor conduct controls for retail operations.",
+        "profile_defaults": {
+            "hourly_employees": True,
+        },
+        "questions": [
+            {
+                "id": "opening_closing_checklist",
+                "question": "What opening/closing checklist controls should be mandatory for timekeeping and safety?",
+                "placeholder": "Clock-in/out, cash count, alarm check, safety walkthrough",
+                "required": False,
+            },
+            {
+                "id": "loss_prevention_escalation",
+                "question": "How should suspected theft, violence, or safety incidents be escalated?",
+                "placeholder": "Escalation owner and response timeline",
+                "required": False,
+            },
+        ],
+        "sections": [
+            {
+                "title": "Store Shift Compliance Controls",
+                "content": (
+                    "Opening and closing activities must be completed on the clock. "
+                    "Managers must verify break compliance, time edits, and end-of-shift handoff records each day."
+                ),
+            },
+            {
+                "title": "Customer-Facing Conduct and Incident Escalation",
+                "content": (
+                    "Employees must de-escalate customer conflicts and immediately report threats, violence, or discriminatory behavior. "
+                    "Serious incidents must be escalated to leadership and HR without delay."
+                ),
+            },
+        ],
+    },
+    "manufacturing": {
+        "label": "Manufacturing / Warehouse",
+        "summary": "Adds safety-critical controls, shift handoff requirements, and incident escalation for operational sites.",
+        "profile_defaults": {
+            "hourly_employees": True,
+        },
+        "questions": [
+            {
+                "id": "safety_shutdown_authority",
+                "question": "Who can stop production for safety and how is restart approval handled?",
+                "placeholder": "Role/title + restart authority",
+                "required": True,
+            },
+            {
+                "id": "ppe_enforcement_protocol",
+                "question": "What PPE enforcement and corrective action protocol should apply?",
+                "placeholder": "Required PPE and escalation sequence",
+                "required": True,
+            },
+        ],
+        "sections": [
+            {
+                "title": "Safety-Critical Work and Stop-Work Authority",
+                "content": (
+                    "Any employee may stop work when an imminent safety hazard exists. "
+                    "Operations may resume only after hazard review and documented management authorization."
+                ),
+            },
+            {
+                "title": "Shift Handoff, Lockout/Tagout, and Incident Reporting",
+                "content": (
+                    "Shift transitions must include documented equipment status, outstanding hazards, and lockout/tagout controls where applicable. "
+                    "Injuries, near misses, and safety concerns must be reported immediately."
+                ),
+            },
+        ],
+    },
+    "technology": {
+        "label": "Technology / Professional Services",
+        "summary": "Adds remote-work governance, data security expectations, and responsive investigation channels.",
+        "profile_defaults": {
+            "remote_workers": True,
+            "salaried_employees": True,
+        },
+        "questions": [
+            {
+                "id": "remote_work_jurisdiction_tracking",
+                "question": "How should employees report work-location changes for tax and compliance tracking?",
+                "placeholder": "Notice window + approval workflow",
+                "required": True,
+            },
+            {
+                "id": "security_incident_reporting_window",
+                "question": "What is the response window for suspected data/privacy incidents?",
+                "placeholder": "e.g., immediate to security@company.com",
+                "required": True,
+            },
+        ],
+        "sections": [
+            {
+                "title": "Remote Work Location and Payroll Compliance",
+                "content": (
+                    "Employees must obtain approval before changing primary work location across state lines. "
+                    "Location changes must be reported promptly to maintain wage/hour, tax, and leave-law compliance."
+                ),
+            },
+            {
+                "title": "Data Security, Privacy, and Investigations",
+                "content": (
+                    "Employees must protect confidential and personal data under company security policies. "
+                    "Suspected privacy or security incidents must be reported immediately through approved channels."
+                ),
+            },
+        ],
+    },
+}
+
+GUIDED_INDUSTRY_ALIASES = {
+    "restaurant": "hospitality",
+    "hospitality": "hospitality",
+    "food": "hospitality",
+    "hotel": "hospitality",
+    "health": "healthcare",
+    "medical": "healthcare",
+    "clinic": "healthcare",
+    "retail": "retail",
+    "store": "retail",
+    "shop": "retail",
+    "warehouse": "manufacturing",
+    "manufacturing": "manufacturing",
+    "industrial": "manufacturing",
+    "technology": "technology",
+    "software": "technology",
+    "saas": "technology",
+    "professional services": "technology",
+    "consulting": "technology",
+}
+
+
+class GuidedDraftRateLimitError(Exception):
+    """Raised when guided draft generation exceeds configured rate limits."""
 
 
 def _normalize_scope(scope: HandbookScopeInput) -> dict[str, Any]:
@@ -148,6 +506,21 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
         if profile.get("federal_contracts")
         else "No federal-contract specific labor clauses are incorporated at this time."
     )
+    coverage_clause = (
+        "Group health coverage is offered to eligible employees under current plan terms."
+        if profile.get("group_health_insurance")
+        else "Group health coverage is not currently offered through company-sponsored plans."
+    )
+    background_clause = (
+        "Background checks may be conducted for eligible roles in accordance with applicable law."
+        if profile.get("background_checks")
+        else "Background checks are not part of standard hiring or retention practices unless required by law or contract."
+    )
+    minors_restriction_line = (
+        "Managers must follow all youth-employment hour and duty restrictions before scheduling minors."
+        if profile.get("minors")
+        else "If minor employees are hired in the future, youth-employment restrictions must be applied before scheduling."
+    )
 
     sections: list[dict[str, Any]] = [
         {
@@ -158,8 +531,9 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             "jurisdiction_scope": {"mode": mode, "states": states},
             "content": (
                 f"This Employee Handbook is adopted by {company_ref} and applies to employees working in {scope_desc}. "
-                f"It summarizes employment expectations and workplace standards. "
-                f"{ceo} is the executive sponsor of this handbook program."
+                f"{ceo} is the executive sponsor of this handbook program. "
+                "This handbook states enforceable workplace rules, reporting procedures, and compliance controls. "
+                "It is intended to be read with offer letters, arbitration agreements, and written policy addenda."
             ),
         },
         {
@@ -169,9 +543,11 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             "section_type": "core",
             "jurisdiction_scope": {"mode": mode, "states": states},
             "content": (
-                f"This handbook is a statement of policies and is not a contract of employment. "
+                "Employment with the company is at-will unless a written agreement signed by the Chief Executive Officer states otherwise. "
+                "At-will employment means either the employee or the company may end employment at any time, with or without cause or notice, subject to applicable law. "
                 f"Employment classifications currently include {mix_text} roles. "
-                "Policy interpretations are administered by company leadership and HR."
+                "No manager or supervisor may make an oral promise that changes at-will status. "
+                "This handbook is not a contract of employment and does not create a guaranteed term of employment."
             ),
         },
         {
@@ -182,7 +558,10 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             "jurisdiction_scope": {"mode": mode, "states": states},
             "content": (
                 "The company provides equal employment opportunity and prohibits discrimination, harassment, and retaliation. "
-                "All employees must report concerns promptly through designated reporting channels."
+                "Employees may report concerns to any manager, Human Resources, or directly to designated reporting channels. "
+                f"Primary reporting channels: email {LEGAL_OPERATIONAL_HOOKS['harassment_email']} and hotline {LEGAL_OPERATIONAL_HOOKS['harassment_hotline']}. "
+                "Reports may be made by employees, applicants, contractors, or witnesses. "
+                "The company will investigate promptly, maintain confidentiality to the extent possible, and prohibit retaliation for good-faith reporting or participation."
             ),
         },
         {
@@ -192,7 +571,11 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             "section_type": "core",
             "jurisdiction_scope": {"mode": mode, "states": states},
             "content": (
-                "Employees must accurately record time worked and meal/rest periods where required. "
+                "Employees must accurately record all time worked and all required meal/rest periods in the approved timekeeping system. "
+                "Off-the-clock work is prohibited. Time records must be corrected in the same pay period when errors are discovered. "
+                f"The standard payroll workweek runs from {LEGAL_OPERATIONAL_HOOKS['workweek_start_day']} at {LEGAL_OPERATIONAL_HOOKS['workweek_start_time']} ({LEGAL_OPERATIONAL_HOOKS['workweek_timezone']}). "
+                f"Paydays follow {LEGAL_OPERATIONAL_HOOKS['payday_frequency']} with payroll cutoff anchored to {LEGAL_OPERATIONAL_HOOKS['payday_anchor']}. "
+                "Overtime must be paid when worked, even if not pre-approved; unauthorized overtime may result in corrective action. "
                 f"{tipped_clause} "
                 f"{federal_contract_clause}"
             ),
@@ -204,9 +587,13 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             "section_type": "core",
             "jurisdiction_scope": {"mode": mode, "states": states},
             "content": (
-                "Regular attendance and punctuality are required unless approved leave or accommodation applies. "
+                "Regular attendance and punctuality are essential job duties unless approved leave or accommodation applies. "
+                "Employees must provide at least 24 hours' notice for foreseeable absences and notify their manager before shift start for unforeseeable absences. "
+                "Excused absences include approved protected leave, legally protected sick leave, jury/witness duty, military leave, and approved accommodation-related absences. "
+                "Unexcused absences include no-call/no-show events and absences without required notice when no legal protection applies. "
                 f"{remote_clause} "
-                f"{minors_clause}"
+                f"{minors_clause} "
+                f"{minors_restriction_line}"
             ),
         },
         {
@@ -216,12 +603,10 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             "section_type": "core",
             "jurisdiction_scope": {"mode": mode, "states": states},
             "content": (
-                "Benefit eligibility and leave rights follow company plans and applicable law. "
-                + (
-                    "Group health coverage is offered to eligible employees under current plan terms. "
-                    if profile.get("group_health_insurance")
-                    else "Group health coverage is not currently offered through company-sponsored plans. "
-                )
+                "Benefit eligibility and leave rights follow plan documents and applicable federal, state, and local law. "
+                f"{coverage_clause} "
+                f"Questions about leave eligibility, protected leave, and reasonable accommodation should be directed to {LEGAL_OPERATIONAL_HOOKS['leave_admin_email']}. "
+                "No handbook provision may be interpreted to reduce statutory leave rights, paid sick leave rights, or accommodation rights."
             ),
         },
         {
@@ -232,7 +617,8 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             "jurisdiction_scope": {"mode": mode, "states": states},
             "content": (
                 "Employees are expected to maintain professional conduct, protect confidential information, "
-                "and follow all safety rules for their role and work location."
+                "and follow all safety rules for their role and work location. "
+                "Employees must report hazards, workplace violence concerns, and policy violations immediately."
             ),
         },
         {
@@ -243,12 +629,9 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             "jurisdiction_scope": {"mode": mode, "states": states},
             "content": (
                 "The company may investigate policy violations and implement corrective action when needed. "
-                + (
-                    "Background checks may be conducted for eligible roles in accordance with applicable law. "
-                    if profile.get("background_checks")
-                    else "Background checks are not part of standard hiring/retention practices unless stated otherwise. "
-                )
-                + f"{union_clause}"
+                f"{background_clause} "
+                "Corrective action may include coaching, written warning, suspension, or termination, based on severity and recurrence. "
+                f"{union_clause}"
             ),
         },
         {
@@ -259,7 +642,9 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             "jurisdiction_scope": {"mode": mode, "states": states},
             "content": (
                 "Employees must acknowledge receipt of this handbook and agree to comply with these policies. "
-                "Future updates may require renewed acknowledgement."
+                "By acknowledging this handbook, employees confirm they understand reporting procedures, anti-retaliation protections, and timekeeping duties. "
+                "Future updates may require renewed acknowledgement. "
+                "Safe-harbor statement: if any handbook provision conflicts with applicable law, the law controls and the remaining provisions remain enforceable."
             ),
         },
     ]
@@ -267,15 +652,230 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
     return sections
 
 
-def _build_state_sections(states: list[str], profile: dict[str, Any]) -> list[dict[str, Any]]:
+def _normalize_text_snippet(value: Optional[str], max_len: int = 220) -> str:
+    if not value:
+        return ""
+    cleaned = " ".join(str(value).split())
+    if len(cleaned) <= max_len:
+        return cleaned
+    return f"{cleaned[:max_len].rstrip('. ')}..."
+
+
+def _format_requirement_line(req: dict[str, Any], include_source: bool = False) -> str:
+    title = _normalize_text_snippet(req.get("title"), max_len=140) or "Requirement"
+    jurisdiction = _normalize_text_snippet(req.get("jurisdiction_name"), max_len=80)
+    level = (req.get("jurisdiction_level") or "").strip().lower()
+    level_suffix = f" [{level}]" if level else ""
+    value = _normalize_text_snippet(req.get("current_value"), max_len=120)
+    if not value:
+        value = _normalize_text_snippet(req.get("description"), max_len=120) or "Refer to statutory text"
+    effective = req.get("effective_date")
+    effective_label = ""
+    if isinstance(effective, date):
+        effective_label = f"; effective {effective.isoformat()}"
+    elif effective:
+        effective_label = f"; effective {_normalize_text_snippet(str(effective), max_len=20)}"
+    src = ""
+    if include_source:
+        src_url = _normalize_text_snippet(req.get("source_url"), max_len=140)
+        src_name = _normalize_text_snippet(req.get("source_name"), max_len=80)
+        if src_url:
+            src = f"; source {src_url}"
+        elif src_name:
+            src = f"; source {src_name}"
+    jurisdiction_label = f" ({jurisdiction}{level_suffix})" if jurisdiction else ""
+    return f"- {title}{jurisdiction_label}: {value}{effective_label}{src}."
+
+
+def _select_representative_requirements(requirements: list[dict[str, Any]], limit: int = 5) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for req in requirements:
+        dedupe_key = (
+            req.get("category"),
+            req.get("rate_type"),
+            req.get("jurisdiction_level"),
+            req.get("jurisdiction_name"),
+            req.get("title"),
+            req.get("current_value"),
+            req.get("effective_date"),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        selected.append(req)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _build_state_addendum_content(
+    state: str,
+    state_name: str,
+    profile: dict[str, Any],
+    requirements: list[dict[str, Any]],
+) -> str:
+    def _category_rows(category: str) -> list[dict[str, Any]]:
+        rows = [req for req in requirements if (req.get("category") or "").strip().lower() == category]
+        return _select_representative_requirements(rows)
+
+    def _other_rights_rows() -> list[dict[str, Any]]:
+        selected: list[dict[str, Any]] = []
+        seen: set[tuple[Any, ...]] = set()
+        for req in requirements:
+            title = (req.get("title") or "").lower()
+            description = (req.get("description") or "").lower()
+            category = (req.get("category") or "").strip().lower()
+            if category in ADDENDUM_CORE_CATEGORIES:
+                continue
+            if not any(
+                marker in title or marker in description
+                for marker in (
+                    "lactation",
+                    "pregnan",
+                    "accommodation",
+                    "disability",
+                    "family leave",
+                    "safe leave",
+                    "domestic violence",
+                )
+            ):
+                continue
+            dedupe_key = (
+                req.get("jurisdiction_level"),
+                req.get("jurisdiction_name"),
+                req.get("title"),
+                req.get("current_value"),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            selected.append(req)
+            if len(selected) >= 4:
+                break
+        return selected
+
+    min_wage_rows = _category_rows("minimum_wage")
+    overtime_rows = _category_rows("overtime")
+    pay_frequency_rows = _category_rows("pay_frequency")
+    sick_leave_rows = _category_rows("sick_leave")
+    meal_break_rows = _category_rows("meal_breaks")
+    other_rights_rows = _other_rights_rows()
+
+    source_refs: list[str] = []
+    for req in requirements:
+        source = _normalize_text_snippet(req.get("source_url"), max_len=180) or _normalize_text_snippet(
+            req.get("source_name"),
+            max_len=120,
+        )
+        if source and source not in source_refs:
+            source_refs.append(source)
+        if len(source_refs) >= 4:
+            break
+
+    lines: list[str] = [
+        f"This addendum applies to employees working in {state_name}.",
+        "Where state and local rules differ, the rule that provides greater employee protection controls.",
+        (
+            f"Operational contacts: Human Resources {LEGAL_OPERATIONAL_HOOKS['hr_contact_email']}; "
+            f"Leave Administration {LEGAL_OPERATIONAL_HOOKS['leave_admin_email']}; "
+            f"Harassment Reporting Hotline {LEGAL_OPERATIONAL_HOOKS['harassment_hotline']}."
+        ),
+        "",
+        "1) Wage, Overtime, and Pay Frequency Controls",
+        "Payroll must apply current minimum wage, overtime, and pay-frequency requirements for each covered work location.",
+    ]
+
+    wage_rows = _select_representative_requirements(min_wage_rows + overtime_rows + pay_frequency_rows, limit=7)
+    if wage_rows:
+        lines.extend(_format_requirement_line(req) for req in wage_rows)
+    else:
+        lines.append(f"- {ADDENDUM_FALLBACK_REVIEW_LINE}")
+
+    lines.extend([
+        "",
+        "2) Paid Sick Leave",
+        (
+            "Eligible employees accrue and use paid sick leave under controlling state/local law. "
+            "Managers may not interfere with or retaliate against lawful sick leave use."
+        ),
+    ])
+    if sick_leave_rows:
+        lines.extend(_format_requirement_line(req) for req in sick_leave_rows)
+    else:
+        lines.append(f"- {ADDENDUM_FALLBACK_REVIEW_LINE}")
+
+    lines.extend([
+        "",
+        "3) Meal and Rest Break Requirements",
+        "Scheduling managers must provide meal/rest opportunities and premium-pay remedies where required by law.",
+    ])
+    if meal_break_rows:
+        lines.extend(_format_requirement_line(req) for req in meal_break_rows)
+    else:
+        lines.append(f"- {ADDENDUM_FALLBACK_REVIEW_LINE}")
+
+    lines.extend([
+        "",
+        "4) Accommodation and Additional Protected Rights",
+        (
+            "The company provides reasonable accommodation for disability, pregnancy, and related conditions, "
+            "including lactation accommodation where required by law. "
+            f"Requests should be sent to {LEGAL_OPERATIONAL_HOOKS['leave_admin_email']}."
+        ),
+    ])
+    if other_rights_rows:
+        lines.extend(_format_requirement_line(req) for req in other_rights_rows)
+    else:
+        lines.append(
+            "- Lactation, disability-benefit, and other state-specific rights must be reviewed against current statutory guidance before final publication."
+        )
+
+    tip_pooling_clause = (
+        "Tip pooling is used and must follow state/local eligibility, notice, and distribution restrictions."
+        if profile.get("tip_pooling")
+        else "Tip pooling is not currently configured; any future tip-pool program must be implemented by written policy addendum."
+    )
+
+    lines.extend([
+        "",
+        "5) Safe Harbor and Legal Control",
+        "This addendum is intended as a compliance control and does not reduce rights provided by federal, state, or local law.",
+        "If any provision conflicts with applicable law or a collective bargaining agreement, governing law/CBA controls and remaining provisions stay in effect.",
+        tip_pooling_clause,
+    ])
+
+    if source_refs:
+        lines.extend(["", "Authoritative Sources Referenced"])
+        lines.extend(f"- {src}" for src in source_refs)
+    else:
+        lines.extend(
+            [
+                "",
+                "Authoritative Sources Referenced",
+                "- Source links were not present in the repository snapshot; run compliance refresh and legal review before publication.",
+            ]
+        )
+
+    lines.extend([
+        "",
+        (
+            f"Final legal review owner: {LEGAL_OPERATIONAL_HOOKS['legal_owner']}. "
+            "Do not publish this addendum without legal sign-off."
+        ),
+    ])
+    return "\n".join(lines)
+
+
+def _build_state_sections(
+    states: list[str],
+    profile: dict[str, Any],
+    state_requirement_map: Optional[dict[str, list[dict[str, Any]]]] = None,
+) -> list[dict[str, Any]]:
     state_sections: list[dict[str, Any]] = []
     for i, state in enumerate(states):
         state_name = STATE_NAMES.get(state, state)
-        tip_pooling_clause = (
-            "Tip pooling practices are used and must follow local restrictions."
-            if profile.get("tip_pooling")
-            else "No tip pooling practices are currently configured."
-        )
+        requirements = state_requirement_map.get(state, []) if state_requirement_map else []
         state_sections.append(
             {
                 "section_key": f"state_addendum_{state.lower()}",
@@ -283,11 +883,7 @@ def _build_state_sections(states: list[str], profile: dict[str, Any]) -> list[di
                 "section_order": 200 + i,
                 "section_type": "state",
                 "jurisdiction_scope": {"states": [state]},
-                "content": (
-                    f"This addendum applies to employees working in {state_name}. "
-                    "State-specific wage and hour, leave, posting, and employee-notice requirements apply. "
-                    f"{tip_pooling_clause}"
-                ),
+                "content": _build_state_addendum_content(state, state_name, profile, requirements),
             }
         )
     return state_sections
@@ -369,15 +965,96 @@ def _translate_handbook_db_error(exc: Exception) -> Optional[str]:
     return None
 
 
+async def _fetch_state_requirements(
+    conn,
+    states: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    normalized_states = sorted({(state or "").strip().upper() for state in states if state})
+    if not normalized_states:
+        return {}
+
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                j.state,
+                jr.category,
+                jr.jurisdiction_level,
+                jr.jurisdiction_name,
+                jr.title,
+                jr.description,
+                jr.current_value,
+                jr.effective_date,
+                jr.source_url,
+                jr.source_name,
+                jr.rate_type,
+                jr.updated_at
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE j.state = ANY($1::varchar[])
+              AND (
+                jr.category = ANY($2::varchar[])
+                OR jr.title ILIKE ANY($3::text[])
+                OR COALESCE(jr.description, '') ILIKE ANY($3::text[])
+              )
+              AND (jr.expiration_date IS NULL OR jr.expiration_date >= CURRENT_DATE)
+            ORDER BY
+                j.state,
+                CASE jr.jurisdiction_level
+                    WHEN 'state' THEN 1
+                    WHEN 'county' THEN 2
+                    WHEN 'city' THEN 3
+                    ELSE 4
+                END,
+                COALESCE(jr.effective_date, CURRENT_DATE) DESC,
+                COALESCE(jr.updated_at, jr.created_at) DESC
+            """,
+            normalized_states,
+            list(ADDENDUM_CORE_CATEGORIES),
+            list(ADDENDUM_KEYWORD_PATTERNS),
+        )
+    except Exception:
+        return {}
+
+    by_state: dict[str, list[dict[str, Any]]] = {state: [] for state in normalized_states}
+    seen_by_state: dict[str, set[tuple[Any, ...]]] = {state: set() for state in normalized_states}
+
+    for raw_row in rows:
+        row = dict(raw_row)
+        state = (row.get("state") or "").strip().upper()
+        if not state:
+            continue
+        if len(by_state.setdefault(state, [])) >= 36:
+            continue
+
+        dedupe_key = (
+            row.get("category"),
+            row.get("rate_type"),
+            row.get("jurisdiction_level"),
+            row.get("jurisdiction_name"),
+            row.get("title"),
+            row.get("current_value"),
+            row.get("effective_date"),
+        )
+        if dedupe_key in seen_by_state.setdefault(state, set()):
+            continue
+        seen_by_state[state].add(dedupe_key)
+
+        by_state[state].append(row)
+
+    return by_state
+
+
 def _build_template_sections(
     mode: str,
     scopes: list[dict[str, Any]],
     profile: dict[str, Any],
     custom_sections: list[HandbookSectionInput],
+    state_requirement_map: Optional[dict[str, list[dict[str, Any]]]] = None,
 ) -> list[dict[str, Any]]:
     unique_states = sorted({scope["state"] for scope in scopes})
     base_sections = _build_core_sections(profile, mode, unique_states)
-    state_sections = _build_state_sections(unique_states, profile)
+    state_sections = _build_state_sections(unique_states, profile, state_requirement_map)
     custom = _normalize_custom_sections(custom_sections)
     return sorted(base_sections + state_sections + custom, key=lambda item: item["section_order"])
 
@@ -407,6 +1084,256 @@ def _validate_handbook_file_reference(file_url: Optional[str]) -> None:
     storage = get_storage()
     if not storage.is_supported_storage_path(file_url):
         raise ValueError("Invalid handbook file reference")
+
+
+def _normalize_industry(raw_industry: Optional[str], company_industry: Optional[str]) -> str:
+    candidate = (raw_industry or company_industry or "general").strip().lower()
+    candidate = re.sub(r"[\s\-_]+", " ", candidate)
+    if not candidate:
+        return "general"
+
+    if candidate in GUIDED_INDUSTRY_PLAYBOOK:
+        return candidate
+
+    for token, normalized in GUIDED_INDUSTRY_ALIASES.items():
+        if token in candidate:
+            return normalized
+
+    return "general"
+
+
+def _sanitize_answer_map(raw_answers: dict[str, str]) -> dict[str, str]:
+    sanitized: dict[str, str] = {}
+    for key, value in (raw_answers or {}).items():
+        clean_key = re.sub(r"[^a-z0-9_]", "_", (key or "").strip().lower())
+        clean_key = re.sub(r"_+", "_", clean_key).strip("_")
+        if not clean_key:
+            continue
+        clean_value = (value or "").strip()
+        if clean_value:
+            sanitized[clean_key] = clean_value[:500]
+    return sanitized
+
+
+def _parse_bool_like(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+    return None
+
+
+def _build_guided_question_list(industry_key: str) -> list[dict[str, Any]]:
+    playbook = GUIDED_INDUSTRY_PLAYBOOK.get(industry_key, GUIDED_INDUSTRY_PLAYBOOK["general"])
+    questions: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for question in [*GUIDED_COMMON_QUESTIONS, *playbook.get("questions", [])]:
+        question_id = (question.get("id") or "").strip().lower()
+        if not question_id or question_id in seen_ids:
+            continue
+        seen_ids.add(question_id)
+        questions.append(
+            {
+                "id": question_id,
+                "question": (question.get("question") or "").strip(),
+                "placeholder": (question.get("placeholder") or "").strip() or None,
+                "required": bool(question.get("required", True)),
+            }
+        )
+    return questions
+
+
+def _filter_unanswered_questions(
+    questions: list[dict[str, Any]],
+    answers: dict[str, str],
+) -> list[dict[str, Any]]:
+    unanswered: list[dict[str, Any]] = []
+    for question in questions:
+        question_id = question.get("id")
+        if not question_id:
+            continue
+        if question_id not in answers or not answers[question_id].strip():
+            unanswered.append(question)
+    return unanswered
+
+
+def _sanitize_guided_questions(raw_questions: list[Any]) -> list[dict[str, Any]]:
+    sanitized: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for idx, question in enumerate(raw_questions or []):
+        if not isinstance(question, dict):
+            continue
+        raw_id = str(question.get("id") or f"follow_up_{idx + 1}").strip().lower()
+        clean_id = re.sub(r"[^a-z0-9_]", "_", raw_id)
+        clean_id = re.sub(r"_+", "_", clean_id).strip("_")
+        if not clean_id or clean_id in seen_ids:
+            continue
+        text = str(question.get("question") or "").strip()
+        if len(text) < 4:
+            continue
+        placeholder = str(question.get("placeholder") or "").strip() or None
+        required = _parse_bool_like(question.get("required"))
+        sanitized.append(
+            {
+                "id": clean_id[:80],
+                "question": text[:500],
+                "placeholder": placeholder[:255] if placeholder else None,
+                "required": required if required is not None else True,
+            }
+        )
+        seen_ids.add(clean_id)
+    return sanitized
+
+
+def _default_profile_updates_for_industry(
+    industry_key: str,
+    normalized_profile: dict[str, Any],
+) -> dict[str, Any]:
+    playbook = GUIDED_INDUSTRY_PLAYBOOK.get(industry_key, GUIDED_INDUSTRY_PLAYBOOK["general"])
+    defaults = playbook.get("profile_defaults", {})
+    updates: dict[str, Any] = {}
+    for key, value in defaults.items():
+        if key in GUIDED_PROFILE_BOOL_KEYS and bool(normalized_profile.get(key)) != bool(value):
+            updates[key] = bool(value)
+    return updates
+
+
+def _build_default_section_suggestions(industry_key: str) -> list[dict[str, Any]]:
+    playbook = GUIDED_INDUSTRY_PLAYBOOK.get(industry_key, GUIDED_INDUSTRY_PLAYBOOK["general"])
+    sections = playbook.get("sections", [])
+    suggested: list[dict[str, Any]] = []
+    for idx, section in enumerate(sections):
+        title = (section.get("title") or "").strip()
+        content = (section.get("content") or "").strip()
+        if not title or not content:
+            continue
+        suggested.append(
+            {
+                "section_key": _slugify_key(f"guided_{industry_key}_{title}", max_len=120) or f"guided_{industry_key}_{idx + 1}",
+                "title": title[:255],
+                "content": content,
+                "section_order": 300 + idx,
+                "section_type": "custom",
+                "jurisdiction_scope": {},
+            }
+        )
+    return suggested
+
+
+def _normalize_existing_section_titles(sections: list[Any]) -> set[str]:
+    normalized: set[str] = set()
+    for section in sections or []:
+        title = ""
+        if isinstance(section, dict):
+            title = str(section.get("title") or "")
+        else:
+            title = str(getattr(section, "title", "") or "")
+        key = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+        if key:
+            normalized.add(key)
+    return normalized
+
+
+def _sanitize_guided_profile_updates(
+    updates: dict[str, Any],
+    normalized_profile: dict[str, Any],
+) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, value in (updates or {}).items():
+        if key in GUIDED_PROFILE_BOOL_KEYS:
+            parsed_bool = _parse_bool_like(value)
+            if parsed_bool is not None:
+                sanitized[key] = parsed_bool
+            continue
+        if key in GUIDED_PROFILE_NUMERIC_KEYS:
+            try:
+                numeric = int(value)
+                if numeric >= 0 and numeric != normalized_profile.get(key):
+                    sanitized[key] = numeric
+            except (TypeError, ValueError):
+                continue
+    return sanitized
+
+
+def _sanitize_guided_sections(raw_sections: list[Any], start_order: int = 320) -> list[dict[str, Any]]:
+    sanitized: list[dict[str, Any]] = []
+    for idx, section in enumerate(raw_sections or []):
+        if not isinstance(section, dict):
+            continue
+        title = (section.get("title") or "").strip()
+        content = (section.get("content") or "").strip()
+        if not title or not content:
+            continue
+        provided_key = (section.get("section_key") or "").strip()
+        safe_key = _slugify_key(provided_key or f"guided_custom_{title}", max_len=120) or f"guided_custom_{idx + 1}"
+        order_value = section.get("section_order")
+        try:
+            order = int(order_value)
+        except (TypeError, ValueError):
+            order = start_order + idx
+        sanitized.append(
+            {
+                "section_key": safe_key,
+                "title": title[:255],
+                "content": content,
+                "section_order": max(start_order, order),
+                "section_type": "custom",
+                "jurisdiction_scope": {},
+            }
+        )
+    return sanitized
+
+
+def _merge_guided_sections(
+    existing_custom_sections: list[Any],
+    baseline_sections: list[dict[str, Any]],
+    ai_sections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    seen_titles = _normalize_existing_section_titles(existing_custom_sections)
+    merged: list[dict[str, Any]] = []
+    for section in [*baseline_sections, *ai_sections]:
+        title_key = re.sub(r"[^a-z0-9]+", " ", (section.get("title") or "").lower()).strip()
+        if not title_key or title_key in seen_titles:
+            continue
+        seen_titles.add(title_key)
+        merged.append(section)
+    return merged
+
+
+def _extract_json_payload(raw_text: str) -> Optional[dict[str, Any]]:
+    if not raw_text:
+        return None
+    text = raw_text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    candidate = text[start:end + 1]
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        return None
+    return None
 
 
 class HandbookService:
@@ -535,6 +1462,208 @@ class HandbookService:
             )
 
     @staticmethod
+    async def _generate_guided_draft_ai_payload(
+        *,
+        company_name: str,
+        industry_key: str,
+        industry_label: str,
+        title: str,
+        mode: str,
+        scopes: list[dict[str, Any]],
+        normalized_profile: dict[str, Any],
+        answers: dict[str, str],
+        baseline_questions: list[dict[str, Any]],
+        baseline_sections: list[dict[str, Any]],
+    ) -> Optional[dict[str, Any]]:
+        try:
+            settings = get_settings()
+        except Exception:
+            return None
+
+        if not settings.use_vertex and not settings.gemini_api_key:
+            return None
+
+        try:
+            from google import genai
+        except Exception:
+            return None
+
+        try:
+            from .rate_limiter import RateLimitExceeded, get_rate_limiter
+
+            await get_rate_limiter().check_limit("handbook_guided_draft", industry_key)
+        except RateLimitExceeded as exc:
+            raise GuidedDraftRateLimitError(
+                "Guided draft rate limit exceeded. Please retry later."
+            ) from exc
+        except Exception:
+            pass
+
+        states = sorted({(scope.get("state") or "").upper() for scope in scopes if scope.get("state")})
+        states_text = ", ".join(states) if states else "No states selected"
+
+        prompt = (
+            "You are an HR policy drafting assistant. "
+            "Generate practical handbook setup guidance for an HR manager.\n\n"
+            f"Company: {company_name}\n"
+            f"Handbook title: {title}\n"
+            f"Industry: {industry_label}\n"
+            f"Mode: {mode}\n"
+            f"States: {states_text}\n"
+            f"Current profile flags: {json.dumps(normalized_profile)}\n"
+            f"Known answers from HR manager: {json.dumps(answers)}\n"
+            f"Baseline follow-up questions: {json.dumps(baseline_questions)}\n"
+            f"Baseline suggested sections: {json.dumps(baseline_sections)}\n\n"
+            "Return ONLY JSON with this shape:\n"
+            "{\n"
+            '  "summary": "one short paragraph",\n'
+            '  "questions": [\n'
+            '    {"id":"snake_case","question":"text","placeholder":"optional","required":true}\n'
+            "  ],\n"
+            '  "profile_updates": {\n'
+            '    "remote_workers": false,\n'
+            '    "tipped_employees": false,\n'
+            '    "union_employees": false,\n'
+            '    "federal_contracts": false,\n'
+            '    "group_health_insurance": false,\n'
+            '    "background_checks": false,\n'
+            '    "hourly_employees": true,\n'
+            '    "salaried_employees": false,\n'
+            '    "commissioned_employees": false,\n'
+            '    "tip_pooling": false\n'
+            "  },\n"
+            '  "suggested_sections": [\n'
+            '    {"section_key":"snake_case","title":"text","content":"enforceable policy text","section_order":320}\n'
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            "- Provide at most 6 questions and at most 6 suggested sections.\n"
+            "- Questions should help complete missing operational/legal hooks.\n"
+            "- Suggested sections must be enforceable policy language, not summaries.\n"
+            "- Use placeholders like [HR_CONTACT_EMAIL], [HARASSMENT_REPORTING_HOTLINE], [WORKWEEK_START_DAY] when details are unknown.\n"
+            "- Keep content neutral, non-retaliatory, and suitable for legal review.\n"
+        )
+
+        try:
+            if settings.use_vertex:
+                client = genai.Client(
+                    vertexai=True,
+                    project=settings.vertex_project,
+                    location=settings.vertex_location or "us-central1",
+                )
+            else:
+                client = genai.Client(api_key=settings.gemini_api_key)
+        except Exception:
+            return None
+
+        model_name = settings.analysis_model or "gemini-3-flash-preview"
+        try:
+            response = await asyncio.wait_for(
+                client.aio.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                ),
+                timeout=45,
+            )
+            raw_text = (getattr(response, "text", None) or "").strip()
+            parsed = _extract_json_payload(raw_text)
+            if not parsed:
+                return None
+            try:
+                from .rate_limiter import get_rate_limiter
+
+                await get_rate_limiter().record_call("handbook_guided_draft", industry_key)
+            except Exception:
+                pass
+            return parsed
+        except Exception:
+            return None
+
+    @staticmethod
+    async def generate_guided_draft(
+        company_id: str,
+        data: HandbookGuidedDraftRequest,
+    ) -> HandbookGuidedDraftResponse:
+        normalized_scopes = [_normalize_scope(scope) for scope in data.scopes]
+        normalized_profile = _normalize_profile(data.profile)
+        answers = _sanitize_answer_map(data.answers)
+
+        company_name = normalized_profile.get("legal_name") or "Company"
+        company_industry = None
+        async with get_connection() as conn:
+            company_row = await conn.fetchrow(
+                "SELECT name, industry FROM companies WHERE id = $1",
+                company_id,
+            )
+            if company_row:
+                company_name = company_row.get("name") or company_name
+                company_industry = company_row.get("industry")
+
+        industry_key = _normalize_industry(data.industry, company_industry)
+        playbook = GUIDED_INDUSTRY_PLAYBOOK.get(industry_key, GUIDED_INDUSTRY_PLAYBOOK["general"])
+        industry_label = playbook.get("label", "General Employer")
+        baseline_summary = playbook.get("summary", GUIDED_INDUSTRY_PLAYBOOK["general"]["summary"])
+
+        baseline_questions = _build_guided_question_list(industry_key)
+        unanswered_baseline_questions = _filter_unanswered_questions(baseline_questions, answers)
+        baseline_profile_updates = _default_profile_updates_for_industry(industry_key, normalized_profile)
+        baseline_sections = _build_default_section_suggestions(industry_key)
+
+        ai_payload = await HandbookService._generate_guided_draft_ai_payload(
+            company_name=company_name,
+            industry_key=industry_key,
+            industry_label=industry_label,
+            title=(data.title or "").strip() or "Employee Handbook",
+            mode=data.mode,
+            scopes=normalized_scopes,
+            normalized_profile=normalized_profile,
+            answers=answers,
+            baseline_questions=baseline_questions,
+            baseline_sections=baseline_sections,
+        )
+
+        ai_summary = None
+        ai_questions: list[dict[str, Any]] = []
+        ai_profile_updates: dict[str, Any] = {}
+        ai_sections: list[dict[str, Any]] = []
+
+        if ai_payload:
+            if isinstance(ai_payload.get("summary"), str):
+                ai_summary = ai_payload["summary"].strip()
+            ai_questions = _sanitize_guided_questions(ai_payload.get("questions") or [])
+            ai_profile_updates = _sanitize_guided_profile_updates(
+                ai_payload.get("profile_updates") or {},
+                normalized_profile,
+            )
+            ai_sections = _sanitize_guided_sections(ai_payload.get("suggested_sections") or [])
+
+        combined_profile_updates = {**baseline_profile_updates, **ai_profile_updates}
+
+        combined_questions = _sanitize_guided_questions([*unanswered_baseline_questions, *ai_questions])
+        unanswered_questions = _filter_unanswered_questions(combined_questions, answers)
+
+        merged_sections = _merge_guided_sections(
+            data.existing_custom_sections,
+            baseline_sections=baseline_sections,
+            ai_sections=ai_sections,
+        )
+
+        summary = ai_summary or baseline_summary
+        if unanswered_questions:
+            summary = (
+                f"{summary} Answer the follow-up questions to finalize policy hooks before publishing."
+            )
+
+        return HandbookGuidedDraftResponse(
+            industry=industry_key,
+            summary=summary,
+            clarification_needed=bool(unanswered_questions),
+            questions=[HandbookGuidedQuestion(**question) for question in unanswered_questions],
+            profile_updates=combined_profile_updates,
+            suggested_sections=[HandbookGuidedSectionSuggestion(**section) for section in merged_sections],
+        )
+
+    @staticmethod
     async def list_handbooks(company_id: str) -> list[HandbookListItemResponse]:
         async with get_connection() as conn:
             rows = await conn.fetch(
@@ -625,11 +1754,16 @@ class HandbookService:
                     )
 
                     if data.source_type == "template":
+                        state_requirement_map = await _fetch_state_requirements(
+                            conn,
+                            [scope["state"] for scope in normalized_scopes],
+                        )
                         sections = _build_template_sections(
                             data.mode,
                             normalized_scopes,
                             profile,
                             data.custom_sections,
+                            state_requirement_map=state_requirement_map,
                         )
                     else:
                         sections = [

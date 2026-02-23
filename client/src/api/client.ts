@@ -124,6 +124,8 @@ import type {
   HandbookUpdate,
   CompanyHandbookProfile,
   HandbookChangeRequest,
+  HandbookGuidedDraftRequest,
+  HandbookGuidedDraftResponse,
   HandbookDistributionResult,
   HandbookAcknowledgementSummary,
   OfferLetter,
@@ -2168,6 +2170,12 @@ export const handbooks = {
   updateProfile: (data: CompanyHandbookProfile) =>
     request<CompanyHandbookProfile>(`/handbooks/profile`, {
       method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  generateGuidedDraft: (data: HandbookGuidedDraftRequest) =>
+    request<HandbookGuidedDraftResponse>(`/handbooks/guided-draft`, {
+      method: 'POST',
       body: JSON.stringify(data),
     }),
 

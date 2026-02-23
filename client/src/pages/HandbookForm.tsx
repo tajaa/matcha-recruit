@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Upload, X, Plus, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Upload, X, Plus, CheckCircle2, Sparkles } from 'lucide-react';
 import { handbooks } from '../api/client';
 import { complianceAPI } from '../api/compliance';
-import type { CompanyHandbookProfile, HandbookMode, HandbookScope, HandbookSourceType } from '../types';
+import type {
+  CompanyHandbookProfile,
+  HandbookGuidedQuestion,
+  HandbookMode,
+  HandbookScope,
+  HandbookSourceType,
+} from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 
 const US_STATES = [
@@ -21,6 +27,15 @@ const CREATE_STEPS = [
   'Workforce Setup',
   'Review',
 ] as const;
+
+const INDUSTRY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'general', label: 'General Employer' },
+  { value: 'technology', label: 'Technology / Professional Services' },
+  { value: 'hospitality', label: 'Hospitality / Restaurants' },
+  { value: 'retail', label: 'Retail' },
+  { value: 'manufacturing', label: 'Manufacturing / Warehouse' },
+  { value: 'healthcare', label: 'Healthcare' },
+];
 
 interface CustomSectionDraft {
   title: string;
@@ -58,11 +73,17 @@ export function HandbookForm() {
   const [profile, setProfile] = useState<CompanyHandbookProfile>(DEFAULT_PROFILE);
   const [existingScopes, setExistingScopes] = useState<HandbookScope[]>([]);
   const [customSections, setCustomSections] = useState<CustomSectionDraft[]>([]);
+  const [industry, setIndustry] = useState('general');
   const [file, setFile] = useState<File | null>(null);
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
   const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [guidedQuestions, setGuidedQuestions] = useState<HandbookGuidedQuestion[]>([]);
+  const [guidedAnswers, setGuidedAnswers] = useState<Record<string, string>>({});
+  const [guidedSummary, setGuidedSummary] = useState<string | null>(null);
+  const [guidedLoading, setGuidedLoading] = useState(false);
+  const [guidedError, setGuidedError] = useState<string | null>(null);
   const [locationsStates, setLocationsStates] = useState<string[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
 
@@ -149,6 +170,94 @@ export function HandbookForm() {
 
   const setProfileField = (key: keyof CompanyHandbookProfile, value: string | number | boolean | null) => {
     setProfile((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const mergeSuggestedSections = (incoming: Array<{ title: string; content: string }>) => {
+    if (!incoming.length) return;
+    setCustomSections((prev) => {
+      const seen = new Set(
+        prev.map((section) => section.title.trim().toLowerCase()).filter(Boolean)
+      );
+      const additions: CustomSectionDraft[] = [];
+      for (const section of incoming) {
+        const title = section.title?.trim();
+        const content = section.content?.trim();
+        const key = title?.toLowerCase() || '';
+        if (!title || !content || seen.has(key)) continue;
+        seen.add(key);
+        additions.push({ title, content });
+      }
+      return additions.length ? [...prev, ...additions] : prev;
+    });
+  };
+
+  const handleGenerateGuidedDraft = async () => {
+    setGuidedError(null);
+    setError(null);
+
+    const companyError = getStepError(2);
+    const scopeError = getStepError(1);
+    if (companyError || scopeError) {
+      setGuidedError(companyError || scopeError || 'Complete required setup fields first.');
+      return;
+    }
+
+    const normalizedSelectedStates = selectedStates.map((state) => state.toUpperCase());
+    const scopes = normalizedSelectedStates.map((state) => ({
+      state,
+      city: null,
+      zipcode: null,
+      location_id: null,
+    }));
+
+    const normalizedProfile: CompanyHandbookProfile = {
+      ...profile,
+      legal_name: profile.legal_name?.trim() || '',
+      ceo_or_president: profile.ceo_or_president?.trim() || '',
+      dba: profile.dba?.trim() || null,
+      headcount: typeof profile.headcount === 'number' ? profile.headcount : null,
+    };
+
+    setGuidedLoading(true);
+    try {
+      const result = await handbooks.generateGuidedDraft({
+        title: title.trim() || null,
+        mode,
+        scopes,
+        profile: normalizedProfile,
+        industry,
+        answers: guidedAnswers,
+        existing_custom_sections: customSections
+          .filter((section) => section.title.trim())
+          .map((section, index) => ({
+            section_key: `existing_custom_${index + 1}`,
+            title: section.title.trim(),
+            content: section.content.trim(),
+            section_order: 300 + index,
+            section_type: 'custom',
+            jurisdiction_scope: {},
+          })),
+      });
+
+      if (result.industry) {
+        setIndustry(result.industry);
+      }
+      setGuidedSummary(result.summary || null);
+      setGuidedQuestions(result.questions || []);
+      if (result.profile_updates && Object.keys(result.profile_updates).length > 0) {
+        setProfile((prev) => ({ ...prev, ...result.profile_updates }));
+      }
+      mergeSuggestedSections(
+        (result.suggested_sections || []).map((section) => ({
+          title: section.title,
+          content: section.content,
+        }))
+      );
+    } catch (err) {
+      setGuidedError(err instanceof Error ? err.message : 'Failed to generate guided draft');
+    } finally {
+      setGuidedLoading(false);
+    }
   };
 
   const handleSourceFileUpload = async () => {
@@ -330,7 +439,7 @@ export function HandbookForm() {
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="space-y-2">
           <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Handbook Type</label>
           <select
@@ -365,6 +474,21 @@ export function HandbookForm() {
               <option value="upload">Upload Existing Handbook</option>
             </select>
           )}
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Industry</label>
+          <select
+            value={industry}
+            onChange={(e) => setIndustry(e.target.value)}
+            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          >
+            {INDUSTRY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
     </>
@@ -523,7 +647,7 @@ export function HandbookForm() {
       {sourceType === 'template' && (
         <div className="space-y-3 border border-white/10 bg-zinc-900/40 p-4">
           <div className="flex items-center justify-between">
-            <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Custom Company Sections</label>
+            <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Template Assistant + Custom Sections</label>
             <button
               type="button"
               onClick={() => setCustomSections((prev) => [...prev, { title: '', content: '' }])}
@@ -532,6 +656,62 @@ export function HandbookForm() {
               <Plus size={12} />
               Add Section
             </button>
+          </div>
+          <div className="border border-white/10 bg-zinc-950/60 p-3 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs text-zinc-200">
+                <Sparkles size={13} className="text-amber-300" />
+                Guided handbook builder
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateGuidedDraft}
+                disabled={guidedLoading}
+                className="px-3 py-1.5 bg-white text-black text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+              >
+                {guidedLoading ? 'Generating...' : 'Ask & Prefill'}
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-500">
+              Uses the selected industry and your current setup to ask follow-up questions and prefill policy-grade sections.
+            </p>
+            {guidedSummary && (
+              <p className="text-xs text-zinc-300 leading-relaxed">{guidedSummary}</p>
+            )}
+            {guidedError && (
+              <p className="text-xs text-red-400">{guidedError}</p>
+            )}
+            {guidedQuestions.length > 0 && (
+              <div className="space-y-2 border-t border-white/10 pt-3">
+                <p className="text-[10px] uppercase tracking-widest text-zinc-500">HR Follow-up Questions</p>
+                {guidedQuestions.map((question) => (
+                  <div key={question.id} className="space-y-1">
+                    <label className="text-xs text-zinc-300">
+                      {question.question}
+                      {question.required ? <span className="text-amber-400"> *</span> : null}
+                    </label>
+                    <input
+                      type="text"
+                      value={guidedAnswers[question.id] || ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setGuidedAnswers((prev) => ({ ...prev, [question.id]: value }));
+                      }}
+                      placeholder={question.placeholder || 'Add your answer'}
+                      className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-xs focus:outline-none focus:border-white/50"
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleGenerateGuidedDraft}
+                  disabled={guidedLoading}
+                  className="text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider underline underline-offset-4"
+                >
+                  Regenerate with answers
+                </button>
+              </div>
+            )}
           </div>
           {customSections.length === 0 ? (
             <p className="text-xs text-zinc-500">No custom sections added.</p>
@@ -582,6 +762,7 @@ export function HandbookForm() {
         <div><span className="text-zinc-500">Title:</span> {title || 'N/A'}</div>
         <div><span className="text-zinc-500">Type:</span> {mode === 'multi_state' ? 'Multi-State' : 'Single-State'}</div>
         <div><span className="text-zinc-500">Source:</span> {sourceType === 'template' ? 'Template Builder' : 'Uploaded File'}</div>
+        <div><span className="text-zinc-500">Industry:</span> {INDUSTRY_OPTIONS.find((option) => option.value === industry)?.label || industry}</div>
         <div><span className="text-zinc-500">States:</span> {selectedStates.join(', ') || 'N/A'}</div>
         <div><span className="text-zinc-500">Legal Name:</span> {profile.legal_name || 'N/A'}</div>
         <div><span className="text-zinc-500">CEO/President:</span> {profile.ceo_or_president || 'N/A'}</div>

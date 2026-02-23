@@ -15,11 +15,13 @@ from ..models.handbook import (
     HandbookCreateRequest,
     HandbookDetailResponse,
     HandbookDistributionResponse,
+    HandbookGuidedDraftRequest,
+    HandbookGuidedDraftResponse,
     HandbookListItemResponse,
     HandbookPublishResponse,
     HandbookUpdateRequest,
 )
-from ..services.handbook_service import HandbookService
+from ..services.handbook_service import GuidedDraftRateLimitError, HandbookService
 from ..services.storage import get_storage
 
 router = APIRouter(prefix="/handbooks", tags=["handbooks"])
@@ -98,6 +100,26 @@ async def create_handbook(
             data,
             str(current_user.id),
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/guided-draft", response_model=HandbookGuidedDraftResponse)
+async def guided_handbook_draft(
+    data: HandbookGuidedDraftRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+
+    try:
+        return await HandbookService.generate_guided_draft(
+            str(company_id),
+            data,
+        )
+    except GuidedDraftRateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

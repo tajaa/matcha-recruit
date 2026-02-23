@@ -2074,6 +2074,32 @@ export interface HandbookAcknowledgementSummary {
   expired_count: number;
 }
 
+export interface HandbookGuidedQuestion {
+  id: string;
+  question: string;
+  placeholder?: string | null;
+  required: boolean;
+}
+
+export interface HandbookGuidedDraftRequest {
+  title?: string | null;
+  mode: HandbookMode;
+  scopes: Omit<HandbookScope, 'id'>[];
+  profile: CompanyHandbookProfile;
+  industry?: string | null;
+  answers?: Record<string, string>;
+  existing_custom_sections?: HandbookSection[];
+}
+
+export interface HandbookGuidedDraftResponse {
+  industry: string;
+  summary: string;
+  clarification_needed: boolean;
+  questions: HandbookGuidedQuestion[];
+  profile_updates: Partial<CompanyHandbookProfile>;
+  suggested_sections: HandbookSection[];
+}
+
 
 export interface IRAuditLogResponse {
   entries: IRAuditLogEntry[];
