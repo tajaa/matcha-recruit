@@ -7,6 +7,11 @@ Create Date: 2026-02-18
 
 from alembic import op
 
+revision = 'b8c9d0e1f2a'
+down_revision = 'a7b8c9d0e1f'
+branch_labels = None
+depends_on = None
+
 
 def upgrade():
     op.execute("""
