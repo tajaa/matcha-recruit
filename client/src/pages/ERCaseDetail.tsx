@@ -106,6 +106,155 @@ function formatCaseNoteType(value: ERCaseNote['note_type']): string {
   return 'General';
 }
 
+function normalizeGuidanceFragment(value: string, maxLength: number): string {
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  if (cleaned.length <= maxLength) return cleaned.replace(/[.]+$/, '');
+  return `${cleaned.slice(0, maxLength).replace(/[.]+$/, '')}...`;
+}
+
+function formatGapQuestion(value: string): string {
+  const cleaned = normalizeGuidanceFragment(value, 160);
+  if (!cleaned) return '';
+  if (cleaned.includes('?')) return cleaned;
+  return `${cleaned}?`;
+}
+
+type SuggestedGuidanceInput = {
+  reviewedDocCount: number;
+  reviewedDocNames: string[];
+  shouldRunDiscrepancies: boolean;
+  timelineSummary: string;
+  timelineGaps: string[];
+  discrepancies: Discrepancy[];
+  discrepancySummary: string;
+  violations: PolicyViolation[];
+  policySummary: string;
+  reviewSucceeded: boolean;
+  objective?: ERCaseIntakeContext['answers'] extends infer Answers
+    ? Answers extends { objective?: infer Objective }
+      ? Objective
+      : never
+    : never;
+  immediateRisk?: ERCaseIntakeContext['answers'] extends infer Answers
+    ? Answers extends { immediate_risk?: infer ImmediateRisk }
+      ? ImmediateRisk
+      : never
+    : never;
+};
+
+function buildSuggestedGuidance(input: SuggestedGuidanceInput): string {
+  const discrepancyRank = { high: 3, medium: 2, low: 1 } as const;
+  const sortedDiscrepancies = [...input.discrepancies].sort(
+    (a, b) => discrepancyRank[b.severity] - discrepancyRank[a.severity]
+  );
+  const topDiscrepancy = sortedDiscrepancies[0];
+  const topViolation = input.violations.find((v) => v.severity === 'major') || input.violations[0];
+  const timelineGaps = input.timelineGaps.filter(Boolean);
+  const docPreview = input.reviewedDocNames.slice(0, 2).join(', ');
+
+  const lines: string[] = ['Suggested Guidance'];
+
+  if (topViolation) {
+    const section = normalizeGuidanceFragment(topViolation.policy_section || 'high-risk policy sections', 90);
+    lines.push(
+      `1. Prioritize follow-ups for policy risk in ${section} and collect source evidence before interviews conclude.`
+    );
+  } else if (topDiscrepancy) {
+    lines.push(
+      `1. Run discrepancy-focused follow-up interviews on: ${normalizeGuidanceFragment(topDiscrepancy.description, 150)}.`
+    );
+  } else {
+    lines.push(
+      '1. Continue neutral fact-finding interviews and confirm each witness account in writing.'
+    );
+  }
+
+  const followUpQuestions: string[] = [];
+  if (topDiscrepancy) {
+    const speaker1 = topDiscrepancy.statement_1?.speaker || 'Witness 1';
+    const speaker2 = topDiscrepancy.statement_2?.speaker || 'Witness 2';
+    followUpQuestions.push(
+      `What specific evidence supports the conflicting accounts from ${speaker1} and ${speaker2}?`
+    );
+  }
+  timelineGaps.slice(0, 2).forEach((gap) => {
+    const question = formatGapQuestion(gap);
+    if (question) followUpQuestions.push(question);
+  });
+  if (input.immediateRisk === 'yes') {
+    followUpQuestions.push('Has any retaliation or immediate safety risk occurred since the last interview?');
+  }
+  if (followUpQuestions.length === 0) {
+    followUpQuestions.push('What unresolved fact still prevents a final determination?');
+  }
+  lines.push(`2. Ask these follow-up questions next: ${followUpQuestions.slice(0, 3).join(' ')}`);
+
+  if (timelineGaps.length > 0) {
+    const gapSummary = timelineGaps
+      .slice(0, 2)
+      .map((gap) => normalizeGuidanceFragment(gap, 90))
+      .join('; ');
+    lines.push(`3. Close timeline gaps before concluding: ${gapSummary}.`);
+  } else {
+    lines.push('3. Timeline coverage is currently complete; validate critical event times against documentary evidence.');
+  }
+
+  if (topViolation) {
+    lines.push(
+      '4. Document policy-by-policy findings with linked quotes so legal and HR can verify conclusion quality.'
+    );
+  } else if (topDiscrepancy) {
+    lines.push(
+      '4. Reconcile conflicting testimony against objective artifacts (emails, logs, messages) and capture credibility impacts.'
+    );
+  } else {
+    lines.push(
+      '4. Preserve a neutral interview record and document corroboration for each material fact.'
+    );
+  }
+
+  const readyForDetermination = input.reviewSucceeded
+    && input.shouldRunDiscrepancies
+    && timelineGaps.length === 0
+    && input.discrepancies.length === 0
+    && input.violations.length === 0;
+
+  if (readyForDetermination) {
+    lines.push(
+      '5. Determination readiness: evidence is currently consistent. If final interviews add no new facts, draft a preliminary determination recommendation.'
+    );
+  } else {
+    const blockers: string[] = [];
+    if (timelineGaps.length > 0) blockers.push(`${timelineGaps.length} timeline gap${timelineGaps.length === 1 ? '' : 's'}`);
+    if (input.discrepancies.length > 0) blockers.push(`${input.discrepancies.length} discrepancy flag${input.discrepancies.length === 1 ? '' : 's'}`);
+    if (input.violations.length > 0) blockers.push(`${input.violations.length} policy risk finding${input.violations.length === 1 ? '' : 's'}`);
+    if (!input.shouldRunDiscrepancies) blockers.push('one more completed witness/evidence document for discrepancy analysis');
+    lines.push(`5. Determination gate: hold final determination until ${blockers.join(', ')} ${blockers.length === 1 ? 'is' : 'are'} resolved.`);
+  }
+
+  const contextFragments: string[] = [];
+  contextFragments.push(`Review basis: ${input.reviewedDocCount} completed evidence document(s)`);
+  if (docPreview) {
+    contextFragments.push(`latest docs include ${docPreview}${input.reviewedDocNames.length > 2 ? ', ...' : ''}`);
+  }
+  if (input.objective && input.objective !== 'general') {
+    contextFragments.push(`intake objective is ${formatIntakeObjective(input.objective)}`);
+  }
+  if (input.timelineSummary) {
+    contextFragments.push(`timeline: ${normalizeGuidanceFragment(input.timelineSummary, 120)}`);
+  }
+  if (input.discrepancySummary && input.discrepancies.length > 0) {
+    contextFragments.push(`discrepancies: ${normalizeGuidanceFragment(input.discrepancySummary, 120)}`);
+  }
+  if (input.policySummary && input.violations.length > 0) {
+    contextFragments.push(`policy: ${normalizeGuidanceFragment(input.policySummary, 120)}`);
+  }
+  lines.push(`6. ${contextFragments.join('; ')}.`);
+
+  return lines.join('\n');
+}
+
 function getCaseNotePurpose(note: ERCaseNote): string | null {
   const metadata = note.metadata;
   if (!metadata || typeof metadata !== 'object') return null;
@@ -625,18 +774,24 @@ export function ERCaseDetail() {
         reviewSummaryLines.push(`Policy review: ${policyResult.analysis.summary}`);
       }
 
-      const suggestedGuidanceLines = [
-        'Suggested Guidance',
-        '1. Create follow-up interviews with each involved employee/witness.',
-        '2. Ask for specifics in each interview: What happened? When did it happen? Who was present? What evidence exists? What outcome is requested?',
-        '3. Keep the interview tone neutral and non-accusatory. Remind participants retaliation is not tolerated and document any retaliation concerns immediately.',
-        violationCount > 0
-          ? '4. Prioritize follow-ups tied to the highest policy-risk findings and preserve supporting evidence before concluding.'
-          : '4. Compare accounts for consistency and close timeline gaps before concluding.',
-        !shouldRunDiscrepancies
-          ? '5. Upload at least one more witness/evidence document so discrepancy analysis can run.'
-          : '5. Upload interview notes/transcripts for updated guidance and next-step recommendations.',
-      ];
+      const normalizedDiscrepancies = normalizeDiscrepancies(discrepancyResult?.analysis?.discrepancies);
+      const timelineGaps = Array.isArray(timelineResult?.analysis?.gaps_identified)
+        ? timelineResult?.analysis?.gaps_identified
+        : [];
+      const suggestedGuidance = buildSuggestedGuidance({
+        reviewedDocCount: completedNonPolicyDocs.length,
+        reviewedDocNames: completedNonPolicyDocs.map((doc) => doc.filename).filter(Boolean),
+        shouldRunDiscrepancies,
+        timelineSummary: timelineResult?.analysis?.timeline_summary || '',
+        timelineGaps,
+        discrepancies: normalizedDiscrepancies,
+        discrepancySummary: discrepancyResult?.analysis?.summary || '',
+        violations: policyResult?.analysis?.violations || [],
+        policySummary: policyResult?.analysis?.summary || '',
+        reviewSucceeded,
+        objective: intakeContext?.answers?.objective,
+        immediateRisk: intakeContext?.answers?.immediate_risk,
+      });
 
       await erCopilot.createCaseNote(id, {
         note_type: 'general',
@@ -655,10 +810,11 @@ export function ERCaseDetail() {
 
       await erCopilot.createCaseNote(id, {
         note_type: 'guidance',
-        content: suggestedGuidanceLines.join('\n'),
+        content: suggestedGuidance,
         metadata: {
           source: 'assistance_auto_review',
           note_purpose: 'next_steps',
+          guidance_version: 2,
           reviewed_doc_ids: reviewedDocIds,
           timeline_ok: timelineOk,
           discrepancies_ok: shouldRunDiscrepancies ? discrepanciesOk : null,
