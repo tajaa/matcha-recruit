@@ -27,6 +27,14 @@ export function Handbooks() {
     loadHandbooks();
   }, [loadHandbooks]);
 
+  useEffect(() => {
+    const onFocus = () => {
+      void loadHandbooks();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [loadHandbooks]);
+
   const handlePublish = async (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -90,7 +98,10 @@ export function Handbooks() {
         ].map((tab) => (
           <button
             key={tab.value}
-            onClick={() => setFilterStatus(tab.value as HandbookStatus | '')}
+            onClick={() => {
+              setFilterStatus(tab.value as HandbookStatus | '');
+              void loadHandbooks();
+            }}
             className={`pb-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2 ${
               filterStatus === tab.value
                 ? 'border-white text-white'

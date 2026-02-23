@@ -21,10 +21,10 @@ const US_STATES = [
 ];
 
 const CREATE_STEPS = [
-  'Basics',
+  'Business Profile',
   'State Scope',
   'Company Profile',
-  'Workforce Setup',
+  'Policy Setup',
   'Review',
 ] as const;
 
@@ -35,6 +35,40 @@ const INDUSTRY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'retail', label: 'Retail' },
   { value: 'manufacturing', label: 'Manufacturing / Warehouse' },
   { value: 'healthcare', label: 'Healthcare' },
+];
+
+const INDUSTRY_PLAYBOOK_PREVIEW: Record<string, { focus: string; boilerplate: string[] }> = {
+  general: {
+    focus: 'Baseline handbook for common employer operations with reporting and leave controls.',
+    boilerplate: ['Core Employment Terms', 'Attendance and Leave Controls', 'Reporting and Anti-Retaliation'],
+  },
+  technology: {
+    focus: 'Adds remote-work governance, privacy controls, and rapid incident escalation language.',
+    boilerplate: ['Remote Work Compliance', 'Security and Privacy Rules', 'Investigation and Reporting'],
+  },
+  hospitality: {
+    focus: 'Adds tipped-employee, tip-pool, and shift scheduling controls.',
+    boilerplate: ['Tip Credit and Pooling Rules', 'Meal and Break Controls', 'Guest Incident Escalation'],
+  },
+  retail: {
+    focus: 'Adds opening/closing controls, floor conduct standards, and loss-prevention workflows.',
+    boilerplate: ['Shift and Timekeeping Controls', 'Customer Conduct Rules', 'Safety and Theft Escalation'],
+  },
+  manufacturing: {
+    focus: 'Adds safety-critical controls, stop-work authority, and handoff requirements.',
+    boilerplate: ['Safety and Stop-Work Authority', 'Shift Handoff Rules', 'Incident Reporting Controls'],
+  },
+  healthcare: {
+    focus: 'Adds credentialing, patient-safety reporting, and accommodation controls.',
+    boilerplate: ['Credentialing Controls', 'Patient Safety Reporting', 'Accommodation and Non-Retaliation'],
+  },
+};
+
+const QUICK_SIGNAL_FIELDS: Array<{ key: keyof CompanyHandbookProfile; label: string }> = [
+  { key: 'remote_workers', label: 'Remote Workforce' },
+  { key: 'tipped_employees', label: 'Tipped Staff' },
+  { key: 'union_employees', label: 'Union Environment' },
+  { key: 'federal_contracts', label: 'Federal Contracts' },
 ];
 
 interface CustomSectionDraft {
@@ -74,6 +108,7 @@ export function HandbookForm() {
   const [existingScopes, setExistingScopes] = useState<HandbookScope[]>([]);
   const [customSections, setCustomSections] = useState<CustomSectionDraft[]>([]);
   const [industry, setIndustry] = useState('general');
+  const [subIndustry, setSubIndustry] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
   const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
@@ -158,6 +193,15 @@ export function HandbookForm() {
     { key: 'tip_pooling', label: 'Do you use tip pooling?' },
   ];
 
+  const selectedIndustryLabel =
+    INDUSTRY_OPTIONS.find((option) => option.value === industry)?.label || industry;
+  const industryPlaybook =
+    INDUSTRY_PLAYBOOK_PREVIEW[industry] || INDUSTRY_PLAYBOOK_PREVIEW.general;
+  const unansweredGuidedCount = guidedQuestions.filter(
+    (question) => !(guidedAnswers[question.id] || '').trim()
+  ).length;
+  const answeredGuidedCount = guidedQuestions.length - unansweredGuidedCount;
+
   const toggleState = (state: string) => {
     setSelectedStates((prev) => {
       const exists = prev.includes(state);
@@ -191,6 +235,30 @@ export function HandbookForm() {
     });
   };
 
+  const buildGuidedAnswersPayload = () => {
+    const enrichedAnswers = { ...guidedAnswers };
+    const businessSignals = QUICK_SIGNAL_FIELDS
+      .filter((field) => Boolean(profile[field.key]))
+      .map((field) => field.label);
+
+    const defaults: Record<string, string> = {
+      industry_profile: selectedIndustryLabel,
+      business_sub_industry: subIndustry.trim(),
+      business_model_signals: businessSignals.join(', '),
+      target_states: selectedStates.join(', '),
+      handbook_source: sourceType === 'template' ? 'Template Builder' : 'Uploaded Handbook',
+    };
+
+    for (const [key, value] of Object.entries(defaults)) {
+      const normalized = value.trim();
+      if (!normalized) continue;
+      if ((enrichedAnswers[key] || '').trim()) continue;
+      enrichedAnswers[key] = normalized;
+    }
+
+    return enrichedAnswers;
+  };
+
   const handleGenerateGuidedDraft = async () => {
     setGuidedError(null);
     setError(null);
@@ -218,6 +286,9 @@ export function HandbookForm() {
       headcount: typeof profile.headcount === 'number' ? profile.headcount : null,
     };
 
+    const answersPayload = buildGuidedAnswersPayload();
+    setGuidedAnswers(answersPayload);
+
     setGuidedLoading(true);
     try {
       const result = await handbooks.generateGuidedDraft({
@@ -226,7 +297,7 @@ export function HandbookForm() {
         scopes,
         profile: normalizedProfile,
         industry,
-        answers: guidedAnswers,
+        answers: answersPayload,
         existing_custom_sections: customSections
           .filter((section) => section.title.trim())
           .map((section, index) => ({
@@ -491,6 +562,134 @@ export function HandbookForm() {
           </select>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Sub-Industry / Business Model</label>
+          <input
+            type="text"
+            value={subIndustry}
+            onChange={(e) => setSubIndustry(e.target.value)}
+            placeholder="e.g. SaaS payroll platform, urgent care clinics, franchise restaurants"
+            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Policy Pack Focus</label>
+          <div className="min-h-[42px] px-3 py-2 bg-zinc-900 border border-white/20 text-sm text-zinc-200">
+            {industryPlaybook.focus}
+          </div>
+        </div>
+      </div>
+
+      {sourceType === 'template' && (
+        <div className="space-y-3 border border-white/10 bg-zinc-900/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={14} className="text-amber-300" />
+              <label className="block text-[10px] uppercase tracking-wider text-zinc-500">
+                Business Profile + Policy Pack
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={handleGenerateGuidedDraft}
+              disabled={guidedLoading}
+              className="px-3 py-1.5 bg-white text-black text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+            >
+              {guidedLoading ? 'Building...' : guidedSummary ? 'Refresh Policy Pack' : 'Build Policy Pack'}
+            </button>
+          </div>
+
+          <p className="text-[11px] text-zinc-500">
+            Generate boilerplate from your industry + workforce profile, then answer only unresolved follow-up questions.
+          </p>
+
+          <div className="flex flex-wrap gap-2">
+            {industryPlaybook.boilerplate.map((item) => (
+              <span
+                key={item}
+                className="px-2 py-1 border border-white/15 bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-300"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[10px] uppercase tracking-widest text-zinc-500">Quick Business Signals</p>
+            <div className="flex flex-wrap gap-2">
+              {QUICK_SIGNAL_FIELDS.map((field) => {
+                const enabled = Boolean(profile[field.key]);
+                return (
+                  <button
+                    key={field.key}
+                    type="button"
+                    onClick={() => setProfileField(field.key, !enabled)}
+                    className={`px-2 py-1 text-[10px] uppercase tracking-wider border transition-colors ${
+                      enabled
+                        ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200'
+                        : 'bg-zinc-950 border-white/20 text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    {field.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-white/10 pt-3 text-[11px] text-zinc-400">
+            {guidedQuestions.length > 0 ? (
+              <span>
+                {answeredGuidedCount}/{guidedQuestions.length} follow-up questions resolved
+              </span>
+            ) : guidedSummary ? (
+              <span>Policy pack generated and sections prefilled.</span>
+            ) : (
+              <span>No policy pack generated yet.</span>
+            )}
+          </div>
+
+          {guidedSummary && (
+            <p className="text-xs text-zinc-300 leading-relaxed">{guidedSummary}</p>
+          )}
+          {guidedError && (
+            <p className="text-xs text-red-400">{guidedError}</p>
+          )}
+          {guidedQuestions.length > 0 && (
+            <div className="space-y-2 border-t border-white/10 pt-3">
+              <p className="text-[10px] uppercase tracking-widest text-zinc-500">Open Follow-up Questions</p>
+              {guidedQuestions.map((question) => (
+                <div key={question.id} className="space-y-1">
+                  <label className="text-xs text-zinc-300">
+                    {question.question}
+                    {question.required ? <span className="text-amber-400"> *</span> : null}
+                  </label>
+                  <input
+                    type="text"
+                    value={guidedAnswers[question.id] || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setGuidedAnswers((prev) => ({ ...prev, [question.id]: value }));
+                    }}
+                    placeholder={question.placeholder || 'Add your answer'}
+                    className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-xs focus:outline-none focus:border-white/50"
+                  />
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={handleGenerateGuidedDraft}
+                disabled={guidedLoading}
+                className="text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider underline underline-offset-4"
+              >
+                Update pack with answers
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 
@@ -647,72 +846,67 @@ export function HandbookForm() {
       {sourceType === 'template' && (
         <div className="space-y-3 border border-white/10 bg-zinc-900/40 p-4">
           <div className="flex items-center justify-between">
-            <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Template Assistant + Custom Sections</label>
-            <button
-              type="button"
-              onClick={() => setCustomSections((prev) => [...prev, { title: '', content: '' }])}
-              className="text-xs text-zinc-300 hover:text-white uppercase tracking-wider flex items-center gap-1"
-            >
-              <Plus size={12} />
-              Add Section
-            </button>
-          </div>
-          <div className="border border-white/10 bg-zinc-950/60 p-3 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs text-zinc-200">
-                <Sparkles size={13} className="text-amber-300" />
-                Guided handbook builder
-              </div>
+            <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Custom Company Sections</label>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleGenerateGuidedDraft}
                 disabled={guidedLoading}
-                className="px-3 py-1.5 bg-white text-black text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+                className="px-2 py-1 border border-white/20 text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider disabled:opacity-50"
               >
-                {guidedLoading ? 'Generating...' : 'Ask & Prefill'}
+                {guidedLoading ? 'Updating...' : 'Refresh Pack'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomSections((prev) => [...prev, { title: '', content: '' }])}
+                className="text-xs text-zinc-300 hover:text-white uppercase tracking-wider flex items-center gap-1"
+              >
+                <Plus size={12} />
+                Add Section
               </button>
             </div>
-            <p className="text-[11px] text-zinc-500">
-              Uses the selected industry and your current setup to ask follow-up questions and prefill policy-grade sections.
-            </p>
-            {guidedSummary && (
-              <p className="text-xs text-zinc-300 leading-relaxed">{guidedSummary}</p>
-            )}
-            {guidedError && (
-              <p className="text-xs text-red-400">{guidedError}</p>
-            )}
-            {guidedQuestions.length > 0 && (
-              <div className="space-y-2 border-t border-white/10 pt-3">
-                <p className="text-[10px] uppercase tracking-widest text-zinc-500">HR Follow-up Questions</p>
-                {guidedQuestions.map((question) => (
-                  <div key={question.id} className="space-y-1">
-                    <label className="text-xs text-zinc-300">
-                      {question.question}
-                      {question.required ? <span className="text-amber-400"> *</span> : null}
-                    </label>
-                    <input
-                      type="text"
-                      value={guidedAnswers[question.id] || ''}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setGuidedAnswers((prev) => ({ ...prev, [question.id]: value }));
-                      }}
-                      placeholder={question.placeholder || 'Add your answer'}
-                      className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-xs focus:outline-none focus:border-white/50"
-                    />
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={handleGenerateGuidedDraft}
-                  disabled={guidedLoading}
-                  className="text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider underline underline-offset-4"
-                >
-                  Regenerate with answers
-                </button>
-              </div>
-            )}
           </div>
+          <p className="text-[11px] text-zinc-500">
+            Boilerplate comes from the Business Profile policy pack. Use custom sections for company-specific rules or exceptions.
+            {guidedQuestions.length > 0 ? ` ${unansweredGuidedCount} follow-up question(s) still open.` : ''}
+          </p>
+          {guidedSummary && (
+            <p className="text-xs text-zinc-300 leading-relaxed">{guidedSummary}</p>
+          )}
+          {guidedError && (
+            <p className="text-xs text-red-400">{guidedError}</p>
+          )}
+          {guidedQuestions.length > 0 && (
+            <div className="space-y-2 border border-white/10 bg-zinc-950/60 p-3">
+              <p className="text-[10px] uppercase tracking-widest text-zinc-500">Open Follow-up Questions</p>
+              {guidedQuestions.map((question) => (
+                <div key={question.id} className="space-y-1">
+                  <label className="text-xs text-zinc-300">
+                    {question.question}
+                    {question.required ? <span className="text-amber-400"> *</span> : null}
+                  </label>
+                  <input
+                    type="text"
+                    value={guidedAnswers[question.id] || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setGuidedAnswers((prev) => ({ ...prev, [question.id]: value }));
+                    }}
+                    placeholder={question.placeholder || 'Add your answer'}
+                    className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-xs focus:outline-none focus:border-white/50"
+                  />
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={handleGenerateGuidedDraft}
+                disabled={guidedLoading}
+                className="text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider underline underline-offset-4"
+              >
+                Apply follow-up answers
+              </button>
+            </div>
+          )}
           {customSections.length === 0 ? (
             <p className="text-xs text-zinc-500">No custom sections added.</p>
           ) : (
@@ -762,11 +956,18 @@ export function HandbookForm() {
         <div><span className="text-zinc-500">Title:</span> {title || 'N/A'}</div>
         <div><span className="text-zinc-500">Type:</span> {mode === 'multi_state' ? 'Multi-State' : 'Single-State'}</div>
         <div><span className="text-zinc-500">Source:</span> {sourceType === 'template' ? 'Template Builder' : 'Uploaded File'}</div>
-        <div><span className="text-zinc-500">Industry:</span> {INDUSTRY_OPTIONS.find((option) => option.value === industry)?.label || industry}</div>
+        <div><span className="text-zinc-500">Industry:</span> {selectedIndustryLabel}</div>
+        <div><span className="text-zinc-500">Sub-Industry:</span> {subIndustry || 'N/A'}</div>
         <div><span className="text-zinc-500">States:</span> {selectedStates.join(', ') || 'N/A'}</div>
         <div><span className="text-zinc-500">Legal Name:</span> {profile.legal_name || 'N/A'}</div>
         <div><span className="text-zinc-500">CEO/President:</span> {profile.ceo_or_president || 'N/A'}</div>
         <div><span className="text-zinc-500">Headcount:</span> {profile.headcount ?? 'N/A'}</div>
+        {sourceType === 'template' && (
+          <>
+            <div><span className="text-zinc-500">Policy Pack:</span> {guidedSummary ? 'Generated' : 'Not generated yet'}</div>
+            <div><span className="text-zinc-500">Open Follow-ups:</span> {guidedQuestions.length > 0 ? unansweredGuidedCount : 0}</div>
+          </>
+        )}
         {sourceType === 'upload' && (
           <div><span className="text-zinc-500">Uploaded File:</span> {uploadedFilename || 'None'}</div>
         )}
