@@ -182,4 +182,92 @@ describe('HandbookForm (create wizard)', () => {
     expect(screen.getByText(/CA generally requires stricter wage\/hour, break, and reimbursement handling/i)).toBeInTheDocument();
     expect(screen.getByText(/For a CA tech startup, classify exempt\/non-exempt roles conservatively/i)).toBeInTheDocument();
   });
+
+  it('does not append hospitality overlays to company identity cards', async () => {
+    const { user } = render(
+      <MemoryRouter initialEntries={['/app/matcha/handbook/new']}>
+        <Routes>
+          <Route path="/app/matcha/handbook/new" element={<HandbookForm />} />
+          <Route path="/app/matcha/handbook/:id" element={<div>Handbook Detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+      { withRouter: false },
+    );
+
+    await user.type(screen.getByPlaceholderText('e.g. 2026 Employee Handbook'), 'Hospitality Handbook');
+    await user.click(screen.getByRole('button', { name: 'Next' })); // mode
+    await user.click(screen.getByRole('button', { name: 'Next' })); // source
+    await user.click(screen.getByRole('button', { name: 'Next' })); // industry
+    await user.selectOptions(screen.getByRole('combobox'), 'hospitality');
+    await user.click(screen.getByRole('button', { name: 'Next' })); // sub industry
+    await user.click(screen.getByRole('button', { name: 'Next' })); // states
+    await user.click(screen.getByRole('button', { name: 'CA' })); // states selection
+    await user.click(screen.getByRole('button', { name: 'Next' })); // legal name card
+
+    expect(screen.getByText(/This legal entity name appears in formal policy language/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/For hospitality, handbook logic prioritizes tipped-workforce and shift-operations controls/i)
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/CA generally requires stricter wage\/hour, break, and reimbursement handling/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows recovery actions for missing boilerplate coverage errors', async () => {
+    handbooksMock.create.mockRejectedValueOnce(
+      new Error('Missing required state boilerplate coverage for hospitality handbook generation: Illinois')
+    );
+
+    const { user } = render(
+      <MemoryRouter initialEntries={['/app/matcha/handbook/new']}>
+        <Routes>
+          <Route path="/app/matcha/handbook/new" element={<HandbookForm />} />
+          <Route path="/app/matcha/compliance" element={<div>Compliance Page</div>} />
+          <Route path="/app/matcha/handbook/:id" element={<div>Handbook Detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+      { withRouter: false },
+    );
+
+    await user.type(screen.getByPlaceholderText('e.g. 2026 Employee Handbook'), 'Coverage Test Handbook');
+
+    // Advance to state selection.
+    await user.click(screen.getByRole('button', { name: 'Next' })); // mode
+    await user.click(screen.getByRole('button', { name: 'Next' })); // source
+    await user.click(screen.getByRole('button', { name: 'Next' })); // industry
+    await user.click(screen.getByRole('button', { name: 'Next' })); // sub industry
+    await user.click(screen.getByRole('button', { name: 'Next' })); // states
+    await user.click(screen.getByRole('button', { name: 'CA' }));
+    await user.click(screen.getByRole('button', { name: 'Next' })); // legal name
+
+    await user.type(screen.getByRole('textbox'), 'Acme LLC');
+    await user.click(screen.getByRole('button', { name: 'Next' })); // dba
+    await user.click(screen.getByRole('button', { name: 'Next' })); // ceo
+    await user.type(screen.getByRole('textbox'), 'Alex Founder');
+    await user.click(screen.getByRole('button', { name: 'Next' })); // headcount
+    await user.click(screen.getByRole('button', { name: 'Next' })); // remote_workers
+    await user.click(screen.getByRole('button', { name: 'Next' })); // minors
+    await user.click(screen.getByRole('button', { name: 'Next' })); // tipped_employees
+    await user.click(screen.getByRole('button', { name: 'Next' })); // union_employees
+    await user.click(screen.getByRole('button', { name: 'Next' })); // federal_contracts
+    await user.click(screen.getByRole('button', { name: 'Next' })); // group_health_insurance
+    await user.click(screen.getByRole('button', { name: 'Next' })); // background_checks
+    await user.click(screen.getByRole('button', { name: 'Next' })); // hourly_employees
+    await user.click(screen.getByRole('button', { name: 'Next' })); // salaried_employees
+    await user.click(screen.getByRole('button', { name: 'Next' })); // commissioned_employees
+    await user.click(screen.getByRole('button', { name: 'Next' })); // policy_pack
+    await user.click(screen.getByRole('button', { name: 'Next' })); // custom_sections
+    await user.click(screen.getByRole('button', { name: 'Next' })); // review
+
+    await user.click(screen.getByRole('button', { name: 'Create Handbook' }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Missing required state boilerplate coverage/i)).toBeInTheDocument()
+    );
+    expect(screen.getByRole('button', { name: 'Go To Policy Pack' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Compliance' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Go To Policy Pack' }));
+    expect(screen.getByText('Generate required boilerplate and guided follow-ups')).toBeInTheDocument();
+  });
 });

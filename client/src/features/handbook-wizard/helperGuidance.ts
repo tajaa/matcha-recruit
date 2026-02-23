@@ -46,6 +46,15 @@ export interface WizardHelperContext {
   guidedQuestionPlaceholder?: string | null;
 }
 
+const INDUSTRY_CONTEXT_CARD_KINDS: ReadonlySet<WizardCardKind> = new Set([
+  'industry',
+  'sub_industry',
+  'states',
+  'policy_pack',
+  'guided_followup',
+  'review',
+]);
+
 const PROFILE_BOOL_HELPER_COPY: Partial<Record<keyof CompanyHandbookProfile, WizardHelperCopy>> = {
   remote_workers: {
     meaning: 'Indicates whether any employee regularly works outside a company-controlled site.',
@@ -308,7 +317,7 @@ function applyIndustryAndJurisdictionContext(
   context: WizardHelperContext
 ): WizardHelperCopy {
   const { sourceType, cardKind, industry, industryLabel, selectedStates } = context;
-  if (sourceType !== 'template' || cardKind === 'source') {
+  if (sourceType !== 'template' || !INDUSTRY_CONTEXT_CARD_KINDS.has(cardKind)) {
     return base;
   }
 
