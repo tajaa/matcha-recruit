@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Upload, X, Plus, CheckCircle2, Sparkles } from 'lucide-react';
 import { handbooks } from '../api/client';
@@ -77,6 +77,35 @@ interface CustomSectionDraft {
   content: string;
 }
 
+type WizardCardKind =
+  | 'title'
+  | 'mode'
+  | 'source'
+  | 'industry'
+  | 'sub_industry'
+  | 'states'
+  | 'legal_name'
+  | 'dba'
+  | 'ceo'
+  | 'headcount'
+  | 'profile_bool'
+  | 'policy_pack'
+  | 'guided_followup'
+  | 'custom_sections'
+  | 'upload'
+  | 'review';
+
+interface WizardCard {
+  key: string;
+  step: number;
+  kind: WizardCardKind;
+  title: string;
+  description?: string;
+  required?: boolean;
+  profileKey?: keyof CompanyHandbookProfile;
+  questionId?: string;
+}
+
 const DEFAULT_PROFILE: CompanyHandbookProfile = {
   legal_name: '',
   dba: null,
@@ -122,7 +151,7 @@ export function HandbookForm() {
   const [guidedError, setGuidedError] = useState<string | null>(null);
   const [companyLocations, setCompanyLocations] = useState<BusinessLocation[]>([]);
   const [locationsStates, setLocationsStates] = useState<string[]>([]);
-  const [currentStep, setCurrentStep] = useState(0);
+  const [wizardCardIndex, setWizardCardIndex] = useState(0);
 
   useEffect(() => {
     const loadDefaults = async () => {
@@ -204,6 +233,188 @@ export function HandbookForm() {
     (question) => !(guidedAnswers[question.id] || '').trim()
   ).length;
   const answeredGuidedCount = guidedQuestions.length - unansweredGuidedCount;
+  const boolFieldLabelMap = useMemo(() => {
+    return boolFields.reduce<Record<string, string>>((acc, field) => {
+      acc[field.key] = field.label;
+      return acc;
+    }, {});
+  }, [boolFields]);
+
+  const wizardCards = useMemo(() => {
+    const cards: WizardCard[] = [
+      {
+        key: 'title',
+        step: 0,
+        kind: 'title',
+        title: 'What should this handbook be called?',
+        description: 'Use a clear title so admins can find and edit the right draft quickly.',
+        required: true,
+      },
+      {
+        key: 'mode',
+        step: 0,
+        kind: 'mode',
+        title: 'Is this handbook single-state or multi-state?',
+        description: 'This controls state selection and required coverage scope.',
+      },
+      {
+        key: 'source',
+        step: 0,
+        kind: 'source',
+        title: 'Start from Matcha template boilerplate or upload your own handbook?',
+        description: 'Template mode generates state/city boilerplate. Upload mode starts from your existing file.',
+      },
+    ];
+
+    if (sourceType === 'template') {
+      cards.push(
+        {
+          key: 'industry',
+          step: 0,
+          kind: 'industry',
+          title: 'Which industry best matches this business?',
+          description: 'Industry drives required boilerplate defaults and AI follow-up prompts.',
+        },
+        {
+          key: 'sub_industry',
+          step: 0,
+          kind: 'sub_industry',
+          title: 'Anything specific about this business model?',
+          description: 'Optional. Example: smoothie shop, cafe, quick-service restaurant.',
+        }
+      );
+    }
+
+    cards.push({
+      key: 'states',
+      step: 1,
+      kind: 'states',
+      title: mode === 'single_state' ? 'Select the state for this handbook' : 'Select every state to cover',
+      description:
+        mode === 'single_state'
+          ? 'Single-state handbooks must include exactly one state.'
+          : 'Multi-state handbooks should include each active operating state.',
+      required: true,
+    });
+
+    cards.push(
+      {
+        key: 'legal_name',
+        step: 2,
+        kind: 'legal_name',
+        title: 'What is the company legal name?',
+        required: true,
+      },
+      {
+        key: 'dba',
+        step: 2,
+        kind: 'dba',
+        title: 'Do you want to include a DBA name?',
+        description: 'Optional.',
+      },
+      {
+        key: 'ceo',
+        step: 2,
+        kind: 'ceo',
+        title: 'Who is the CEO or President?',
+        required: true,
+      },
+      {
+        key: 'headcount',
+        step: 2,
+        kind: 'headcount',
+        title: 'Approximate headcount?',
+        description: 'Optional, but helps draft assumptions.',
+      }
+    );
+
+    const workforceOrder: Array<keyof CompanyHandbookProfile> = [
+      'remote_workers',
+      'minors',
+      'tipped_employees',
+      'tip_pooling',
+      'union_employees',
+      'federal_contracts',
+      'group_health_insurance',
+      'background_checks',
+      'hourly_employees',
+      'salaried_employees',
+      'commissioned_employees',
+    ];
+
+    workforceOrder.forEach((fieldKey) => {
+      if (fieldKey === 'tip_pooling' && !profile.tipped_employees) return;
+      cards.push({
+        key: `profile_${fieldKey}`,
+        step: 3,
+        kind: 'profile_bool',
+        title: boolFieldLabelMap[fieldKey] || 'Confirm policy signal',
+        description: 'This answer affects required policy language in the generated draft.',
+        profileKey: fieldKey,
+      });
+    });
+
+    if (sourceType === 'template') {
+      cards.push({
+        key: 'policy_pack',
+        step: 3,
+        kind: 'policy_pack',
+        title: 'Generate required boilerplate and guided follow-ups',
+        description: 'Uses your selected scope and profile to draft state/city baseline content.',
+      });
+
+      guidedQuestions.forEach((question) => {
+        cards.push({
+          key: `guided_${question.id}`,
+          step: 3,
+          kind: 'guided_followup',
+          title: question.question,
+          description: question.required ? 'Required follow-up from policy generation.' : 'Optional follow-up.',
+          required: question.required,
+          questionId: question.id,
+        });
+      });
+
+      cards.push({
+        key: 'custom_sections',
+        step: 3,
+        kind: 'custom_sections',
+        title: 'Add company-specific sections (optional)',
+        description: 'These are employer-authored sections and should be reviewed by your counsel.',
+      });
+    } else {
+      cards.push({
+        key: 'upload',
+        step: 3,
+        kind: 'upload',
+        title: 'Upload your current handbook file',
+        description: 'Required for upload mode.',
+        required: true,
+      });
+    }
+
+    cards.push({
+      key: 'review',
+      step: 4,
+      kind: 'review',
+      title: 'Review and create handbook',
+    });
+
+    return cards;
+  }, [boolFieldLabelMap, guidedQuestions, mode, profile.tipped_employees, sourceType]);
+
+  const wizardCurrentCard = isWizard ? wizardCards[wizardCardIndex] : null;
+  const wizardCurrentStep = wizardCurrentCard?.step ?? 0;
+
+  const wizardStepQuestionProgress = useMemo(() => {
+    if (!wizardCurrentCard) return { current: 1, total: 1 };
+    const stepCards = wizardCards.filter((card) => card.step === wizardCurrentStep);
+    const stepIndex = stepCards.findIndex((card) => card.key === wizardCurrentCard.key);
+    return {
+      current: stepIndex >= 0 ? stepIndex + 1 : 1,
+      total: Math.max(stepCards.length, 1),
+    };
+  }, [wizardCards, wizardCurrentCard, wizardCurrentStep]);
 
   const toggleState = (state: string) => {
     setSelectedStates((prev) => {
@@ -218,6 +429,20 @@ export function HandbookForm() {
   const setProfileField = (key: keyof CompanyHandbookProfile, value: string | number | boolean | null) => {
     setProfile((prev) => ({ ...prev, [key]: value }));
   };
+
+  useEffect(() => {
+    if (!profile.tipped_employees && profile.tip_pooling) {
+      setProfile((prev) => ({ ...prev, tip_pooling: false }));
+    }
+  }, [profile.tipped_employees, profile.tip_pooling]);
+
+  useEffect(() => {
+    if (!isWizard) return;
+    setWizardCardIndex((prev) => {
+      const maxIndex = Math.max(wizardCards.length - 1, 0);
+      return Math.min(prev, maxIndex);
+    });
+  }, [isWizard, wizardCards.length]);
 
   const mergeSuggestedSections = (incoming: Array<{ title: string; content: string }>) => {
     if (!incoming.length) return;
@@ -404,27 +629,67 @@ export function HandbookForm() {
     return null;
   };
 
-  const goToNextStep = () => {
-    const err = getStepError(currentStep);
+  const getWizardCardError = (card: WizardCard): string | null => {
+    if (card.kind === 'title' && !title.trim()) {
+      return 'Title is required';
+    }
+
+    if (card.kind === 'states') {
+      return getStepError(1);
+    }
+
+    if (card.kind === 'legal_name' && !profile.legal_name?.trim()) {
+      return 'Company legal name is required';
+    }
+
+    if (card.kind === 'ceo' && !profile.ceo_or_president?.trim()) {
+      return 'CEO/President is required';
+    }
+
+    if (card.kind === 'upload' && sourceType === 'upload' && !uploadedFileUrl) {
+      return 'Upload a handbook file before continuing';
+    }
+
+    if (card.kind === 'guided_followup' && card.questionId) {
+      const question = guidedQuestions.find((item) => item.id === card.questionId);
+      if (question?.required && !(guidedAnswers[card.questionId] || '').trim()) {
+        return 'Answer this required follow-up before continuing';
+      }
+    }
+
+    return null;
+  };
+
+  const goToNextWizardCard = () => {
+    if (!wizardCurrentCard) return;
+    const err = getWizardCardError(wizardCurrentCard);
     if (err) {
       setError(err);
       return;
     }
     setError(null);
-    setCurrentStep((prev) => Math.min(prev + 1, CREATE_STEPS.length - 1));
+    setWizardCardIndex((prev) => Math.min(prev + 1, wizardCards.length - 1));
   };
 
-  const goToPrevStep = () => {
+  const goToPrevWizardCard = () => {
     setError(null);
-    setCurrentStep((prev) => Math.max(prev - 1, 0));
+    setWizardCardIndex((prev) => Math.max(prev - 1, 0));
+  };
+
+  const jumpToWizardStep = (stepIndex: number) => {
+    const targetIndex = wizardCards.findIndex((card) => card.step === stepIndex);
+    if (targetIndex >= 0) {
+      setWizardCardIndex(targetIndex);
+      setError(null);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (isWizard && currentStep < CREATE_STEPS.length - 1) {
-      goToNextStep();
+    if (isWizard && wizardCurrentCard?.kind !== 'review') {
+      goToNextWizardCard();
       return;
     }
 
@@ -432,10 +697,10 @@ export function HandbookForm() {
     if (validationError) {
       setError(validationError);
       if (isWizard) {
-        if (validationError.includes('Title')) setCurrentStep(0);
-        else if (validationError.includes('state')) setCurrentStep(1);
-        else if (validationError.includes('CEO') || validationError.includes('legal')) setCurrentStep(2);
-        else setCurrentStep(3);
+        if (validationError.includes('Title')) jumpToWizardStep(0);
+        else if (validationError.toLowerCase().includes('state')) jumpToWizardStep(1);
+        else if (validationError.includes('CEO') || validationError.includes('legal')) jumpToWizardStep(2);
+        else jumpToWizardStep(3);
       }
       return;
     }
@@ -460,9 +725,17 @@ export function HandbookForm() {
                 (scope) => `${scope.state}|${scope.city || ''}|${scope.zipcode || ''}|${scope.location_id || ''}`
               )
             );
+            const retainedStates = new Set(retainedScopes.map((scope) => scope.state));
             const newStateScopes = locationBackedScopes.filter((scope) => {
               const key = `${scope.state}|${scope.city || ''}|${scope.zipcode || ''}|${scope.location_id || ''}`;
-              return !retainedScopeKeys.has(key);
+              if (retainedScopeKeys.has(key)) {
+                return false;
+              }
+              // Avoid adding a generic state-level fallback when a retained location scope already covers that state.
+              if (retainedStates.has(scope.state) && !scope.city && !scope.zipcode && !scope.location_id) {
+                return false;
+              }
+              return true;
             });
             return [...retainedScopes, ...newStateScopes];
           })()
@@ -1019,6 +1292,428 @@ export function HandbookForm() {
     </div>
   );
 
+  const renderWizardCard = (card: WizardCard | null) => {
+    if (!card) return null;
+    if (card.kind === 'review') return renderReviewStep();
+
+    const shell = (content: ReactNode) => (
+      <div className="border border-white/10 bg-zinc-900/40 p-5 space-y-4">
+        <div className="space-y-2">
+          <p className="text-[10px] uppercase tracking-widest text-zinc-500">{CREATE_STEPS[card.step]}</p>
+          <h2 className="text-lg text-white tracking-tight">
+            {card.title}
+            {card.required ? <span className="text-amber-400"> *</span> : null}
+          </h2>
+          {card.description ? <p className="text-xs text-zinc-400">{card.description}</p> : null}
+        </div>
+        {content}
+      </div>
+    );
+
+    if (card.kind === 'title') {
+      return shell(
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          placeholder="e.g. 2026 Employee Handbook"
+          required
+        />
+      );
+    }
+
+    if (card.kind === 'mode') {
+      return shell(
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setMode('single_state');
+              if (selectedStates.length > 1) {
+                setSelectedStates(selectedStates.slice(0, 1));
+              }
+            }}
+            className={`px-4 py-3 border text-left transition-colors ${
+              mode === 'single_state'
+                ? 'bg-white text-black border-white'
+                : 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40'
+            }`}
+          >
+            <div className="text-xs font-semibold uppercase tracking-wider">Single-State</div>
+            <div className="text-[11px] mt-1 opacity-80">One state only</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('multi_state')}
+            className={`px-4 py-3 border text-left transition-colors ${
+              mode === 'multi_state'
+                ? 'bg-white text-black border-white'
+                : 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40'
+            }`}
+          >
+            <div className="text-xs font-semibold uppercase tracking-wider">Multi-State</div>
+            <div className="text-[11px] mt-1 opacity-80">Two or more states</div>
+          </button>
+        </div>
+      );
+    }
+
+    if (card.kind === 'source') {
+      return shell(
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => setSourceType('template')}
+            className={`px-4 py-3 border text-left transition-colors ${
+              sourceType === 'template'
+                ? 'bg-white text-black border-white'
+                : 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40'
+            }`}
+          >
+            <div className="text-xs font-semibold uppercase tracking-wider">Template Builder</div>
+            <div className="text-[11px] mt-1 opacity-80">Generate state/city boilerplate with guided AI follow-ups</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSourceType('upload')}
+            className={`px-4 py-3 border text-left transition-colors ${
+              sourceType === 'upload'
+                ? 'bg-white text-black border-white'
+                : 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40'
+            }`}
+          >
+            <div className="text-xs font-semibold uppercase tracking-wider">Upload Existing Handbook</div>
+            <div className="text-[11px] mt-1 opacity-80">Start from your existing policy document</div>
+          </button>
+        </div>
+      );
+    }
+
+    if (card.kind === 'industry') {
+      return shell(
+        <div className="space-y-3">
+          <select
+            value={industry}
+            onChange={(e) => setIndustry(e.target.value)}
+            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          >
+            {INDUSTRY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-zinc-300">{industryPlaybook.focus}</p>
+          <div className="flex flex-wrap gap-2">
+            {industryPlaybook.boilerplate.map((item) => (
+              <span
+                key={item}
+                className="px-2 py-1 border border-white/15 bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-300"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (card.kind === 'sub_industry') {
+      return shell(
+        <input
+          type="text"
+          value={subIndustry}
+          onChange={(e) => setSubIndustry(e.target.value)}
+          placeholder="e.g. smoothie shop, franchise cafe, coffee kiosk"
+          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+        />
+      );
+    }
+
+    if (card.kind === 'states') {
+      return shell(
+        <div className="space-y-3">
+          <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+            {visibleStates.map((state) => {
+              const selected = selectedStates.includes(state);
+              return (
+                <button
+                  key={state}
+                  type="button"
+                  onClick={() => toggleState(state)}
+                  className={`px-2 py-1 text-[10px] font-mono border transition-colors ${
+                    selected
+                      ? 'bg-white text-black border-white'
+                      : 'bg-zinc-900 text-zinc-400 border-white/20 hover:border-white/40'
+                  }`}
+                >
+                  {state}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-zinc-500 font-mono">
+            Compliance locations found: {locationsStates.length > 0 ? locationsStates.join(', ') : 'none'}.
+          </p>
+        </div>
+      );
+    }
+
+    if (card.kind === 'legal_name') {
+      return shell(
+        <input
+          type="text"
+          value={profile.legal_name}
+          onChange={(e) => setProfileField('legal_name', e.target.value)}
+          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          required
+        />
+      );
+    }
+
+    if (card.kind === 'dba') {
+      return shell(
+        <input
+          type="text"
+          value={profile.dba || ''}
+          onChange={(e) => setProfileField('dba', e.target.value || null)}
+          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          placeholder="Optional DBA"
+        />
+      );
+    }
+
+    if (card.kind === 'ceo') {
+      return shell(
+        <input
+          type="text"
+          value={profile.ceo_or_president}
+          onChange={(e) => setProfileField('ceo_or_president', e.target.value)}
+          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          required
+        />
+      );
+    }
+
+    if (card.kind === 'headcount') {
+      return shell(
+        <input
+          type="number"
+          value={profile.headcount ?? ''}
+          onChange={(e) => setProfileField('headcount', e.target.value ? Number(e.target.value) : null)}
+          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          min={0}
+          placeholder="Optional"
+        />
+      );
+    }
+
+    if (card.kind === 'profile_bool' && card.profileKey) {
+      const enabled = Boolean(profile[card.profileKey]);
+      return shell(
+        <div className="inline-flex border border-white/20 text-[10px] uppercase tracking-wider">
+          <button
+            type="button"
+            onClick={() => setProfileField(card.profileKey!, false)}
+            className={`px-4 py-2 transition-colors ${
+              !enabled ? 'bg-white text-black' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            No
+          </button>
+          <button
+            type="button"
+            onClick={() => setProfileField(card.profileKey!, true)}
+            className={`px-4 py-2 transition-colors ${
+              enabled ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Yes
+          </button>
+        </div>
+      );
+    }
+
+    if (card.kind === 'policy_pack') {
+      return shell(
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={14} className="text-amber-300" />
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400">
+                Gemini-guided policy generation
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleGenerateGuidedDraft}
+              disabled={guidedLoading}
+              className="px-3 py-1.5 bg-white text-black text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+            >
+              {guidedLoading ? 'Building...' : guidedSummary ? 'Refresh Policy Pack' : 'Build Policy Pack'}
+            </button>
+          </div>
+          <p className="text-[11px] text-zinc-500">
+            Matcha uses Gemini Flash guided prompts to draft baseline boilerplate for the selected states/cities.
+          </p>
+          <p className="text-[11px] text-amber-300/90 border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            Matcha supplies statutory boilerplate only. Company-authored culture or custom policy language remains your responsibility.
+          </p>
+          <div className="text-[11px] text-zinc-400">
+            {guidedQuestions.length > 0 ? (
+              <span>
+                {answeredGuidedCount}/{guidedQuestions.length} follow-up answers completed
+              </span>
+            ) : guidedSummary ? (
+              <span>Policy pack generated.</span>
+            ) : (
+              <span>No policy pack generated yet.</span>
+            )}
+          </div>
+          {guidedSummary ? <p className="text-xs text-zinc-300 leading-relaxed">{guidedSummary}</p> : null}
+          {guidedError ? <p className="text-xs text-red-400">{guidedError}</p> : null}
+        </div>
+      );
+    }
+
+    if (card.kind === 'guided_followup' && card.questionId) {
+      const question = guidedQuestions.find((item) => item.id === card.questionId);
+      if (!question) return null;
+      const currentFollowupIndex = guidedQuestions.findIndex((item) => item.id === question.id) + 1;
+      return shell(
+        <div className="space-y-3">
+          <p className="text-[11px] text-zinc-500">
+            Follow-up {currentFollowupIndex} of {guidedQuestions.length}
+          </p>
+          <input
+            type="text"
+            value={guidedAnswers[question.id] || ''}
+            onChange={(e) => {
+              const value = e.target.value;
+              setGuidedAnswers((prev) => ({ ...prev, [question.id]: value }));
+            }}
+            placeholder={question.placeholder || 'Add your answer'}
+            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          />
+          <button
+            type="button"
+            onClick={handleGenerateGuidedDraft}
+            disabled={guidedLoading}
+            className="text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider underline underline-offset-4"
+          >
+            {guidedLoading ? 'Updating...' : 'Apply answer to draft'}
+          </button>
+          {guidedError ? <p className="text-xs text-red-400">{guidedError}</p> : null}
+        </div>
+      );
+    }
+
+    if (card.kind === 'custom_sections') {
+      return shell(
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Custom Company Sections</label>
+            <button
+              type="button"
+              onClick={() => setCustomSections((prev) => [...prev, { title: '', content: '' }])}
+              className="text-xs text-zinc-300 hover:text-white uppercase tracking-wider flex items-center gap-1"
+            >
+              <Plus size={12} />
+              Add Section
+            </button>
+          </div>
+          <p className="text-[11px] text-zinc-500">
+            These sections are optional and employer-authored. Use them for culture or non-statutory company rules.
+          </p>
+          <p className="text-[11px] text-amber-300/90 border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            Custom content is not legal boilerplate. Your team is responsible for legal review and final policy ownership.
+          </p>
+          {customSections.length === 0 ? (
+            <p className="text-xs text-zinc-500">No custom sections added.</p>
+          ) : (
+            <div className="space-y-3">
+              {customSections.map((section, index) => (
+                <div key={index} className="border border-white/10 p-3 space-y-2">
+                  <input
+                    type="text"
+                    value={section.title}
+                    onChange={(e) =>
+                      setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, title: e.target.value } : item)))
+                    }
+                    placeholder="Section title"
+                    className="w-full px-3 py-2 bg-zinc-950 border border-white/20 text-white text-sm"
+                  />
+                  <textarea
+                    value={section.content}
+                    onChange={(e) =>
+                      setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, content: e.target.value } : item)))
+                    }
+                    placeholder="Section content"
+                    className="w-full px-3 py-2 bg-zinc-950 border border-white/20 text-white text-sm min-h-[90px] resize-y"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCustomSections((prev) => prev.filter((_, i) => i !== index))}
+                    className="text-[10px] text-red-400 hover:text-red-300 uppercase tracking-wider"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (card.kind === 'upload') {
+      return shell(
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <label className="px-3 py-2 border border-white/20 text-xs uppercase tracking-wider text-zinc-300 hover:text-white cursor-pointer">
+              Select File
+              <input
+                type="file"
+                className="hidden"
+                accept=".pdf,.doc,.docx,.txt"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+            </label>
+            {file && <span className="text-xs text-zinc-400 truncate">{file.name}</span>}
+            {file && (
+              <button
+                type="button"
+                onClick={() => setFile(null)}
+                className="text-zinc-500 hover:text-red-400"
+              >
+                <X size={14} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleSourceFileUpload}
+              disabled={!file}
+              className="ml-auto px-3 py-2 bg-white text-black text-xs uppercase tracking-wider disabled:opacity-50 flex items-center gap-1"
+            >
+              <Upload size={12} />
+              Upload
+            </button>
+          </div>
+          {uploadedFileUrl ? (
+            <div className="text-[11px] text-emerald-400 font-mono">
+              Uploaded: {uploadedFilename || 'handbook'}
+            </div>
+          ) : (
+            <div className="text-[11px] text-zinc-500">No file uploaded yet.</div>
+          )}
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   const renderActiveFormContent = () => {
     if (!isWizard) {
       return (
@@ -1031,11 +1726,7 @@ export function HandbookForm() {
       );
     }
 
-    if (currentStep === 0) return renderBasicsStep();
-    if (currentStep === 1) return renderScopeStep();
-    if (currentStep === 2) return renderCompanyStep();
-    if (currentStep === 3) return renderWorkforceStep();
-    return renderReviewStep();
+    return renderWizardCard(wizardCurrentCard);
   };
 
   return (
@@ -1066,15 +1757,17 @@ export function HandbookForm() {
       {isWizard && (
         <div data-tour="handbook-wizard-progress" className="border border-white/10 bg-zinc-900/40 p-4">
           <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-zinc-500 mb-3">
-            <span>Step {currentStep + 1} of {CREATE_STEPS.length}</span>
-            <span>{CREATE_STEPS[currentStep]}</span>
+            <span>Step {wizardCurrentStep + 1} of {CREATE_STEPS.length}</span>
+            <span>
+              {CREATE_STEPS[wizardCurrentStep]} • Question {wizardStepQuestionProgress.current} of {wizardStepQuestionProgress.total}
+            </span>
           </div>
           <div className="grid grid-cols-5 gap-2">
             {CREATE_STEPS.map((step, idx) => (
               <button
                 key={step}
                 type="button"
-                onClick={() => setCurrentStep(idx)}
+                onClick={() => jumpToWizardStep(idx)}
                 data-tour={
                   idx === 0
                     ? 'handbook-step-pill-basics'
@@ -1087,7 +1780,7 @@ export function HandbookForm() {
                     : 'handbook-step-pill-review'
                 }
                 className={`h-2 rounded-sm transition-colors ${
-                  idx <= currentStep ? 'bg-white' : 'bg-white/15'
+                  idx <= wizardCurrentStep ? 'bg-white' : 'bg-white/15'
                 }`}
                 aria-label={`Go to ${step}`}
               />
@@ -1108,18 +1801,22 @@ export function HandbookForm() {
         <div className="flex justify-between gap-4 pt-6 border-t border-white/10">
           <button
             type="button"
-            onClick={isWizard ? (currentStep === 0 ? () => navigate(-1) : goToPrevStep) : () => navigate(-1)}
+            onClick={
+              isWizard
+                ? (wizardCardIndex === 0 ? () => navigate(-1) : goToPrevWizardCard)
+                : () => navigate(-1)
+            }
             className="px-6 py-2 text-zinc-500 hover:text-white text-xs font-medium uppercase tracking-wider transition-colors flex items-center gap-1"
           >
             <ChevronLeft size={12} />
-            {isWizard && currentStep > 0 ? 'Previous' : 'Cancel'}
+            {isWizard && wizardCardIndex > 0 ? 'Previous' : 'Cancel'}
           </button>
 
           {isWizard ? (
-            currentStep < CREATE_STEPS.length - 1 ? (
+            wizardCurrentCard?.kind !== 'review' ? (
               <button
                 type="button"
-                onClick={goToNextStep}
+                onClick={goToNextWizardCard}
                 className="px-8 py-2 bg-white hover:bg-zinc-200 text-black rounded-sm text-xs font-medium uppercase tracking-wider transition-colors flex items-center gap-1"
               >
                 Next

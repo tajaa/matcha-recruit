@@ -92,7 +92,7 @@ describe('HandbookForm (edit mode)', () => {
 
     expect(screen.getByText('Template Builder')).toBeInTheDocument();
     expect(screen.getByText('Answer each question with Yes or No')).toBeInTheDocument();
-    expect(screen.getAllByRole('combobox')).toHaveLength(1);
+    expect(screen.getAllByRole('combobox')).toHaveLength(2);
 
     await user.click(screen.getByRole('button', { name: 'Update Handbook' }));
 
@@ -109,5 +109,47 @@ describe('HandbookForm (edit mode)', () => {
     ]);
     expect(payload).not.toHaveProperty('file_url');
     expect(payload).not.toHaveProperty('file_name');
+  });
+});
+
+describe('HandbookForm (create wizard)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    handbooksMock.getProfile.mockResolvedValue(null);
+    complianceApiMock.getLocations.mockResolvedValue([]);
+    handbooksMock.create.mockResolvedValue({ id: 'hb-new' });
+  });
+
+  it('shows one question at a time and branches by source type', async () => {
+    const { user } = render(
+      <MemoryRouter initialEntries={['/app/matcha/handbook/new']}>
+        <Routes>
+          <Route path="/app/matcha/handbook/new" element={<HandbookForm />} />
+          <Route path="/app/matcha/handbook/:id" element={<div>Handbook Detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+      { withRouter: false },
+    );
+
+    expect(screen.getByText('What should this handbook be called?')).toBeInTheDocument();
+    expect(screen.queryByText('Which industry best matches this business?')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('Title is required')).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('e.g. 2026 Employee Handbook'), 'Wizard Handbook');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(screen.getByText('Is this handbook single-state or multi-state?')).toBeInTheDocument();
+    expect(screen.queryByText('What should this handbook be called?')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('Start from Matcha template boilerplate or upload your own handbook?')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Upload Existing Handbook/i }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(screen.getByText('Select the state for this handbook')).toBeInTheDocument();
+    expect(screen.queryByText('Which industry best matches this business?')).not.toBeInTheDocument();
   });
 });
