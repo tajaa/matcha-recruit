@@ -1,9 +1,93 @@
 {
   "categories": [
     {
-      "id": "remote-first",
-      "title": "Remote-First Pioneers",
-      "description": "Best practices for asynchronous communication, remote operations, and global culture.",
+      "id": "cafe-coffee",
+      "title": "Hospitality: Coffee & Cafe",
+      "description": "Leading policies for precision brewing, hospitality standards, and high-volume cafe operations.",
+      "references": [
+        {
+          "name": "Starbucks Partner Guide",
+          "path": "starbucks-partner-model.md",
+          "type": "markdown",
+          "industry": "Hospitality / Cafe",
+          "highlight": "The gold standard 'Partner' model and benefits policy"
+        },
+        {
+          "name": "Peet's Coffee Values",
+          "path": "peets-coffee-values.md",
+          "type": "markdown",
+          "industry": "Hospitality / Cafe",
+          "highlight": "Focus on mastery, authenticity, and ownership"
+        },
+        {
+          "name": "Blue Bottle Culture",
+          "path": "blue-bottle-culture.md",
+          "type": "markdown",
+          "industry": "Hospitality / Cafe",
+          "highlight": "Precision, professionalism, and high-end service"
+        }
+      ]
+    },
+    {
+      "id": "fast-casual",
+      "title": "Hospitality: Fast Casual",
+      "description": "Innovative growth-stage policies focusing on speed, integrity, and internal leadership pipelines.",
+      "references": [
+        {
+          "name": "Chipotle Integrity Culture",
+          "path": "chipotle-integrity-culture.md",
+          "type": "markdown",
+          "industry": "Hospitality / Fast Casual",
+          "highlight": "High-performance team building and internal promotion"
+        },
+        {
+          "name": "Shake Shack Culture",
+          "path": "shake-shack-culture.md",
+          "type": "markdown",
+          "industry": "Hospitality / Fast Casual",
+          "highlight": "The 'Stand For Something Good' community model"
+        },
+        {
+          "name": "Sweetgreen HEART Values",
+          "path": "sweetgreen-values.md",
+          "type": "markdown",
+          "industry": "Hospitality / Fast Casual",
+          "highlight": "Sustainability and values-driven decision making"
+        }
+      ]
+    },
+    {
+      "id": "service-operations",
+      "title": "Hospitality: Service & Operations",
+      "description": "Operational benchmarks for service excellence, diner uniformity, and community resilience.",
+      "references": [
+        {
+          "name": "USHG Enlightened Hospitality",
+          "path": "ushg-enlightened-hospitality.md",
+          "type": "markdown",
+          "industry": "Hospitality / Fine Dining",
+          "highlight": "Putting employees first to drive guest satisfaction"
+        },
+        {
+          "name": "Waffle House Principles",
+          "path": "waffle-house-principles.md",
+          "type": "markdown",
+          "industry": "Hospitality / Diner",
+          "highlight": "Unmatched operational consistency and resilience"
+        },
+        {
+          "name": "Zappos Core Values",
+          "path": "zappos-values.md",
+          "type": "markdown",
+          "industry": "Retail / Service",
+          "highlight": "Benchmark for customer service culture"
+        }
+      ]
+    },
+    {
+      "id": "tech-remote",
+      "title": "Technology & Remote-First",
+      "description": "Best practices for asynchronous work, flat hierarchies, and modern SaaS culture.",
       "references": [
         {
           "name": "GitLab Values (CREDIT)",
@@ -12,20 +96,6 @@
           "industry": "Software / DevOps",
           "highlight": "Comprehensive all-remote framework"
         },
-        {
-          "name": "Basecamp Handbook",
-          "path": "basecamp-handbook",
-          "type": "directory",
-          "industry": "Software / Productivity",
-          "highlight": "Human-centric, straightforward policies"
-        }
-      ]
-    },
-    {
-      "id": "culture-hierarchy",
-      "title": "Culture & Hierarchy",
-      "description": "Innovative approaches to company structure, performance, and behavioral values.",
-      "references": [
         {
           "name": "Valve New Employee Handbook",
           "path": "Valve_NewEmployeeHandbook.pdf",
@@ -41,33 +111,12 @@
           "highlight": "High-performance 'Dream Team' logic"
         },
         {
-          "name": "HubSpot Culture Code",
-          "path": "hubspot-culture.md",
-          "type": "markdown",
-          "industry": "SaaS / Marketing",
-          "highlight": "HEART values and customer-first mindset"
-        }
-      ]
-    },
-    {
-      "id": "retail-service",
-      "title": "Retail & Service",
-      "description": "Benchmarking for customer-facing operations and service excellence.",
-      "references": [
-        {
-          "name": "Zappos Core Values",
-          "path": "zappos-values.md",
-          "type": "markdown",
-          "industry": "Retail / E-commerce",
-          "highlight": "Delivering WOW through service"
-        }
-      ]
-    },
-    {
-      "id": "modern-templates",
-      "title": "Modern SaaS Templates",
-      "description": "Modular, policy-heavy templates ready for adaptation.",
-      "references": [
+          "name": "Basecamp Handbook",
+          "path": "basecamp-handbook",
+          "type": "directory",
+          "industry": "Software / Productivity",
+          "highlight": "Human-centric, straightforward policies"
+        },
         {
           "name": "Sparksuite Handbook",
           "path": "sparksuite-handbook",
