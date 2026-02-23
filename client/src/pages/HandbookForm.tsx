@@ -12,6 +12,7 @@ import type {
   HandbookSourceType,
 } from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
+import { getWizardHelperCopy, type WizardCardKind } from '../features/handbook-wizard/helperGuidance';
 
 const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
@@ -77,24 +78,6 @@ interface CustomSectionDraft {
   content: string;
 }
 
-type WizardCardKind =
-  | 'title'
-  | 'mode'
-  | 'source'
-  | 'industry'
-  | 'sub_industry'
-  | 'states'
-  | 'legal_name'
-  | 'dba'
-  | 'ceo'
-  | 'headcount'
-  | 'profile_bool'
-  | 'policy_pack'
-  | 'guided_followup'
-  | 'custom_sections'
-  | 'upload'
-  | 'review';
-
 interface WizardCard {
   key: string;
   step: number;
@@ -104,12 +87,6 @@ interface WizardCard {
   required?: boolean;
   profileKey?: keyof CompanyHandbookProfile;
   questionId?: string;
-}
-
-interface WizardHelperCopy {
-  meaning: string;
-  goodAnswer: string;
-  avoid: string;
 }
 
 const DEFAULT_PROFILE: CompanyHandbookProfile = {
@@ -421,266 +398,6 @@ export function HandbookForm() {
       total: Math.max(stepCards.length, 1),
     };
   }, [wizardCards, wizardCurrentCard, wizardCurrentStep]);
-
-  const boolHelperCopy: Partial<Record<keyof CompanyHandbookProfile, WizardHelperCopy>> = {
-    remote_workers: {
-      meaning: 'Indicates whether any employee regularly works outside a company-controlled site.',
-      goodAnswer: 'Select Yes if employees routinely work from home or other remote locations.',
-      avoid: 'Do not select Yes for rare one-off remote days.',
-    },
-    minors: {
-      meaning: 'Indicates whether your workforce includes employees under 18.',
-      goodAnswer: 'Select Yes if minors are currently employed or expected to be hired.',
-      avoid: 'Do not select No if seasonal hiring includes minors.',
-    },
-    tipped_employees: {
-      meaning: 'Determines whether tip-credit and tip handling boilerplate is required.',
-      goodAnswer: 'Select Yes if any role receives tips as compensation.',
-      avoid: 'Do not select No when tip jars or digital tipping are active.',
-    },
-    tip_pooling: {
-      meaning: 'Determines whether shared-tip policy language should be included.',
-      goodAnswer: 'Select Yes only if tips are intentionally pooled or redistributed.',
-      avoid: 'Do not select Yes if each worker keeps only their own tips.',
-    },
-    union_employees: {
-      meaning: 'Signals whether union-specific labor language should be included.',
-      goodAnswer: 'Select Yes if any covered bargaining unit exists.',
-      avoid: 'Do not select No if a union contract is active for any location.',
-    },
-    federal_contracts: {
-      meaning: 'Signals whether federal-contractor obligations may apply.',
-      goodAnswer: 'Select Yes if the company performs work under federal contracts/subcontracts.',
-      avoid: 'Do not guess; confirm with legal or operations if unsure.',
-    },
-    group_health_insurance: {
-      meaning: 'Controls health-benefit references in handbook boilerplate.',
-      goodAnswer: 'Select Yes only when a company-sponsored group health plan exists.',
-      avoid: 'Do not select Yes for stipend-only or marketplace-only support.',
-    },
-    background_checks: {
-      meaning: 'Controls pre-employment screening language and notices.',
-      goodAnswer: 'Select Yes if background checks are part of your hiring workflow.',
-      avoid: 'Do not select No if checks are performed for any role.',
-    },
-    hourly_employees: {
-      meaning: 'Determines whether wage/hour and timekeeping language is emphasized.',
-      goodAnswer: 'Select Yes if any non-exempt hourly employees exist.',
-      avoid: 'Do not select No unless workforce is fully salaried/commissioned exempt.',
-    },
-    salaried_employees: {
-      meaning: 'Determines whether salaried-exempt policy language is included.',
-      goodAnswer: 'Select Yes if any employees are paid on a salary basis.',
-      avoid: 'Do not assume all salaried roles are exempt; classification still matters.',
-    },
-    commissioned_employees: {
-      meaning: 'Controls commission-plan and earnings disclosure references.',
-      goodAnswer: 'Select Yes if any compensation includes commissions.',
-      avoid: 'Do not select No when any sales role has variable commission pay.',
-    },
-  };
-
-  const getWizardHelperCopy = (card: WizardCard): WizardHelperCopy => {
-    if (card.kind === 'title') {
-      return {
-        meaning: 'This is the admin-visible name for your draft handbook.',
-        goodAnswer: 'Use a specific title with year and scope, like "2026 CA + NY Employee Handbook".',
-        avoid: 'Avoid generic names like "Final Handbook" or "Test".',
-      };
-    }
-
-    if (card.kind === 'mode') {
-      return {
-        meaning: 'Defines whether this draft governs one state or multiple states.',
-        goodAnswer: 'Use Single-State only for one jurisdiction; choose Multi-State for two or more states.',
-        avoid: 'Avoid Single-State if you operate in multiple states.',
-      };
-    }
-
-    if (card.kind === 'source') {
-      return {
-        meaning: 'Chooses whether Matcha generates boilerplate or you import an existing handbook.',
-        goodAnswer: 'Use Template Builder for net-new drafts; use Upload when you already have a base handbook.',
-        avoid: 'Avoid Upload unless the document is current and reviewable.',
-      };
-    }
-
-    if (card.kind === 'industry') {
-      return {
-        meaning: 'Industry selects compliance and policy defaults for boilerplate generation.',
-        goodAnswer: 'Pick the closest operating model (for cafes/restaurants choose Hospitality).',
-        avoid: 'Avoid choosing a broad category when a more specific fit exists.',
-      };
-    }
-
-    if (card.kind === 'sub_industry') {
-      return {
-        meaning: 'Adds operational context used by AI to fine-tune policy assumptions.',
-        goodAnswer: 'Provide concrete detail like "smoothie shop with counter service".',
-        avoid: 'Avoid vague notes like "food" or "service business".',
-      };
-    }
-
-    if (card.kind === 'states') {
-      return {
-        meaning: 'Defines where statutory boilerplate must apply.',
-        goodAnswer: mode === 'single_state'
-          ? 'Select exactly one state where the handbook applies.'
-          : 'Select every operating state you need coverage for.',
-        avoid: 'Avoid omitting active states or selecting states with no workforce.',
-      };
-    }
-
-    if (card.kind === 'legal_name') {
-      return {
-        meaning: 'This legal entity name appears in formal policy language.',
-        goodAnswer: 'Use the exact registered legal entity name.',
-        avoid: 'Avoid shorthand brands or nicknames in this field.',
-      };
-    }
-
-    if (card.kind === 'dba') {
-      return {
-        meaning: 'Optional public-facing operating name shown alongside legal name.',
-        goodAnswer: 'Enter DBA only if officially used in employee communications.',
-        avoid: 'Avoid placeholder DBAs that are not actually used.',
-      };
-    }
-
-    if (card.kind === 'ceo') {
-      return {
-        meaning: 'Executive signature/authority reference used in handbook metadata.',
-        goodAnswer: 'Use current CEO/President full name.',
-        avoid: 'Avoid outdated names or role titles only.',
-      };
-    }
-
-    if (card.kind === 'headcount') {
-      return {
-        meaning: 'Provides context for policy assumptions and HR process language.',
-        goodAnswer: 'Enter an approximate current employee count.',
-        avoid: 'Avoid stale or intentionally rounded placeholder numbers.',
-      };
-    }
-
-    if (card.kind === 'profile_bool' && card.profileKey) {
-      return boolHelperCopy[card.profileKey] || {
-        meaning: 'This signal determines whether corresponding policy language is included.',
-        goodAnswer: 'Answer based on current real operating conditions.',
-        avoid: 'Avoid aspirational or future-state answers.',
-      };
-    }
-
-    if (card.kind === 'policy_pack') {
-      return {
-        meaning: 'Generates baseline state/city boilerplate and unresolved follow-up prompts.',
-        goodAnswer: 'Run this after scope/profile are accurate, then answer follow-ups clearly.',
-        avoid: 'Avoid creating custom sections before required boilerplate is generated.',
-      };
-    }
-
-    if (card.kind === 'guided_followup') {
-      const question = card.questionId
-        ? guidedQuestions.find((item) => item.id === card.questionId)
-        : null;
-      return {
-        meaning: 'This answer fills a policy gap identified during guided generation.',
-        goodAnswer: `Provide a concrete operational answer${question?.placeholder ? ` (e.g., ${question.placeholder})` : ''}.`,
-        avoid: 'Avoid vague answers like "TBD" for required follow-ups.',
-      };
-    }
-
-    if (card.kind === 'custom_sections') {
-      return {
-        meaning: 'Adds employer-authored policies outside statutory boilerplate.',
-        goodAnswer: 'Include only company-specific culture or process rules that counsel approves.',
-        avoid: 'Avoid copying legal boilerplate into custom sections without review.',
-      };
-    }
-
-    if (card.kind === 'upload') {
-      return {
-        meaning: 'Uploads the base handbook document for upload-mode workflows.',
-        goodAnswer: 'Upload the latest approved handbook in PDF/DOC/DOCX/TXT format.',
-        avoid: 'Avoid outdated drafts, scans with unreadable text, or unrelated files.',
-      };
-    }
-
-    return {
-      meaning: 'This section collects required information for handbook generation.',
-      goodAnswer: 'Provide current, specific, and operationally accurate input.',
-      avoid: 'Avoid placeholders or assumptions that have not been verified.',
-    };
-  };
-
-  const applyIndustryAndJurisdictionHelperContext = (
-    base: WizardHelperCopy,
-    card: WizardCard
-  ): WizardHelperCopy => {
-    if (sourceType !== 'template' || card.kind === 'source') {
-      return base;
-    }
-
-    const stateCodes = selectedStates.map((state) => state.toUpperCase());
-    const hasCA = stateCodes.includes('CA');
-    const hasNY = stateCodes.includes('NY');
-    const hasIL = stateCodes.includes('IL');
-    const hasFL = stateCodes.includes('FL');
-    const jurisdictionNotes: string[] = [];
-
-    if (hasCA) {
-      jurisdictionNotes.push('CA generally requires stricter wage/hour, break, and reimbursement handling.');
-    }
-    if (hasNY) {
-      jurisdictionNotes.push('NY/NYC policies often need tighter wage notice, harassment, and pay-transparency coordination.');
-    }
-    if (hasIL) {
-      jurisdictionNotes.push('IL/Chicago operations often need clear paid-leave and scheduling alignment.');
-    }
-    if (hasFL) {
-      jurisdictionNotes.push('FL/Miami operations should still confirm any city/county-specific overlays.');
-    }
-
-    let industryMeaning = '';
-    let industryGood = '';
-    let industryAvoid = '';
-
-    if (industry === 'hospitality') {
-      industryMeaning = 'For hospitality, handbook logic prioritizes tipped-workforce and shift-operations controls.';
-      industryGood = 'For cafes/restaurants, answer based on real shift flow, tip handling, and front-of-house/back-of-house staffing.';
-      industryAvoid = 'Avoid optimistic assumptions about breaks, tip handling, or scheduling that operations cannot consistently execute.';
-    } else if (industry === 'technology') {
-      industryMeaning = 'For technology employers, handbook logic emphasizes remote/hybrid operations, data handling, and role classification.';
-      industryGood = 'For tech teams, answer using real role mix (engineering, support, sales) and real remote-work patterns.';
-      industryAvoid = 'Avoid assuming all startup roles are exempt or that remote-work rules are informal.';
-      if (hasCA) {
-        industryGood += ' For a CA tech startup, classify exempt/non-exempt roles conservatively and document reimbursement expectations.';
-        industryAvoid += ' Avoid broad statements that every engineer is exempt without role-specific analysis.';
-      }
-    } else if (industry === 'retail') {
-      industryMeaning = 'For retail employers, handbook logic emphasizes floor operations, timekeeping, and customer-facing escalation.';
-      industryGood = 'Answer based on opening/closing routines, on-floor supervision, and sales-floor incident workflows.';
-      industryAvoid = 'Avoid policy language that conflicts with how stores actually staff and schedule.';
-    } else if (industry === 'manufacturing') {
-      industryMeaning = 'For manufacturing/warehouse employers, handbook logic emphasizes safety-critical controls and shift handoffs.';
-      industryGood = 'Answer with current plant/warehouse realities for safety ownership, training, and handoff protocol.';
-      industryAvoid = 'Avoid understating safety controls or incident escalation requirements.';
-    } else if (industry === 'healthcare') {
-      industryMeaning = 'For healthcare employers, handbook logic emphasizes credentialing, patient-safety reporting, and accommodations.';
-      industryGood = 'Answer using current clinical/non-clinical workflows and documented escalation paths.';
-      industryAvoid = 'Avoid generic language that bypasses credential, safety, or reporting obligations.';
-    } else {
-      industryMeaning = `For ${selectedIndustryLabel}, helper guidance focuses on baseline employer compliance behaviors.`;
-      industryGood = `Answer with your current ${selectedIndustryLabel.toLowerCase()} operating model, not future plans.`;
-      industryAvoid = 'Avoid placeholders that require major policy rewrites after launch.';
-    }
-
-    return {
-      meaning: [base.meaning, industryMeaning, jurisdictionNotes.join(' ')].filter(Boolean).join(' '),
-      goodAnswer: [base.goodAnswer, industryGood].filter(Boolean).join(' '),
-      avoid: [base.avoid, industryAvoid].filter(Boolean).join(' '),
-    };
-  };
 
   const toggleState = (state: string) => {
     setSelectedStates((prev) => {
@@ -1522,19 +1239,14 @@ export function HandbookForm() {
   );
 
   const renderReviewStep = () => {
-    const reviewHelperCopy = applyIndustryAndJurisdictionHelperContext(
-      {
-        meaning: 'This is your final checkpoint before draft creation.',
-        goodAnswer: 'Confirm title, scope, and workforce profile are accurate for current operations.',
-        avoid: 'Do not publish if states, ownership details, or required follow-ups are incomplete.',
-      },
-      {
-        key: 'review',
-        step: 4,
-        kind: 'review',
-        title: 'Review and create handbook',
-      }
-    );
+    const reviewHelperCopy = getWizardHelperCopy({
+      cardKind: 'review',
+      mode,
+      sourceType,
+      industry,
+      industryLabel: selectedIndustryLabel,
+      selectedStates,
+    });
 
     return (
       <div className="border border-white/10 bg-zinc-900/40 p-5 space-y-4">
@@ -1589,7 +1301,19 @@ export function HandbookForm() {
   const renderWizardCard = (card: WizardCard | null) => {
     if (!card) return null;
     if (card.kind === 'review') return renderReviewStep();
-    const helperCopy = applyIndustryAndJurisdictionHelperContext(getWizardHelperCopy(card), card);
+    const helperCopy = getWizardHelperCopy({
+      cardKind: card.kind,
+      mode,
+      sourceType,
+      industry,
+      industryLabel: selectedIndustryLabel,
+      selectedStates,
+      profileKey: card.profileKey,
+      guidedQuestionPlaceholder:
+        card.questionId
+          ? guidedQuestions.find((item) => item.id === card.questionId)?.placeholder || null
+          : null,
+    });
 
     const shell = (content: ReactNode) => (
       <div className="border border-white/10 bg-zinc-900/40 p-5 space-y-4">
