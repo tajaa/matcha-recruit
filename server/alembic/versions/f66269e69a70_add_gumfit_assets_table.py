@@ -8,6 +8,11 @@ Create Date: 2026-01-21 14:12:36.760542
 from typing import Sequence, Union
 
 from alembic import op
+
+revision = 'f66269e69a70'
+down_revision = '7c3a7b1e830a'
+branch_labels = None
+depends_on = None
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 

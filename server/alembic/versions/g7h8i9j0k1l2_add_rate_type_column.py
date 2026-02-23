@@ -8,6 +8,11 @@ Create Date: 2026-02-03
 from typing import Sequence, Union
 
 from alembic import op
+
+revision = 'g7h8i9j0k1l2'
+down_revision = 'f6g7h8i9j0k1'
+branch_labels = None
+depends_on = None
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.

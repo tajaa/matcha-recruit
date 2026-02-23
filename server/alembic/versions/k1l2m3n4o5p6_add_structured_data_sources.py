@@ -8,6 +8,11 @@ Create Date: 2026-02-03
 from typing import Sequence, Union
 
 from alembic import op
+
+revision = 'k1l2m3n4o5p6'
+down_revision = 'j0k1l2m3n4o5'
+branch_labels = None
+depends_on = None
 import sqlalchemy as sa
 
 

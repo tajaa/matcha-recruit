@@ -7,6 +7,11 @@ Create Date: 2026-02-18
 
 from alembic import op
 
+revision = 'c9d0e1f2a3b4'
+down_revision = 'b8c9d0e1f2a'
+branch_labels = None
+depends_on = None
+
 
 def upgrade():
     # Add new columns to projects table

@@ -9,6 +9,11 @@ from typing import Sequence, Union
 
 from alembic import op
 
+revision = 'h4i5j6k7l8m9'
+down_revision = 'g3h4i5j6k7l8'
+branch_labels = None
+depends_on = None
+
 
 # revision identifiers, used by Alembic.
 revision: str = "h4i5j6k7l8m9"
