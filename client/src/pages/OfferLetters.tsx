@@ -129,6 +129,74 @@ const OFFER_CYCLE_STEPS: OfferWizardStep[] = [
   },
 ];
 
+// ─── Range Negotiation Flowchart ─────────────────────────────────────────────
+
+type RangeFlowStep = { id: number; label: string; sublabel: string; branch?: boolean };
+
+const RANGE_FLOW_STEPS: RangeFlowStep[] = [
+  { id: 1, label: 'Set Range',       sublabel: 'Employer sets min/max salary band' },
+  { id: 2, label: 'Send Link',       sublabel: 'Magic link emailed to candidate' },
+  { id: 3, label: 'Candidate Submits', sublabel: 'Candidate enters their private range' },
+  { id: 4, label: 'Auto-Match',      sublabel: 'System checks for overlap', branch: true },
+  { id: 5, label: 'Resolution',      sublabel: 'Accepted at midpoint — or re-negotiate' },
+];
+
+function RangeNegotiationFlowchart() {
+  const [collapsed, setCollapsed] = useState(true);
+  return (
+    <div className="border border-white/10 bg-zinc-950/60 mb-6">
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Blind Range Negotiation</span>
+          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-amber-400/10 border border-amber-400/20 text-amber-400">How It Works</span>
+        </div>
+        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-200 shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
+      </button>
+
+      {!collapsed && (
+        <div className="border-t border-white/10 px-5 pt-5 pb-5">
+          {/* Flow steps */}
+          <div className="relative overflow-x-auto no-scrollbar">
+            <div className="flex items-start gap-0 min-w-max mb-5">
+              {RANGE_FLOW_STEPS.map((step, idx) => (
+                <div key={step.id} className="flex items-start">
+                  <div className="flex flex-col items-center w-32">
+                    <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-bold ${
+                      step.branch ? 'border-amber-400/50 bg-amber-400/10 text-amber-400' : 'border-zinc-600 bg-zinc-900 text-zinc-400'
+                    }`}>{step.id}</div>
+                    <div className="mt-2 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-300 leading-tight px-1">{step.label}</div>
+                    <div className="mt-1 text-center text-[9px] text-zinc-600 leading-tight px-1">{step.sublabel}</div>
+                  </div>
+                  {idx < RANGE_FLOW_STEPS.length - 1 && (
+                    <div className="w-8 h-0.5 mt-4 flex-shrink-0 bg-zinc-800" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Branch explanation */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
+            <div className="bg-emerald-400/5 border border-emerald-400/20 p-3">
+              <div className="font-bold uppercase tracking-wider text-emerald-400 mb-1">✓ Overlap Found</div>
+              <div className="text-zinc-400">Offer accepted automatically at the midpoint of the overlapping range. Both parties are notified.</div>
+            </div>
+            <div className="bg-amber-400/5 border border-amber-400/20 p-3">
+              <div className="font-bold uppercase tracking-wider text-amber-400 mb-1">↻ No Overlap</div>
+              <div className="text-zinc-400">Direction is shared (too low / too high) but exact numbers stay private. Employer can revise and re-send up to the round limit.</div>
+            </div>
+          </div>
+          <p className="mt-3 text-[9px] text-zinc-600 leading-relaxed">
+            Neither party sees the other's exact numbers until after a match. The system only reveals the direction of a miss, preserving negotiating privacy on both sides.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OfferCycleIcon({ icon, className = '' }: { icon: OfferStepIcon; className?: string }) {
   const common = { className, width: 16, height: 16, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
   
@@ -663,7 +731,7 @@ export function OfferLetters() {
             <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Compensation Package</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <div className="flex gap-2 mb-2">
+                <div className="flex gap-2 mb-2" data-tour="offer-range-toggle">
                   <button
                     type="button"
                     onClick={() => setSalaryType('fixed')}
@@ -693,7 +761,7 @@ export function OfferLetters() {
                 />
               </div>
               ) : (
-              <div className="sm:col-span-2 flex gap-4">
+              <div className="sm:col-span-2 flex gap-4" data-tour="offer-range-inputs">
                 <div className="flex-1">
                   <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Min ($)</label>
                   <input
@@ -1031,6 +1099,7 @@ export function OfferLetters() {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl sm:text-4xl font-bold tracking-tighter text-white uppercase">Offer Letters</h1>
             <FeatureGuideTrigger guideId="offer-letters" />
+            <FeatureGuideTrigger guideId="offer-letters-range" />
           </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Manage & Generate Candidate Offers</p>
         </div>
@@ -1069,6 +1138,7 @@ export function OfferLetters() {
       </div>
 
       <OfferCycleWizard offerLetters={offerLetters} />
+      <RangeNegotiationFlowchart />
 
       {offerLettersPlusEnabled && (
         <section className="mb-8 border border-white/10 bg-zinc-950/70">
@@ -1716,7 +1786,7 @@ export function OfferLetters() {
                       
                       {/* Range negotiation status */}
                       {selectedLetter.range_match_status && (
-                        <div>
+                        <div data-tour="offer-range-status">
                           <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Range Negotiation</label>
                           <span className={`text-xs px-2 py-1 font-bold uppercase tracking-wider inline-block ${
                             selectedLetter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/30' :
@@ -1745,11 +1815,11 @@ export function OfferLetters() {
                            <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={() => handleEditDraft(selectedLetter)}>Edit Draft</Button>
                          )}
                          {selectedLetter.salary_range_min != null && selectedLetter.salary_range_max != null && !selectedLetter.range_match_status && (
-                           <Button variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => { setShowSendRangePrompt(selectedLetter.id); setSendRangeEmail(selectedLetter.candidate_email || ''); }}>Send Range Offer</Button>
+                           <Button data-tour="offer-send-range-btn" variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => { setShowSendRangePrompt(selectedLetter.id); setSendRangeEmail(selectedLetter.candidate_email || ''); }}>Send Range Offer</Button>
                          )}
                          {(selectedLetter.range_match_status === 'no_match_low' || selectedLetter.range_match_status === 'no_match_high') &&
                            (selectedLetter.negotiation_round ?? 1) < (selectedLetter.max_negotiation_rounds ?? 3) && (
-                           <Button variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => handleReNegotiate(selectedLetter.id)}>Re-negotiate</Button>
+                           <Button data-tour="offer-renegotiate-btn" variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => handleReNegotiate(selectedLetter.id)}>Re-negotiate</Button>
                          )}
                       </div>
                    </div>

@@ -222,6 +222,53 @@ export const offerLettersWalkthrough: WalkthroughConfig = {
   ],
 };
 
+export const offerLettersRangeWalkthrough: WalkthroughConfig = {
+  id: 'offer-letters-range',
+  title: 'Blind Range Negotiation',
+  category: 'admin',
+  steps: [
+    {
+      target: 'offer-range-toggle',
+      title: 'Switch to Salary Range',
+      content: 'Instead of a fixed salary, you can negotiate within a range. Click "Salary Range" to reveal the min/max inputs.',
+      placement: 'bottom',
+      action: 'Select "Salary Range" to enable blind range negotiation on this offer.',
+      expect: 'Two inputs appear: Min and Max salary.',
+    },
+    {
+      target: 'offer-range-inputs',
+      title: 'Set Your Range',
+      content: 'Enter the salary band you\'re willing to offer. The candidate will never see these exact numbers — only whether the ranges overlap.',
+      placement: 'bottom',
+      action: 'Enter a Min and Max value, e.g. $140,000 – $160,000.',
+    },
+    {
+      target: 'offer-send-range-btn',
+      title: 'Send Range Offer',
+      content: 'Once the range is saved, use this button to email the candidate a private magic link. They\'ll see your range and submit their own — without seeing the other\'s exact numbers.',
+      placement: 'left',
+      action: 'Click "Send Range Offer" and enter the candidate\'s email address.',
+      ifMissing: 'This button appears after saving an offer with a salary range set.',
+    },
+    {
+      target: 'offer-range-status',
+      title: 'Track Negotiation Status',
+      content: 'The badge here shows where the negotiation stands: Awaiting Candidate, Matched at $X, or No Match (with direction).',
+      placement: 'right',
+      expect: '"Awaiting candidate" while the link is open, "Matched at $X" on success, or "No match" with a direction hint.',
+      ifMissing: 'Status appears after the range offer has been sent.',
+    },
+    {
+      target: 'offer-renegotiate-btn',
+      title: 'Re-negotiate',
+      content: 'If the ranges didn\'t overlap, you can revise your range and send a new magic link — up to the configured maximum rounds. The candidate will receive a fresh link automatically.',
+      placement: 'left',
+      action: 'Click "Re-negotiate" to increment the round and optionally update your range.',
+      ifMissing: 'This button only appears after a no-match result with rounds remaining.',
+    },
+  ],
+};
+
 export const erCopilotWalkthrough: WalkthroughConfig = {
   id: 'er-copilot',
   title: 'ER Copilot',

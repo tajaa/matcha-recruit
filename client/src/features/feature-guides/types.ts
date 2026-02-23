@@ -23,6 +23,7 @@ export type GuideKey =
   | 'handbooks'
   | 'handbook-create'
   | 'offer-letters'
+  | 'offer-letters-range'
   | 'ir-list'
   | 'ir-dashboard'
   | 'ir-create'
