@@ -30,6 +30,9 @@ export default function CandidateOffer() {
         setOffer(data);
         if (data.range_match_status === 'matched') {
           setPageState('already_matched');
+        } else if (data.range_match_status === 'no_match_low' || data.range_match_status === 'no_match_high') {
+          setResult({ result: data.range_match_status as 'no_match_low' | 'no_match_high' });
+          setPageState('result');
         } else {
           setPageState('awaiting');
         }

@@ -3,7 +3,8 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class OfferLetterStatus(str, Enum):
@@ -49,10 +50,10 @@ class OfferLetterBase(BaseModel):
     # Company logo
     company_logo_url: Optional[str] = None
     # Salary range negotiation
-    salary_range_min: Optional[float] = None
-    salary_range_max: Optional[float] = None
+    salary_range_min: Optional[float] = Field(default=None, ge=0)
+    salary_range_max: Optional[float] = Field(default=None, ge=0)
     candidate_email: Optional[str] = None
-    max_negotiation_rounds: int = 3
+    max_negotiation_rounds: int = Field(default=3, ge=1, le=10)
 
 
 class OfferLetterCreate(OfferLetterBase):
@@ -93,6 +94,11 @@ class OfferLetterUpdate(BaseModel):
     contingency_drug_screening: Optional[bool] = None
     # Company logo
     company_logo_url: Optional[str] = None
+    # Salary range negotiation
+    salary_range_min: Optional[float] = Field(default=None, ge=0)
+    salary_range_max: Optional[float] = Field(default=None, ge=0)
+    candidate_email: Optional[str] = None
+    max_negotiation_rounds: Optional[int] = Field(default=None, ge=1, le=10)
 
 
 class OfferGuidanceRequest(BaseModel):
@@ -156,13 +162,33 @@ class CandidateOfferView(BaseModel):
 
 class SendRangeRequest(BaseModel):
     candidate_email: str
-    salary_range_min: float
-    salary_range_max: float
+    salary_range_min: float = Field(..., gt=0)
+    salary_range_max: float = Field(..., gt=0)
+
+    @field_validator("candidate_email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
+            raise ValueError("Invalid email address")
+        return v
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "SendRangeRequest":
+        if self.salary_range_min > self.salary_range_max:
+            raise ValueError("salary_range_min must be ≤ salary_range_max")
+        return self
 
 
 class CandidateRangeSubmit(BaseModel):
-    range_min: float
-    range_max: float
+    range_min: float = Field(..., ge=0)
+    range_max: float = Field(..., ge=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "CandidateRangeSubmit":
+        if self.range_min > self.range_max:
+            raise ValueError("range_min must be ≤ range_max")
+        return self
 
 
 class RangeNegotiateResult(BaseModel):

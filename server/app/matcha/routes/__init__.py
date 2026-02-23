@@ -10,7 +10,7 @@ from .employees import router as employees_router, pto_admin_router, leave_admin
 from .employee_portal import router as employee_portal_router
 from .onboarding import router as onboarding_router
 from .invitations import router as invitations_router
-from .offer_letters import router as offer_letters_router
+from .offer_letters import router as offer_letters_router, candidate_router as offer_letters_candidate_router
 from .openings import router as openings_router
 from .matching import router as matching_router
 from .ranking import router as ranking_router
@@ -46,6 +46,8 @@ matcha_router.include_router(onboarding_router, prefix="/onboarding", tags=["onb
 matcha_router.include_router(invitations_router, prefix="/invitations", tags=["invitations"])
 matcha_router.include_router(offer_letters_router, prefix="/offer-letters", tags=["offer-letters"],
                              dependencies=[Depends(require_feature("offer_letters"))])
+# Public candidate endpoints — no auth, no feature gate
+matcha_router.include_router(offer_letters_candidate_router, prefix="/offer-letters", tags=["offer-letters-public"])
 matcha_router.include_router(openings_router, prefix="/openings", tags=["openings"])
 matcha_router.include_router(matching_router, tags=["matching"])
 matcha_router.include_router(ranking_router, tags=["rankings"])

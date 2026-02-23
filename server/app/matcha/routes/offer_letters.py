@@ -35,6 +35,8 @@ from ...config import get_settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+# Public (no-auth) router for candidate magic-link endpoints
+candidate_router = APIRouter()
 
 # Explicit allowlist of columns that can be updated via PATCH
 ALLOWED_UPDATE_COLUMNS = {
@@ -244,11 +246,13 @@ async def create_offer_letter(
                 benefits_wellness, benefits_pto_vacation, benefits_pto_sick,
                 benefits_holidays, benefits_other,
                 contingency_background_check, contingency_credit_check, contingency_drug_screening,
-                company_logo_url
+                company_logo_url,
+                salary_range_min, salary_range_max, candidate_email, max_negotiation_rounds
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                     $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-                    $27, $28, $29, $30)
+                    $27, $28, $29, $30,
+                    $31, $32, $33, $34)
             RETURNING *
             """,
             offer.candidate_name,
@@ -281,6 +285,10 @@ async def create_offer_letter(
             offer.contingency_credit_check,
             offer.contingency_drug_screening,
             offer.company_logo_url,
+            offer.salary_range_min,
+            offer.salary_range_max,
+            offer.candidate_email,
+            offer.max_negotiation_rounds,
         )
         return OfferLetter(**dict(row))
 
@@ -512,7 +520,7 @@ async def send_range_offer(
     return OfferLetter(**dict(updated))
 
 
-@router.get("/candidate/{token}", response_model=CandidateOfferView)
+@candidate_router.get("/candidate/{token}", response_model=CandidateOfferView)
 async def get_candidate_offer(token: str):
     """Public endpoint — get offer details by candidate magic token."""
     async with get_connection() as conn:
@@ -558,7 +566,7 @@ async def get_candidate_offer(token: str):
         )
 
 
-@router.post("/candidate/{token}/submit-range", response_model=RangeNegotiateResult)
+@candidate_router.post("/candidate/{token}/submit-range", response_model=RangeNegotiateResult)
 async def submit_candidate_range(token: str, payload: CandidateRangeSubmit):
     """Public endpoint — candidate submits their desired salary range."""
     async with get_connection() as conn:
@@ -585,38 +593,36 @@ async def submit_candidate_range(token: str, payload: CandidateRangeSubmit):
         )
         rounds_remaining = (offer.get("max_negotiation_rounds") or 3) - (offer.get("negotiation_round") or 1)
         if result == "matched":
-            await conn.fetchrow(
+            await conn.execute(
                 """
                 UPDATE offer_letters
                 SET candidate_range_min = $1, candidate_range_max = $2,
                     matched_salary = $3, range_match_status = 'matched',
                     status = 'accepted', updated_at = NOW()
                 WHERE candidate_token = $4
-                RETURNING *
                 """,
                 payload.range_min, payload.range_max, matched_salary, token,
             )
         else:
-            await conn.fetchrow(
+            await conn.execute(
                 """
                 UPDATE offer_letters
                 SET candidate_range_min = $1, candidate_range_max = $2,
                     range_match_status = $3, updated_at = NOW()
                 WHERE candidate_token = $4
-                RETURNING *
                 """,
                 payload.range_min, payload.range_max, result, token,
             )
+        # Look up employer email in the same connection
+        employer_email = None
+        company_row = await conn.fetchrow(
+            "SELECT u.email FROM users u JOIN companies c ON u.id = c.owner_id WHERE c.id = $1",
+            offer.get("company_id"),
+        )
+        if company_row:
+            employer_email = company_row["email"]
     # Notify employer
     try:
-        employer_email = None
-        async with get_connection() as conn2:
-            company_row = await conn2.fetchrow(
-                "SELECT email FROM users WHERE id = (SELECT owner_id FROM companies WHERE id = $1)",
-                offer.get("company_id"),
-            )
-            if company_row:
-                employer_email = company_row["email"]
         if employer_email:
             await _send_employer_result_email(
                 employer_email=employer_email,
