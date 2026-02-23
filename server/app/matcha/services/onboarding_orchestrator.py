@@ -268,6 +268,45 @@ async def start_google_workspace_onboarding(
                 )
                 return await _fetch_run_payload(conn, run_id)
 
+        service_account_json = secrets.get("service_account_json")
+        if service_account_json:
+            try:
+                secrets["service_account_json"] = decrypt_secret(service_account_json)
+            except ValueError:
+                message = "Stored Google Workspace service account credentials are unreadable. Re-enter them in Google Workspace settings."
+                await conn.execute(
+                    """
+                    UPDATE onboarding_steps
+                    SET status = 'needs_action', attempts = attempts + 1, last_error = $2, completed_at = NOW(), updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    step_id,
+                    message,
+                )
+                await conn.execute(
+                    """
+                    UPDATE onboarding_runs
+                    SET status = 'needs_action', last_error = $2, completed_at = NOW(), updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    run_id,
+                    message,
+                )
+                await _insert_audit_log(
+                    conn,
+                    company_id=company_id,
+                    employee_id=employee_id,
+                    run_id=run_id,
+                    step_id=step_id,
+                    actor_user_id=triggered_by,
+                    provider=PROVIDER_GOOGLE_WORKSPACE,
+                    action="provision_user",
+                    status="error",
+                    detail=message,
+                    error_code="invalid_stored_service_account",
+                )
+                return await _fetch_run_payload(conn, run_id)
+
         mode = config.get("mode") or "mock"
         if mode == "api_token" and not secrets.get("access_token"):
             message = "Google Workspace access token is missing"
