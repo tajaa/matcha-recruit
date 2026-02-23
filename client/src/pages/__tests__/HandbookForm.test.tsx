@@ -132,6 +132,8 @@ describe('HandbookForm (create wizard)', () => {
     );
 
     expect(screen.getByText('What should this handbook be called?')).toBeInTheDocument();
+    expect(screen.getByText('Helper Guidance')).toBeInTheDocument();
+    expect(screen.getByText(/This is the admin-visible name for your draft handbook/i)).toBeInTheDocument();
     expect(screen.queryByText('Which industry best matches this business?')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -141,6 +143,7 @@ describe('HandbookForm (create wizard)', () => {
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
     expect(screen.getByText('Is this handbook single-state or multi-state?')).toBeInTheDocument();
+    expect(screen.getByText(/Defines whether this draft governs one state or multiple states/i)).toBeInTheDocument();
     expect(screen.queryByText('What should this handbook be called?')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -151,5 +154,32 @@ describe('HandbookForm (create wizard)', () => {
 
     expect(screen.getByText('Select the state for this handbook')).toBeInTheDocument();
     expect(screen.queryByText('Which industry best matches this business?')).not.toBeInTheDocument();
+  });
+
+  it('shows industry and jurisdiction-specific helper guidance', async () => {
+    const { user } = render(
+      <MemoryRouter initialEntries={['/app/matcha/handbook/new']}>
+        <Routes>
+          <Route path="/app/matcha/handbook/new" element={<HandbookForm />} />
+          <Route path="/app/matcha/handbook/:id" element={<div>Handbook Detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+      { withRouter: false },
+    );
+
+    await user.type(screen.getByPlaceholderText('e.g. 2026 Employee Handbook'), 'CA Tech Handbook');
+    await user.click(screen.getByRole('button', { name: 'Next' })); // mode
+    await user.click(screen.getByRole('button', { name: 'Next' })); // source
+    await user.click(screen.getByRole('button', { name: 'Next' })); // industry
+
+    await user.selectOptions(screen.getByRole('combobox'), 'technology');
+    expect(screen.getByText(/For technology employers, handbook logic emphasizes remote\/hybrid operations/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Next' })); // sub industry
+    await user.click(screen.getByRole('button', { name: 'Next' })); // states
+
+    await user.click(screen.getByRole('button', { name: 'CA' }));
+    expect(screen.getByText(/CA generally requires stricter wage\/hour, break, and reimbursement handling/i)).toBeInTheDocument();
+    expect(screen.getByText(/For a CA tech startup, classify exempt\/non-exempt roles conservatively/i)).toBeInTheDocument();
   });
 });
