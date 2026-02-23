@@ -128,6 +128,7 @@ import type {
   HandbookGuidedDraftResponse,
   HandbookDistributionResult,
   HandbookAcknowledgementSummary,
+  HandbookReference,
   OfferLetter,
   OfferLetterCreate,
   OfferGuidanceRequest,
@@ -1670,6 +1671,18 @@ export const irIncidents = {
     request<IRAuditLogResponse>(`/ir/incidents/${incidentId}/audit-log?limit=${limit}&offset=${offset}`),
 };
 
+// Admin Handbook References API
+export const adminHandbookReferences = {
+  list: (path: string = '') =>
+    request<HandbookReference[]>(`/admin/handbook-references?path=${encodeURIComponent(path)}`),
+
+  getContent: (path: string) =>
+    request<{ content: string; name: string }>(`/admin/handbook-references/content?path=${encodeURIComponent(path)}`),
+
+  getFileUrl: (path: string) =>
+    `${API_BASE}/admin/handbook-references/file?path=${encodeURIComponent(path)}&token=${getAccessToken()}`,
+};
+
 // Admin Beta Access API
 export const adminBeta = {
   listCandidates: (): Promise<CandidateBetaListResponse> =>
@@ -2871,6 +2884,7 @@ export const api = {
   adminBeta,
   adminJurisdictions,
   adminSchedulers,
+  adminHandbookReferences,
   blogs,
   policies,
   handbooks,

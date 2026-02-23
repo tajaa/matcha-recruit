@@ -1999,6 +1999,13 @@ export interface HandbookListItem {
   published_at: string | null;
 }
 
+export interface HandbookReference {
+  name: string;
+  type: 'file' | 'directory';
+  path: string;
+  extension?: string;
+}
+
 export interface HandbookDetail {
   id: string;
   company_id: string;

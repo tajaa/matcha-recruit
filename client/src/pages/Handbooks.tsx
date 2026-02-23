@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { handbooks } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import type { HandbookListItem, HandbookStatus } from '../types';
-import { BookOpen, ChevronRight, Plus, Pencil, CheckCircle, Send } from 'lucide-react';
+import { BookOpen, ChevronRight, Plus, Pencil, CheckCircle, Send, ExternalLink, ShieldCheck } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 
 export function Handbooks() {
   const navigate = useNavigate();
+  const { hasRole } = useAuth();
   const [items, setItems] = useState<HandbookListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState<HandbookStatus | ''>('');
@@ -88,6 +90,32 @@ export function Handbooks() {
           Create Handbook
         </button>
       </div>
+
+      {hasRole('admin') && (
+        <div className="p-6 bg-zinc-900/50 border border-white/5 space-y-4">
+          <div className="flex items-center gap-2 text-zinc-400 mb-2">
+            <ShieldCheck size={14} className="text-matcha-500" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Master Admin Console</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold text-white uppercase tracking-tight">Industry Reference Benchmarks</h3>
+              <p className="text-xs text-zinc-500 leading-relaxed">
+                Access our internal library of gold-standard handbooks from industry leaders like Valve, Netflix, and GitLab to assist with client templating.
+              </p>
+            </div>
+            <div className="flex items-center justify-end">
+              <Link
+                to="/app/admin/handbooks"
+                className="flex items-center gap-2 px-4 py-2 border border-white/10 text-white hover:bg-white/5 text-[10px] font-bold uppercase tracking-widest transition-all"
+              >
+                Open Reference Library
+                <ExternalLink size={12} />
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div data-tour="handbooks-tabs" className="flex gap-8 border-b border-white/10 pb-px">
         {[
