@@ -1,3 +1,4 @@
+import json
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -3345,5 +3346,22 @@ async def init_db():
                 user_row["id"]
             )
             print("[DB] Created default admin user (admin@matcha.local)")
+
+        # Platform settings table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS platform_settings (
+                key VARCHAR(100) PRIMARY KEY,
+                value JSONB NOT NULL,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value)
+            VALUES ('visible_features', $1::jsonb)
+            ON CONFLICT (key) DO NOTHING
+            """,
+            json.dumps(["offer_letters","client_management","blog","policies","handbooks","er_copilot","onboarding","employees"])
+        )
 
         print("[DB] Tables initialized")

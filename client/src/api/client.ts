@@ -2896,3 +2896,13 @@ export const api = {
   internalMobilityAdmin,
   adminNews,
 };
+
+export const adminPlatformSettings = {
+  get: (): Promise<{ visible_features: string[] }> =>
+    request('/admin/platform-settings/features'),
+  update: (visible_features: string[]): Promise<{ visible_features: string[] }> =>
+    request('/admin/platform-settings/features', {
+      method: 'PUT',
+      body: JSON.stringify({ visible_features }),
+    }),
+};

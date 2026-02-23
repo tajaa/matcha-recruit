@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
-import { HelpCircle, X, ChevronDown } from 'lucide-react';
+import { HelpCircle, X, ChevronDown, Sliders } from 'lucide-react';
 import { PendingApproval } from './PendingApproval';
+import { PlatformFeatureManager } from '../pages/admin/PlatformFeatureManager';
 
 interface NavItem {
   path: string;
@@ -14,6 +15,7 @@ interface NavItem {
   feature?: string;
   anyFeature?: string[];
   helpText?: string;
+  platformKey?: string;
 }
 
 interface NavSection {
@@ -49,6 +51,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/overview',
         label: 'Overview',
         roles: ['admin'],
+        platformKey: 'admin_overview',
         helpText: 'View all businesses, employee counts, and platform-wide stats.',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -60,6 +63,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/business-registrations',
         label: 'Registrations',
         roles: ['admin'],
+        platformKey: 'client_management',
         helpText: 'Review and approve new business account registrations.',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -71,6 +75,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/company-features',
         label: 'Company Features',
         roles: ['admin'],
+        platformKey: 'company_features',
         helpText: 'Toggle features on/off per company.',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -82,6 +87,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/handbooks',
         label: 'Industry Handbooks',
         roles: ['admin'],
+        platformKey: 'industry_handbooks',
         helpText: 'Browse and reference industry-standard employee handbooks and culture memos.',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -93,6 +99,7 @@ const navSections: NavSection[] = [
         path: '/app/import',
         label: 'Import',
         roles: ['admin'],
+        platformKey: 'admin_import',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -110,6 +117,7 @@ const navSections: NavSection[] = [
         path: '/app/projects',
         label: 'Projects',
         roles: ['admin', 'client'],
+        platformKey: 'projects',
         helpText: 'Create recruiting pipelines, add candidates, send interview invites, and track pipeline stages.',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -122,6 +130,7 @@ const navSections: NavSection[] = [
         path: '/app/interviewer',
         label: 'Interviewer',
         roles: ['admin', 'client'],
+        platformKey: 'interviewer',
         betaFeature: 'interview_prep',
         helpText: 'Run live AI-powered culture, screening, and candidate-fit interviews.',
         icon: (
@@ -136,6 +145,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/candidate-metrics',
         label: 'Candidate Metrics',
         roles: ['admin', 'client'],
+        platformKey: 'candidate_metrics',
         feature: 'interview_prep',
         helpText: 'View session results, multi-signal rankings, and send AI-drafted reach-out emails to top candidates.',
         icon: (
@@ -148,6 +158,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/interview-prep',
         label: 'Interview Prep Beta',
         roles: ['admin'],
+        platformKey: 'interview_prep',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
@@ -158,6 +169,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/test-bot',
         label: 'Test Bot',
         roles: ['admin'],
+        platformKey: 'test_bot',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -175,6 +187,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/onboarding',
         label: 'Onboarding',
         roles: ['admin', 'client'],
+        platformKey: 'onboarding',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
@@ -185,6 +198,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/employees',
         label: 'Employees',
         roles: ['admin', 'client'],
+        platformKey: 'employees',
         feature: 'employees',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -196,6 +210,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/offer-letters',
         label: 'Offer Letters',
         roles: ['admin', 'client'],
+        platformKey: 'offer_letters',
         feature: 'offer_letters',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -207,6 +222,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/policies',
         label: 'Policies',
         roles: ['admin', 'client'],
+        platformKey: 'policies',
         feature: 'policies',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -218,6 +234,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/handbook',
         label: 'Handbooks',
         roles: ['admin', 'client'],
+        platformKey: 'handbooks',
         feature: 'handbooks',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -229,6 +246,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/pto',
         label: 'Time Off',
         roles: ['admin', 'client'],
+        platformKey: 'time_off',
         feature: 'time_off',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -240,6 +258,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/leave',
         label: 'Leave Cases',
         roles: ['admin', 'client'],
+        platformKey: 'time_off',
         feature: 'time_off',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -251,6 +270,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/accommodations',
         label: 'Accommodations',
         roles: ['admin', 'client'],
+        platformKey: 'accommodations',
         feature: 'accommodations',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -262,6 +282,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/internal-mobility',
         label: 'Internal Mobility',
         roles: ['admin', 'client'],
+        platformKey: 'internal_mobility',
         feature: 'internal_mobility',
         helpText: 'Publish internal opportunities and review employee applications before talent exits.',
         icon: (
@@ -275,6 +296,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/er-copilot',
         label: 'ER Copilot',
         roles: ['admin', 'client'],
+        platformKey: 'er_copilot',
         feature: 'er_copilot',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -286,6 +308,7 @@ const navSections: NavSection[] = [
         path: '/app/ir',
         label: 'Incidents',
         roles: ['admin', 'client'],
+        platformKey: 'incidents',
         feature: 'incidents',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -304,6 +327,7 @@ const navSections: NavSection[] = [
         path: '/app/xp/dashboard',
         label: 'XP Dashboard',
         roles: ['admin', 'client'],
+        platformKey: 'xp_dashboard',
         anyFeature: ['vibe_checks', 'enps', 'performance_reviews'],
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -315,6 +339,7 @@ const navSections: NavSection[] = [
         path: '/app/xp/vibe-checks',
         label: 'Vibe Checks',
         roles: ['admin', 'client'],
+        platformKey: 'vibe_checks',
         feature: 'vibe_checks',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -326,6 +351,7 @@ const navSections: NavSection[] = [
         path: '/app/xp/enps',
         label: 'eNPS Surveys',
         roles: ['admin', 'client'],
+        platformKey: 'enps',
         feature: 'enps',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -337,6 +363,7 @@ const navSections: NavSection[] = [
         path: '/app/xp/reviews',
         label: 'Performance Reviews',
         roles: ['admin', 'client'],
+        platformKey: 'performance_reviews',
         feature: 'performance_reviews',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -355,6 +382,7 @@ const navSections: NavSection[] = [
         path: '/app/matcha/compliance',
         label: 'Compliance',
         roles: ['admin', 'client'],
+        platformKey: 'compliance',
         feature: 'compliance',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -366,6 +394,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/jurisdictions',
         label: 'Jurisdictions',
         roles: ['admin'],
+        platformKey: 'jurisdictions',
         helpText: 'View compliance repository by city & state, manage scheduled checks.',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -411,6 +440,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/blog',
         label: 'Blog',
         roles: ['admin'],
+        platformKey: 'blog',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 4h9l3 3v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
@@ -422,6 +452,7 @@ const navSections: NavSection[] = [
         path: '/app/admin/news',
         label: 'HR News',
         roles: ['admin'],
+        platformKey: 'hr_news',
         helpText: 'Browse latest HR industry news from top sources like HR Dive, SHRM, and HR Morning.',
         icon: (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -591,8 +622,9 @@ const settingsItem: NavItem = {
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, profile, logout, hasRole, hasBetaFeature, hasFeature } = useAuth();
+  const { user, profile, logout, hasRole, hasBetaFeature, hasFeature, platformFeatures } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showFeatureManager, setShowFeatureManager] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
     () => new Set(navSections.map(s => s.title))
   );
@@ -637,6 +669,8 @@ export function Layout() {
       }
       return false;
     }
+    // Platform-level gate (admin-only: only admins have platformFeatures loaded)
+    if (user?.role === 'admin' && item.platformKey && !platformFeatures.has(item.platformKey)) return false;
     // Check company feature flag (admin bypassed inside hasFeature)
     if (item.feature && !hasFeature(item.feature)) return false;
     // Check if any of multiple features is enabled (e.g. XP Dashboard)
@@ -761,6 +795,15 @@ export function Layout() {
 
         {/* Bottom section - Settings & User */}
         <div className="border-t border-white/10 p-4">
+          {user?.role === 'admin' && (
+            <button
+              onClick={() => setShowFeatureManager(true)}
+              className="w-full flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase text-zinc-400 hover:text-white border-l-2 border-transparent hover:border-zinc-700 transition-all mb-3"
+            >
+              <Sliders className="w-4 h-4 shrink-0" />
+              <span>Manage Features</span>
+            </button>
+          )}
           <NavLink item={settingsItem} />
           <div className="mt-4 px-3 py-3 bg-zinc-900 border border-white/5">
             {companyName && (
@@ -782,6 +825,11 @@ export function Layout() {
             </div>
           </div>
         </div>
+        {showFeatureManager && (
+          <PlatformFeatureManager
+            onClose={() => setShowFeatureManager(false)}
+          />
+        )}
       </aside>
 
       {/* Mobile Header - visible only on mobile */}

@@ -14,6 +14,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
     "@tanstack/react-query": "^5.90.12",
     "@types/three": "^0.182.0",
     "date-fns": "^4.1.0",

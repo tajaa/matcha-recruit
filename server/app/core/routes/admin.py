@@ -32,6 +32,18 @@ from ...config import get_settings
 
 router = APIRouter()
 
+KNOWN_PLATFORM_ITEMS = {
+    "admin_overview", "client_management", "company_features", "industry_handbooks", "admin_import",
+    "projects", "interviewer", "candidate_metrics", "interview_prep", "test_bot",
+    "onboarding", "employees", "offer_letters", "policies", "handbooks", "time_off",
+    "accommodations", "internal_mobility", "er_copilot", "incidents",
+    "xp_dashboard", "vibe_checks", "enps", "performance_reviews",
+    "compliance", "jurisdictions", "blog", "hr_news",
+}
+
+class PlatformFeaturesUpdate(BaseModel):
+    visible_features: list[str]
+
 
 STRICT_CONFIDENCE_THRESHOLD = 0.95
 MAX_CONFIDENCE_REFETCH_ATTEMPTS = 2
@@ -3636,3 +3648,33 @@ async def update_poster_order(order_id: UUID, request: PosterOrderUpdateRequest)
         )
 
         return {"status": "updated", "order_id": str(order_id)}
+
+
+@router.get("/platform-settings/features")
+async def get_platform_features(admin=Depends(require_admin)):
+    async with get_connection() as conn:
+        raw = await conn.fetchval(
+            "SELECT value FROM platform_settings WHERE key = 'visible_features'"
+        )
+    visible = json.loads(raw) if raw else ["offer_letters","client_management","blog","policies","handbooks","er_copilot","onboarding","employees"]
+    return {"visible_features": visible}
+
+
+@router.put("/platform-settings/features")
+async def update_platform_features(
+    body: PlatformFeaturesUpdate,
+    admin=Depends(require_admin)
+):
+    unknown = [k for k in body.visible_features if k not in KNOWN_PLATFORM_ITEMS]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown feature keys: {unknown}")
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value, updated_at)
+            VALUES ('visible_features', $1::jsonb, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            json.dumps(body.visible_features)
+        )
+    return {"visible_features": body.visible_features}

@@ -375,6 +375,24 @@ def require_feature(feature_name: str):
         if current_user.role == "admin":
             return current_user
 
+        # Platform-level visibility check (non-admins blocked if feature is a known
+        # platform item and has been shelved by the admin).
+        # Sub-flags like compliance_plus / offer_letters_plus are not platform items
+        # and bypass this check — they are governed solely by company feature flags.
+        from ..core.routes.admin import KNOWN_PLATFORM_ITEMS
+        if feature_name in KNOWN_PLATFORM_ITEMS:
+            import json as _json
+            async with get_connection() as conn:
+                _raw = await conn.fetchval(
+                    "SELECT value FROM platform_settings WHERE key = 'visible_features'"
+                )
+                _visible = _json.loads(_raw) if _raw else []
+                if feature_name not in _visible:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"'{feature_name}' is not currently available"
+                    )
+
         scope = await resolve_accessible_company_scope(current_user)
         company_id = scope.get("company_id")
         if not company_id:

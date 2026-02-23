@@ -8,7 +8,7 @@ import type {
   UserRole,
   EnabledFeatures,
 } from '../types';
-import { auth, getAccessToken, clearTokens } from '../api/client';
+import { auth, adminPlatformSettings, getAccessToken, clearTokens } from '../api/client';
 
 interface AuthContextType {
   user: User | null;
@@ -28,6 +28,8 @@ interface AuthContextType {
   hasBetaFeature: (feature: string) => boolean;
   hasFeature: (feature: string) => boolean;
   refreshUser: () => Promise<void>;
+  platformFeatures: Set<string>;
+  setPlatformFeatures: (features: Set<string>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,6 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [companyFeatures, setCompanyFeatures] = useState<EnabledFeatures>({});
   const [onboardingNeeded, setOnboardingNeeded] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const [platformFeatures, setPlatformFeatures] = useState<Set<string>>(new Set());
   const loadingRef = useRef(false);
 
   const extractCompanyFeatures = (profileData: any): EnabledFeatures => {
@@ -77,6 +80,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAllowedInterviewRoles(data.user.allowed_interview_roles || []);
       setCompanyFeatures(extractCompanyFeatures(data.profile));
       setOnboardingNeeded(data.onboarding_needed || {});
+      // Load platform features for admin
+      if (data.user.role === 'admin') {
+        try {
+          const pfData = await adminPlatformSettings.get();
+          setPlatformFeatures(new Set(pfData.visible_features));
+        } catch (err) {
+          console.warn('Failed to load platform features:', err);
+        }
+      }
     } catch (err) {
       // Only clear tokens and user for auth errors (401), not server errors
       const isAuthError = err instanceof Error &&
@@ -140,6 +152,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAllowedInterviewRoles(profileData.user.allowed_interview_roles || []);
         setCompanyFeatures(extractCompanyFeatures(profileData.profile));
         setOnboardingNeeded(profileData.onboarding_needed || {});
+        // Load platform features for admin
+        if (profileData.user.role === 'admin') {
+          try {
+            const pfData = await adminPlatformSettings.get();
+            setPlatformFeatures(new Set(pfData.visible_features));
+          } catch (err) {
+            console.warn('Failed to load platform features:', err);
+          }
+        }
       } catch (err) {
         // Profile load failed, but login succeeded - keep the basic user info
         console.warn('Failed to load full profile after login:', err);
@@ -157,6 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setCompanyFeatures({});
     setOnboardingNeeded({});
+    setPlatformFeatures(new Set());
   };
 
   const registerBusiness = async (data: BusinessRegister) => {
@@ -220,6 +242,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         hasBetaFeature,
         hasFeature,
         refreshUser,
+        platformFeatures,
+        setPlatformFeatures,
       }}
     >
       {children}
