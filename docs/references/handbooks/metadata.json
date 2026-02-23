@@ -1,0 +1,81 @@
+{
+  "categories": [
+    {
+      "id": "remote-first",
+      "title": "Remote-First Pioneers",
+      "description": "Best practices for asynchronous communication, remote operations, and global culture.",
+      "references": [
+        {
+          "name": "GitLab Values (CREDIT)",
+          "path": "gitlab-values.md",
+          "type": "markdown",
+          "industry": "Software / DevOps",
+          "highlight": "Comprehensive all-remote framework"
+        },
+        {
+          "name": "Basecamp Handbook",
+          "path": "basecamp-handbook",
+          "type": "directory",
+          "industry": "Software / Productivity",
+          "highlight": "Human-centric, straightforward policies"
+        }
+      ]
+    },
+    {
+      "id": "culture-hierarchy",
+      "title": "Culture & Hierarchy",
+      "description": "Innovative approaches to company structure, performance, and behavioral values.",
+      "references": [
+        {
+          "name": "Valve New Employee Handbook",
+          "path": "Valve_NewEmployeeHandbook.pdf",
+          "type": "pdf",
+          "industry": "Gaming / Creative",
+          "highlight": "Famous flat-hierarchy onboarding"
+        },
+        {
+          "name": "Netflix Culture Memo",
+          "path": "netflix-culture.md",
+          "type": "markdown",
+          "industry": "Entertainment / Tech",
+          "highlight": "High-performance 'Dream Team' logic"
+        },
+        {
+          "name": "HubSpot Culture Code",
+          "path": "hubspot-culture.md",
+          "type": "markdown",
+          "industry": "SaaS / Marketing",
+          "highlight": "HEART values and customer-first mindset"
+        }
+      ]
+    },
+    {
+      "id": "retail-service",
+      "title": "Retail & Service",
+      "description": "Benchmarking for customer-facing operations and service excellence.",
+      "references": [
+        {
+          "name": "Zappos Core Values",
+          "path": "zappos-values.md",
+          "type": "markdown",
+          "industry": "Retail / E-commerce",
+          "highlight": "Delivering WOW through service"
+        }
+      ]
+    },
+    {
+      "id": "modern-templates",
+      "title": "Modern SaaS Templates",
+      "description": "Modular, policy-heavy templates ready for adaptation.",
+      "references": [
+        {
+          "name": "Sparksuite Handbook",
+          "path": "sparksuite-handbook",
+          "type": "directory",
+          "industry": "Technology",
+          "highlight": "Modern, transparent policy modules"
+        }
+      ]
+    }
+  ]
+}
