@@ -35,7 +35,7 @@ Update EC2 deployments by pulling latest images and restarting containers.
 OPTIONS:
     --matcha         Update Matcha-Recruit (ports 8002/8082)
     --gumm-local     Update gumm-local (ports 8004/8084)
-    --oceaneca       Update Oceaneca/Drooli (ports 8001/8080)
+    --oceaneca       Update Oceaneca (ports 8001/8080)
     --all            Update all apps
     --status         Show status of all containers
     -h, --help       Show this help message
@@ -69,8 +69,8 @@ pre_cleanup() {
     log_info "Freeing up disk space before pull..."
     # Gracefully stop workers with 60s timeout to let them finish current job
     log_info "Stopping workers gracefully (60s timeout)..."
-    ssh_cmd "docker stop -t 60 matcha-worker drooli-worker 2>/dev/null || true"
-    ssh_cmd "docker rm matcha-worker drooli-worker 2>/dev/null || true"
+    ssh_cmd "docker stop -t 60 matcha-worker 2>/dev/null || true"
+    ssh_cmd "docker rm matcha-worker 2>/dev/null || true"
     # Remove all stopped containers
     ssh_cmd "docker container prune -f" || true
     # Remove ALL unused images (not just dangling) - running containers keep their images
