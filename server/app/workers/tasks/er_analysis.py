@@ -9,6 +9,7 @@ Handles AI-powered analysis:
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -307,29 +308,33 @@ def run_discrepancy_analysis(self, case_id: str) -> dict[str, Any]:
 # Policy Check
 # ===========================================
 
-async def _get_company_policies(conn, case_id: str) -> list[dict]:
-    """Get all active policies for the company that owns this ER case."""
+def _text_fingerprint(value: str) -> str:
+    normalized = " ".join((value or "").split()).strip().lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+async def _extract_text_from_file_url(file_url: str, fallback_filename: str) -> str:
+    """Download a file from storage and extract plain text for analysis."""
     from app.core.services.storage import get_storage
     from app.matcha.services.er_document_parser import ERDocumentParser
     from urllib.parse import urlparse, unquote
     import os
 
-    # Resolve the company from the case itself first (source of truth), then creator fallback.
-    company_id = await conn.fetchval(
-        """
-        SELECT COALESCE(ec.company_id, cl.company_id, (SELECT id FROM companies ORDER BY created_at LIMIT 1))
-        FROM er_cases ec
-        LEFT JOIN users u ON ec.created_by = u.id
-        LEFT JOIN clients cl ON u.id = cl.user_id
-        WHERE ec.id = $1
-        """,
-        case_id,
-    )
+    storage = get_storage()
+    parser = ERDocumentParser()
 
-    if not company_id:
-        return []
+    parsed_path = urlparse(file_url).path
+    filename = os.path.basename(unquote(parsed_path)) or fallback_filename
+    if "." not in filename:
+        filename = f"{filename}.txt"
 
-    # Get all active policies for this company
+    file_bytes = await storage.download_file(file_url)
+    parsed = parser.parse_document(file_bytes, filename)
+    return parsed.text.strip()
+
+
+async def _get_company_policy_records(conn, company_id: str) -> list[dict]:
+    """Get all active policies configured in the Policies module."""
     rows = await conn.fetch(
         """
         SELECT id, title, content, file_url
@@ -340,24 +345,16 @@ async def _get_company_policies(conn, case_id: str) -> list[dict]:
         company_id,
     )
 
-    storage = get_storage()
-    parser = ERDocumentParser()
     policies: list[dict] = []
-
     for row in rows:
         text = (row["content"] or "").strip()
-
-        # Fallback: extract text from uploaded policy file when content is empty.
         if not text and row["file_url"]:
             file_url = str(row["file_url"])
             try:
-                parsed_path = urlparse(file_url).path
-                filename = os.path.basename(unquote(parsed_path)) or f"policy-{row['id']}.txt"
-                if "." not in filename:
-                    filename = f"{filename}.txt"
-                file_bytes = await storage.download_file(file_url)
-                parsed = parser.parse_document(file_bytes, filename)
-                text = parsed.text.strip()
+                text = await _extract_text_from_file_url(
+                    file_url,
+                    fallback_filename=f"policy-{row['id']}.txt",
+                )
             except Exception as exc:
                 logger.warning(
                     "Failed to parse active policy %s (%s) from %s: %s",
@@ -373,6 +370,7 @@ async def _get_company_policies(conn, case_id: str) -> list[dict]:
                     "id": str(row["id"]),
                     "title": row["title"],
                     "text": text,
+                    "source_kind": "policy",
                 }
             )
         else:
@@ -385,29 +383,196 @@ async def _get_company_policies(conn, case_id: str) -> list[dict]:
     return policies
 
 
+async def _get_active_handbook_record(conn, company_id: str) -> Optional[dict]:
+    """Get the currently active handbook content for the company, if any."""
+    handbook_row = await conn.fetchrow(
+        """
+        SELECT id, title, source_type, file_url, file_name, active_version
+        FROM handbooks
+        WHERE company_id = $1 AND status = 'active'
+        ORDER BY published_at DESC NULLS LAST, updated_at DESC, created_at DESC
+        LIMIT 1
+        """,
+        company_id,
+    )
+    if not handbook_row:
+        return None
+
+    handbook_id = str(handbook_row["id"])
+    handbook_title = handbook_row["title"] or "Employee Handbook"
+    handbook_text = ""
+
+    version_id = await conn.fetchval(
+        """
+        SELECT id
+        FROM handbook_versions
+        WHERE handbook_id = $1 AND version_number = $2
+        """,
+        handbook_row["id"],
+        handbook_row["active_version"],
+    )
+    if version_id is None:
+        version_id = await conn.fetchval(
+            """
+            SELECT id
+            FROM handbook_versions
+            WHERE handbook_id = $1
+            ORDER BY version_number DESC
+            LIMIT 1
+            """,
+            handbook_row["id"],
+        )
+
+    if version_id is not None:
+        section_rows = await conn.fetch(
+            """
+            SELECT title, content
+            FROM handbook_sections
+            WHERE handbook_version_id = $1
+            ORDER BY section_order ASC, created_at ASC
+            """,
+            version_id,
+        )
+        section_blocks = []
+        for row in section_rows:
+            content = (row["content"] or "").strip()
+            if not content:
+                continue
+            title = (row["title"] or "").strip()
+            if title:
+                section_blocks.append(f"{title}\n{content}")
+            else:
+                section_blocks.append(content)
+        handbook_text = "\n\n".join(section_blocks).strip()
+
+    if not handbook_text and handbook_row["file_url"]:
+        file_url = str(handbook_row["file_url"])
+        try:
+            handbook_text = await _extract_text_from_file_url(
+                file_url,
+                fallback_filename=handbook_row["file_name"] or f"handbook-{handbook_id}.pdf",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to parse active handbook %s (%s) from %s: %s",
+                handbook_id,
+                handbook_title,
+                file_url,
+                exc,
+            )
+
+    if not handbook_text:
+        logger.info(
+            "Skipping active handbook %s (%s): no usable text content",
+            handbook_id,
+            handbook_title,
+        )
+        return None
+
+    return {
+        "id": f"handbook:{handbook_id}",
+        "title": f"Handbook: {handbook_title}",
+        "text": handbook_text,
+        "source_kind": "handbook",
+    }
+
+
+async def _get_case_policy_documents(conn, case_id: str) -> list[dict]:
+    """Get completed policy documents uploaded directly to this ER case."""
+    rows = await conn.fetch(
+        """
+        SELECT id, filename, scrubbed_text
+        FROM er_case_documents
+        WHERE case_id = $1 AND document_type = 'policy' AND processing_status = 'completed'
+        ORDER BY created_at ASC
+        """,
+        case_id,
+    )
+
+    documents: list[dict] = []
+    for row in rows:
+        text = (row["scrubbed_text"] or "").strip()
+        if not text:
+            continue
+        documents.append(
+            {
+                "id": f"erdoc:{row['id']}",
+                "title": f"Case Policy: {row['filename'] or row['id']}",
+                "text": text,
+                "source_kind": "case_policy",
+            }
+        )
+    return documents
+
+
+async def _get_policy_sources(conn, case_id: str) -> list[dict]:
+    """Get all policy text sources relevant for ER policy checks."""
+    # Resolve the company from the case itself first (source of truth), then creator fallback.
+    company_id = await conn.fetchval(
+        """
+        SELECT COALESCE(ec.company_id, cl.company_id, (SELECT id FROM companies ORDER BY created_at LIMIT 1))
+        FROM er_cases ec
+        LEFT JOIN users u ON ec.created_by = u.id
+        LEFT JOIN clients cl ON u.id = cl.user_id
+        WHERE ec.id = $1
+        """,
+        case_id,
+    )
+
+    if not company_id:
+        return []
+
+    source_docs: list[dict] = []
+    seen_fingerprints: set[str] = set()
+
+    def add_source(doc: Optional[dict]) -> None:
+        if not doc:
+            return
+        text = (doc.get("text") or "").strip()
+        if not text:
+            return
+        fingerprint = _text_fingerprint(text)
+        if fingerprint in seen_fingerprints:
+            return
+        seen_fingerprints.add(fingerprint)
+        source_docs.append(doc)
+
+    for policy_doc in await _get_company_policy_records(conn, str(company_id)):
+        add_source(policy_doc)
+
+    add_source(await _get_active_handbook_record(conn, str(company_id)))
+
+    for case_policy_doc in await _get_case_policy_documents(conn, case_id):
+        add_source(case_policy_doc)
+
+    return source_docs
+
+
 async def _run_policy_check(case_id: str) -> dict[str, Any]:
-    """Run policy violation check against all company policies."""
+    """Run policy violation check against company policy sources."""
     analyzer = _build_er_analyzer()
 
     conn = await get_db_connection()
     try:
-        # Progress: Loading documents
+        # Progress: Loading policy sources
         _safe_publish_progress(
             channel=f"er_case:{case_id}",
             task_type="policy_check",
             entity_id=case_id,
             progress=1,
             total=4,
-            message="Loading company policies...",
+            message="Loading policy sources...",
         )
 
-        # Get all company policies
-        policies = await _get_company_policies(conn, case_id)
+        # Get all policy sources (active policies, active handbook, case-uploaded policy docs).
+        policies = await _get_policy_sources(conn, case_id)
 
         if not policies:
-            raise ValueError("No active policies found for this company. Please add policies in the Policies section.")
+            raise ValueError(
+                "No policy sources found. Add active policies, publish a handbook, or upload policy documents to this case."
+            )
 
-        total_steps = len(policies) + 3  # load policies + load evidence + each policy check + save
+        total_steps = len(policies) + 3  # load sources + load evidence + each source check + save
 
         # Progress: Loading evidence
         _safe_publish_progress(
@@ -416,7 +581,7 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
             entity_id=case_id,
             progress=2,
             total=total_steps,
-            message=f"Found {len(policies)} policies. Loading evidence documents...",
+            message=f"Found {len(policies)} policy sources. Loading evidence documents...",
         )
 
         # Get evidence documents
@@ -429,7 +594,7 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
         applicable_policies: list[str] = []
         policy_summaries: list[str] = []
 
-        # Analyze each policy individually so every active policy is checked.
+        # Analyze each policy source individually so all available inputs are checked.
         for idx, policy in enumerate(policies):
             _safe_publish_progress(
                 channel=f"er_case:{case_id}",
@@ -437,7 +602,7 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
                 entity_id=case_id,
                 progress=3 + idx,
                 total=total_steps,
-                message=f"Checking policy {idx + 1}/{len(policies)}: {policy['title']}",
+                message=f"Checking source {idx + 1}/{len(policies)}: {policy['title']}",
             )
 
             policy_doc = {
@@ -463,11 +628,11 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
 
         if all_violations:
             summary_text = (
-                f"Checked {len(policies)} active policies and identified "
+                f"Checked {len(policies)} policy source(s) and identified "
                 f"{len(all_violations)} potential violation(s)."
             )
         else:
-            summary_text = f"Checked {len(policies)} active policies. No policy violations identified."
+            summary_text = f"Checked {len(policies)} policy source(s). No policy violations identified."
 
         if policy_summaries:
             preview = " ".join(policy_summaries[:3])
