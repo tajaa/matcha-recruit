@@ -5,9 +5,7 @@ import {
   ChevronRight, 
   ArrowLeft, 
   Download, 
-  ExternalLink,
   BookOpen,
-  Info,
   ShieldCheck,
   Tag,
   Layers
@@ -38,6 +36,8 @@ interface MetadataRoot {
 export default function IndustryHandbooks() {
   const [items, setItems] = useState<HandbookReference[]>([]);
   const [metadata, setMetadata] = useState<MetadataRoot | null>(null);
+  const [metadataLoaded, setMetadataLoaded] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
   const [currentPath, setCurrentPath] = useState('');
   const [selectedFile, setSelectedFile] = useState<{ name: string, content: string, path: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,17 +48,26 @@ export default function IndustryHandbooks() {
   }, []);
 
   useEffect(() => {
-    if (currentPath || selectedFile) {
+    if (currentPath || metadataError) {
       loadItems(currentPath);
     }
-  }, [currentPath, selectedFile]);
+  }, [currentPath, metadataError]);
 
   const loadMetadata = async () => {
     try {
       const { content } = await adminHandbookReferences.getContent('metadata.json');
-      setMetadata(JSON.parse(content));
+      const parsed = JSON.parse(content) as MetadataRoot;
+      if (!parsed || !Array.isArray(parsed.categories)) {
+        throw new Error('Invalid metadata shape');
+      }
+      setMetadata(parsed);
+      setMetadataError(null);
     } catch (err) {
       console.error('Failed to load metadata:', err);
+      setMetadata(null);
+      setMetadataError('Metadata unavailable. Showing raw reference library.');
+    } finally {
+      setMetadataLoaded(true);
     }
   };
 
@@ -181,6 +190,14 @@ export default function IndustryHandbooks() {
         </div>
       )}
 
+      {metadataError && !selectedFile && (
+        <div className="p-4 bg-amber-950/20 border border-amber-500/20 rounded-sm">
+          <p className="text-[10px] text-amber-300 font-mono uppercase tracking-widest">
+            {metadataError}
+          </p>
+        </div>
+      )}
+
       {selectedFile ? (
         <div className="bg-zinc-950 border border-white/10 rounded-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-white/10 bg-zinc-900/50 flex items-center justify-between">
@@ -206,7 +223,7 @@ export default function IndustryHandbooks() {
             )}
           </div>
         </div>
-      ) : currentPath ? (
+      ) : (currentPath || metadataError) ? (
         <div className="grid grid-cols-1 gap-px bg-white/10 border border-white/10">
           {loading ? (
             Array.from({ length: 6 }).map((_, i) => (
@@ -295,7 +312,7 @@ export default function IndustryHandbooks() {
             </div>
           ))}
           
-          {!metadata && (
+          {!metadataLoaded && (
             <div className="flex items-center justify-center py-24 border border-dashed border-white/10">
               <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 animate-pulse">Initializing Library...</p>
             </div>

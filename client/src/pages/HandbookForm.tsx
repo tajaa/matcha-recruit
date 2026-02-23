@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Upload, X, Plus, CheckCircle2, Sparkles } from 'lucide-react';
 import { handbooks } from '../api/client';
 import { complianceAPI } from '../api/compliance';
+import type { BusinessLocation } from '../api/compliance';
 import type {
   CompanyHandbookProfile,
   HandbookGuidedQuestion,
@@ -119,6 +120,7 @@ export function HandbookForm() {
   const [guidedSummary, setGuidedSummary] = useState<string | null>(null);
   const [guidedLoading, setGuidedLoading] = useState(false);
   const [guidedError, setGuidedError] = useState<string | null>(null);
+  const [companyLocations, setCompanyLocations] = useState<BusinessLocation[]>([]);
   const [locationsStates, setLocationsStates] = useState<string[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
 
@@ -139,6 +141,7 @@ export function HandbookForm() {
         }
 
         const states = Array.from(new Set((locations || []).map((loc) => (loc.state || '').toUpperCase()).filter(Boolean))).sort();
+        setCompanyLocations(locations || []);
         setLocationsStates(states);
       } catch {
         // Non-blocking defaults fetch; keep wizard usable with static state list.
@@ -259,6 +262,40 @@ export function HandbookForm() {
     return enrichedAnswers;
   };
 
+  const buildScopesFromSelectedStates = (states: string[]): Omit<HandbookScope, 'id'>[] => {
+    const normalizedStates = states.map((state) => state.toUpperCase());
+    const selectedStateSet = new Set(normalizedStates);
+    const locationScopes = (companyLocations || [])
+      .filter((loc) => selectedStateSet.has((loc.state || '').toUpperCase()))
+      .map((loc) => ({
+        state: (loc.state || '').toUpperCase(),
+        city: loc.city || null,
+        zipcode: loc.zipcode || null,
+        location_id: loc.id || null,
+      }));
+
+    const dedupedLocationScopes: Omit<HandbookScope, 'id'>[] = [];
+    const seen = new Set<string>();
+    for (const scope of locationScopes) {
+      const key = `${scope.state}|${scope.city || ''}|${scope.zipcode || ''}|${scope.location_id || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dedupedLocationScopes.push(scope);
+    }
+
+    const statesCoveredByLocations = new Set(dedupedLocationScopes.map((scope) => scope.state));
+    const fallbackStateScopes = normalizedStates
+      .filter((state) => !statesCoveredByLocations.has(state))
+      .map((state) => ({
+        state,
+        city: null,
+        zipcode: null,
+        location_id: null,
+      }));
+
+    return [...dedupedLocationScopes, ...fallbackStateScopes];
+  };
+
   const handleGenerateGuidedDraft = async () => {
     setGuidedError(null);
     setError(null);
@@ -271,12 +308,7 @@ export function HandbookForm() {
     }
 
     const normalizedSelectedStates = selectedStates.map((state) => state.toUpperCase());
-    const scopes = normalizedSelectedStates.map((state) => ({
-      state,
-      city: null,
-      zipcode: null,
-      location_id: null,
-    }));
+    const scopes = buildScopesFromSelectedStates(normalizedSelectedStates);
 
     const normalizedProfile: CompanyHandbookProfile = {
       ...profile,
@@ -411,6 +443,7 @@ export function HandbookForm() {
     try {
       setLoading(true);
       const normalizedSelectedStates = selectedStates.map((state) => state.toUpperCase());
+      const locationBackedScopes = buildScopesFromSelectedStates(normalizedSelectedStates);
       const scopes = isEditing
         ? (() => {
             const selectedStateSet = new Set(normalizedSelectedStates);
@@ -422,23 +455,18 @@ export function HandbookForm() {
                 zipcode: scope.zipcode ?? null,
                 location_id: scope.location_id ?? null,
               }));
-            const retainedStates = new Set(retainedScopes.map((scope) => scope.state));
-            const newStateScopes = normalizedSelectedStates
-              .filter((state) => !retainedStates.has(state))
-              .map((state) => ({
-                state,
-                city: null,
-                zipcode: null,
-                location_id: null,
-              }));
+            const retainedScopeKeys = new Set(
+              retainedScopes.map(
+                (scope) => `${scope.state}|${scope.city || ''}|${scope.zipcode || ''}|${scope.location_id || ''}`
+              )
+            );
+            const newStateScopes = locationBackedScopes.filter((scope) => {
+              const key = `${scope.state}|${scope.city || ''}|${scope.zipcode || ''}|${scope.location_id || ''}`;
+              return !retainedScopeKeys.has(key);
+            });
             return [...retainedScopes, ...newStateScopes];
           })()
-        : normalizedSelectedStates.map((state) => ({
-            state,
-            city: null,
-            zipcode: null,
-            location_id: null,
-          }));
+        : locationBackedScopes;
 
       const normalizedProfile: CompanyHandbookProfile = {
         ...profile,
@@ -462,6 +490,7 @@ export function HandbookForm() {
           title: title.trim(),
           mode,
           source_type: sourceType,
+          industry: sourceType === 'template' ? industry : null,
           scopes,
           profile: normalizedProfile,
           create_from_template: sourceType === 'template',
@@ -603,6 +632,10 @@ export function HandbookForm() {
 
           <p className="text-[11px] text-zinc-500">
             Generate boilerplate from your industry + workforce profile, then answer only unresolved follow-up questions.
+          </p>
+          <p className="text-[11px] text-amber-300/90 border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            Matcha generates state and city compliance boilerplate for the selected scope. Any company-authored culture
+            or custom policy language is employer-owned and should be reviewed by your counsel before publication.
           </p>
 
           <div className="flex flex-wrap gap-2">
@@ -870,6 +903,9 @@ export function HandbookForm() {
             Boilerplate comes from the Business Profile policy pack. Use custom sections for company-specific rules or exceptions.
             {guidedQuestions.length > 0 ? ` ${unansweredGuidedCount} follow-up question(s) still open.` : ''}
           </p>
+          <p className="text-[11px] text-amber-300/90 border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            Custom sections are not statutory boilerplate. Your team is legally responsible for custom culture and policy language.
+          </p>
           {guidedSummary && (
             <p className="text-xs text-zinc-300 leading-relaxed">{guidedSummary}</p>
           )}
@@ -973,6 +1009,11 @@ export function HandbookForm() {
         )}
         {sourceType === 'template' && (
           <div><span className="text-zinc-500">Custom Sections:</span> {customSections.filter((s) => s.title.trim()).length}</div>
+        )}
+        {sourceType === 'template' && (
+          <div className="text-amber-300">
+            <span className="text-zinc-500">Liability Notice:</span> Matcha supplies state/city boilerplate; custom sections are employer-authored and require your legal review.
+          </div>
         )}
       </div>
     </div>

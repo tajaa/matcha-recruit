@@ -2029,6 +2029,7 @@ export interface HandbookCreate {
   title: string;
   mode: HandbookMode;
   source_type: HandbookSourceType;
+  industry?: string | null;
   scopes: Omit<HandbookScope, 'id'>[];
   profile: CompanyHandbookProfile;
   custom_sections?: HandbookSection[];

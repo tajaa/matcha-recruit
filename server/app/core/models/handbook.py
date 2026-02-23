@@ -50,6 +50,7 @@ class HandbookCreateRequest(BaseModel):
     title: str = Field(..., min_length=2, max_length=500)
     mode: HandbookMode = "single_state"
     source_type: HandbookSourceType = "template"
+    industry: Optional[str] = Field(default=None, max_length=120)
     scopes: list[HandbookScopeInput]
     profile: CompanyHandbookProfileInput
     custom_sections: list[HandbookSectionInput] = Field(default_factory=list)

@@ -110,6 +110,24 @@ ADDENDUM_KEYWORD_PATTERNS = (
     "%domestic violence%",
 )
 
+STRICT_TEMPLATE_INDUSTRIES = {"hospitality"}
+
+MANDATORY_STATE_TOPIC_RULES: dict[str, tuple[str, ...]] = {
+    "minimum_wage": ("minimum_wage", "minimum wage", "wage floor"),
+    "overtime": ("overtime", "ot", "time and a half"),
+    "pay_frequency": ("pay_frequency", "pay frequency", "payday", "pay period"),
+    "sick_leave": ("sick_leave", "paid sick", "sick leave"),
+    "meal_breaks": ("meal_break", "meal period", "rest break", "meal and rest"),
+}
+
+MANDATORY_STATE_TOPIC_LABELS: dict[str, str] = {
+    "minimum_wage": "minimum wage",
+    "overtime": "overtime",
+    "pay_frequency": "pay frequency",
+    "sick_leave": "paid sick leave",
+    "meal_breaks": "meal/rest breaks",
+}
+
 LEGAL_OPERATIONAL_HOOKS = {
     "hr_contact_email": "[HR_CONTACT_EMAIL]",
     "leave_admin_email": "[LEAVE_ADMIN_EMAIL]",
@@ -466,6 +484,48 @@ def _normalize_profile(profile: CompanyHandbookProfileInput) -> dict[str, Any]:
     }
 
 
+def _normalize_city_token(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    token = re.sub(r"[^a-z0-9]+", " ", value.strip().lower())
+    token = re.sub(r"\s+", " ", token).strip()
+    return token
+
+
+def _city_matches_scope(requirement_city: str, scoped_cities: set[str]) -> bool:
+    req = _normalize_city_token(requirement_city)
+    if not req or not scoped_cities:
+        return False
+    req_tokens = set(req.split())
+    for scoped in scoped_cities:
+        if req == scoped or req.startswith(f"{scoped} ") or scoped.startswith(f"{req} "):
+            return True
+        scoped_tokens = set(scoped.split())
+        if req_tokens and scoped_tokens and (
+            req_tokens.issubset(scoped_tokens) or scoped_tokens.issubset(req_tokens)
+        ):
+            return True
+    return False
+
+
+def _collect_state_city_scope(
+    scopes: list[dict[str, Any]],
+) -> tuple[list[str], dict[str, list[str]], dict[str, set[str]]]:
+    states = sorted({(scope.get("state") or "").strip().upper() for scope in scopes if scope.get("state")})
+    city_labels: dict[str, list[str]] = {}
+    city_tokens: dict[str, set[str]] = {}
+    for scope in scopes:
+        state = (scope.get("state") or "").strip().upper()
+        city = (scope.get("city") or "").strip()
+        if not state or not city:
+            continue
+        city_labels.setdefault(state, [])
+        if city not in city_labels[state]:
+            city_labels[state].append(city)
+        city_tokens.setdefault(state, set()).add(_normalize_city_token(city))
+    return states, city_labels, city_tokens
+
+
 def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) -> list[dict[str, Any]]:
     legal_name = profile["legal_name"]
     dba = profile.get("dba")
@@ -635,6 +695,18 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             ),
         },
         {
+            "section_key": "custom_policy_responsibility",
+            "title": "Employer-Custom Policy Responsibility",
+            "section_order": 85,
+            "section_type": "core",
+            "jurisdiction_scope": {"mode": mode, "states": states},
+            "content": (
+                "State and city addenda in this handbook are generated from verified jurisdiction requirements and are limited to baseline statutory controls. "
+                "Any employer-authored custom sections, culture language, operating standards, or benefit promises are drafted at employer direction and remain the employer's legal responsibility. "
+                "The employer must obtain legal review before publishing or enforcing custom handbook language."
+            ),
+        },
+        {
             "section_key": "acknowledgement",
             "title": "Employee Acknowledgement",
             "section_order": 90,
@@ -714,6 +786,7 @@ def _build_state_addendum_content(
     state_name: str,
     profile: dict[str, Any],
     requirements: list[dict[str, Any]],
+    selected_cities: Optional[list[str]] = None,
 ) -> str:
     def _category_rows(category: str) -> list[dict[str, Any]]:
         rows = [req for req in requirements if (req.get("category") or "").strip().lower() == category]
@@ -773,6 +846,10 @@ def _build_state_addendum_content(
         if len(source_refs) >= 4:
             break
 
+    city_rows = [
+        req for req in requirements if (req.get("jurisdiction_level") or "").strip().lower() == "city"
+    ]
+
     lines: list[str] = [
         f"This addendum applies to employees working in {state_name}.",
         "Where state and local rules differ, the rule that provides greater employee protection controls.",
@@ -782,9 +859,26 @@ def _build_state_addendum_content(
             f"Harassment Reporting Hotline {LEGAL_OPERATIONAL_HOOKS['harassment_hotline']}."
         ),
         "",
+    ]
+
+    if selected_cities:
+        lines.append(f"Covered city/local scopes in this state: {', '.join(selected_cities)}.")
+        if not city_rows:
+            lines.append(
+                "No city-specific statutory entries were found in the compliance repository for the selected city scopes. "
+                "Run a compliance refresh and complete legal review for local ordinance coverage before publication."
+            )
+    else:
+        lines.append(
+            "No city-specific scope is configured for this state in this handbook draft. "
+            "If local ordinances apply, add city-level addenda before publication."
+        )
+
+    lines.extend(
+        [
         "1) Wage, Overtime, and Pay Frequency Controls",
         "Payroll must apply current minimum wage, overtime, and pay-frequency requirements for each covered work location.",
-    ]
+    ])
 
     wage_rows = _select_representative_requirements(min_wage_rows + overtime_rows + pay_frequency_rows, limit=7)
     if wage_rows:
@@ -871,11 +965,13 @@ def _build_state_sections(
     states: list[str],
     profile: dict[str, Any],
     state_requirement_map: Optional[dict[str, list[dict[str, Any]]]] = None,
+    selected_cities_by_state: Optional[dict[str, list[str]]] = None,
 ) -> list[dict[str, Any]]:
     state_sections: list[dict[str, Any]] = []
     for i, state in enumerate(states):
         state_name = STATE_NAMES.get(state, state)
         requirements = state_requirement_map.get(state, []) if state_requirement_map else []
+        selected_cities = selected_cities_by_state.get(state, []) if selected_cities_by_state else []
         state_sections.append(
             {
                 "section_key": f"state_addendum_{state.lower()}",
@@ -883,7 +979,13 @@ def _build_state_sections(
                 "section_order": 200 + i,
                 "section_type": "state",
                 "jurisdiction_scope": {"states": [state]},
-                "content": _build_state_addendum_content(state, state_name, profile, requirements),
+                "content": _build_state_addendum_content(
+                    state,
+                    state_name,
+                    profile,
+                    requirements,
+                    selected_cities=selected_cities,
+                ),
             }
         )
     return state_sections
@@ -967,9 +1069,9 @@ def _translate_handbook_db_error(exc: Exception) -> Optional[str]:
 
 async def _fetch_state_requirements(
     conn,
-    states: list[str],
+    scopes: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
-    normalized_states = sorted({(state or "").strip().upper() for state in states if state})
+    normalized_states, _, selected_city_tokens_by_state = _collect_state_city_scope(scopes)
     if not normalized_states:
         return {}
 
@@ -1024,6 +1126,14 @@ async def _fetch_state_requirements(
         state = (row.get("state") or "").strip().upper()
         if not state:
             continue
+        level = (row.get("jurisdiction_level") or "").strip().lower()
+        if level == "city":
+            selected_city_tokens = selected_city_tokens_by_state.get(state, set())
+            # Only include city-level requirements for explicitly scoped cities.
+            if not selected_city_tokens:
+                continue
+            if not _city_matches_scope(row.get("jurisdiction_name") or "", selected_city_tokens):
+                continue
         if len(by_state.setdefault(state, [])) >= 36:
             continue
 
@@ -1045,16 +1155,67 @@ async def _fetch_state_requirements(
     return by_state
 
 
+def _requirements_cover_topic(requirements: list[dict[str, Any]], topic: str) -> bool:
+    patterns = MANDATORY_STATE_TOPIC_RULES.get(topic, ())
+    for req in requirements:
+        haystack = " ".join(
+            [
+                str(req.get("category") or "").lower(),
+                str(req.get("title") or "").lower(),
+                str(req.get("description") or "").lower(),
+            ]
+        )
+        if any(pattern in haystack for pattern in patterns):
+            return True
+    return False
+
+
+def _validate_required_state_coverage(
+    industry_key: str,
+    states: list[str],
+    state_requirement_map: dict[str, list[dict[str, Any]]],
+) -> None:
+    if industry_key not in STRICT_TEMPLATE_INDUSTRIES:
+        return
+
+    missing_by_state: list[str] = []
+    for state in states:
+        requirements = state_requirement_map.get(state, [])
+        missing_topics = [
+            MANDATORY_STATE_TOPIC_LABELS[topic]
+            for topic in MANDATORY_STATE_TOPIC_RULES.keys()
+            if not _requirements_cover_topic(requirements, topic)
+        ]
+        if missing_topics:
+            missing_by_state.append(
+                f"{STATE_NAMES.get(state, state)} ({', '.join(missing_topics)})"
+            )
+
+    if missing_by_state:
+        raise ValueError(
+            "Missing required state boilerplate coverage for hospitality handbook generation: "
+            f"{'; '.join(missing_by_state)}. "
+            "Run compliance refresh for the selected jurisdictions and complete legal review before creating this handbook."
+        )
+
+
 def _build_template_sections(
     mode: str,
     scopes: list[dict[str, Any]],
     profile: dict[str, Any],
     custom_sections: list[HandbookSectionInput],
+    industry_key: str = "general",
     state_requirement_map: Optional[dict[str, list[dict[str, Any]]]] = None,
 ) -> list[dict[str, Any]]:
-    unique_states = sorted({scope["state"] for scope in scopes})
+    unique_states, selected_cities_by_state, _ = _collect_state_city_scope(scopes)
+    _validate_required_state_coverage(industry_key, unique_states, state_requirement_map or {})
     base_sections = _build_core_sections(profile, mode, unique_states)
-    state_sections = _build_state_sections(unique_states, profile, state_requirement_map)
+    state_sections = _build_state_sections(
+        unique_states,
+        profile,
+        state_requirement_map,
+        selected_cities_by_state=selected_cities_by_state,
+    )
     custom = _normalize_custom_sections(custom_sections)
     return sorted(base_sections + state_sections + custom, key=lambda item: item["section_order"])
 
@@ -1703,6 +1864,12 @@ class HandbookService:
         try:
             async with get_connection() as conn:
                 async with conn.transaction():
+                    company_industry = await conn.fetchval(
+                        "SELECT industry FROM companies WHERE id = $1",
+                        company_id,
+                    )
+                    industry_key = _normalize_industry(data.industry, company_industry)
+
                     profile_row = await HandbookService._upsert_profile_with_conn(
                         conn,
                         company_id,
@@ -1756,13 +1923,14 @@ class HandbookService:
                     if data.source_type == "template":
                         state_requirement_map = await _fetch_state_requirements(
                             conn,
-                            [scope["state"] for scope in normalized_scopes],
+                            normalized_scopes,
                         )
                         sections = _build_template_sections(
                             data.mode,
                             normalized_scopes,
                             profile,
                             data.custom_sections,
+                            industry_key=industry_key,
                             state_requirement_map=state_requirement_map,
                         )
                     else:

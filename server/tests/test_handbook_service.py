@@ -13,6 +13,7 @@ from app.core.services.handbook_service import (
     GuidedDraftRateLimitError,
     HandbookService,
     _build_core_sections,
+    _build_template_sections,
     _build_state_sections,
     _coerce_jurisdiction_scope,
     _normalize_custom_sections,
@@ -253,6 +254,7 @@ def test_build_core_sections_includes_enforceable_language_and_operational_hooks
     assert "[HARASSMENT_REPORTING_HOTLINE]" in by_key["equal_opportunity"]["content"]
     assert "[WORKWEEK_START_DAY]" in by_key["hours_and_pay"]["content"]
     assert "Excused absences include approved protected leave" in by_key["attendance_and_remote"]["content"]
+    assert "employer's legal responsibility" in by_key["custom_policy_responsibility"]["content"].lower()
     assert "Safe-harbor statement" in by_key["acknowledgement"]["content"]
 
 
@@ -305,6 +307,65 @@ def test_build_state_sections_includes_repository_fallback_when_missing():
     assert len(sections) == 1
     content = sections[0]["content"]
     assert "No verified statutory entries were found in the compliance repository" in content
+
+
+def test_build_state_sections_mentions_selected_city_scope():
+    sections = _build_state_sections(
+        ["CA"],
+        {"tip_pooling": False},
+        {"CA": []},
+        selected_cities_by_state={"CA": ["Los Angeles"]},
+    )
+    assert len(sections) == 1
+    content = sections[0]["content"]
+    assert "Covered city/local scopes in this state: Los Angeles." in content
+
+
+def test_build_template_sections_requires_mandatory_topics_for_hospitality():
+    profile = {
+        "legal_name": "Acme Cafe LLC",
+        "dba": None,
+        "ceo_or_president": "Owner Name",
+        "headcount": 24,
+        "remote_workers": False,
+        "minors": False,
+        "tipped_employees": True,
+        "union_employees": False,
+        "federal_contracts": False,
+        "group_health_insurance": False,
+        "background_checks": True,
+        "hourly_employees": True,
+        "salaried_employees": False,
+        "commissioned_employees": False,
+        "tip_pooling": True,
+    }
+    state_requirement_map = {
+        "CA": [
+            {
+                "state": "CA",
+                "category": "minimum_wage",
+                "jurisdiction_level": "state",
+                "jurisdiction_name": "California",
+                "title": "California Minimum Wage",
+                "description": "Statewide minimum wage baseline.",
+                "current_value": "$16.00/hr",
+                "effective_date": date(2026, 1, 1),
+                "source_url": "https://example.com/ca-minimum-wage",
+                "source_name": "CA Source",
+                "rate_type": "general",
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError, match="Missing required state boilerplate coverage"):
+        _build_template_sections(
+            mode="single_state",
+            scopes=[{"state": "CA", "city": "Los Angeles", "zipcode": "90012", "location_id": None}],
+            profile=profile,
+            custom_sections=[],
+            industry_key="hospitality",
+            state_requirement_map=state_requirement_map,
+        )
 
 
 def _guided_profile() -> dict:
