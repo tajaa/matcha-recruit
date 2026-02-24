@@ -68,7 +68,7 @@ async def list_jurisdictions(
             FROM jurisdictions j
             LEFT JOIN jurisdiction_reference jr
                 ON LOWER(jr.city) = LOWER(j.city) AND jr.state = j.state
-            WHERE j.requirement_count > 0
+            WHERE (j.requirement_count > 0 OR j.last_verified_at IS NULL)
               AND j.city <> ''
               AND j.city NOT LIKE '_county_%'
             ORDER BY j.state, j.city
