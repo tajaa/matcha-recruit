@@ -489,6 +489,24 @@ export const brokerPortal = {
 
   getPortfolioReport: () =>
     request<BrokerPortfolioReportResponse>('/brokers/reporting/portfolio'),
+
+  getReferredClients: () =>
+    request<{
+      broker_slug: string;
+      total: number;
+      clients: {
+        company_id: string;
+        company_name: string;
+        industry: string | null;
+        company_size: string | null;
+        company_status: string;
+        link_status: string;
+        linked_at: string | null;
+        activated_at: string | null;
+        active_employee_count: number;
+        enabled_feature_count: number;
+      }[];
+    }>('/brokers/referred-clients'),
 };
 
 export const provisioning = {

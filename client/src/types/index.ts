@@ -512,6 +512,7 @@ export interface BusinessRegister {
   phone?: string;
   job_title?: string;
   invite_token?: string;
+  broker_ref?: string;
 }
 
 export interface TestAccountRegister {

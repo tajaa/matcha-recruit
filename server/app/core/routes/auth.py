@@ -1593,8 +1593,18 @@ async def register_business(request: BusinessRegister):
                 if not invitation:
                     raise HTTPException(status_code=400, detail="Invalid, expired, or already-used invite link")
 
-            # Determine company status based on invite
-            company_status = "approved" if invitation else "pending"
+            # Resolve broker referral (slug lookup — ignore silently if invalid)
+            referring_broker_id = None
+            if request.broker_ref:
+                broker_row = await conn.fetchrow(
+                    "SELECT id FROM brokers WHERE slug = $1 AND status = 'active'",
+                    request.broker_ref.strip().lower(),
+                )
+                if broker_row:
+                    referring_broker_id = broker_row["id"]
+
+            # Determine company status — auto-approve if invited or referred by a broker
+            company_status = "approved" if (invitation or referring_broker_id) else "pending"
 
             # Step 1: Create company
             company = await conn.fetchrow(
@@ -1603,7 +1613,7 @@ async def register_business(request: BusinessRegister):
                    RETURNING id, name""",
                 request.company_name, request.industry, request.company_size,
                 company_status,
-                datetime.utcnow() if invitation else None,
+                datetime.utcnow() if (invitation or referring_broker_id) else None,
                 default_company_features_json(),
             )
             company_id = company["id"]
@@ -1647,6 +1657,22 @@ async def register_business(request: BusinessRegister):
                     company_id, invitation["id"],
                 )
 
+            # Step 6: Create broker referral link if the company came via a broker slug
+            if referring_broker_id:
+                await conn.execute(
+                    """
+                    INSERT INTO broker_company_links
+                        (broker_id, company_id, status, linked_at, activated_at, created_by, updated_at)
+                    VALUES ($1, $2, 'active', NOW(), NOW(), $3, NOW())
+                    ON CONFLICT (broker_id, company_id) DO UPDATE
+                        SET status = 'active',
+                            activated_at = COALESCE(broker_company_links.activated_at, NOW()),
+                            terminated_at = NULL,
+                            updated_at = NOW()
+                    """,
+                    referring_broker_id, company_id, user["id"],
+                )
+
             # Generate tokens
             settings = get_settings()
             access_token = create_access_token(user["id"], user["email"], user["role"])
@@ -1654,7 +1680,7 @@ async def register_business(request: BusinessRegister):
 
             # Send appropriate email
             email_service = get_email_service()
-            if invitation:
+            if invitation or referring_broker_id:
                 await email_service.send_business_approved_email(
                     to_email=user["email"],
                     to_name=request.name,
@@ -1682,7 +1708,7 @@ async def register_business(request: BusinessRegister):
                 "company_status": company_status,
                 "message": (
                     "Welcome! Your business account is approved and ready to use."
-                    if invitation else
+                    if (invitation or referring_broker_id) else
                     "Your business registration is pending approval. You will be notified once it's reviewed."
                 ),
             }

@@ -103,6 +103,8 @@ class BusinessRegister(BaseModel):
 
     # Optional invite token for auto-approval
     invite_token: Optional[str] = None
+    # Broker referral slug from ?via= link
+    broker_ref: Optional[str] = None
 
 
 class TestAccountRegister(BaseModel):

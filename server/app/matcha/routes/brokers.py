@@ -884,3 +884,66 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
             "note": "Broker portfolio reporting is intentionally aggregated for privacy and minimum necessary access.",
         },
     }
+
+
+@router.get("/referred-clients")
+async def list_referred_clients(current_user: CurrentUser = Depends(require_broker)):
+    """List all companies that came through this broker's referral link or client setup flow."""
+    async with get_connection() as conn:
+        membership = await _get_broker_membership(conn, user_id=current_user.id)
+        broker_id = membership["broker_id"]
+
+        rows = await conn.fetch(
+            """
+            SELECT
+                c.id AS company_id,
+                c.name AS company_name,
+                c.industry,
+                c.size AS company_size,
+                c.status AS company_status,
+                bcl.status AS link_status,
+                bcl.linked_at,
+                bcl.activated_at,
+                COUNT(DISTINCT e.id) FILTER (WHERE e.termination_date IS NULL) AS active_employee_count,
+                c.enabled_features
+            FROM broker_company_links bcl
+            JOIN companies c ON c.id = bcl.company_id
+            LEFT JOIN employees e ON e.company_id = c.id
+            WHERE bcl.broker_id = $1
+            GROUP BY c.id, c.name, c.industry, c.size, c.status,
+                     bcl.status, bcl.linked_at, bcl.activated_at,
+                     c.enabled_features
+            ORDER BY bcl.linked_at DESC
+            """,
+            broker_id,
+        )
+
+        broker_slug = await conn.fetchval("SELECT slug FROM brokers WHERE id = $1", broker_id)
+
+        clients = []
+        for row in rows:
+            features = row["enabled_features"]
+            if isinstance(features, str):
+                try:
+                    features = json.loads(features)
+                except Exception:
+                    features = {}
+            enabled_count = sum(1 for v in (features or {}).values() if v)
+            clients.append({
+                "company_id": str(row["company_id"]),
+                "company_name": row["company_name"],
+                "industry": row["industry"],
+                "company_size": row["company_size"],
+                "company_status": row["company_status"],
+                "link_status": row["link_status"],
+                "linked_at": row["linked_at"].isoformat() if row["linked_at"] else None,
+                "activated_at": row["activated_at"].isoformat() if row["activated_at"] else None,
+                "active_employee_count": row["active_employee_count"] or 0,
+                "enabled_feature_count": enabled_count,
+            })
+
+        return {
+            "broker_slug": broker_slug,
+            "total": len(clients),
+            "clients": clients,
+        }
