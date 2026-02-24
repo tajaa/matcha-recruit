@@ -10,6 +10,7 @@ import ScrollTrigger from "gsap/ScrollTrigger";
 
 import { CinematicNoise } from "./components/CinematicNoise";
 import { Navbar } from "./components/Navbar";
+import { PricingContactModal } from "./components/PricingContactModal";
 import { Hero } from "./sections/Hero";
 import { Compliance } from "./sections/Compliance";
 import { Interviewer } from "./sections/Interviewer";
@@ -25,6 +26,7 @@ export function Landing() {
 
   const [scrolled, setScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState("Core");
+  const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
   const scrolledRef = useRef(false);
 
   useEffect(() => {
@@ -135,6 +137,12 @@ export function Landing() {
         scrollTo={scrollTo} 
         manifestoRef={manifestoRef} 
         systemRef={systemRef} 
+        onPricingClick={() => setIsPricingModalOpen(true)}
+      />
+
+      <PricingContactModal 
+        isOpen={isPricingModalOpen} 
+        onClose={() => setIsPricingModalOpen(false)} 
       />
 
       <Hero />

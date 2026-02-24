@@ -6,9 +6,10 @@ interface NavbarProps {
   scrollTo: (ref: React.RefObject<HTMLDivElement | null>) => void;
   manifestoRef: React.RefObject<HTMLDivElement | null>;
   systemRef: React.RefObject<HTMLDivElement | null>;
+  onPricingClick: () => void;
 }
 
-export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, systemRef }: NavbarProps) => {
+export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, systemRef, onPricingClick }: NavbarProps) => {
   return (
     <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-[1600px] pointer-events-none">
       <div
@@ -48,12 +49,12 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, system
           >
             System
           </span>
-          <span className="text-[#F0EFEA]/35 cursor-default">
+          <span
+            onClick={onPricingClick}
+            className="hover:text-[#4ADE80] cursor-pointer transition-colors"
+          >
             Pricing
           </span>
-          <Link to="/terms" className="hover:text-[#4ADE80] transition-colors">
-            Terms
-          </Link>
         </div>
         <Link
           to="/login"

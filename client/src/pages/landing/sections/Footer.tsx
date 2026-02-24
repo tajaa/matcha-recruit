@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { fonts } from "../constants";
 
 export const Footer = () => {
@@ -18,7 +19,12 @@ export const Footer = () => {
         </h2>
 
         <div className="border-t border-white/10 pt-12 flex justify-between items-center text-[10px] font-mono uppercase tracking-[0.2em] text-[#F0EFEA]/40">
-          <span>© {new Date().getFullYear()} Matcha Architecture</span>
+          <div className="flex items-center gap-8">
+            <span>© {new Date().getFullYear()} Matcha Architecture</span>
+            <Link to="/terms" className="hover:text-[#4ADE80] transition-colors">
+              Terms
+            </Link>
+          </div>
           <div className="flex items-center gap-3">
             <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] animate-[pulse_2s_linear_infinite]" />
             Core Systems Nominal
