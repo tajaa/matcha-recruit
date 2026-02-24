@@ -12,3 +12,4 @@ export { ParticleSphere } from './ParticleSphere';
 export { CompanySelectModal } from './CompanySelectModal';
 export { ComplianceWidget } from './ComplianceWidget';
 export { PendingApproval } from './PendingApproval';
+export { LifecycleWizard } from './LifecycleWizard';

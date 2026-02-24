@@ -6,23 +6,9 @@ import type { GoogleWorkspaceConnectionStatus, OnboardingAnalytics } from '../ty
 import Employees from './Employees';
 import OnboardingTemplates from './OnboardingTemplates';
 import CompanyProfile from './CompanyProfile';
+import { LifecycleWizard } from '../components/LifecycleWizard';
 
 type Tab = 'workspace' | 'employees' | 'templates' | 'runs' | 'profile';
-
-function ChevronDownIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="14"
-      height="14"
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 function statusTone(status: string): string {
   if (status === 'connected') return 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200';
@@ -31,121 +17,57 @@ function statusTone(status: string): string {
   return 'border-zinc-700 bg-zinc-900/70 text-zinc-300';
 }
 
-type OnboardingCycleStep = {
-  id: number;
-  title: string;
-  icon: 'setup' | 'employee' | 'invite' | 'accepted' | 'in_progress' | 'complete' | 'ready';
-  description: string;
-  action: string;
-};
-
-const ONBOARDING_CYCLE_STEPS: OnboardingCycleStep[] = [
+const ONBOARDING_CYCLE_STEPS = [
   {
     id: 1,
     title: 'Prehire Setup',
-    icon: 'setup',
+    icon: 'setup' as const,
     description: 'Define onboarding standards before the hire starts: integrations, templates, owners, and due windows.',
     action: 'Configure workspace integrations and required onboarding templates.',
   },
   {
     id: 2,
     title: 'Create Employee Record',
-    icon: 'employee',
+    icon: 'employee' as const,
     description: 'Create the new hire profile with start date, manager, role details, and employment attributes.',
     action: 'Add the employee record from New Hires or CSV import.',
   },
   {
     id: 3,
     title: 'Send Invitation',
-    icon: 'invite',
+    icon: 'invite' as const,
     description: 'Issue a secure setup invitation so the employee can access the portal and checklist.',
     action: 'Send invitation and track pending vs accepted invites.',
   },
   {
     id: 4,
     title: 'Invitation Accepted',
-    icon: 'accepted',
+    icon: 'accepted' as const,
     description: 'The employee activates their account and onboarding work officially moves into execution.',
     action: 'Confirm accepted invite status and begin task execution.',
   },
   {
     id: 5,
     title: 'Onboarding In Progress',
-    icon: 'in_progress',
+    icon: 'in_progress' as const,
     description: 'Employee, manager, HR, and IT complete required tasks, compliance paperwork, and provisioning steps.',
     action: 'Drive checklist completion and resolve overdue blockers.',
   },
   {
     id: 6,
     title: 'Checklist Complete',
-    icon: 'complete',
+    icon: 'complete' as const,
     description: 'All required onboarding tasks are complete and no critical dependency remains open.',
     action: 'Validate completion and clear any final exceptions.',
   },
   {
     id: 7,
     title: 'Ready For Day 1',
-    icon: 'ready',
+    icon: 'ready' as const,
     description: 'The employee is operationally ready to start with access, compliance, and handoff requirements satisfied.',
     action: 'Track day-one readiness KPI and maintain cycle quality.',
   },
 ];
-
-function CycleIcon({ icon, className = '' }: { icon: OnboardingCycleStep['icon']; className?: string }) {
-  const common = { className, width: 16, height: 16, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
-  if (icon === 'setup') {
-    return (
-      <svg {...common}>
-        <path d="M10 6.5V3.5M10 16.5V13.5M13.5 10H16.5M3.5 10H6.5M12.5 7.5L14.5 5.5M5.5 14.5L7.5 12.5M12.5 12.5L14.5 14.5M5.5 5.5L7.5 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-        <circle cx="10" cy="10" r="2.3" stroke="currentColor" strokeWidth="1.6" />
-      </svg>
-    );
-  }
-  if (icon === 'employee') {
-    return (
-      <svg {...common}>
-        <circle cx="10" cy="7" r="2.6" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M5.3 15.2C6.5 13.2 8.1 12.2 10 12.2C11.9 12.2 13.5 13.2 14.7 15.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (icon === 'invite') {
-    return (
-      <svg {...common}>
-        <path d="M8.5 6.7L6.6 8.6C5.8 9.4 5.8 10.6 6.6 11.4C7.4 12.2 8.6 12.2 9.4 11.4L11.3 9.5M11.5 13.3L13.4 11.4C14.2 10.6 14.2 9.4 13.4 8.6C12.6 7.8 11.4 7.8 10.6 8.6L8.7 10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (icon === 'accepted') {
-    return (
-      <svg {...common}>
-        <path d="M6 10.3L8.5 12.8L14 7.3" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (icon === 'in_progress') {
-    return (
-      <svg {...common}>
-        <rect x="5.2" y="8.7" width="9.6" height="6.2" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M7.2 8.7V7.5C7.2 5.9 8.4 4.7 10 4.7C11.6 4.7 12.8 5.9 12.8 7.5V8.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (icon === 'complete') {
-    return (
-      <svg {...common}>
-        <path d="M5.5 10.5L8.2 13.2L14.5 6.9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M4.4 4.8H7.1M12.9 4.8H15.6M10 3.6V6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  return (
-    <svg {...common}>
-      <path d="M10 3.6V10.4M10 10.4L7.6 8M10 10.4L12.4 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M5.3 12.9C6.6 14.2 8.2 14.9 10 14.9C11.8 14.9 13.4 14.2 14.7 12.9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 function computeOnboardingCycleStep(
   analytics: OnboardingAnalytics | null,
@@ -169,14 +91,6 @@ export default function OnboardingCenter() {
   const [activeTab, setActiveTab] = useState<Tab>('workspace');
   const [analytics, setAnalytics] = useState<OnboardingAnalytics | null>(null);
   const [analyticsError, setAnalyticsError] = useState('');
-  const cycleStorageKey = 'onboarding-cycle-collapsed-v1';
-  const [cycleCollapsed, setCycleCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(cycleStorageKey) === 'true';
-    } catch {
-      return false;
-    }
-  });
 
   // Workspace Tab State
   const [loadingGoogle, setLoadingGoogle] = useState(true);
@@ -259,15 +173,6 @@ export default function OnboardingCenter() {
     [analytics, googleStatus],
   );
 
-  const toggleCycle = () => {
-    const next = !cycleCollapsed;
-    setCycleCollapsed(next);
-    try {
-      localStorage.setItem(cycleStorageKey, String(next));
-    } catch {
-      // noop
-    }
-  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 overflow-x-hidden">
@@ -283,128 +188,21 @@ export default function OnboardingCenter() {
         </div>
       </div>
 
-      <div className="border border-white/10 bg-zinc-950/60">
-        <button
-          onClick={toggleCycle}
-          className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Expected Onboarding Cycle</span>
-            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
-              Step {activeCycleStep} of {ONBOARDING_CYCLE_STEPS.length}
-            </span>
-            <span className="text-[10px] text-zinc-600">
-              {ONBOARDING_CYCLE_STEPS[activeCycleStep - 1].title}
-            </span>
-          </div>
-          <ChevronDownIcon className={`text-zinc-600 transition-transform duration-200 ${cycleCollapsed ? '' : 'rotate-180'}`} />
-        </button>
-
-        {!cycleCollapsed && (
-          <div className="border-t border-white/10">
-            <div className="relative px-5 pt-5 pb-2 overflow-x-auto">
-              <div className="flex items-start gap-0 min-w-max">
-                {ONBOARDING_CYCLE_STEPS.map((step, idx) => {
-                  const isComplete = step.id < activeCycleStep;
-                  const isActive = step.id === activeCycleStep;
-                  return (
-                    <div key={step.id} className="flex items-start">
-                      <div className="flex flex-col items-center w-28">
-                        <div
-                          className={`relative w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all ${
-                            isComplete
-                              ? 'bg-matcha-500/20 border-matcha-500/50 text-matcha-400'
-                              : isActive
-                              ? 'bg-white/10 border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)]'
-                              : 'bg-zinc-900 border-zinc-700 text-zinc-600'
-                          }`}
-                        >
-                          {isComplete ? '✓' : <CycleIcon icon={step.icon} className="w-4 h-4" />}
-                        </div>
-                        <div
-                          className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider leading-tight px-1 ${
-                            isActive ? 'text-white' : isComplete ? 'text-matcha-400/70' : 'text-zinc-600'
-                          }`}
-                        >
-                          {step.title}
-                        </div>
-                      </div>
-
-                      {idx < ONBOARDING_CYCLE_STEPS.length - 1 && (
-                        <div
-                          className={`w-10 h-0.5 mt-[18px] flex-shrink-0 transition-colors ${
-                            step.id < activeCycleStep ? 'bg-matcha-500/40' : 'bg-zinc-800'
-                          }`}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
-              <div className="flex items-start gap-3">
-                <span className="text-xl flex-shrink-0 text-zinc-200">
-                  <CycleIcon icon={ONBOARDING_CYCLE_STEPS[activeCycleStep - 1].icon} className="w-5 h-5" />
-                </span>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-bold text-white uppercase tracking-wider">
-                      {ONBOARDING_CYCLE_STEPS[activeCycleStep - 1].title}
-                    </span>
-                    <span className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-white/10 text-zinc-400 border border-white/10">
-                      Current Step
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-zinc-400 leading-relaxed mb-2">
-                    {ONBOARDING_CYCLE_STEPS[activeCycleStep - 1].description}
-                  </p>
-                  <p className="text-[11px] text-matcha-400/80 font-medium">
-                    → {ONBOARDING_CYCLE_STEPS[activeCycleStep - 1].action}
-                  </p>
-                </div>
-              </div>
-
-              {activeCycleStep < ONBOARDING_CYCLE_STEPS.length && (
-                <div className="mt-3 pt-3 border-t border-white/10 flex items-center gap-2">
-                  <span className="text-[9px] uppercase tracking-widest text-zinc-600">Up next:</span>
-                  <span className="text-[10px] text-zinc-500">
-                    Step {activeCycleStep + 1} — {ONBOARDING_CYCLE_STEPS[activeCycleStep].title}
-                  </span>
-                </div>
-              )}
-
-              {analytics && (
-                <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap gap-2">
-                  <span className="text-[10px] px-2 py-1 border border-white/10 bg-white/[0.02] text-zinc-400">
-                    Invited: <span className="text-zinc-200">{analytics.funnel.invited}</span>
-                  </span>
-                  <span className="text-[10px] px-2 py-1 border border-white/10 bg-white/[0.02] text-zinc-400">
-                    Accepted: <span className="text-zinc-200">{analytics.funnel.accepted}</span>
-                  </span>
-                  <span className="text-[10px] px-2 py-1 border border-white/10 bg-white/[0.02] text-zinc-400">
-                    Ready for Day 1: <span className="text-zinc-200">{analytics.funnel.ready_for_day1}</span>
-                  </span>
-                  {analytics.kpis.completion_before_start_rate !== null && (
-                    <span className="text-[10px] px-2 py-1 border border-white/10 bg-white/[0.02] text-zinc-400">
-                      Complete Before Start: <span className="text-zinc-200">{analytics.kpis.completion_before_start_rate.toFixed(1)}%</span>
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {analyticsError && (
-                <div className="mt-3 pt-3 border-t border-white/10">
-                  <p className="text-[10px] text-zinc-500">
-                    Analytics unavailable: {analyticsError}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <LifecycleWizard
+        steps={ONBOARDING_CYCLE_STEPS}
+        activeStep={activeCycleStep}
+        title="Expected Onboarding Cycle"
+        storageKey="onboarding-cycle-collapsed-v1"
+        showUpNext={true}
+        upNextText={(activeCycleStep < ONBOARDING_CYCLE_STEPS.length) ? `Step ${activeCycleStep + 1} — ${ONBOARDING_CYCLE_STEPS[activeCycleStep].title}` : undefined}
+        showAnalytics={analytics ? {
+          invited: analytics.funnel.invited,
+          accepted: analytics.funnel.accepted,
+          ready_for_day1: analytics.funnel.ready_for_day1,
+          completion_before_start_rate: analytics.kpis.completion_before_start_rate,
+        } : undefined}
+        analyticsError={analyticsError}
+      />
 
       {/* Tabs */}
       <div className="border-b border-white/10 -mx-4 px-4 sm:mx-0 sm:px-0">

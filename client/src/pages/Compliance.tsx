@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FeatureGuideTrigger } from '../features/feature-guides';
+import { LifecycleWizard } from '../components/LifecycleWizard';
 
 function linkifyText(text: string) {
     const splitRegex = /(https?:\/\/[^\s,)]+)/g;
@@ -135,227 +136,43 @@ function getRequirementEmptyStateCopy(category: string): string {
     }
 }
 
-// ─── Compliance Lifecycle Wizard ──────────────────────────────────────────────
-
-type ComplianceStepIcon = 'locations' | 'research' | 'alerts' | 'posters' | 'audit';
-
-type ComplianceWizardStep = {
-  id: number;
-  icon: ComplianceStepIcon;
-  title: string;
-  description: string;
-  action?: string;
-};
-
-const COMPLIANCE_CYCLE_STEPS: ComplianceWizardStep[] = [
+const COMPLIANCE_CYCLE_STEPS = [
   {
     id: 1,
-    icon: 'locations',
+    icon: 'locations' as const,
     title: 'Locations',
     description: 'Map applicable laws by pinning business sites.',
     action: 'Click "Add Location" to register a site.',
   },
   {
     id: 2,
-    icon: 'research',
+    icon: 'research' as const,
     title: 'Research',
     description: 'AI scans federal, state, and local ordinances.',
     action: 'Select a location and click "Check for Updates".',
   },
   {
     id: 3,
-    icon: 'alerts',
+    icon: 'alerts' as const,
     title: 'Monitor',
     description: 'Track changes and detected requirements.',
     action: 'Review the "Alerts" tab for attention items.',
   },
   {
     id: 4,
-    icon: 'posters',
+    icon: 'posters' as const,
     title: 'Posters',
     description: 'Order or download mandatory compliance signage.',
     action: 'Navigate to "Posters" for downloads.',
   },
   {
     id: 5,
-    icon: 'audit',
+    icon: 'audit' as const,
     title: 'Audit',
     description: 'Maintain verifiable records of all checks.',
     action: 'View the "Log" for a full audit trail.',
   },
 ];
-
-function ComplianceCycleIcon({ icon, className = '' }: { icon: ComplianceStepIcon; className?: string }) {
-  const common = { className, width: 14, height: 14, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
-  
-  if (icon === 'locations') {
-    return (
-      <svg {...common}>
-        <path d="M10 17C10 17 4 11 4 7C4 3.68629 6.68629 1 10 1C13.3137 1 16 3.68629 16 7C16 11 10 17 10 17Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="10" cy="7" r="2" stroke="currentColor" strokeWidth="1.6" />
-      </svg>
-    );
-  }
-  if (icon === 'research') {
-    return (
-      <svg {...common}>
-        <path d="M10 6.5V3.5M10 16.5V13.5M13.5 10H16.5M3.5 10H6.5M12.5 7.5L14.5 5.5M5.5 14.5L7.5 12.5M12.5 12.5L14.5 14.5M5.5 5.5L7.5 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-        <circle cx="10" cy="10" r="2.3" stroke="currentColor" strokeWidth="1.6" />
-      </svg>
-    );
-  }
-  if (icon === 'alerts') {
-    return (
-      <svg {...common}>
-        <path d="M10 3V17M3 10H17M14.5 5.5L5.5 14.5M14.5 14.5L5.5 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (icon === 'posters') {
-    return (
-      <svg {...common}>
-        <rect x="5" y="4" width="10" height="12" rx="1" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M7 7H13M7 10H13M7 13H10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (icon === 'audit') {
-    return (
-      <svg {...common}>
-        <path d="M4 10L8 14L16 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  return null;
-}
-
-function ComplianceCycleWizard({ locations, alerts }: { locations?: BusinessLocation[], alerts?: any[] }) {
-  const storageKey = 'compliance-wizard-collapsed-v1';
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem(storageKey) === 'true'; } catch { return false; }
-  });
-
-  const toggle = () => {
-    const next = !collapsed;
-    setCollapsed(next);
-    try { localStorage.setItem(storageKey, String(next)); } catch {}
-  };
-
-  const activeStep = (alerts && alerts.length > 0) ? 3
-                  : (locations && locations.some(l => (l.requirements_count || 0) > 0)) ? 2
-                  : (locations && locations.length > 0) ? 2
-                  : 1;
-
-  return (
-    <div className="border border-white/5 bg-zinc-900/30 rounded-sm overflow-hidden mb-8 shadow-sm">
-      <button
-        onClick={toggle}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
-      >
-        <div className="flex items-center gap-4">
-          <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-zinc-500 font-mono">System Lifecycle</span>
-          <div className="flex items-center gap-2">
-            <span className="px-1.5 py-0.5 text-[8px] font-mono font-bold uppercase tracking-widest bg-zinc-800 border border-white/5 text-zinc-400">
-              Stage 0{activeStep}
-            </span>
-            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600 hidden sm:inline">
-              {COMPLIANCE_CYCLE_STEPS[activeStep - 1].title}
-            </span>
-          </div>
-        </div>
-        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`} />
-      </button>
-
-      <AnimatePresence initial={false}>
-        {!collapsed && (
-          <motion.div 
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="border-t border-white/5 overflow-hidden"
-          >
-            <div className="px-4 py-6">
-              <div className="flex items-start justify-between gap-8 mb-6 overflow-x-auto no-scrollbar pb-2">
-                {COMPLIANCE_CYCLE_STEPS.map((step, idx) => {
-                  const isComplete = step.id < activeStep;
-                  const isActive = step.id === activeStep;
-
-                  return (
-                    <div key={step.id} className="flex items-center gap-4 group flex-shrink-0">
-                      <div className="flex flex-col items-center">
-                        <div className={`relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-500 ${
-                          isComplete
-                            ? 'bg-matcha-500/10 border-matcha-500/30 text-matcha-500'
-                            : isActive
-                            ? 'bg-white/5 border-white/20 text-white shadow-[0_0_15px_rgba(255,255,255,0.05)]'
-                            : 'bg-zinc-900 border-white/5 text-zinc-700'
-                        }`}>
-                          {isComplete ? <CheckCircle size={14} strokeWidth={2.5} /> : <ComplianceCycleIcon icon={step.icon} />}
-                        </div>
-                        <span className={`mt-2 text-[8px] font-bold uppercase tracking-[0.15em] ${
-                          isActive ? 'text-white' : isComplete ? 'text-matcha-500/60' : 'text-zinc-700'
-                        }`}>
-                          {step.title}
-                        </span>
-                      </div>
-                      {idx < COMPLIANCE_CYCLE_STEPS.length - 1 && (
-                        <div className={`w-8 h-px transition-colors duration-700 ${
-                          step.id < activeStep ? 'bg-matcha-500/20' : 'bg-white/5'
-                        }`} />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="p-4 bg-zinc-950/40 border border-white/5 rounded-sm">
-                <div className="flex items-start gap-4">
-                  <div className="p-2 bg-white/5 rounded-sm text-zinc-400">
-                    <ComplianceCycleIcon icon={COMPLIANCE_CYCLE_STEPS[activeStep - 1].icon} className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-1">
-                      <h4 className="text-[10px] font-bold text-white uppercase tracking-widest">
-                        {COMPLIANCE_CYCLE_STEPS[activeStep - 1].title}
-                      </h4>
-                      <span className="text-[7px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 rounded-xs">
-                        Active Stage
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      {COMPLIANCE_CYCLE_STEPS[activeStep - 1].description}
-                    </p>
-                    {COMPLIANCE_CYCLE_STEPS[activeStep - 1].action && (
-                      <p className="text-[10px] text-zinc-400 font-mono mt-2 opacity-80">
-                        <span className="text-matcha-500">→</span> {COMPLIANCE_CYCLE_STEPS[activeStep - 1].action}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function ChevronDownIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="14"
-      height="14"
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 export function Compliance() {
     const { user } = useAuth();
@@ -736,7 +553,17 @@ export function Compliance() {
                 </div>
             </div>
 
-            <ComplianceCycleWizard locations={locations} alerts={alerts} />
+            <LifecycleWizard
+              steps={COMPLIANCE_CYCLE_STEPS}
+              activeStep={
+                (alerts && alerts.length > 0) ? 3
+                : (locations && locations.some(l => (l.requirements_count || 0) > 0)) ? 2
+                : (locations && locations.length > 0) ? 2
+                : 1
+              }
+              storageKey="compliance-wizard-collapsed-v1"
+              title="Compliance Lifecycle"
+            />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
                 <div data-tour="compliance-locations" className="lg:col-span-1 space-y-6">

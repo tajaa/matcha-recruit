@@ -13,6 +13,7 @@ import type {
 import { FileUpload } from '../components';
 import { X, ChevronRight, ArrowLeft } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
+import { LifecycleWizard } from '../components/LifecycleWizard';
 
 const STATUS_TABS: { label: string; value: ERCaseStatus | 'all' }[] = [
   { label: 'All', value: 'all' },
@@ -103,220 +104,43 @@ function buildInitialGuidance(description: string): string {
   ].join('\n');
 }
 
-// ─── ER Lifecycle Wizard ──────────────────────────────────────────────────────
-
-type ERStepIcon = 'intake' | 'evidence' | 'guidance' | 'analysis' | 'decision';
-
-type ERWizardStep = {
-  id: number;
-  icon: ERStepIcon;
-  title: string;
-  description: string;
-  action?: string;
-};
-
-const ER_CYCLE_STEPS: ERWizardStep[] = [
+const ER_CYCLE_STEPS = [
   {
     id: 1,
-    icon: 'intake',
+    icon: 'intake' as const,
     title: 'Intake Case',
     description: 'Open a new case with a clear title and a description of the allegation or concern.',
     action: 'Click "New Case" to begin the intake process.',
   },
   {
     id: 2,
-    icon: 'evidence',
+    icon: 'evidence' as const,
     title: 'Collect Evidence',
     description: 'Upload transcripts, emails, and policies. The more data you provide, the better the AI guidance.',
     action: 'Use the "Upload" tool within a case record.',
   },
   {
     id: 3,
-    icon: 'guidance',
+    icon: 'guidance' as const,
     title: 'AI Guidance',
     description: 'The Copilot auto-reviews your intake and evidence to provide immediate preservation and next-step tips.',
     action: 'Check the "Assistance" tab in the case detail view.',
   },
   {
     id: 4,
-    icon: 'analysis',
+    icon: 'analysis' as const,
     title: 'Deep Analysis',
     description: 'Use AI to build timelines, find inconsistencies in testimony, and flag potential policy violations.',
     action: 'Review "Case Notes" and AI-generated timelines.',
   },
   {
     id: 5,
-    icon: 'decision',
+    icon: 'decision' as const,
     title: 'Final Decision',
     description: 'Synthesize all evidence and AI insights to reach a determination and officially close the case record.',
     action: 'Update the case status to "Closed" once resolved.',
   },
 ];
-
-function ERCycleIcon({ icon, className = '' }: { icon: ERStepIcon; className?: string }) {
-  const common = { className, width: 16, height: 16, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
-  
-  if (icon === 'intake') {
-    return (
-      <svg {...common}>
-        <path d="M10 5V15M5 10H15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6" />
-      </svg>
-    );
-  }
-  if (icon === 'evidence') {
-    return (
-      <svg {...common}>
-        <path d="M4 10L10 4L16 10M10 4V16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (icon === 'guidance') {
-    return (
-      <svg {...common}>
-        <rect x="5" y="5" width="10" height="10" rx="1" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M10 8V12M8 10H12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (icon === 'analysis') {
-    return (
-      <svg {...common}>
-        <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M10 10L13 13M10 10V6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (icon === 'decision') {
-    return (
-      <svg {...common}>
-        <path d="M6 10.3L8.5 12.8L14 7.3" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6" />
-      </svg>
-    );
-  }
-  return null;
-}
-
-function ERCycleWizard({ casesCount, openCasesCount }: { casesCount: number, openCasesCount: number }) {
-  const storageKey = 'er-wizard-collapsed-v1';
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem(storageKey) === 'true'; } catch { return false; }
-  });
-
-  const toggle = () => {
-    const next = !collapsed;
-    setCollapsed(next);
-    try { localStorage.setItem(storageKey, String(next)); } catch {}
-  };
-
-  const activeStep = (casesCount - openCasesCount) > 0 ? 5 
-                  : openCasesCount > 0 ? 3
-                  : casesCount > 0 ? 2
-                  : 1;
-
-  return (
-    <div className="border border-white/10 bg-zinc-950/60 mb-10">
-      <button
-        onClick={toggle}
-        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
-      >
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">ER Cycle</span>
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
-              Step {activeStep} of 5
-            </span>
-            <span className="text-[10px] text-zinc-600 hidden sm:inline">
-              {ER_CYCLE_STEPS[activeStep - 1].title}
-            </span>
-          </div>
-        </div>
-        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-200 shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
-      </button>
-
-      {!collapsed && (
-        <div className="border-t border-white/10">
-          <div className="relative px-5 pt-5 pb-2 overflow-x-auto no-scrollbar">
-            <div className="flex items-start gap-0 min-w-max">
-              {ER_CYCLE_STEPS.map((step, idx) => {
-                const isComplete = step.id < activeStep;
-                const isActive = step.id === activeStep;
-
-                return (
-                  <div key={step.id} className="flex items-start">
-                    <div className="flex flex-col items-center w-28">
-                      <div className={`relative w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all ${
-                        isComplete
-                          ? 'bg-matcha-500/20 border-matcha-500/50 text-matcha-400'
-                          : isActive
-                          ? 'bg-white/10 border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)]'
-                          : 'bg-zinc-900 border-zinc-700 text-zinc-600'
-                      }`}>
-                        {isComplete ? '✓' : <ERCycleIcon icon={step.icon} className="w-4 h-4" />}
-                      </div>
-                      <div className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider leading-tight px-1 ${
-                        isActive ? 'text-white' : isComplete ? 'text-matcha-400/70' : 'text-zinc-600'
-                      }`}>
-                        {step.title}
-                      </div>
-                    </div>
-                    {idx < ER_CYCLE_STEPS.length - 1 && (
-                      <div className={`w-10 h-0.5 mt-[18px] flex-shrink-0 transition-colors ${
-                        step.id < activeStep ? 'bg-matcha-500/40' : 'bg-zinc-800'
-                      }`} />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
-            <div className="flex items-start gap-3">
-              <span className="text-xl flex-shrink-0 text-zinc-200">
-                <ERCycleIcon icon={ER_CYCLE_STEPS[activeStep - 1].icon} className="w-5 h-5" />
-              </span>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-bold text-white uppercase tracking-wider">
-                    {ER_CYCLE_STEPS[activeStep - 1].title}
-                  </span>
-                  <span className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-white/10 text-zinc-400 border border-white/10">
-                    Current Step
-                  </span>
-                </div>
-                <p className="text-[11px] text-zinc-400 leading-relaxed mb-2">
-                  {ER_CYCLE_STEPS[activeStep - 1].description}
-                </p>
-                {ER_CYCLE_STEPS[activeStep - 1].action && (
-                  <p className="text-[11px] text-matcha-400/80 font-medium">
-                    → {ER_CYCLE_STEPS[activeStep - 1].action}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ChevronDownIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="14"
-      height="14"
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 export function ERCopilot() {
   const navigate = useNavigate();
@@ -584,7 +408,15 @@ export function ERCopilot() {
         </button>
       </div>
 
-      <ERCycleWizard casesCount={cases.length} openCasesCount={cases.filter(c => c.status !== 'closed').length} />
+      <LifecycleWizard
+        steps={ER_CYCLE_STEPS}
+        activeStep={(cases.length - cases.filter(c => c.status !== 'closed').length) > 0 ? 5
+                  : cases.filter(c => c.status !== 'closed').length > 0 ? 3
+                  : cases.length > 0 ? 2
+                  : 1}
+        title="ER Cycle"
+        storageKey="er-wizard-collapsed-v1"
+      />
 
       <div data-tour="er-tabs" className="flex gap-8 mb-px border-b border-white/10">
         {STATUS_TABS.map((tab) => (
