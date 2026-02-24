@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAccessToken, provisioning } from '../api/client';
+import { getAccessToken, provisioning, onboardingDraft } from '../api/client';
 import { Plus, X, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import type { GoogleWorkspaceConnectionStatus } from '../types';
@@ -361,6 +361,10 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   const [batchRows, setBatchRows] = useState<BatchEmployeeRow[]>([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [batchResult, setBatchResult] = useState<BatchCreateResult | null>(null);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [draftDirty, setDraftDirty] = useState(false);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const draftSnapshotRef = useRef<string>('');
 
   const [submitting, setSubmitting] = useState(false);
   const [invitingId, setInvitingId] = useState<string | null>(null);
@@ -426,6 +430,33 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     ]);
     setBatchResult(null);
   }, [googleDomainAvailable]);
+
+  // Dirty detection for batch wizard draft
+  useEffect(() => {
+    if (!draftLoaded) return;
+    const current = JSON.stringify({ batchRows, emailMode: batchEmailMode, workLocationMode: batchWorkLocationMode, wizardStep: batchWizardStep });
+    setDraftDirty(current !== draftSnapshotRef.current);
+  }, [batchRows, batchEmailMode, batchWorkLocationMode, batchWizardStep, draftLoaded]);
+
+  // Autosave batch wizard draft with 5-second debounce
+  const DRAFT_AUTOSAVE_MS = 5000;
+  useEffect(() => {
+    if (!draftLoaded || !draftDirty) return;
+    const timer = setTimeout(async () => {
+      setDraftSaving(true);
+      try {
+        const state = { batchRows, emailMode: batchEmailMode, workLocationMode: batchWorkLocationMode, wizardStep: batchWizardStep };
+        await onboardingDraft.save(state as unknown as Record<string, unknown>);
+        draftSnapshotRef.current = JSON.stringify(state);
+        setDraftDirty(false);
+      } catch {
+        // silently fail autosave
+      } finally {
+        setDraftSaving(false);
+      }
+    }, DRAFT_AUTOSAVE_MS);
+    return () => clearTimeout(timer);
+  }, [draftLoaded, draftDirty, batchRows, batchEmailMode, batchWorkLocationMode, batchWizardStep]);
 
   const fetchEmployees = async () => {
     try {
@@ -924,6 +955,10 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       setBatchResult({ created, failed, errors });
       fetchEmployees();
       fetchOnboardingProgress();
+      // Clear the draft after a successful batch submission
+      try { await onboardingDraft.clear(); } catch { /* ignore */ }
+      draftSnapshotRef.current = '';
+      setDraftDirty(false);
     } finally {
       setBatchSubmitting(false);
     }
@@ -1034,9 +1069,25 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             </button>
 
             <button
-              onClick={() => {
+              onClick={async () => {
                 resetBatchWizard();
+                setDraftLoaded(false);
+                setDraftDirty(false);
                 setShowBatchWizardModal(true);
+                try {
+                  const draft = await onboardingDraft.get();
+                  if (draft?.draft_state && Array.isArray((draft.draft_state as Record<string, unknown>).batchRows) && ((draft.draft_state as Record<string, unknown>).batchRows as unknown[]).length > 0) {
+                    const s = draft.draft_state as Record<string, unknown>;
+                    setBatchRows(s.batchRows as BatchEmployeeRow[]);
+                    setBatchEmailMode((s.emailMode as EmailEntryMode) ?? 'existing');
+                    setBatchWorkLocationMode((s.workLocationMode as WorkLocationMode) ?? 'remote');
+                    setBatchWizardStep((s.wizardStep as BatchWizardStep) ?? 1);
+                  }
+                  draftSnapshotRef.current = JSON.stringify(draft?.draft_state ?? {});
+                } catch {
+                  draftSnapshotRef.current = '';
+                }
+                setDraftLoaded(true);
               }}
               className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors"
             >
@@ -1687,10 +1738,21 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <div>
                 <h3 className="text-xl font-bold text-white uppercase tracking-tight">Batch Onboarding Wizard</h3>
-                <p className="text-xs text-zinc-500 mt-1">Create up to 50 employees in one guided flow</p>
+                <div className="flex items-center gap-3 mt-1">
+                  <p className="text-xs text-zinc-500">Create up to 50 employees in one guided flow</p>
+                  {draftLoaded && (
+                    <span className={`text-[10px] uppercase tracking-wider ${draftSaving ? 'text-zinc-500' : draftDirty ? 'text-zinc-600' : 'text-zinc-600'}`}>
+                      {draftSaving ? 'Saving…' : draftDirty ? '' : 'Draft saved'}
+                    </span>
+                  )}
+                </div>
               </div>
               <button
-                onClick={() => {
+                onClick={async () => {
+                  try { await onboardingDraft.clear(); } catch { /* ignore */ }
+                  draftSnapshotRef.current = '';
+                  setDraftDirty(false);
+                  setDraftLoaded(false);
                   setShowBatchWizardModal(false);
                   setBatchResult(null);
                 }}
@@ -2016,7 +2078,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             <div className="p-6 border-t border-white/10 flex justify-end gap-3">
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
+                  try { await onboardingDraft.clear(); } catch { /* ignore */ }
+                  draftSnapshotRef.current = '';
+                  setDraftDirty(false);
+                  setDraftLoaded(false);
                   setShowBatchWizardModal(false);
                   setBatchResult(null);
                 }}
@@ -2060,6 +2126,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                 <button
                   type="button"
                   onClick={() => {
+                    setDraftLoaded(false);
                     setShowBatchWizardModal(false);
                     setBatchResult(null);
                   }}

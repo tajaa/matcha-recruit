@@ -2807,3 +2807,103 @@ async def create_leave_notice(
                 status_code=500,
                 detail="Failed to generate leave notice. Please try again.",
             )
+
+
+# ---------------------------------------------------------------------------
+# Batch Onboarding Wizard Draft endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/onboarding-draft")
+async def get_onboarding_draft(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: Optional[UUID] = Depends(get_client_company_id),
+):
+    """Retrieve the saved batch onboarding wizard draft for this admin/company."""
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company context")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT draft_state
+            FROM employee_onboarding_drafts
+            WHERE company_id = $1 AND user_id = $2
+            """,
+            str(company_id),
+            str(current_user.id),
+        )
+
+    if not row:
+        return None
+
+    state = row["draft_state"]
+    if isinstance(state, str):
+        try:
+            state = json.loads(state)
+        except Exception:
+            state = {}
+
+    return {"draft_state": state or {}}
+
+
+@router.put("/onboarding-draft")
+async def upsert_onboarding_draft(
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: Optional[UUID] = Depends(get_client_company_id),
+):
+    """Save (upsert) the batch onboarding wizard draft state."""
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company context")
+
+    state = body.get("state", {})
+    if not isinstance(state, dict):
+        raise HTTPException(status_code=422, detail="state must be a JSON object")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO employee_onboarding_drafts (company_id, user_id, draft_state, updated_at)
+            VALUES ($1, $2, $3::jsonb, NOW())
+            ON CONFLICT (company_id, user_id) DO UPDATE
+            SET draft_state = EXCLUDED.draft_state, updated_at = NOW()
+            RETURNING draft_state, updated_at
+            """,
+            str(company_id),
+            str(current_user.id),
+            json.dumps(state),
+        )
+
+    saved_state = row["draft_state"]
+    if isinstance(saved_state, str):
+        try:
+            saved_state = json.loads(saved_state)
+        except Exception:
+            saved_state = {}
+
+    return {
+        "draft_state": saved_state or {},
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+@router.delete("/onboarding-draft")
+async def delete_onboarding_draft(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: Optional[UUID] = Depends(get_client_company_id),
+):
+    """Delete the batch onboarding wizard draft."""
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company context")
+
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM employee_onboarding_drafts
+            WHERE company_id = $1 AND user_id = $2
+            """,
+            str(company_id),
+            str(current_user.id),
+        )
+
+    return {"deleted": result == "DELETE 1"}

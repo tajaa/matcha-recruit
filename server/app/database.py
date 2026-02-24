@@ -1571,6 +1571,22 @@ async def init_db():
         """)
 
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS employee_onboarding_drafts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                draft_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(company_id, user_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_employee_onboarding_drafts_company_user
+            ON employee_onboarding_drafts(company_id, user_id)
+        """)
+
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS handbook_versions (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 handbook_id UUID NOT NULL REFERENCES handbooks(id) ON DELETE CASCADE,

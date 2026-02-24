@@ -2913,6 +2913,18 @@ export const api = {
   adminNews,
 };
 
+export const onboardingDraft = {
+  get: (): Promise<{ draft_state: Record<string, unknown> } | null> =>
+    request('/employees/onboarding-draft'),
+  save: (state: Record<string, unknown>): Promise<{ draft_state: Record<string, unknown>; updated_at: string }> =>
+    request('/employees/onboarding-draft', {
+      method: 'PUT',
+      body: JSON.stringify({ state }),
+    }),
+  clear: (): Promise<{ deleted: boolean }> =>
+    request('/employees/onboarding-draft', { method: 'DELETE' }),
+};
+
 export const adminPlatformSettings = {
   get: (): Promise<{ visible_features: string[] }> =>
     request('/admin/platform-settings/features'),
