@@ -323,7 +323,6 @@ export function ERCaseDetail() {
   const [discrepancies, setDiscrepancies] = useState<Discrepancy[]>([]);
   const [discrepancySummary, setDiscrepancySummary] = useState<string>('');
   const [violations, setViolations] = useState<PolicyViolation[]>([]);
-  const [violationSummary, setViolationSummary] = useState<string>('');
   const [policiesChecked, setPoliciesChecked] = useState<number>(0);
   const [analysisLoading, setAnalysisLoading] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState<{ step: string; detail?: string } | null>(null);
@@ -396,12 +395,10 @@ export function ERCaseDetail() {
         const data = await erCopilot.getPolicyCheck(id);
         if (!data.generated_at) {
           setViolations([]);
-          setViolationSummary('');
           setPoliciesChecked(0);
           return;
         }
         setViolations(data.analysis.violations || []);
-        setViolationSummary(data.analysis.summary || '');
         setPoliciesChecked(data.analysis.policies_potentially_applicable?.length || 0);
       }
     } catch {
@@ -606,7 +603,6 @@ export function ERCaseDetail() {
             continue;
           }
           setViolations(data.analysis.violations || []);
-          setViolationSummary(data.analysis.summary || '');
           setPoliciesChecked(data.analysis.policies_potentially_applicable?.length || 0);
           return true;
         }
