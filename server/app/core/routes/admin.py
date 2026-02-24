@@ -2729,11 +2729,144 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
     service = get_gemini_compliance_service()
     async with get_connection() as conn:
         used_repository = False
+        city_key = _normalize_city_input(city)
+        city_jurisdiction_rows = await conn.fetch(
+            """
+            SELECT
+                j.id,
+                j.city,
+                j.state,
+                j.requirement_count,
+                j.legislation_count,
+                j.last_verified_at,
+                j.created_at,
+                COUNT(bl.id) AS location_count
+            FROM jurisdictions j
+            LEFT JOIN business_locations bl ON bl.jurisdiction_id = j.id AND bl.is_active = true
+            WHERE j.state = $1
+              AND j.city <> ''
+              AND j.city NOT LIKE '_county_%'
+            GROUP BY j.id
+            """,
+            state,
+        )
+        same_city_rows = [
+            row for row in city_jurisdiction_rows
+            if _normalize_city_input(row["city"]) == city_key
+        ]
+        if not same_city_rows:
+            j_dict = dict(j)
+            same_city_rows = [{
+                "id": j_dict["id"],
+                "city": j_dict["city"],
+                "state": j_dict["state"],
+                "requirement_count": j_dict.get("requirement_count", 0),
+                "legislation_count": j_dict.get("legislation_count", 0),
+                "last_verified_at": j_dict.get("last_verified_at"),
+                "created_at": j_dict.get("created_at"),
+                "location_count": 0,
+            }]
+
+        def _canonical_priority(row):
+            return (
+                (row["requirement_count"] or 0) + (row["legislation_count"] or 0),
+                row["location_count"] or 0,
+                1 if row["last_verified_at"] is not None else 0,
+                row["last_verified_at"] or datetime.min,
+                1 if row["created_at"] is not None else 0,
+                row["created_at"] or datetime.min,
+            )
+
+        canonical_row = max(same_city_rows, key=_canonical_priority)
+        canonical_jurisdiction_id = canonical_row["id"]
+        duplicate_jurisdiction_ids = [
+            row["id"] for row in same_city_rows
+            if row["id"] != canonical_jurisdiction_id
+        ]
+        city_group_ids = [canonical_jurisdiction_id, *duplicate_jurisdiction_ids]
+
+        if duplicate_jurisdiction_ids:
+            moved_locations = await conn.fetchval(
+                """
+                WITH moved AS (
+                    UPDATE business_locations
+                    SET jurisdiction_id = $1
+                    WHERE jurisdiction_id = ANY($2::uuid[])
+                    RETURNING id
+                )
+                SELECT COUNT(*) FROM moved
+                """,
+                canonical_jurisdiction_id,
+                duplicate_jurisdiction_ids,
+            )
+            moved_children = await conn.fetchval(
+                """
+                WITH moved AS (
+                    UPDATE jurisdictions
+                    SET parent_id = $1
+                    WHERE parent_id = ANY($2::uuid[])
+                      AND id <> $1
+                    RETURNING id
+                )
+                SELECT COUNT(*) FROM moved
+                """,
+                canonical_jurisdiction_id,
+                duplicate_jurisdiction_ids,
+            )
+            moved_location_count = int(moved_locations or 0)
+            moved_child_count = int(moved_children or 0)
+            if moved_location_count or moved_child_count:
+                yield {
+                    "type": "syncing",
+                    "message": (
+                        "Aligned duplicate city jurisdictions to canonical source: "
+                        f"{moved_location_count} location(s), {moved_child_count} child node(s) relinked."
+                    ),
+                }
+            if canonical_jurisdiction_id != jurisdiction_id:
+                yield {
+                    "type": "syncing",
+                    "message": (
+                        f"Using canonical jurisdiction record for {_format_city_label(city)}, {state}."
+                    ),
+                }
+
         existing_jurisdiction_rows = await conn.fetch(
-            "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
-            jurisdiction_id,
+            "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = ANY($1::uuid[])",
+            city_group_ids,
+        )
+        for row in existing_jurisdiction_rows:
+            row_dict = dict(row)
+            normalized_category = _normalize_category(row_dict.get("category")) or row_dict.get("category")
+            row_dict["category"] = normalized_category
+            normalized_key = _compute_requirement_key(row_dict)
+            if (
+                normalized_category != row["category"]
+                or normalized_key != row["requirement_key"]
+            ):
+                try:
+                    await conn.execute(
+                        """
+                        UPDATE jurisdiction_requirements
+                        SET category = $2, requirement_key = $3, updated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        row["id"],
+                        normalized_category,
+                        normalized_key,
+                    )
+                except asyncpg.UniqueViolationError:
+                    await conn.execute(
+                        "DELETE FROM jurisdiction_requirements WHERE id = $1",
+                        row["id"],
+                    )
+
+        existing_jurisdiction_rows = await conn.fetch(
+            "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = ANY($1::uuid[])",
+            city_group_ids,
         )
         existing_requirements = [_jurisdiction_row_to_dict(dict(row)) for row in existing_jurisdiction_rows]
+        existing_requirements = _filter_by_jurisdiction_priority(existing_requirements)
         present_categories = {
             _normalize_category(req.get("category")) or req.get("category")
             for req in existing_requirements
@@ -2835,11 +2968,16 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
 
         if not requirements:
             cached_rows = await conn.fetch(
-                "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1 ORDER BY category",
-                jurisdiction_id,
+                """
+                SELECT * FROM jurisdiction_requirements
+                WHERE jurisdiction_id = ANY($1::uuid[])
+                ORDER BY category
+                """,
+                city_group_ids,
             )
             if cached_rows:
                 requirements = [_jurisdiction_row_to_dict(dict(row)) for row in cached_rows]
+                requirements = _filter_by_jurisdiction_priority(requirements)
                 used_repository = True
                 logger.warning(
                     "Falling back to stale repository data (%d cached requirements)", len(requirements)
@@ -2863,7 +3001,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         yield {"type": "processing", "message": f"Processing {len(requirements)} requirements..."}
 
         if not used_repository:
-            await _upsert_jurisdiction_requirements(conn, jurisdiction_id, requirements)
+            await _upsert_jurisdiction_requirements(conn, canonical_jurisdiction_id, requirements)
 
         new_count = len(requirements)
         for req in requirements:
@@ -2940,7 +3078,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         )
 
         if legislation_items:
-            await _upsert_jurisdiction_legislation(conn, jurisdiction_id, legislation_items)
+            await _upsert_jurisdiction_legislation(conn, canonical_jurisdiction_id, legislation_items)
             yield {
                 "type": "legislation",
                 "message": (
@@ -2950,8 +3088,12 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
             }
 
         linked_locations = await conn.fetch(
-            "SELECT id, company_id FROM business_locations WHERE jurisdiction_id = $1 AND is_active = true",
-            jurisdiction_id,
+            """
+            SELECT id, company_id
+            FROM business_locations
+            WHERE jurisdiction_id = ANY($1::uuid[]) AND is_active = true
+            """,
+            city_group_ids,
         )
 
         total_alerts = 0
@@ -3149,14 +3291,14 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         try:
             from ..services.poster_service import check_and_regenerate_poster, create_poster_update_alerts
 
-            poster_result = await check_and_regenerate_poster(conn, jurisdiction_id)
+            poster_result = await check_and_regenerate_poster(conn, canonical_jurisdiction_id)
             if poster_result and poster_result.get("status") == "generated":
                 poster_version = poster_result.get("version", "?")
                 yield {
                     "type": "poster_updated",
                     "message": f"Poster PDF regenerated (v{poster_version})",
                 }
-                alert_count = await create_poster_update_alerts(conn, jurisdiction_id)
+                alert_count = await create_poster_update_alerts(conn, canonical_jurisdiction_id)
                 if alert_count:
                     total_alerts += alert_count
                     yield {

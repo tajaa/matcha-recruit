@@ -69,6 +69,28 @@ REQUIRED_LABOR_CATEGORIES = {
     "scheduling_reporting",
 }
 
+_CATEGORY_ALIASES = {
+    "meal_rest_breaks": "meal_breaks",
+    "meal_and_rest_breaks": "meal_breaks",
+    "meal_periods": "meal_breaks",
+    "rest_breaks": "meal_breaks",
+    "payday_frequency": "pay_frequency",
+    "pay_day_frequency": "pay_frequency",
+    "final_wage": "final_pay",
+    "final_wages": "final_pay",
+    "final_paycheck": "final_pay",
+    "final_paychecks": "final_pay",
+    "minor_work_permits": "minor_work_permit",
+    "work_permit": "minor_work_permit",
+    "work_permits": "minor_work_permit",
+    "youth_employment": "minor_work_permit",
+    "youth_work_permit": "minor_work_permit",
+    "scheduling_and_reporting_time": "scheduling_reporting",
+    "reporting_time": "scheduling_reporting",
+    "predictive_scheduling": "scheduling_reporting",
+    "fair_workweek": "scheduling_reporting",
+}
+
 
 def _normalize_legislation_status(
     status: Optional[str],
@@ -285,7 +307,7 @@ def _normalize_category(category: Optional[str]) -> Optional[str]:
         return category
     s = category.strip().lower()
     s = re.sub(r"[\s\-]+", "_", s)
-    return s
+    return _CATEGORY_ALIASES.get(s, s)
 
 
 def _normalize_rate_type(rate_type: Optional[str]) -> Optional[str]:
@@ -2168,10 +2190,12 @@ async def run_compliance_check_stream(
                 if missing_categories:
                     yield {
                         "type": "repository_only",
+                        "jurisdiction_id": str(jurisdiction_id),
+                        "missing_categories": missing_categories,
                         "message": (
                             "Jurisdiction repository is missing "
                             f"{', '.join(missing_categories)}. "
-                            "Run Admin > Jurisdictions check to refresh source-of-truth coverage."
+                            "Run Admin > Jurisdictions research refresh for this city."
                         ),
                     }
 
@@ -3294,7 +3318,8 @@ async def run_compliance_check_background(
                 if missing_categories:
                     print(
                         f"[Compliance] Repository-only mode: missing categories for {location.city}, {location.state}: "
-                        f"{', '.join(missing_categories)}. Run Admin > Jurisdictions check."
+                        f"{', '.join(missing_categories)}. "
+                        f"Run Admin > Jurisdictions research refresh (jurisdiction_id={jurisdiction_id})."
                     )
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
