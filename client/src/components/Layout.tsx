@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
-import { HelpCircle, X, ChevronDown, Sliders } from 'lucide-react';
+import { HelpCircle, X, ChevronDown, Sliders, Sun, Moon } from 'lucide-react';
 import { PendingApproval } from './PendingApproval';
 import { PlatformFeatureManager } from '../pages/admin/PlatformFeatureManager';
 
@@ -636,6 +636,7 @@ export function Layout() {
   const { user, profile, logout, hasRole, hasBetaFeature, hasFeature, platformFeatures } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showFeatureManager, setShowFeatureManager] = useState(false);
+  const [lightMode, setLightMode] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
     () => new Set(navSections.map(s => s.title))
   );
@@ -761,7 +762,7 @@ export function Layout() {
       <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-30 mix-blend-overlay" />
 
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className="hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-64 flex-col bg-zinc-950 border-r border-white/10">
+      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-64 flex-col bg-zinc-950 border-r border-white/10 ${lightMode ? 'invert brightness-90 hue-rotate-180' : ''}`}>
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-white/10">
           <Link to="/" className="flex items-center gap-3 group">
@@ -817,6 +818,15 @@ export function Layout() {
             </button>
           )}
           <NavLink item={settingsItem} />
+          
+          <button
+            onClick={() => setLightMode(!lightMode)}
+            className="w-full flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase text-zinc-400 hover:text-white border-l-2 border-transparent hover:border-zinc-700 transition-all mt-1"
+          >
+            {lightMode ? <Moon className="w-4 h-4 shrink-0" /> : <Sun className="w-4 h-4 shrink-0" />}
+            <span>{lightMode ? 'Dark Mode' : 'Light Mode'}</span>
+          </button>
+
           <div className="mt-4 px-3 py-3 bg-zinc-900 border border-white/5">
             {companyName && (
               <div className="text-[10px] font-bold text-white tracking-widest uppercase truncate mb-2 pb-2 border-b border-white/10">
