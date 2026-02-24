@@ -193,16 +193,12 @@ export default function OnboardingCenter() {
         activeStep={activeCycleStep}
         title="Expected Onboarding Cycle"
         storageKey="onboarding-cycle-collapsed-v1"
-        showUpNext={true}
-        upNextText={(activeCycleStep < ONBOARDING_CYCLE_STEPS.length) ? `Step ${activeCycleStep + 1} — ${ONBOARDING_CYCLE_STEPS[activeCycleStep].title}` : undefined}
-        showAnalytics={analytics ? {
-          invited: analytics.funnel.invited,
-          accepted: analytics.funnel.accepted,
-          ready_for_day1: analytics.funnel.ready_for_day1,
-          completion_before_start_rate: analytics.kpis.completion_before_start_rate,
-        } : undefined}
-        analyticsError={analyticsError}
       />
+      {analyticsError && (
+        <div className="border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[10px] font-mono uppercase tracking-[0.15em] text-amber-200">
+          Analytics temporarily unavailable: {analyticsError}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-white/10 -mx-4 px-4 sm:mx-0 sm:px-0">

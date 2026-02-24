@@ -528,28 +528,28 @@ export default function PerformanceReviews() {
                   {/* Stats Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-px bg-white/10 border border-white/10">
                     <StatCard
-                      title="Completion Rate"
+                      label="Completion Rate"
                       value={`${Math.round(cycleProgress.completion_rate)}%`}
                       subtext={`${cycleProgress.completed} of ${cycleProgress.total_reviews} completed`}
                       icon={CheckCircle}
                       color="text-emerald-400"
                     />
                     <StatCard
-                      title="Self Reviews"
+                      label="Self Reviews"
                       value={cycleProgress.self_submitted}
                       subtext="Self-assessments submitted"
                       icon={Users}
                       color="text-blue-400"
                     />
                     <StatCard
-                      title="Manager Reviews"
+                      label="Manager Reviews"
                       value={cycleProgress.manager_submitted}
                       subtext="Manager reviews submitted"
                       icon={FileText}
                       color="text-purple-400"
                     />
                     <StatCard
-                      title="Pending"
+                      label="Pending"
                       value={cycleProgress.pending}
                       subtext="Awaiting submission"
                       icon={Clock}

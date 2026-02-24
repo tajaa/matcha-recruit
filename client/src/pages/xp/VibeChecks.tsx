@@ -269,28 +269,28 @@ export default function VibeChecks() {
                 return (
                   <>
                     <StatCard
-                      title="Avg Mood Rating"
+                      label="Avg Mood Rating"
                       value={avgMood != null && !isNaN(avgMood) ? avgMood.toFixed(1) : '—'}
                       subtext={avgMood != null && !isNaN(avgMood) ? getMoodLabel(Math.round(avgMood)) : 'No data'}
                       icon={Smile}
                       color={avgMood != null && !isNaN(avgMood) ? getMoodColor(avgMood) : 'text-zinc-500'}
                     />
                     <StatCard
-                      title="Response Rate"
+                      label="Response Rate"
                       value={responseRate != null && !isNaN(responseRate) ? `${Math.round(responseRate)}%` : '—'}
                       subtext={`${analytics.total_responses ?? 0} responses`}
                       icon={Users}
                       color="text-emerald-400"
                     />
                     <StatCard
-                      title="Total Responses"
+                      label="Total Responses"
                       value={analytics.total_responses ?? 0}
                       subtext="This period"
                       icon={MessageCircle}
                       color="text-white"
                     />
                     <StatCard
-                      title="Avg Sentiment"
+                      label="Avg Sentiment"
                       value={avgSentiment != null && !isNaN(avgSentiment) ? avgSentiment.toFixed(2) : '—'}
                       subtext={avgSentiment != null && !isNaN(avgSentiment) ? (avgSentiment > 0 ? 'Positive' : avgSentiment < 0 ? 'Negative' : 'Neutral') : 'No data'}
                       icon={TrendingUp}

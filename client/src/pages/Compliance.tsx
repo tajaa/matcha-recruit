@@ -1,9 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { BusinessLocation, ComplianceRequirement, LocationCreate, JurisdictionOption } from '../api/compliance';
 import {
-    complianceAPI,
     COMPLIANCE_CATEGORY_LABELS,
     JURISDICTION_LEVEL_LABELS
 } from '../api/compliance';
@@ -19,6 +18,7 @@ import {
 import { AnimatePresence, motion } from 'framer-motion';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
+import { useCompliance, useComplianceRequirements, useJurisdictionSearch, useComplianceCheck } from '../hooks/compliance';
 
 function linkifyText(text: string) {
     const splitRegex = /(https?:\/\/[^\s,)]+)/g;
@@ -80,32 +80,6 @@ const emptyFormData: LocationFormData = {
     jurisdictionKey: ''
 };
 
-const REQUIREMENT_CATEGORY_ORDER = [
-    'meal_breaks',
-    'minimum_wage',
-    'overtime',
-    'pay_frequency',
-    'sick_leave',
-    'final_pay',
-    'minor_work_permit',
-    'scheduling_reporting',
-    'workers_comp',
-    'business_license',
-    'tax_rate',
-    'posting_requirements',
-];
-
-const CORE_REQUIREMENT_SECTIONS = [
-    'meal_breaks',
-    'minimum_wage',
-    'overtime',
-    'pay_frequency',
-    'sick_leave',
-    'final_pay',
-    'minor_work_permit',
-    'scheduling_reporting',
-];
-
 const RATE_TYPE_LABELS: Record<string, string> = {
     general: 'General',
     tipped: 'Tipped / Tip Credit',
@@ -116,10 +90,6 @@ const RATE_TYPE_LABELS: Record<string, string> = {
     large_employer: 'Large Employer',
     small_employer: 'Small Employer',
 };
-
-function normalizeCategoryKey(category: string): string {
-    return category.trim().toLowerCase().replace(/[\s-]+/g, '_');
-}
 
 function getRequirementEmptyStateCopy(category: string): string {
     switch (category) {
@@ -180,18 +150,33 @@ export function Compliance() {
     const [searchParams] = useSearchParams();
     const isClient = user?.role === 'client';
     const isAdmin = user?.role === 'admin';
-    const queryClient = useQueryClient();
+
+    // Local state for UI-specific interactions
     const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
     const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
-    const [jurisdictionSearch, setJurisdictionSearch] = useState('');
-    const [showAddModal, setShowAddModal] = useState(false);
-    const [editingLocation, setEditingLocation] = useState<BusinessLocation | null>(null);
-    const [formData, setFormData] = useState<LocationFormData>(emptyFormData);
-    const [useManualEntry, setUseManualEntry] = useState(false);
+
+    // Hook instantiation
+    const complianceHook = useCompliance(selectedCompanyId, selectedLocationId);
+    const complianceCheckHook = useComplianceCheck(selectedLocationId, selectedCompanyId, () => {});
+    const complianceReqHook = useComplianceRequirements(complianceHook.requirements || []);
+    const jurisdictionSearchHook = useJurisdictionSearch(complianceHook.jurisdictions || []);
+
+    // Aliases for easier access
+    const {
+        locations, loadingLocations, requirements, loadingRequirements, alerts, loadingAlerts,
+        upcomingLegislation, checkLog, createLocationMutation,
+        updateLocationMutation, deleteLocationMutation, markAlertReadMutation, dismissAlertMutation,
+        showAddModal, setShowAddModal, editingLocation, setEditingLocation, formData, setFormData,
+        useManualEntry, setUseManualEntry
+    } = complianceHook;
+
+    const { checkInProgress, checkMessages, runComplianceCheck } = complianceCheckHook;
+    const { orderedRequirementCategories } = complianceReqHook;
+    const { jurisdictionSearch, setJurisdictionSearch, filteredJurisdictions } = jurisdictionSearchHook;
+
+    // UI-specific state (not in hooks)
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
     const [activeTab, setActiveTab] = useState<'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters'>('requirements');
-    const [checkInProgress, setCheckInProgress] = useState(false);
-    const [checkMessages, setCheckMessages] = useState<{ type: string; status?: string; message?: string; location?: string; new?: number; updated?: number; alerts?: number }[]>([]);
     const [expandedAlertSources, setExpandedAlertSources] = useState<Set<string>>(new Set());
     const [availablePosters, setAvailablePosters] = useState<AvailablePoster[]>([]);
     const [posterOrders, setPosterOrders] = useState<PosterOrder[]>([]);
@@ -224,17 +209,10 @@ export function Compliance() {
         }
     }, [isAdmin, companies, selectedCompanyId]);
 
-    const companyId = isAdmin ? selectedCompanyId ?? undefined : undefined;
-
-    const { data: locations, isLoading: loadingLocations } = useQuery({
-        queryKey: ['compliance-locations', companyId],
-        queryFn: () => complianceAPI.getLocations(companyId),
-        enabled: !isAdmin || !!companyId,
-    });
-
+    // Reset selected location when company changes
     useEffect(() => {
         setSelectedLocationId(null);
-    }, [companyId]);
+    }, [selectedCompanyId]);
 
     // Load poster data when tab becomes active
     useEffect(() => {
@@ -257,141 +235,8 @@ export function Compliance() {
         loadPosters();
     }, [activeTab]);
 
-    const { data: requirements, isLoading: loadingRequirements } = useQuery({
-        queryKey: ['compliance-requirements', selectedLocationId, companyId],
-        queryFn: () => selectedLocationId ? complianceAPI.getRequirements(selectedLocationId, undefined, companyId) : Promise.resolve([]),
-        enabled: !!selectedLocationId
-    });
-
-    const { data: alerts, isLoading: loadingAlerts } = useQuery({
-        queryKey: ['compliance-alerts', companyId],
-        queryFn: () => complianceAPI.getAlerts(undefined, companyId),
-        enabled: !isAdmin || !!companyId,
-    });
-
-    const { data: upcomingLegislation } = useQuery({
-        queryKey: ['compliance-upcoming', selectedLocationId, companyId],
-        queryFn: () => selectedLocationId ? complianceAPI.getUpcomingLegislation(selectedLocationId, companyId) : Promise.resolve([]),
-        enabled: !!selectedLocationId
-    });
-
-    const { data: checkLog } = useQuery({
-        queryKey: ['compliance-check-log', selectedLocationId, companyId],
-        queryFn: () => selectedLocationId ? complianceAPI.getCheckLog(selectedLocationId, 10, companyId) : Promise.resolve([]),
-        enabled: !!selectedLocationId
-    });
-
     const showJurisdictionPicker = (isClient || isAdmin) && !editingLocation && !useManualEntry;
-
-    const { data: jurisdictions } = useQuery({
-        queryKey: ['compliance-jurisdictions'],
-        queryFn: complianceAPI.getJurisdictions,
-        enabled: isClient || isAdmin,
-    });
-
-    const jurisdictionsByState = useMemo(() => {
-        if (!jurisdictions) return {};
-        const grouped: Record<string, JurisdictionOption[]> = {};
-        for (const j of jurisdictions) {
-            if (!grouped[j.state]) grouped[j.state] = [];
-            grouped[j.state].push(j);
-        }
-        return grouped;
-    }, [jurisdictions]);
-
-    const filteredJurisdictions = useMemo(() => {
-        if (!jurisdictions) return {};
-        const search = jurisdictionSearch.toLowerCase().trim();
-        if (!search) return jurisdictionsByState;
-        const filtered: Record<string, JurisdictionOption[]> = {};
-        for (const [state, items] of Object.entries(jurisdictionsByState)) {
-            const stateLabel = US_STATES.find(s => s.value === state)?.label || state;
-            const matches = items.filter(j =>
-                j.city.toLowerCase().includes(search) ||
-                state.toLowerCase().includes(search) ||
-                stateLabel.toLowerCase().includes(search)
-            );
-            if (matches.length > 0) filtered[state] = matches;
-        }
-        return filtered;
-    }, [jurisdictions, jurisdictionSearch, jurisdictionsByState]);
-
     const makeJurisdictionKey = (j: JurisdictionOption) => `${j.city}|${j.state}|${j.county || ''}`;
-
-    const createLocationMutation = useMutation({
-        mutationFn: (data: LocationCreate) => complianceAPI.createLocation(data, companyId),
-        onSuccess: (newLocation) => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
-            queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
-            setShowAddModal(false);
-            setFormData(emptyFormData);
-            setUseManualEntry(false);
-            setSelectedLocationId(newLocation.id);
-        }
-    });
-
-    const updateLocationMutation = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: LocationCreate }) => complianceAPI.updateLocation(id, data, companyId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
-            setEditingLocation(null);
-            setFormData(emptyFormData);
-        }
-    });
-
-    const deleteLocationMutation = useMutation({
-        mutationFn: (id: string) => complianceAPI.deleteLocation(id, companyId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
-            queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
-            if (selectedLocationId === deleteLocationMutation.variables) {
-                setSelectedLocationId(null);
-            }
-        }
-    });
-
-    const markAlertReadMutation = useMutation({
-        mutationFn: (id: string) => complianceAPI.markAlertRead(id, companyId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
-            queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
-        }
-    });
-
-    const dismissAlertMutation = useMutation({
-        mutationFn: (id: string) => complianceAPI.dismissAlert(id, companyId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
-            queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
-        }
-    });
-
-    const requirementsByCategory = useMemo(() => {
-        if (!requirements) return {};
-        return requirements.reduce((acc, req) => {
-            const category = normalizeCategoryKey(req.category || 'other');
-            if (!acc[category]) acc[category] = [];
-            acc[category].push({ ...req, category });
-            return acc;
-        }, {} as Record<string, ComplianceRequirement[]>);
-    }, [requirements]);
-
-    const orderedRequirementCategories = useMemo(() => {
-        const orderIndex = new Map(REQUIREMENT_CATEGORY_ORDER.map((cat, idx) => [cat, idx]));
-        const categories = new Set(Object.keys(requirementsByCategory));
-        CORE_REQUIREMENT_SECTIONS.forEach(category => categories.add(category));
-
-        return Array.from(categories)
-            .sort((a, b) => {
-                const aIdx = orderIndex.get(a);
-                const bIdx = orderIndex.get(b);
-                if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
-                if (aIdx !== undefined) return -1;
-                if (bIdx !== undefined) return 1;
-                return a.localeCompare(b);
-            })
-            .map((category) => [category, requirementsByCategory[category] || []] as [string, ComplianceRequirement[]]);
-    }, [requirementsByCategory]);
 
     const toggleCategory = (category: string) => {
         setExpandedCategories(prev => {
@@ -740,41 +585,7 @@ export function Compliance() {
                                         disabled={checkInProgress}
                                         onClick={async () => {
                                             if (!selectedLocationId || checkInProgress) return;
-                                            setCheckInProgress(true);
-                                            setCheckMessages([]);
-                                            try {
-                                                const response = await complianceAPI.checkCompliance(selectedLocationId, companyId);
-                                                const reader = response.body?.getReader();
-                                                if (!reader) throw new Error('No response body');
-                                                const decoder = new TextDecoder();
-                                                let buffer = '';
-                                                while (true) {
-                                                    const { done, value } = await reader.read();
-                                                    if (done) break;
-                                                    buffer += decoder.decode(value, { stream: true });
-                                                    const lines = buffer.split('\n');
-                                                    buffer = lines.pop() || '';
-                                                    for (const line of lines) {
-                                                        const trimmed = line.trim();
-                                                        if (!trimmed.startsWith('data: ')) continue;
-                                                        const payload = trimmed.slice(6);
-                                                        if (payload === '[DONE]') continue;
-                                                        try {
-                                                            const event = JSON.parse(payload);
-                                                            setCheckMessages(prev => [...prev, event]);
-                                                        } catch { /* skip malformed */ }
-                                                    }
-                                                }
-                                                queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId, companyId] });
-                                                queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
-                                                queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
-                                                queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
-                                            } catch (error) {
-                                                console.error('Compliance check failed:', error);
-                                                setCheckMessages(prev => [...prev, { type: 'error', message: 'Failed to run compliance check' }]);
-                                            } finally {
-                                                setCheckInProgress(false);
-                                            }
+                                            await runComplianceCheck();
                                         }}
                                         className="relative group px-6 py-3 bg-white text-black text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-500 hover:bg-[#4ADE80] disabled:opacity-50 overflow-hidden rounded-sm"
                                     >

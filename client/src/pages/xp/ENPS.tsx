@@ -311,21 +311,21 @@ export default function ENPS() {
               {/* Stats Grid */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-white/10 border border-white/10">
                 <StatCard
-                  title="Response Rate"
+                  label="Response Rate"
                   value={`${Math.round(results.response_rate)}%`}
                   subtext={`${results.total_responses} total responses`}
                   icon={Users}
                   color="text-emerald-400"
                 />
                 <StatCard
-                  title="Promoter Rate"
+                  label="Promoter Rate"
                   value={`${results.total_responses > 0 ? Math.round((results.promoters / results.total_responses) * 100) : 0}%`}
                   subtext={`${results.promoters} promoters (9-10)`}
                   icon={TrendingUp}
                   color="text-emerald-400"
                 />
                 <StatCard
-                  title="Detractor Rate"
+                  label="Detractor Rate"
                   value={`${results.total_responses > 0 ? Math.round((results.detractors / results.total_responses) * 100) : 0}%`}
                   subtext={`${results.detractors} detractors (0-6)`}
                   icon={AlertTriangle}
