@@ -2712,6 +2712,8 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         _compute_requirement_key,
         _normalize_title_key,
         REQUIRED_LABOR_CATEGORIES,
+        _lookup_has_local_ordinance,
+        _refresh_repository_missing_categories,
     )
     from ..models.compliance import VerificationResult
 
@@ -2729,6 +2731,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
     service = get_gemini_compliance_service()
     async with get_connection() as conn:
         used_repository = False
+        has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
         city_key = _normalize_city_input(city)
         city_jurisdiction_rows = await conn.fetch(
             """
@@ -2965,6 +2968,67 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         low_conf_requirement_count = sum(
             1 for confidence, _ in best_requirements.values() if confidence < STRICT_CONFIDENCE_THRESHOLD
         )
+
+        if not requirements:
+            missing_categories = sorted(REQUIRED_LABOR_CATEGORIES)
+            yield {
+                "type": "repository_refresh",
+                "jurisdiction_id": str(canonical_jurisdiction_id),
+                "missing_categories": missing_categories,
+                "message": (
+                    "No requirements returned from direct research. Running source-aware repository refresh for "
+                    f"{location_label} ({', '.join(missing_categories)})."
+                ),
+            }
+
+            refresh_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+            def _on_refresh_retry(attempt: int, _error: str):
+                refresh_queue.put_nowait(
+                    {
+                        "type": "retrying",
+                        "message": f"Retrying repository refresh (attempt {attempt + 1})...",
+                    }
+                )
+
+            refresh_task = asyncio.create_task(
+                _refresh_repository_missing_categories(
+                    conn,
+                    service,
+                    jurisdiction_id=canonical_jurisdiction_id,
+                    city=city,
+                    state=state,
+                    county=county,
+                    has_local_ordinance=has_local_ordinance,
+                    current_requirements=existing_requirements,
+                    missing_categories=missing_categories,
+                    on_retry=_on_refresh_retry,
+                )
+            )
+            try:
+                while not refresh_task.done():
+                    while not refresh_queue.empty():
+                        yield refresh_queue.get_nowait()
+                    done, _ = await asyncio.wait({refresh_task}, timeout=8)
+                    if done:
+                        break
+                    yield {"type": "heartbeat"}
+            except asyncio.CancelledError:
+                if not refresh_task.done():
+                    refresh_task.cancel()
+                raise
+
+            while not refresh_queue.empty():
+                yield refresh_queue.get_nowait()
+
+            refreshed_requirements = refresh_task.result() or []
+            if refreshed_requirements:
+                requirements = _filter_by_jurisdiction_priority(refreshed_requirements)
+                yield {
+                    "type": "repository_refreshed",
+                    "jurisdiction_id": str(canonical_jurisdiction_id),
+                    "message": f"Repository refresh produced {len(requirements)} requirement(s).",
+                }
 
         if not requirements:
             cached_rows = await conn.fetch(
