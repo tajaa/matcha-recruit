@@ -389,6 +389,12 @@ export function Compliance() {
         return normalized;
     }, [searchParams]);
 
+    const syncStates = useMemo(() => {
+        const raw = searchParams.get('sync_states');
+        if (!raw || !wizardReturnPath) return new Set<string>();
+        return new Set(raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean));
+    }, [searchParams, wizardReturnPath]);
+
     const { data: companies } = useQuery({
         queryKey: ['admin-overview'],
         queryFn: () => adminOverview.get(),
@@ -741,6 +747,15 @@ export function Compliance() {
                         <span className="text-[9px] font-mono text-zinc-700">[{locations?.length || 0}]</span>
                     </div>
 
+                    {syncStates.size > 0 && (
+                        <div className="border border-amber-500/30 bg-amber-500/10 px-4 py-3 rounded-sm text-xs text-amber-200 space-y-1">
+                            <p className="font-medium uppercase tracking-wider">Handbook requires compliance sync</p>
+                            <p>
+                                Run <strong>Sync Compliance</strong> for each highlighted location below, then return to your handbook.
+                            </p>
+                        </div>
+                    )}
+
                     {loadingLocations ? (
                         <div className="space-y-2">
                             {[1, 2, 3].map(i => (
@@ -775,7 +790,9 @@ export function Compliance() {
                                 className={`border rounded-sm p-3.5 cursor-pointer transition-all duration-300 group relative overflow-hidden ${
                                     selectedLocationId === location.id
                                         ? 'border-matcha-500/40 bg-matcha-500/[0.03] shadow-[0_0_20px_rgba(0,0,0,0.4)]'
-                                        : 'border-white/5 bg-zinc-900/40 hover:border-white/10 hover:bg-zinc-900/60'
+                                        : syncStates.has((location.state || '').toUpperCase())
+                                            ? 'border-amber-500/40 bg-amber-500/[0.04] hover:border-amber-500/60'
+                                            : 'border-white/5 bg-zinc-900/40 hover:border-white/10 hover:bg-zinc-900/60'
                                 }`}
                             >
                                 {selectedLocationId === location.id && (

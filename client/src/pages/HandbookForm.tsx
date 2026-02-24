@@ -594,6 +594,19 @@ export function HandbookForm() {
     }
   }, [isWizard, wizardDraftLoaded, wizardDraftSaving, wizardDraftState]);
 
+  const extractMissingStateAbbrs = useCallback((errMsg: string): string[] => {
+    const match = errMsg.match(/generation:\s*(.+?)\.\s*Run/);
+    if (!match) return [];
+    const stateNames = match[1].split(';').map(s => s.trim().split('(')[0].trim().toLowerCase());
+    const abbrs = companyLocations
+      .filter(loc => stateNames.some(name =>
+        (loc.city || '').toLowerCase().includes(name) || name.includes((loc.state || '').toLowerCase())
+      ))
+      .map(loc => loc.state?.toUpperCase())
+      .filter(Boolean);
+    return [...new Set(abbrs)] as string[];
+  }, [companyLocations]);
+
   const openComplianceFromRecovery = useCallback(async () => {
     if (isWizard && wizardDraftLoaded) {
       await persistWizardDraft();
@@ -601,8 +614,12 @@ export function HandbookForm() {
     const params = new URLSearchParams({
       return_to: HANDBOOK_WIZARD_RETURN_PATH,
     });
+    if (error) {
+      const abbrs = extractMissingStateAbbrs(error);
+      if (abbrs.length > 0) params.set('sync_states', abbrs.join(','));
+    }
     navigate(`/app/matcha/compliance?${params.toString()}`);
-  }, [isWizard, wizardDraftLoaded, persistWizardDraft, navigate]);
+  }, [isWizard, wizardDraftLoaded, persistWizardDraft, navigate, error, extractMissingStateAbbrs]);
 
   const toggleState = (state: string) => {
     setSelectedStates((prev) => {
@@ -902,16 +919,6 @@ export function HandbookForm() {
     }
   };
 
-  const jumpToPolicyPackCard = (options?: { clearError?: boolean }) => {
-    const targetIndex = wizardCards.findIndex((card) => card.kind === 'policy_pack');
-    if (targetIndex >= 0) {
-      setWizardCardIndex(targetIndex);
-      if (options?.clearError ?? true) {
-        setError(null);
-      }
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -1016,9 +1023,6 @@ export function HandbookForm() {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to save handbook';
-      if (isWizard && msg.includes(MISSING_BOILERPLATE_COVERAGE_ERROR)) {
-        jumpToPolicyPackCard({ clearError: false });
-      }
       setError(msg);
     } finally {
       setLoading(false);
@@ -2102,22 +2106,13 @@ export function HandbookForm() {
           <div className="text-red-400 text-xs font-medium px-4 py-3 border border-red-500/30 bg-red-500/10 rounded-sm space-y-2">
             <p>{error}</p>
             {showsMissingCoverageRecovery && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mt-1">
                 <button
                   type="button"
-                  onClick={() => jumpToPolicyPackCard()}
+                  onClick={() => { void openComplianceFromRecovery(); }}
                   className="px-3 py-1.5 border border-red-400/40 bg-red-500/10 text-red-200 hover:text-white text-[10px] uppercase tracking-wider"
                 >
-                  Go To Policy Pack
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void openComplianceFromRecovery();
-                  }}
-                  className="px-3 py-1.5 border border-red-400/40 bg-red-500/10 text-red-200 hover:text-white text-[10px] uppercase tracking-wider"
-                >
-                  Open Compliance
+                  Sync Compliance Coverage →
                 </button>
               </div>
             )}
