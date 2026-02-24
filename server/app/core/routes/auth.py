@@ -23,7 +23,7 @@ from ..models.auth import (
     TokenAwardRequest, AllowedRolesRequest, CandidateSessionSummary
 )
 from ..services.auth import (
-    hash_password, verify_password,
+    hash_password, verify_password, verify_password_async,
     create_access_token, create_refresh_token, decode_token
 )
 from ..dependencies import get_current_user, require_admin, require_broker
@@ -1064,7 +1064,7 @@ async def login(request: LoginRequest):
             request.email
         )
 
-        if not user or not verify_password(request.password, user["password_hash"]):
+        if not user or not await verify_password_async(request.password, user["password_hash"]):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
@@ -2181,7 +2181,7 @@ async def change_password(
             current_user.id
         )
 
-        if not user or not verify_password(request.current_password, user["password_hash"]):
+        if not user or not await verify_password_async(request.current_password, user["password_hash"]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Current password is incorrect"
@@ -2217,7 +2217,7 @@ async def change_email(
             current_user.id
         )
 
-        if not user or not verify_password(request.password, user["password_hash"]):
+        if not user or not await verify_password_async(request.password, user["password_hash"]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Password is incorrect"

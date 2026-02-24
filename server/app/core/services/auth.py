@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
@@ -15,18 +16,23 @@ def hash_password(password: str) -> str:
     # Truncate to 72 bytes if needed (bcrypt limit)
     if len(password_bytes) > 72:
         password_bytes = password_bytes[:72]
-    salt = bcrypt.gensalt(rounds=12)
+    salt = bcrypt.gensalt(rounds=10)
     hashed = bcrypt.hashpw(password_bytes, salt)
     return hashed.decode('utf-8')
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash."""
+    """Verify a password against its hash (blocking — use verify_password_async in async routes)."""
     password_bytes = plain_password.encode('utf-8')
     if len(password_bytes) > 72:
         password_bytes = password_bytes[:72]
     hashed_bytes = hashed_password.encode('utf-8')
     return bcrypt.checkpw(password_bytes, hashed_bytes)
+
+
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    """Non-blocking bcrypt verify — runs in a thread so the event loop stays free."""
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
 
 
 def create_access_token(

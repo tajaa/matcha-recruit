@@ -9,7 +9,7 @@ from jose import jwt, JWTError
 
 from ....config import get_settings
 from ....database import get_connection
-from ...services.auth import hash_password, verify_password
+from ...services.auth import hash_password, verify_password_async
 from ...models.chat import (
     ChatUserRegister,
     ChatUserLogin,
@@ -194,7 +194,7 @@ async def login(data: ChatUserLogin):
             data.email.lower()
         )
 
-        if not user or not verify_password(data.password, user["password_hash"]):
+        if not user or not await verify_password_async(data.password, user["password_hash"]):
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
         # Update last_seen
