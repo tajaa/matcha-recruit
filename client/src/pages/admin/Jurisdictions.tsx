@@ -223,37 +223,31 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
                 <span className="text-[9px] text-zinc-700 font-mono">{reqs.length}</span>
               </div>
               {reqs.map((r: JurisdictionRequirement) => (
-                <div key={r.id} className="px-6 py-3 hover:bg-white/[0.02] transition-colors">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs text-zinc-200 font-medium">{r.title}</span>
-                        <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${levelColor[r.jurisdiction_level] || levelColor.federal}`}>
-                          {r.jurisdiction_level}
-                        </span>
-                      </div>
-                      {r.description && (
-                        <div className="text-[11px] text-zinc-500 font-mono leading-relaxed mb-1 line-clamp-2">{r.description}</div>
-                      )}
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
-                        {r.source_name && (
-                          <span className="text-[9px] text-zinc-600 font-mono">
-                            {r.source_url ? <a href={r.source_url} target="_blank" rel="noreferrer" className="hover:text-zinc-400 underline">{r.source_name}</a> : r.source_name}
-                          </span>
-                        )}
-                        {r.effective_date && <span className="text-[9px] text-zinc-600 font-mono">Effective: {r.effective_date}</span>}
-                        {r.last_changed_at && <span className="text-[9px] text-amber-500/70 font-mono">Changed {formatRelative(r.last_changed_at)}</span>}
-                        <span className="text-[9px] text-zinc-700 font-mono">Verified {formatRelative(r.last_verified_at)}</span>
-                      </div>
-                    </div>
-                    <div className="text-right flex-shrink-0 min-w-[90px]">
-                      {r.current_value && (
-                        <div className="text-sm text-white font-mono font-bold">{r.current_value}</div>
-                      )}
-                      {r.previous_value && r.previous_value !== r.current_value && (
-                        <div className="text-[9px] text-zinc-600 font-mono line-through">{r.previous_value}</div>
-                      )}
-                    </div>
+                <div key={r.id} className="px-6 py-4 hover:bg-white/[0.02] transition-colors">
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span className="text-xs text-zinc-200 font-medium leading-tight">{r.title}</span>
+                    <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border shrink-0 ${levelColor[r.jurisdiction_level] || levelColor.federal}`}>
+                      {r.jurisdiction_level}
+                    </span>
+                  </div>
+                  {r.current_value && (
+                    <div className="text-xs text-white font-mono font-bold mb-1.5 leading-snug">{r.current_value}</div>
+                  )}
+                  {r.previous_value && r.previous_value !== r.current_value && (
+                    <div className="text-[9px] text-zinc-600 font-mono line-through mb-1">{r.previous_value}</div>
+                  )}
+                  {r.description && (
+                    <div className="text-[10px] text-zinc-500 font-mono leading-relaxed mb-2 line-clamp-3">{r.description}</div>
+                  )}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {r.source_name && (
+                      <span className="text-[9px] text-zinc-600 font-mono">
+                        {r.source_url ? <a href={r.source_url} target="_blank" rel="noreferrer" className="hover:text-zinc-400 underline">{r.source_name}</a> : r.source_name}
+                      </span>
+                    )}
+                    {r.effective_date && <span className="text-[9px] text-zinc-600 font-mono">Eff: {r.effective_date}</span>}
+                    {r.last_changed_at && <span className="text-[9px] text-amber-500/70 font-mono">Changed {formatRelative(r.last_changed_at)}</span>}
+                    <span className="text-[9px] text-zinc-700 font-mono">Verified {formatRelative(r.last_verified_at)}</span>
                   </div>
                 </div>
               ))}
@@ -268,41 +262,35 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
             <div className="px-6 py-4 text-xs text-zinc-600 font-mono italic">No legislation tracked</div>
           )}
           {detail.legislation.map((l: JurisdictionLegislation) => (
-            <div key={l.id} className="px-6 py-3 hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs text-zinc-200 font-medium">{l.title}</span>
-                    <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${legStatusColor[l.current_status] || legStatusColor.proposed}`}>
-                      {l.current_status.replace(/_/g, ' ')}
-                    </span>
-                    {l.category && (
-                      <span className="text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-600 bg-zinc-800 border border-zinc-700">
-                        {categoryLabel[l.category] || l.category.replace(/_/g, ' ')}
-                      </span>
-                    )}
-                  </div>
-                  {l.description && (
-                    <div className="text-[11px] text-zinc-500 font-mono leading-relaxed mb-1 line-clamp-2">{l.description}</div>
-                  )}
-                  {l.impact_summary && (
-                    <div className="text-[11px] text-zinc-500 font-mono leading-relaxed mb-1 line-clamp-2">Impact: {l.impact_summary}</div>
-                  )}
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
-                    {l.source_name && (
-                      <span className="text-[9px] text-zinc-600 font-mono">
-                        {l.source_url ? <a href={l.source_url} target="_blank" rel="noreferrer" className="hover:text-zinc-400 underline">{l.source_name}</a> : l.source_name}
-                      </span>
-                    )}
-                    {l.confidence != null && <span className="text-[9px] text-zinc-600 font-mono">Confidence: {Math.round(l.confidence * 100)}%</span>}
-                    <span className="text-[9px] text-zinc-700 font-mono">Verified {formatRelative(l.last_verified_at)}</span>
-                  </div>
-                </div>
-                <div className="text-right flex-shrink-0 min-w-[90px]">
-                  {l.expected_effective_date && (
-                    <div className="text-xs text-zinc-300 font-mono">{l.expected_effective_date}</div>
-                  )}
-                </div>
+            <div key={l.id} className="px-6 py-4 hover:bg-white/[0.02] transition-colors">
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                <span className="text-xs text-zinc-200 font-medium leading-tight">{l.title}</span>
+                <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border shrink-0 ${legStatusColor[l.current_status] || legStatusColor.proposed}`}>
+                  {l.current_status.replace(/_/g, ' ')}
+                </span>
+                {l.category && (
+                  <span className="text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-mono text-zinc-600 bg-zinc-800 border border-zinc-700 shrink-0">
+                    {categoryLabel[l.category] || l.category.replace(/_/g, ' ')}
+                  </span>
+                )}
+              </div>
+              {l.expected_effective_date && (
+                <div className="text-xs text-zinc-300 font-mono mb-1.5">{l.expected_effective_date}</div>
+              )}
+              {l.description && (
+                <div className="text-[10px] text-zinc-500 font-mono leading-relaxed mb-1.5 line-clamp-3">{l.description}</div>
+              )}
+              {l.impact_summary && (
+                <div className="text-[10px] text-zinc-500 font-mono leading-relaxed mb-2 line-clamp-2">Impact: {l.impact_summary}</div>
+              )}
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {l.source_name && (
+                  <span className="text-[9px] text-zinc-600 font-mono">
+                    {l.source_url ? <a href={l.source_url} target="_blank" rel="noreferrer" className="hover:text-zinc-400 underline">{l.source_name}</a> : l.source_name}
+                  </span>
+                )}
+                {l.confidence != null && <span className="text-[9px] text-zinc-600 font-mono">Confidence: {Math.round(l.confidence * 100)}%</span>}
+                <span className="text-[9px] text-zinc-700 font-mono">Verified {formatRelative(l.last_verified_at)}</span>
               </div>
             </div>
           ))}
@@ -1050,10 +1038,10 @@ export function Jurisdictions() {
           )}
 
           {/* Main two-column layout */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
-            {/* Jurisdictions list — 2/3 width on xl */}
-            <div className="xl:col-span-2 space-y-3">
+            {/* Jurisdictions list — 2/3 width on lg */}
+            <div className="lg:col-span-2 space-y-3">
               <SectionLabel>
                 Jurisdictions{jurisdictions.length > 0 ? ` (${jurisdictions.length})` : ''}
               </SectionLabel>
@@ -1092,21 +1080,6 @@ export function Jurisdictions() {
                 </div>
               ) : (
                 <div className="border border-white/10 divide-y divide-white/[0.05]">
-                  {/* Column header */}
-                  <div className="hidden xl:flex items-center gap-2 px-4 py-2 bg-zinc-950/70 border-b border-white/[0.05]">
-                    <div className="flex-1 min-w-0" />
-                    <div className="flex items-center gap-4 shrink-0">
-                      <div className="w-10 text-right text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Reqs</div>
-                      <div className="w-10 text-right text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Leg</div>
-                      <div className="w-10 text-right text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Locs</div>
-                      <div className="w-16 text-right text-[9px] text-zinc-600 uppercase tracking-widest font-mono">Verified</div>
-                    </div>
-                    <div className="hidden sm:block w-[77px]" />
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <div className="w-[88px]" />
-                      <div className="w-7" />
-                    </div>
-                  </div>
                   {groupedByState.map(([state, stateJurisdictions]) => (
                     <div key={state}>
                       {/* State group header */}
@@ -1121,104 +1094,117 @@ export function Jurisdictions() {
                     return (
                       <div key={j.id} className={isExpanded ? 'bg-white/[0.015]' : ''}>
                         {/* Row */}
-                        <div className="flex items-center gap-2 px-4 py-3 hover:bg-white/[0.03] transition-colors group">
-                          {/* Expand + main info */}
-                          <button
-                            onClick={() => handleExpand(j.id)}
-                            className="flex-1 min-w-0 flex items-center gap-2.5 text-left"
-                          >
-                            <span className={`text-[9px] font-mono text-zinc-600 shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
-                            <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                              <span className="text-sm text-white font-medium">{displayCity(j.city)}, {j.state}</span>
-                              {j.county && <span className="text-[9px] text-zinc-600 font-mono hidden md:inline">({j.county})</span>}
-                              {j.parent_id && j.parent_city && (
-                                <span className={`text-[8px] px-1.5 py-0.5 font-mono border hidden sm:inline ${
-                                  j.inherits_from_parent
-                                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
-                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                                }`}>
-                                  {j.inherits_from_parent
-                                    ? `inherits ${formatInheritanceParent(displayCity(j.parent_city), j.parent_state)}`
-                                    : `↳ ${displayCity(j.parent_city)}`}
-                                </span>
-                              )}
-                              {j.children_count > 0 && (
-                                <span className="text-[8px] px-1.5 py-0.5 font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 hidden lg:inline">
-                                  {j.children_count} {j.children_count === 1 ? 'child' : 'children'}
-                                </span>
-                              )}
-                            </div>
-                          </button>
-
-                          {/* Stats — desktop only */}
-                          <div className="hidden xl:flex items-center gap-4 shrink-0">
-                            <div className="w-10 text-right text-xs text-zinc-300 font-mono font-bold tabular-nums">{j.requirement_count}</div>
-                            <div className="w-10 text-right text-xs text-zinc-300 font-mono font-bold tabular-nums">{j.legislation_count}</div>
-                            <div className="w-10 text-right text-xs text-zinc-300 font-mono font-bold tabular-nums">{j.location_count}</div>
-                            <div className="w-16 text-right text-xs text-zinc-500 font-mono">{formatRelative(j.last_verified_at)}</div>
-                          </div>
-
-                          {/* Status badge */}
-                          <span className={`hidden sm:inline text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border shrink-0 ${
-                            j.requirement_count > 0
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                              : 'bg-zinc-800/40 text-zinc-600 border-zinc-700/30'
-                          }`}>
-                            {j.requirement_count > 0 ? 'Populated' : 'Empty'}
-                          </span>
-
-                          {/* Actions */}
-                          <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="px-4 py-3.5 hover:bg-white/[0.03] transition-colors">
+                          <div className="flex items-start gap-2.5">
+                            {/* Chevron */}
                             <button
-                              onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
-                              disabled={topMetroRunning || checkingId !== null || deletingId !== null}
-                              className={`relative px-2.5 py-1.5 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
-                                checkingId === j.id
-                                  ? 'text-blue-300 border-blue-500/40 bg-blue-500/5'
-                                  : 'text-zinc-500 border-zinc-700/60 hover:text-white hover:border-zinc-500 disabled:opacity-30'
-                              }`}
+                              onClick={() => handleExpand(j.id)}
+                              className="mt-0.5 shrink-0"
+                              aria-label="Toggle detail"
                             >
-                              {checkingId === j.id && (
-                                <span className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/10 to-transparent" style={{ animation: 'scanX 1.5s ease-in-out infinite' }} />
-                              )}
-                              <span className="relative flex items-center gap-1.5">
-                                {checkingId === j.id ? (
-                                  <>
-                                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none">
-                                      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
-                                    </svg>
-                                    <span className="hidden sm:inline">Scanning</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                    </svg>
-                                    <span className="hidden sm:inline">Research</span>
-                                  </>
+                              <span className={`text-[9px] font-mono text-zinc-600 transition-transform duration-150 inline-block ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
+                            </button>
+
+                            {/* Content block */}
+                            <div className="flex-1 min-w-0">
+                              {/* Line 1: name + actions */}
+                              <div className="flex items-center justify-between gap-3">
+                                <button
+                                  onClick={() => handleExpand(j.id)}
+                                  className="text-sm text-white font-medium truncate min-w-0 text-left leading-tight"
+                                >
+                                  {displayCity(j.city)}, {j.state}
+                                </button>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
+                                    disabled={topMetroRunning || checkingId !== null || deletingId !== null}
+                                    className={`relative px-2.5 py-1.5 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
+                                      checkingId === j.id
+                                        ? 'text-blue-300 border-blue-500/40 bg-blue-500/5'
+                                        : 'text-zinc-500 border-zinc-700/60 hover:text-white hover:border-zinc-500 disabled:opacity-30'
+                                    }`}
+                                  >
+                                    {checkingId === j.id && (
+                                      <span className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/10 to-transparent" style={{ animation: 'scanX 1.5s ease-in-out infinite' }} />
+                                    )}
+                                    <span className="relative flex items-center gap-1.5">
+                                      {checkingId === j.id ? (
+                                        <>
+                                          <svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none">
+                                            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
+                                          </svg>
+                                          Scanning
+                                        </>
+                                      ) : (
+                                        <>
+                                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                          </svg>
+                                          Research
+                                        </>
+                                      )}
+                                    </span>
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); void handleDelete(j); }}
+                                    disabled={topMetroRunning || checkingId !== null || deletingId !== null}
+                                    className={`p-1.5 border transition-colors disabled:opacity-30 ${
+                                      deletingId === j.id
+                                        ? 'text-red-300 border-red-500/40 bg-red-500/5'
+                                        : 'text-zinc-700 border-zinc-800 hover:text-red-400 hover:border-red-700/60'
+                                    }`}
+                                    title="Delete jurisdiction"
+                                  >
+                                    {deletingId === j.id ? (
+                                      <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 16 16" fill="none">
+                                        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
+                                      </svg>
+                                    ) : (
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Line 2: badges + stats */}
+                              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                {j.county && (
+                                  <span className="text-[9px] text-zinc-600 font-mono">{j.county} Co.</span>
                                 )}
-                              </span>
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); void handleDelete(j); }}
-                              disabled={topMetroRunning || checkingId !== null || deletingId !== null}
-                              className={`p-1.5 border transition-colors disabled:opacity-30 ${
-                                deletingId === j.id
-                                  ? 'text-red-300 border-red-500/40 bg-red-500/5'
-                                  : 'text-zinc-700 border-zinc-800 hover:text-red-400 hover:border-red-700/60'
-                              }`}
-                              title="Delete jurisdiction"
-                            >
-                              {deletingId === j.id ? (
-                                <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 16 16" fill="none">
-                                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
-                                </svg>
-                              ) : (
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              )}
-                            </button>
+                                {j.parent_id && j.parent_city && (
+                                  <span className={`text-[8px] px-1.5 py-0.5 font-mono border ${
+                                    j.inherits_from_parent
+                                      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                                      : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                  }`}>
+                                    {j.inherits_from_parent
+                                      ? `inherits ${formatInheritanceParent(displayCity(j.parent_city), j.parent_state)}`
+                                      : `↳ ${displayCity(j.parent_city)}`}
+                                  </span>
+                                )}
+                                {j.children_count > 0 && (
+                                  <span className="text-[8px] px-1.5 py-0.5 font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                    {j.children_count} {j.children_count === 1 ? 'child' : 'children'}
+                                  </span>
+                                )}
+                                <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${
+                                  j.requirement_count > 0
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                    : 'bg-zinc-800/40 text-zinc-600 border-zinc-700/30'
+                                }`}>
+                                  {j.requirement_count > 0 ? 'Populated' : 'Empty'}
+                                </span>
+                                <div className="ml-auto flex items-center gap-3 text-[9px] font-mono text-zinc-600 tabular-nums">
+                                  <span>{j.requirement_count} reqs</span>
+                                  <span>{j.legislation_count} leg</span>
+                                  <span>{j.location_count} locs</span>
+                                  <span className="text-zinc-700">{formatRelative(j.last_verified_at)}</span>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
