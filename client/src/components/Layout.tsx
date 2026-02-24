@@ -762,7 +762,7 @@ export function Layout() {
       <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-30 mix-blend-overlay" />
 
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-64 flex-col bg-zinc-950 border-r border-white/10 ${lightMode ? 'invert brightness-90 hue-rotate-180' : ''}`}>
+      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 border-r border-white/10 ${lightMode ? 'invert brightness-90 hue-rotate-180' : ''}`}>
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-white/10">
           <Link to="/" className="flex items-center gap-3 group">
@@ -933,14 +933,14 @@ export function Layout() {
       </nav>
 
       {/* Main content - offset for sidebar on desktop, header on mobile */}
-      <main className="relative z-10 md:ml-64 pt-20 md:pt-8 pb-12 px-4 sm:px-8 lg:px-12 overflow-x-hidden">
+      <main className="relative z-10 md:ml-56 pt-20 md:pt-8 pb-12 px-4 sm:px-8 lg:px-12 overflow-x-hidden">
         <div className="max-w-[1600px] mx-auto">
           <Outlet />
         </div>
       </main>
 
       {/* Bottom status bar */}
-      <footer className="fixed bottom-0 left-0 md:left-64 right-0 z-30 border-t border-white/5 bg-zinc-950 text-zinc-600">
+      <footer className="fixed bottom-0 left-0 md:left-56 right-0 z-30 border-t border-white/5 bg-zinc-950 text-zinc-600">
         <div className="px-6 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
