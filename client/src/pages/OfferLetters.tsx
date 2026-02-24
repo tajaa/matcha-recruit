@@ -135,7 +135,6 @@ export function OfferLetters() {
   const { hasFeature } = useAuth();
   const offerLettersPlusEnabled = hasFeature('offer_letters_plus');
   const [salaryType, setSalaryType] = useState<'fixed' | 'range'>('fixed');
-  const [createMode, setCreateMode] = useState<'form' | 'wizard' | 'select' | null>(null);
 
   const { offerLetters, setOfferLetters, selectedLetter, setSelectedLetter, isLoading, reload } = useOfferLetters();
 
@@ -147,6 +146,7 @@ export function OfferLetters() {
   const guidanceHook = useOfferGuidance();
 
   const rangeHook = useRangeNegotiation(offerLetters, setOfferLetters, selectedLetter, setSelectedLetter);
+  const { createMode, setCreateMode } = formHook;
 
   // Alias hook methods for easier template usage
   const { handleCreate, resetCreation, handleEditDraft, handleLogoChange, removeLogo } = formHook;

@@ -58,10 +58,8 @@ export function useComplianceCheck(selectedLocationId: string | null, companyId:
       if (selectedLocationId) {
         queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId, companyId] });
       }
-      if (companyId) {
-        queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
-        queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
-      }
+      queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
       onComplete();
     } catch (error) {

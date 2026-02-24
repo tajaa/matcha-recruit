@@ -156,7 +156,7 @@ export function Compliance() {
     const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
     // Hook instantiation
-    const complianceHook = useCompliance(selectedCompanyId, selectedLocationId);
+    const complianceHook = useCompliance(selectedCompanyId, selectedLocationId, isAdmin);
     const complianceCheckHook = useComplianceCheck(selectedLocationId, selectedCompanyId, () => {});
     const complianceReqHook = useComplianceRequirements(complianceHook.requirements || []);
     const jurisdictionSearchHook = useJurisdictionSearch(complianceHook.jurisdictions || []);

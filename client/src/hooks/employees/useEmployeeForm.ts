@@ -89,7 +89,7 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
   }, [emailEntryMode, generatedEmailEdited, newEmployee.first_name, newEmployee.last_name]);
 
   const generatedSingleWorkEmail = googleDomainAvailable && generatedEmailLocalPart
-    ? `${generatedEmailLocalPart}@${(googleDomainAvailable ? '' : '').replace(/^@/, '').toLowerCase()}`
+    ? generatedEmailLocalPart
     : '';
 
   const canProceedAddStep1 = Boolean(newEmployee.first_name.trim() && newEmployee.last_name.trim());
