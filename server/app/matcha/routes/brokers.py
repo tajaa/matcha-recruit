@@ -908,7 +908,7 @@ async def list_referred_clients(current_user: CurrentUser = Depends(require_brok
                 c.enabled_features
             FROM broker_company_links bcl
             JOIN companies c ON c.id = bcl.company_id
-            LEFT JOIN employees e ON e.company_id = c.id
+            LEFT JOIN employees e ON e.org_id = c.id
             WHERE bcl.broker_id = $1
             GROUP BY c.id, c.name, c.industry, c.size, c.status,
                      bcl.status, bcl.linked_at, bcl.activated_at,
