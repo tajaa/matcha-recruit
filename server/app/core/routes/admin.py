@@ -2434,6 +2434,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         score_verification_confidence,
         _compute_requirement_key,
         _normalize_title_key,
+        REQUIRED_LABOR_CATEGORIES,
     )
     from ..models.compliance import VerificationResult
 
@@ -2451,6 +2452,28 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
     service = get_gemini_compliance_service()
     async with get_connection() as conn:
         used_repository = False
+        existing_jurisdiction_rows = await conn.fetch(
+            "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+            jurisdiction_id,
+        )
+        existing_requirements = [_jurisdiction_row_to_dict(dict(row)) for row in existing_jurisdiction_rows]
+        present_categories = {
+            _normalize_category(req.get("category")) or req.get("category")
+            for req in existing_requirements
+            if req.get("category")
+        }
+        research_categories = sorted(
+            cat for cat in REQUIRED_LABOR_CATEGORIES
+            if cat not in present_categories
+        ) or None
+        if research_categories:
+            yield {
+                "type": "researching",
+                "message": (
+                    f"Filling missing coverage for {location_label}: "
+                    f"{', '.join(research_categories)}."
+                ),
+            }
 
         best_requirements: dict[str, tuple[float, dict[str, Any]]] = {}
         for pass_index in range(MAX_CONFIDENCE_REFETCH_ATTEMPTS + 1):
@@ -2475,6 +2498,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
                     city=city,
                     state=state,
                     county=county,
+                    categories=research_categories,
                     on_retry=_on_retry,
                 )
             )
@@ -2498,6 +2522,13 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
             for req in pass_requirements:
                 req["category"] = _normalize_category(req.get("category")) or req.get("category")
             pass_requirements = _filter_by_jurisdiction_priority(pass_requirements)
+            if research_categories and existing_requirements:
+                target_set = set(research_categories)
+                preserved = [
+                    req for req in existing_requirements
+                    if (_normalize_category(req.get("category")) or req.get("category")) not in target_set
+                ]
+                pass_requirements = preserved + pass_requirements
 
             for req in pass_requirements:
                 req_key = _compute_requirement_key(req)

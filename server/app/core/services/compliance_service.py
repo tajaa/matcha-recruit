@@ -1926,6 +1926,9 @@ async def run_compliance_check_stream(
     service = get_gemini_compliance_service()
     used_repository = False
     change_email_items: List[Dict[str, str]] = []
+    requirements: List[Dict[str, Any]] = []
+    cached_requirements_for_merge: List[Dict[str, Any]] = []
+    research_categories: Optional[List[str]] = None
 
     async with get_connection() as conn:
         log_id = await _create_check_log(conn, location_id, company_id, "manual")
@@ -1971,6 +1974,8 @@ async def run_compliance_check_stream(
                 requirements = tier1_data + repo_reqs
                 missing_categories = _missing_required_categories(requirements)
                 if missing_categories:
+                    research_categories = missing_categories
+                    cached_requirements_for_merge = list(requirements)
                     yield {
                         "type": "researching",
                         "message": f"Expanding coverage for {location_name}: missing {', '.join(missing_categories)}.",
@@ -1989,6 +1994,8 @@ async def run_compliance_check_stream(
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
                 missing_categories = _missing_required_categories(requirements)
                 if missing_categories:
+                    research_categories = missing_categories
+                    cached_requirements_for_merge = list(requirements)
                     yield {
                         "type": "researching",
                         "message": f"Coverage gap detected ({', '.join(missing_categories)}). Running live research...",
@@ -2008,6 +2015,8 @@ async def run_compliance_check_stream(
                     requirements = county_reqs
                     missing_categories = _missing_required_categories(requirements)
                     if missing_categories:
+                        research_categories = missing_categories
+                        cached_requirements_for_merge = list(requirements)
                         yield {
                             "type": "researching",
                             "message": f"County cache missing {', '.join(missing_categories)}. Running live research...",
@@ -2069,6 +2078,7 @@ async def run_compliance_check_stream(
                 research_task = asyncio.create_task(
                     service.research_location_compliance(
                         city=location.city, state=location.state, county=location.county,
+                        categories=research_categories,
                         source_context=source_context,
                         corrections_context=corrections_context,
                         preemption_rules=preemption_rules,
@@ -2078,7 +2088,19 @@ async def run_compliance_check_stream(
                 )
                 async for evt in _heartbeat_while(research_task, queue=research_queue):
                     yield evt
-                requirements = research_task.result()
+                researched_requirements = research_task.result() or []
+                if research_categories and cached_requirements_for_merge:
+                    target_set = {
+                        _normalize_category(cat) or cat
+                        for cat in research_categories
+                    }
+                    preserved = [
+                        req for req in cached_requirements_for_merge
+                        if (_normalize_category(req.get("category")) or req.get("category")) not in target_set
+                    ]
+                    requirements = preserved + researched_requirements
+                else:
+                    requirements = researched_requirements
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
             # Set used_repository = True to skip fresh-data logic (upserts, alerts, verification).
@@ -3054,6 +3076,9 @@ async def run_compliance_check_background(
     service = get_gemini_compliance_service()
     used_repository = False
     change_email_items: List[Dict[str, str]] = []
+    requirements: List[Dict[str, Any]] = []
+    cached_requirements_for_merge: List[Dict[str, Any]] = []
+    research_categories: Optional[List[str]] = None
 
     async with get_connection() as conn:
         log_id = await _create_check_log(conn, location_id, company_id, check_type)
@@ -3098,6 +3123,8 @@ async def run_compliance_check_background(
                 requirements = tier1_data + repo_reqs
                 missing_categories = _missing_required_categories(requirements)
                 if missing_categories:
+                    research_categories = missing_categories
+                    cached_requirements_for_merge = list(requirements)
                     print(
                         f"[Compliance] Coverage gap for {location.city}, {location.state} "
                         f"({', '.join(missing_categories)}); running live research."
@@ -3109,6 +3136,8 @@ async def run_compliance_check_background(
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
                 missing_categories = _missing_required_categories(requirements)
                 if missing_categories:
+                    research_categories = missing_categories
+                    cached_requirements_for_merge = list(requirements)
                     print(
                         f"[Compliance] Fresh cache missing categories for {location.city}, {location.state}: "
                         f"{', '.join(missing_categories)}. Running live research."
@@ -3123,6 +3152,8 @@ async def run_compliance_check_background(
                     requirements = county_reqs
                     missing_categories = _missing_required_categories(requirements)
                     if missing_categories:
+                        research_categories = missing_categories
+                        cached_requirements_for_merge = list(requirements)
                         print(
                             f"[Compliance] County cache missing categories for {location.city}, {location.state}: "
                             f"{', '.join(missing_categories)}. Running live research."
@@ -3166,11 +3197,22 @@ async def run_compliance_check_background(
 
                 requirements = await service.research_location_compliance(
                     city=location.city, state=location.state, county=location.county,
+                    categories=research_categories,
                     source_context=source_context,
                     corrections_context=corrections_context,
                     preemption_rules=preemption_rules,
                     has_local_ordinance=has_local_ordinance,
                 )
+                if research_categories and cached_requirements_for_merge:
+                    target_set = {
+                        _normalize_category(cat) or cat
+                        for cat in research_categories
+                    }
+                    preserved = [
+                        req for req in cached_requirements_for_merge
+                        if (_normalize_category(req.get("category")) or req.get("category")) not in target_set
+                    ]
+                    requirements = preserved + requirements
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
             # Set used_repository = True to skip fresh-data logic (upserts, alerts, verification).

@@ -38,6 +38,46 @@ VALID_RATE_TYPES = {
     "small_employer",
 }
 
+_CATEGORY_ALIASES = {
+    "meal_rest_breaks": "meal_breaks",
+    "meal_and_rest_breaks": "meal_breaks",
+    "meal_periods": "meal_breaks",
+    "rest_breaks": "meal_breaks",
+    "payday_frequency": "pay_frequency",
+    "pay_day_frequency": "pay_frequency",
+    "final_wage": "final_pay",
+    "final_wages": "final_pay",
+    "final_paycheck": "final_pay",
+    "final_paychecks": "final_pay",
+    "minor_work_permits": "minor_work_permit",
+    "work_permit": "minor_work_permit",
+    "work_permits": "minor_work_permit",
+    "youth_employment": "minor_work_permit",
+    "youth_work_permit": "minor_work_permit",
+    "scheduling_and_reporting_time": "scheduling_reporting",
+    "reporting_time": "scheduling_reporting",
+    "predictive_scheduling": "scheduling_reporting",
+    "fair_workweek": "scheduling_reporting",
+}
+
+_JURISDICTION_LEVEL_ALIASES = {
+    "local": "city",
+    "municipal": "city",
+    "citywide": "city",
+    "countywide": "county",
+    "statewide": "state",
+    "national": "federal",
+}
+
+_RATE_TYPE_ALIASES = {
+    "tip_credit": "tipped",
+    "tipped_rate": "tipped",
+    "cash_wage": "tipped",
+    "exempt": "exempt_salary",
+    "salary_threshold": "exempt_salary",
+    "salary_basis": "exempt_salary",
+}
+
 # Errors that should not be retried (API config / quota issues)
 _NON_RETRYABLE_KEYWORDS = {"API_KEY", "PERMISSION", "QUOTA", "RATE"}
 
@@ -52,6 +92,78 @@ CORRECTION_HINTS = {
     "timeout": "Response took too long. Be more concise - return only essential data.",
     "validation": "Validation failed: {detail}. Fix this specific issue.",
 }
+
+
+def _normalize_token(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    token = str(value).strip().lower()
+    token = token.replace("&", " and ")
+    token = re.sub(r"[\s\-/]+", "_", token)
+    token = re.sub(r"[^a-z0-9_]", "", token)
+    token = re.sub(r"_+", "_", token).strip("_")
+    return token or None
+
+
+def _normalize_category_value(value: Optional[str]) -> Optional[str]:
+    token = _normalize_token(value)
+    if not token:
+        return None
+    if token in VALID_CATEGORIES:
+        return token
+    return _CATEGORY_ALIASES.get(token)
+
+
+def _normalize_jurisdiction_level_value(value: Optional[str]) -> Optional[str]:
+    token = _normalize_token(value)
+    if not token:
+        return None
+    if token in VALID_JURISDICTION_LEVELS:
+        return token
+    return _JURISDICTION_LEVEL_ALIASES.get(token)
+
+
+def _normalize_rate_type_value(value: Optional[str]) -> Optional[str]:
+    token = _normalize_token(value)
+    if not token:
+        return None
+    if token in VALID_RATE_TYPES:
+        return token
+    return _RATE_TYPE_ALIASES.get(token)
+
+
+def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> dict:
+    """Normalize requirement fields so minor model drift doesn't drop valid rows."""
+    normalized = dict(req)
+    expected_category = _normalize_category_value(requested_category)
+
+    if expected_category:
+        normalized["category"] = expected_category
+    else:
+        category = _normalize_category_value(normalized.get("category"))
+        if category:
+            normalized["category"] = category
+
+    jurisdiction_level = _normalize_jurisdiction_level_value(normalized.get("jurisdiction_level"))
+    if jurisdiction_level:
+        normalized["jurisdiction_level"] = jurisdiction_level
+    else:
+        jurisdiction_name = str(normalized.get("jurisdiction_name") or "").lower()
+        if "federal" in jurisdiction_name or "u.s." in jurisdiction_name or "united states" in jurisdiction_name:
+            normalized["jurisdiction_level"] = "federal"
+        elif "county" in jurisdiction_name:
+            normalized["jurisdiction_level"] = "county"
+        elif "city" in jurisdiction_name:
+            normalized["jurisdiction_level"] = "city"
+        elif jurisdiction_name:
+            normalized["jurisdiction_level"] = "state"
+
+    if normalized.get("category") == "minimum_wage":
+        normalized["rate_type"] = _normalize_rate_type_value(normalized.get("rate_type")) or "general"
+    else:
+        normalized["rate_type"] = None
+
+    return normalized
 
 
 def _build_correction_feedback(error_type: str, **kwargs) -> str:
@@ -209,6 +321,8 @@ If no specific scheduling/reporting-time law applies, explicitly say so.""",
 {context_section}
 {preemption_context}
 {category_instructions.get(category, "")}
+If there is no distinct rule beyond federal/state baseline, still return one state-level requirement that explicitly says no additional jurisdiction-specific rule applies.
+Do NOT return an empty requirements list.
 
 Today's date is {date.today().isoformat()}. Return ONLY rates/values currently in effect.
 
@@ -370,6 +484,7 @@ class GeminiComplianceService:
         city: str,
         state: str,
         county: Optional[str] = None,
+        categories: Optional[List[str]] = None,
         source_context: str = "",
         corrections_context: str = "",
         preemption_rules: Optional[Dict[str, bool]] = None,
@@ -391,7 +506,26 @@ class GeminiComplianceService:
         context_section = source_context
         if corrections_context:
             context_section += f"\n\n{corrections_context}"
-        search_strategy = build_search_strategy_prompt(state)
+
+        default_categories = [
+            "minimum_wage",
+            "overtime",
+            "sick_leave",
+            "meal_breaks",
+            "pay_frequency",
+            "final_pay",
+            "minor_work_permit",
+            "scheduling_reporting",
+        ]
+        selected_categories: List[str] = []
+        for category in categories or default_categories:
+            normalized = _normalize_category_value(category)
+            if normalized and normalized not in selected_categories:
+                selected_categories.append(normalized)
+        if not selected_categories:
+            selected_categories = default_categories
+
+        search_strategy = build_search_strategy_prompt(state, selected_categories)
         if search_strategy:
             context_section += f"\n\n{search_strategy}"
 
@@ -431,17 +565,6 @@ class GeminiComplianceService:
                     f"Do NOT return city or county level requirements for this category."
                 )
 
-        categories = [
-            "minimum_wage",
-            "overtime",
-            "sick_leave",
-            "meal_breaks",
-            "pay_frequency",
-            "final_pay",
-            "minor_work_permit",
-            "scheduling_reporting",
-        ]
-
         async def research_category(category: str) -> List[Dict]:
             """Research a single category with retry."""
             prompt = _build_category_prompt(
@@ -463,7 +586,16 @@ class GeminiComplianceService:
                     label=f"Research {category} for {location_str}",
                     on_retry=on_retry,
                 )
-                return result if isinstance(result, list) else []
+                if not isinstance(result, list):
+                    return []
+
+                normalized_rows: List[Dict] = []
+                for req in result:
+                    if not isinstance(req, dict):
+                        continue
+                    normalized_rows.append(_coerce_requirement_shape(req, requested_category=category))
+
+                return normalized_rows
             except GeminiExhaustedError as e:
                 print(f"[Gemini Compliance] {category} exhausted: {e}")
                 return []
@@ -472,8 +604,8 @@ class GeminiComplianceService:
                 return []
 
         # Run all categories in parallel
-        print(f"[Gemini Compliance] Researching {location_str} ({len(categories)} parallel calls)...")
-        results = await asyncio.gather(*[research_category(c) for c in categories])
+        print(f"[Gemini Compliance] Researching {location_str} ({len(selected_categories)} parallel calls)...")
+        results = await asyncio.gather(*[research_category(c) for c in selected_categories])
 
         # Flatten and validate
         all_requirements = []
@@ -493,6 +625,7 @@ class GeminiComplianceService:
         city: str,
         state: str,
         county: Optional[str] = None,
+        categories: Optional[List[str]] = None,
         source_context: str = "",
         corrections_context: str = "",
         preemption_rules: Optional[Dict[str, bool]] = None,
@@ -505,7 +638,7 @@ class GeminiComplianceService:
             return []
 
         return await self.research_location_compliance_parallel(
-            city, state, county, source_context, corrections_context,
+            city, state, county, categories, source_context, corrections_context,
             preemption_rules=preemption_rules,
             has_local_ordinance=has_local_ordinance,
             on_retry=on_retry,
