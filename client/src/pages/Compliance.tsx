@@ -94,6 +94,17 @@ const REQUIREMENT_CATEGORY_ORDER = [
     'posting_requirements',
 ];
 
+const CORE_REQUIREMENT_SECTIONS = [
+    'meal_breaks',
+    'minimum_wage',
+    'overtime',
+    'pay_frequency',
+    'sick_leave',
+    'final_pay',
+    'minor_work_permit',
+    'scheduling_reporting',
+];
+
 const RATE_TYPE_LABELS: Record<string, string> = {
     general: 'General',
     tipped: 'Tipped / Tip Credit',
@@ -107,6 +118,21 @@ const RATE_TYPE_LABELS: Record<string, string> = {
 
 function normalizeCategoryKey(category: string): string {
     return category.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function getRequirementEmptyStateCopy(category: string): string {
+    switch (category) {
+        case 'minimum_wage':
+            return 'Coverage pending. This section should include general minimum wage, tipped/tip-credit treatment, and the exempt salary threshold.';
+        case 'final_pay':
+            return 'Coverage pending. This section should capture final pay timing for voluntary and involuntary separations, including payout rules for accrued sick/vacation balances.';
+        case 'minor_work_permit':
+            return 'Coverage pending. This section should capture minor work permit/certificate requirements and any age- or hour-based limits.';
+        case 'scheduling_reporting':
+            return 'No scheduling/reporting-time ordinance has been detected yet for this location. If local fair-workweek or reporting-time pay rules apply, they will appear here.';
+        default:
+            return 'No active requirements detected for this section yet.';
+    }
 }
 
 // ─── Compliance Lifecycle Wizard ──────────────────────────────────────────────
@@ -529,14 +555,19 @@ export function Compliance() {
 
     const orderedRequirementCategories = useMemo(() => {
         const orderIndex = new Map(REQUIREMENT_CATEGORY_ORDER.map((cat, idx) => [cat, idx]));
-        return Object.entries(requirementsByCategory).sort(([a], [b]) => {
-            const aIdx = orderIndex.get(a);
-            const bIdx = orderIndex.get(b);
-            if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
-            if (aIdx !== undefined) return -1;
-            if (bIdx !== undefined) return 1;
-            return a.localeCompare(b);
-        });
+        const categories = new Set(Object.keys(requirementsByCategory));
+        CORE_REQUIREMENT_SECTIONS.forEach(category => categories.add(category));
+
+        return Array.from(categories)
+            .sort((a, b) => {
+                const aIdx = orderIndex.get(a);
+                const bIdx = orderIndex.get(b);
+                if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
+                if (aIdx !== undefined) return -1;
+                if (bIdx !== undefined) return 1;
+                return a.localeCompare(b);
+            })
+            .map((category) => [category, requirementsByCategory[category] || []] as [string, ComplianceRequirement[]]);
     }, [requirementsByCategory]);
 
     const toggleCategory = (category: string) => {
@@ -1137,15 +1168,19 @@ export function Compliance() {
                                                     passed: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
                                                     signed: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
                                                     effective_soon: 'bg-red-500/10 text-red-400 border-red-500/20',
+                                                    effective: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                                                    dismissed: 'bg-zinc-800 text-zinc-500 border-zinc-700',
                                                 };
+                                                const isEffectiveNow = leg.days_until_effective !== null && leg.days_until_effective <= 0;
+                                                const displayStatus = isEffectiveNow ? 'effective' : leg.current_status;
                                                 return (
                                                     <div key={leg.id} className="border border-white/5 rounded-sm p-6 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors">
                                                         <div className="flex items-start justify-between gap-6">
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-3 flex-wrap mb-2">
                                                                     <h4 className="text-sm font-bold text-white uppercase tracking-tight truncate">{leg.title}</h4>
-                                                                    <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${statusColors[leg.current_status] || 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}>
-                                                                        {leg.current_status.replace('_', ' ')}
+                                                                    <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${statusColors[displayStatus] || 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}>
+                                                                        {displayStatus.replace('_', ' ')}
                                                                     </span>
                                                                     {leg.category && (
                                                                         <span className="text-[8px] px-1.5 py-0.5 bg-white/5 text-zinc-500 border border-white/10 rounded-xs uppercase tracking-widest">
@@ -1268,7 +1303,7 @@ export function Compliance() {
                                                 <div key={i} className="h-16 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
                                             ))}
                                         </div>
-                                    ) : Object.keys(requirementsByCategory).length === 0 ? (
+                                    ) : orderedRequirementCategories.length === 0 ? (
                                         <div className="text-center py-24 text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em] border border-dashed border-white/5 bg-white/[0.01]">
                                             Zero Nodes Detected
                                         </div>
@@ -1289,18 +1324,24 @@ export function Compliance() {
                                                                     {reqs.length} Active Node{reqs.length !== 1 ? 's' : ''}
                                                                 </span>
                                                             </div>
-                                                            {(() => {
-                                                                const source = getCategoryJurisdiction(reqs);
-                                                                return (
-                                                                    <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
-                                                                        source.type === 'local'
-                                                                            ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
-                                                                            : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-                                                                    }`}>
-                                                                        {source.label}
-                                                                    </span>
-                                                                );
-                                                            })()}
+                                                            {reqs.length > 0 ? (
+                                                                (() => {
+                                                                    const source = getCategoryJurisdiction(reqs);
+                                                                    return (
+                                                                        <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
+                                                                            source.type === 'local'
+                                                                                ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                                                                                : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                                                                        }`}>
+                                                                            {source.label}
+                                                                        </span>
+                                                                    );
+                                                                })()
+                                                            ) : (
+                                                                <span className="px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] bg-zinc-900 text-zinc-500 border-zinc-800">
+                                                                    Coverage Pending
+                                                                </span>
+                                                            )}
                                                         </div>
                                                         <motion.div
                                                             animate={{ rotate: expandedCategories.has(category) ? 180 : 0 }}
@@ -1320,60 +1361,66 @@ export function Compliance() {
                                                                 className="overflow-hidden bg-zinc-950/40"
                                                             >
                                                                 <div className="divide-y divide-white/5 px-2">
-                                                                    {reqs.map(req => (
-                                                                        <div key={req.id} className="p-6 hover:bg-white/[0.02] transition-colors rounded-sm">
-                                                                            <div className="flex items-start justify-between mb-4 gap-6">
-                                                                                <div className="flex-1">
-                                                                                    <h4 className="text-white text-xs font-bold uppercase tracking-wide mb-2">
-                                                                                        {req.title}
-                                                                                    </h4>
-                                                                                    <div className="flex items-center gap-3">
-                                                                                        <span className="px-1.5 py-0.5 bg-zinc-900 border border-white/5 text-[8px] uppercase tracking-widest text-zinc-500 font-bold rounded-xs">
-                                                                                            {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
-                                                                                        </span>
-                                                                                        {req.category === 'minimum_wage' && req.rate_type && (
-                                                                                            <span className="px-1.5 py-0.5 bg-zinc-900 border border-white/5 text-[8px] uppercase tracking-widest text-zinc-400 font-bold rounded-xs">
-                                                                                                {RATE_TYPE_LABELS[req.rate_type] || req.rate_type.replace(/_/g, ' ')}
+                                                                    {reqs.length === 0 ? (
+                                                                        <div className="p-6 text-zinc-500 text-xs leading-relaxed font-light">
+                                                                            {getRequirementEmptyStateCopy(category)}
+                                                                        </div>
+                                                                    ) : (
+                                                                        reqs.map(req => (
+                                                                            <div key={req.id} className="p-6 hover:bg-white/[0.02] transition-colors rounded-sm">
+                                                                                <div className="flex items-start justify-between mb-4 gap-6">
+                                                                                    <div className="flex-1">
+                                                                                        <h4 className="text-white text-xs font-bold uppercase tracking-wide mb-2">
+                                                                                            {req.title}
+                                                                                        </h4>
+                                                                                        <div className="flex items-center gap-3">
+                                                                                            <span className="px-1.5 py-0.5 bg-zinc-900 border border-white/5 text-[8px] uppercase tracking-widest text-zinc-500 font-bold rounded-xs">
+                                                                                                {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
                                                                                             </span>
-                                                                                        )}
-                                                                                        <span className="text-zinc-600 text-[9px] font-mono uppercase tracking-tighter">
-                                                                                            Node: {req.jurisdiction_name}
-                                                                                        </span>
-                                                                                    </div>
-                                                                                </div>
-                                                                                {req.current_value && (
-                                                                                    <span className="text-emerald-400 font-mono text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-sm shadow-inner">
-                                                                                        {req.current_value}
-                                                                                    </span>
-                                                                                )}
-                                                                            </div>
-                                                                            {req.description && (
-                                                                                <p className="text-zinc-500 text-xs leading-relaxed mb-6 max-w-2xl font-light">
-                                                                                    {req.description}
-                                                                                </p>
-                                                                            )}
-                                                                            <div className="flex items-center justify-between pt-4 border-t border-white/[0.03]">
-                                                                                <div className="flex items-center gap-4">
-                                                                                    {req.effective_date && (
-                                                                                        <div className="flex items-center gap-2 text-[8px] text-zinc-600 uppercase tracking-widest font-mono">
-                                                                                            <Calendar size={10} className="opacity-40" />
-                                                                                            Enforced: {new Date(req.effective_date).toLocaleDateString()}
+                                                                                            {req.category === 'minimum_wage' && req.rate_type && (
+                                                                                                <span className="px-1.5 py-0.5 bg-zinc-900 border border-white/5 text-[8px] uppercase tracking-widest text-zinc-400 font-bold rounded-xs">
+                                                                                                    {RATE_TYPE_LABELS[req.rate_type] || req.rate_type.replace(/_/g, ' ')}
+                                                                                                </span>
+                                                                                            )}
+                                                                                            <span className="text-zinc-600 text-[9px] font-mono uppercase tracking-tighter">
+                                                                                                Node: {req.jurisdiction_name}
+                                                                                            </span>
                                                                                         </div>
+                                                                                    </div>
+                                                                                    {req.current_value && (
+                                                                                        <span className="text-emerald-400 font-mono text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-sm shadow-inner">
+                                                                                            {req.current_value}
+                                                                                        </span>
                                                                                     )}
                                                                                 </div>
-                                                                                {req.source_url && (
-                                                                                    <a
-                                                                                        href={req.source_url}
-                                                                                        target="_blank"
-                                                                                        rel="noopener noreferrer"
-                                                                                        className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 hover:text-white flex items-center gap-1.5 transition-colors"
-                                                                                    >
-                                                                                        Authority <ExternalLink size={10} />
-                                                                                    </a>
+                                                                                {req.description && (
+                                                                                    <p className="text-zinc-500 text-xs leading-relaxed mb-6 max-w-2xl font-light">
+                                                                                        {req.description}
+                                                                                    </p>
                                                                                 )}
+                                                                                <div className="flex items-center justify-between pt-4 border-t border-white/[0.03]">
+                                                                                    <div className="flex items-center gap-4">
+                                                                                        {req.effective_date && (
+                                                                                            <div className="flex items-center gap-2 text-[8px] text-zinc-600 uppercase tracking-widest font-mono">
+                                                                                                <Calendar size={10} className="opacity-40" />
+                                                                                                Enforced: {new Date(req.effective_date).toLocaleDateString()}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {req.source_url && (
+                                                                                        <a
+                                                                                            href={req.source_url}
+                                                                                            target="_blank"
+                                                                                            rel="noopener noreferrer"
+                                                                                            className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 hover:text-white flex items-center gap-1.5 transition-colors"
+                                                                                        >
+                                                                                            Authority <ExternalLink size={10} />
+                                                                                        </a>
+                                                                                    )}
+                                                                                </div>
                                                                             </div>
-                                                                        </div>
-                                                                    ))}
+                                                                        ))
+                                                                    )}
                                                                 </div>
                                                             </motion.div>
                                                         )}

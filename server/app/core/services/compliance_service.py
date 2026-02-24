@@ -49,6 +49,15 @@ MATERIAL_CHANGE_THRESHOLDS = {
 
 JURISDICTION_PRIORITY = {'city': 1, 'county': 2, 'state': 3, 'federal': 4}
 
+VALID_LEGISLATION_STATUSES = {
+    "proposed",
+    "passed",
+    "signed",
+    "effective_soon",
+    "effective",
+    "dismissed",
+}
+
 REQUIRED_LABOR_CATEGORIES = {
     "minimum_wage",
     "overtime",
@@ -59,6 +68,22 @@ REQUIRED_LABOR_CATEGORIES = {
     "minor_work_permit",
     "scheduling_reporting",
 }
+
+
+def _normalize_legislation_status(
+    status: Optional[str],
+    expected_effective_date: Optional[date],
+) -> str:
+    """Normalize legislation status and prevent stale future statuses."""
+    normalized = (status or "proposed").strip().lower().replace("-", "_")
+    if normalized not in VALID_LEGISLATION_STATUSES:
+        normalized = "proposed"
+
+    today = datetime.utcnow().date()
+    if expected_effective_date and expected_effective_date <= today:
+        return "effective"
+
+    return normalized
 
 # State code → state name mapping for jurisdiction relabeling
 _CODE_TO_STATE_NAME = {
@@ -1537,8 +1562,12 @@ async def process_upcoming_legislation(
         if confidence is not None:
             confidence = float(confidence)
 
+        normalized_status = _normalize_legislation_status(
+            item.get("current_status", existing["current_status"] if existing else None),
+            eff_date,
+        )
+
         if existing:
-            new_status = item.get("current_status", existing["current_status"])
             await conn.execute(
                 """
                 UPDATE upcoming_legislation
@@ -1547,7 +1576,7 @@ async def process_upcoming_legislation(
                     updated_at = NOW()
                 WHERE id = $8
                 """,
-                new_status, eff_date, item.get("impact_summary"),
+                normalized_status, eff_date, item.get("impact_summary"),
                 item.get("source_url"), item.get("source_name"),
                 confidence, item.get("description"),
                 existing["id"],
@@ -1575,7 +1604,7 @@ async def process_upcoming_legislation(
                 """,
                 location_id, company_id, item.get("category"),
                 item.get("title"), item.get("description"),
-                item.get("current_status", "proposed"),
+                normalized_status,
                 eff_date, item.get("impact_summary"),
                 item.get("source_url"), item.get("source_name"),
                 confidence, leg_key, alert_id,
@@ -1607,7 +1636,7 @@ async def escalate_upcoming_deadlines(conn, company_id: UUID) -> int:
 
         if days_remaining <= 0:
             new_severity = "critical"
-            new_status = "effective_soon"
+            new_status = "effective"
         elif days_remaining <= 30:
             new_severity = "critical"
             new_status = row["current_status"]
@@ -2845,6 +2874,7 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
             WHERE ul.company_id = $1
               AND ul.current_status NOT IN ('effective', 'dismissed')
               AND ul.expected_effective_date IS NOT NULL
+              AND ul.expected_effective_date > CURRENT_DATE
             ORDER BY ul.expected_effective_date ASC
             LIMIT 3
             """,
@@ -2969,24 +2999,42 @@ async def get_upcoming_legislation(
             location_id, company_id,
         )
         now = datetime.utcnow().date()
-        return [
-            UpcomingLegislationResponse(
-                id=str(row["id"]),
-                location_id=str(row["location_id"]),
-                category=row["category"],
-                title=row["title"],
-                description=row["description"],
-                current_status=row["current_status"],
-                expected_effective_date=row["expected_effective_date"].isoformat() if row["expected_effective_date"] else None,
-                impact_summary=row["impact_summary"],
-                source_url=row["source_url"],
-                source_name=row["source_name"],
-                confidence=float(row["confidence"]) if row["confidence"] is not None else None,
-                days_until_effective=(row["expected_effective_date"] - now).days if row["expected_effective_date"] else None,
-                created_at=row["created_at"].isoformat(),
+
+        responses: list[UpcomingLegislationResponse] = []
+        for row in rows:
+            effective_date = row["expected_effective_date"]
+            normalized_status = _normalize_legislation_status(row["current_status"], effective_date)
+
+            if normalized_status != row["current_status"]:
+                await conn.execute(
+                    "UPDATE upcoming_legislation SET current_status = $1, updated_at = NOW() WHERE id = $2",
+                    normalized_status,
+                    row["id"],
+                )
+
+            # Keep this endpoint focused on upcoming/not-yet-effective items.
+            if normalized_status in {"effective", "dismissed"}:
+                continue
+
+            responses.append(
+                UpcomingLegislationResponse(
+                    id=str(row["id"]),
+                    location_id=str(row["location_id"]),
+                    category=row["category"],
+                    title=row["title"],
+                    description=row["description"],
+                    current_status=normalized_status,
+                    expected_effective_date=effective_date.isoformat() if effective_date else None,
+                    impact_summary=row["impact_summary"],
+                    source_url=row["source_url"],
+                    source_name=row["source_name"],
+                    confidence=float(row["confidence"]) if row["confidence"] is not None else None,
+                    days_until_effective=(effective_date - now).days if effective_date else None,
+                    created_at=row["created_at"].isoformat(),
+                )
             )
-            for row in rows
-        ]
+
+        return responses
 
 
 async def run_compliance_check_background(
