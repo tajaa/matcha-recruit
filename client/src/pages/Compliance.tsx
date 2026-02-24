@@ -756,7 +756,7 @@ export function Compliance() {
                         </div>
                     )}
 
-                    {syncStates.size > 0 && (() => {
+                    {syncStates.size > 0 && !loadingLocations && (() => {
                         const coveredStates = new Set((locations || []).map(l => (l.state || '').toUpperCase()));
                         const missingStates = [...syncStates].filter(s => !coveredStates.has(s));
                         if (missingStates.length === 0) return null;
