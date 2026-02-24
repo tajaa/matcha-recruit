@@ -324,6 +324,7 @@ export function ERCaseDetail() {
   const [discrepancySummary, setDiscrepancySummary] = useState<string>('');
   const [violations, setViolations] = useState<PolicyViolation[]>([]);
   const [violationSummary, setViolationSummary] = useState<string>('');
+  const [policiesChecked, setPoliciesChecked] = useState<number>(0);
   const [analysisLoading, setAnalysisLoading] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState<{ step: string; detail?: string } | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -396,10 +397,12 @@ export function ERCaseDetail() {
         if (!data.generated_at) {
           setViolations([]);
           setViolationSummary('');
+          setPoliciesChecked(0);
           return;
         }
         setViolations(data.analysis.violations || []);
         setViolationSummary(data.analysis.summary || '');
+        setPoliciesChecked(data.analysis.policies_potentially_applicable?.length || 0);
       }
     } catch {
       // Analysis not yet generated - that's okay
@@ -604,6 +607,7 @@ export function ERCaseDetail() {
           }
           setViolations(data.analysis.violations || []);
           setViolationSummary(data.analysis.summary || '');
+          setPoliciesChecked(data.analysis.policies_potentially_applicable?.length || 0);
           return true;
         }
       } catch {
@@ -1387,9 +1391,13 @@ export function ERCaseDetail() {
                   </button>
                 </div>
 
-                {violationSummary && (
-                  <div className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed font-serif">
-                    {violationSummary}
+                {policiesChecked > 0 && (
+                  <div className="flex items-center gap-3 text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
+                    <span>{policiesChecked} {policiesChecked === 1 ? 'source' : 'sources'} checked</span>
+                    <span className="text-zinc-700">·</span>
+                    <span className={violations.length > 0 ? 'text-red-400' : 'text-emerald-400'}>
+                      {violations.length} violation{violations.length !== 1 ? 's' : ''} found
+                    </span>
                   </div>
                 )}
 
@@ -1403,7 +1411,7 @@ export function ERCaseDetail() {
                           <span className="text-[10px] text-zinc-500">{analysisProgress.detail}</span>
                         )}
                       </div>
-                    ) : violationSummary ? (
+                    ) : policiesChecked > 0 ? (
                       <div>
                         <p className="mb-2">No policy violations identified.</p>
                         <p className="text-[10px] text-zinc-500">
@@ -1442,6 +1450,15 @@ export function ERCaseDetail() {
                             <div key={j}>
                               <p className="text-xs text-zinc-700 dark:text-zinc-300 mb-1">"{e.quote}"</p>
                               <p className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">→ {e.how_it_violates}</p>
+                              {e.source_document_id && (() => {
+                                const doc = documents.find(d => d.id === e.source_document_id);
+                                const label = doc?.filename || e.source_document_id.slice(0, 8);
+                                return (
+                                  <p className="text-[9px] text-zinc-600 dark:text-zinc-600 font-mono mt-1">
+                                    Source: {label}{e.location ? ` · ${e.location}` : ''}
+                                  </p>
+                                );
+                              })()}
                             </div>
                           ))}
                         </div>
