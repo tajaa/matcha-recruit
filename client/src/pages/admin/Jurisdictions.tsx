@@ -334,15 +334,6 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-3 mb-3">
-      <span className="text-[9px] uppercase tracking-[0.2em] font-mono font-bold text-zinc-500 shrink-0">{children}</span>
-      <div className="flex-1 h-px bg-white/[0.06]" />
-    </div>
-  );
-}
-
 export function Jurisdictions() {
   const [jurisdictions, setJurisdictions] = useState<Jurisdiction[]>([]);
   const [totals, setTotals] = useState<JurisdictionTotals | null>(null);
