@@ -1656,8 +1656,8 @@ class HandbookService:
             if not row:
                 return None
             payload = dict(row)
-            state = payload.pop("draft_state", {}) or {}
-            payload["state"] = state if isinstance(state, dict) else {}
+            raw = payload.pop("draft_state", {}) or {}
+            payload["state"] = json.loads(raw) if isinstance(raw, str) else raw
             return HandbookWizardDraftResponse(**payload)
 
     @staticmethod
@@ -1692,7 +1692,8 @@ class HandbookService:
             raise
 
         payload = dict(row)
-        payload["state"] = payload.pop("draft_state", {}) or {}
+        raw = payload.pop("draft_state", {}) or {}
+        payload["state"] = json.loads(raw) if isinstance(raw, str) else raw
         return HandbookWizardDraftResponse(**payload)
 
     @staticmethod
