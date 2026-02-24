@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react';
+import { useState } from 'react';
 import { Button } from '../components/Button';
 import { ChevronRight, ChevronDown, Check, ArrowRight, ArrowLeft, Upload, X } from 'lucide-react';
 import { offerLetters as offerLettersApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import type { OfferGuidanceResponse, OfferLetter, OfferLetterCreate } from '../types';
+import type { OfferLetter } from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
+import { useOfferLetters, useOfferForm, useOfferGuidance, useRangeNegotiation, OFFER_GUIDANCE_CITY_OPTIONS } from '../hooks/offer-letters';
 
 const EMPLOYMENT_TYPES = [
   'Full-Time Exempt',
@@ -15,28 +16,6 @@ const EMPLOYMENT_TYPES = [
   'Internship',
 ] as const;
 
-const OFFER_GUIDANCE_CITY_STATE: Record<string, string> = {
-  'Atlanta': 'GA',
-  'Austin': 'TX',
-  'Boston': 'MA',
-  'Chicago': 'IL',
-  'Dallas': 'TX',
-  'Denver': 'CO',
-  'Los Angeles': 'CA',
-  'Miami': 'FL',
-  'New York City': 'NY',
-  'Philadelphia': 'PA',
-  'Phoenix': 'AZ',
-  'San Diego': 'CA',
-  'San Francisco': 'CA',
-  'San Jose': 'CA',
-  'Seattle': 'WA',
-  'Salt Lake City': 'UT',
-  'Washington': 'DC',
-};
-
-const OFFER_GUIDANCE_CITY_OPTIONS = Object.keys(OFFER_GUIDANCE_CITY_STATE);
-
 function formatUsd(value: number): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -44,41 +23,6 @@ function formatUsd(value: number): string {
     maximumFractionDigits: 0,
   }).format(value);
 }
-
-const initialFormData: OfferLetterCreate = {
-  candidate_name: '',
-  position_title: '',
-  company_name: 'Matcha Tech, Inc.',
-  start_date: '',
-  salary: '',
-  bonus: '',
-  stock_options: '',
-  employment_type: 'Full-Time Exempt',
-  location: '',
-  benefits: '',
-  manager_name: '',
-  manager_title: '',
-  expiration_date: '',
-  // Structured benefits
-  benefits_medical: false,
-  benefits_medical_coverage: undefined,
-  benefits_medical_waiting_days: 0,
-  benefits_dental: false,
-  benefits_vision: false,
-  benefits_401k: false,
-  benefits_401k_match: '',
-  benefits_wellness: '',
-  benefits_pto_vacation: false,
-  benefits_pto_sick: false,
-  benefits_holidays: false,
-  benefits_other: '',
-  // Contingencies
-  contingency_background_check: false,
-  contingency_credit_check: false,
-  contingency_drug_screening: false,
-  // Logo
-  company_logo_url: '',
-};
 
 const OFFER_CYCLE_STEPS = [
   {
@@ -190,234 +134,30 @@ function RangeNegotiationFlowchart() {
 export function OfferLetters() {
   const { hasFeature } = useAuth();
   const offerLettersPlusEnabled = hasFeature('offer_letters_plus');
-  const [offerLetters, setOfferLetters] = useState<OfferLetter[]>([]);
-  const [selectedLetter, setSelectedLetter] = useState<OfferLetter | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Creation Mode State
-  const [createMode, setCreateMode] = useState<'form' | 'wizard' | 'select' | null>(null);
-  const [wizardStep, setWizardStep] = useState(1);
-  const [editingId, setEditingId] = useState<string | null>(null);
-
-  // Salary range negotiation state
   const [salaryType, setSalaryType] = useState<'fixed' | 'range'>('fixed');
-  const [sendRangeEmail, setSendRangeEmail] = useState('');
-  const [showSendRangePrompt, setShowSendRangePrompt] = useState<string | null>(null);
+  const [createMode, setCreateMode] = useState<'form' | 'wizard' | 'select' | null>(null);
 
-  // Logo upload state
-  const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [logoPreview, setLogoPreview] = useState<string | null>(null);
-  const logoInputRef = useRef<HTMLInputElement>(null);
+  const { offerLetters, setOfferLetters, selectedLetter, setSelectedLetter, isLoading, reload } = useOfferLetters();
 
-  // Form state
-  const [formData, setFormData] = useState<OfferLetterCreate>(initialFormData);
+  const formHook = useOfferForm((letter) => {
+    reload();
+    setSelectedLetter(letter);
+  });
 
-  // Offer Guidance Plus state
-  const [guidanceRoleTitle, setGuidanceRoleTitle] = useState('');
-  const [guidanceCity, setGuidanceCity] = useState('San Francisco');
-  const [guidanceState, setGuidanceState] = useState('CA');
-  const [guidanceYearsExperience, setGuidanceYearsExperience] = useState(5);
-  const [guidanceEmploymentType, setGuidanceEmploymentType] = useState<string>('Full-Time Exempt');
-  const [guidanceLoading, setGuidanceLoading] = useState(false);
-  const [guidanceError, setGuidanceError] = useState<string | null>(null);
-  const [guidanceResult, setGuidanceResult] = useState<OfferGuidanceResponse | null>(null);
+  const guidanceHook = useOfferGuidance();
 
-  useEffect(() => {
-    loadOfferLetters();
-  }, []);
+  const rangeHook = useRangeNegotiation(offerLetters, setOfferLetters, selectedLetter, setSelectedLetter);
 
-  async function loadOfferLetters() {
-    try {
-      setIsLoading(true);
-      const data = await offerLettersApi.list();
-      setOfferLetters(data);
-    } catch (error) {
-      console.error('Failed to load offer letters:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function handleCreate(e?: FormEvent) {
-    if (e) e.preventDefault();
-    if (isSubmitting) return;
-
-    try {
-      setIsSubmitting(true);
-      const payload = {
-        ...formData,
-        start_date: formData.start_date || undefined,
-        expiration_date: formData.expiration_date || undefined,
-      };
-
-      let savedOffer: OfferLetter;
-      if (editingId) {
-        savedOffer = await offerLettersApi.update(editingId, payload);
-      } else {
-        savedOffer = await offerLettersApi.create(payload);
-      }
-
-      // Upload logo if there's a new file
-      if (logoFile) {
-        const { url } = await offerLettersApi.uploadLogo(savedOffer.id, logoFile);
-        setFormData(prev => ({ ...prev, company_logo_url: url }));
-      }
-
-      await loadOfferLetters();
-      resetCreation();
-    } catch (error) {
-      console.error('Failed to create/update offer letter:', error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  const resetCreation = () => {
-    setCreateMode(null);
-    setWizardStep(1);
-    setEditingId(null);
-    setLogoFile(null);
-    setLogoPreview(null);
-    setSalaryType('fixed');
-    setFormData(initialFormData);
-  };
-
-  const handleEditDraft = (letter: OfferLetter) => {
-    setFormData({
-      candidate_name: letter.candidate_name,
-      position_title: letter.position_title,
-      company_name: letter.company_name,
-      salary: letter.salary || '',
-      bonus: letter.bonus || '',
-      stock_options: letter.stock_options || '',
-      start_date: letter.start_date || '',
-      employment_type: letter.employment_type || 'Full-Time Exempt',
-      location: letter.location || '',
-      benefits: letter.benefits || '',
-      manager_name: letter.manager_name || '',
-      manager_title: letter.manager_title || '',
-      expiration_date: letter.expiration_date || '',
-      benefits_medical: letter.benefits_medical || false,
-      benefits_medical_coverage: letter.benefits_medical_coverage || undefined,
-      benefits_medical_waiting_days: letter.benefits_medical_waiting_days || 0,
-      benefits_dental: letter.benefits_dental || false,
-      benefits_vision: letter.benefits_vision || false,
-      benefits_401k: letter.benefits_401k || false,
-      benefits_401k_match: letter.benefits_401k_match || '',
-      benefits_wellness: letter.benefits_wellness || '',
-      benefits_pto_vacation: letter.benefits_pto_vacation || false,
-      benefits_pto_sick: letter.benefits_pto_sick || false,
-      benefits_holidays: letter.benefits_holidays || false,
-      benefits_other: letter.benefits_other || '',
-      contingency_background_check: letter.contingency_background_check || false,
-      contingency_credit_check: letter.contingency_credit_check || false,
-      contingency_drug_screening: letter.contingency_drug_screening || false,
-      company_logo_url: letter.company_logo_url || '',
-    });
-    if (letter.company_logo_url) {
-      setLogoPreview(letter.company_logo_url);
-    }
-    setEditingId(letter.id);
-    setSelectedLetter(null);
-    setCreateMode('form');
-  };
+  // Alias hook methods for easier template usage
+  const { handleCreate, resetCreation, handleEditDraft, handleLogoChange, removeLogo } = formHook;
+  const { handleGuidanceCityChange, handleGenerateGuidance } = guidanceHook;
+  const { handleSendRange, handleReNegotiate } = rangeHook;
 
   const handleDownloadPdf = async (letter: OfferLetter) => {
     try {
       await offerLettersApi.downloadPdf(letter.id, letter.candidate_name);
     } catch (error) {
       console.error('Failed to download PDF:', error);
-    }
-  };
-
-  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setLogoFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogoPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const removeLogo = () => {
-    setLogoFile(null);
-    setLogoPreview(null);
-    setFormData({ ...formData, company_logo_url: '' });
-    if (logoInputRef.current) {
-      logoInputRef.current.value = '';
-    }
-  };
-
-  const handleGuidanceCityChange = (city: string) => {
-    setGuidanceCity(city);
-    const mappedState = OFFER_GUIDANCE_CITY_STATE[city];
-    if (mappedState) {
-      setGuidanceState(mappedState);
-    }
-  };
-
-  const handleGenerateGuidance = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (guidanceLoading) return;
-
-    const trimmedRole = guidanceRoleTitle.trim();
-    if (!trimmedRole) {
-      setGuidanceError('Role title is required');
-      return;
-    }
-
-    try {
-      setGuidanceLoading(true);
-      setGuidanceError(null);
-      const result = await offerLettersApi.getPlusRecommendation({
-        role_title: trimmedRole,
-        city: guidanceCity,
-        state: guidanceState,
-        years_experience: guidanceYearsExperience,
-        employment_type: guidanceEmploymentType,
-      });
-      setGuidanceResult(result);
-    } catch (error) {
-      console.error('Failed to generate offer guidance:', error);
-      setGuidanceError(error instanceof Error ? error.message : 'Failed to generate guidance');
-    } finally {
-      setGuidanceLoading(false);
-    }
-  };
-
-  const handleSendRange = async (offerId: string) => {
-    if (!sendRangeEmail) return;
-    const offer = offerLetters.find(o => o.id === offerId);
-    if (!offer?.salary_range_min || !offer?.salary_range_max) return;
-    try {
-      setIsSubmitting(true);
-      const updated = await offerLettersApi.sendRange(offerId, {
-        candidate_email: sendRangeEmail,
-        salary_range_min: offer.salary_range_min,
-        salary_range_max: offer.salary_range_max,
-      });
-      setOfferLetters(prev => prev.map(o => o.id === offerId ? updated : o));
-      if (selectedLetter?.id === offerId) setSelectedLetter(updated);
-      setShowSendRangePrompt(null);
-      setSendRangeEmail('');
-    } catch (error) {
-      console.error('Failed to send range offer:', error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleReNegotiate = async (offerId: string) => {
-    try {
-      const updated = await offerLettersApi.reNegotiate(offerId);
-      setOfferLetters(prev => prev.map(o => o.id === offerId ? updated : o));
-      if (selectedLetter?.id === offerId) setSelectedLetter(updated);
-    } catch (err) {
-      console.error('Re-negotiate failed:', err);
     }
   };
 
@@ -494,7 +234,7 @@ export function OfferLetters() {
 
   // Wizard Steps Components
   const renderWizardStep = () => {
-    switch (wizardStep) {
+    switch (formHook.wizardStep) {
       case 1: // Basics
         return (
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -502,23 +242,23 @@ export function OfferLetters() {
             <div className="space-y-4">
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Candidate Name</label>
-                <input 
-                  type="text" 
-                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                   placeholder="Enter full name"
-                  value={formData.candidate_name}
-                  onChange={(e) => setFormData({...formData, candidate_name: e.target.value})}
+                  value={formHook.formData.candidate_name}
+                  onChange={(e) => formHook.setFormData({...formHook.formData, candidate_name: e.target.value})}
                   autoFocus
                 />
               </div>
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Role Title</label>
-                <input 
-                  type="text" 
-                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                   placeholder="e.g. Senior Engineer"
-                  value={formData.position_title}
-                  onChange={(e) => setFormData({...formData, position_title: e.target.value})}
+                  value={formHook.formData.position_title}
+                  onChange={(e) => formHook.setFormData({...formHook.formData, position_title: e.target.value})}
                 />
               </div>
               <div>
@@ -526,22 +266,22 @@ export function OfferLetters() {
                 <input
                   type="date"
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
-                  value={formData.start_date ? new Date(formData.start_date).toISOString().split('T')[0] : ''}
-                  onChange={(e) => setFormData({...formData, start_date: e.target.value})}
+                  value={formHook.formData.start_date ? new Date(formHook.formData.start_date).toISOString().split('T')[0] : ''}
+                  onChange={(e) => formHook.setFormData({...formHook.formData, start_date: e.target.value})}
                 />
               </div>
               <div className="col-span-2">
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Company Logo (optional)</label>
-                <input type="file" ref={logoInputRef} accept="image/*" onChange={handleLogoChange} className="hidden" />
-                {logoPreview ? (
+                <input type="file" ref={formHook.logoInputRef} accept="image/*" onChange={handleLogoChange} className="hidden" />
+                {formHook.logoPreview ? (
                   <div className="flex items-center gap-4 p-3 bg-zinc-900 border border-zinc-800 rounded">
-                    <img src={logoPreview} alt="Logo preview" className="h-10 max-w-[120px] object-contain" />
+                    <img src={formHook.logoPreview} alt="Logo preview" className="h-10 max-w-[120px] object-contain" />
                     <button type="button" onClick={removeLogo} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
                       <X size={14} /> Remove
                     </button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => logoInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-zinc-700 text-sm text-zinc-500 hover:border-zinc-500 hover:text-zinc-300 transition-colors rounded">
+                  <button type="button" onClick={() => formHook.logoInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-zinc-700 text-sm text-zinc-500 hover:border-zinc-500 hover:text-zinc-300 transition-colors rounded">
                     <Upload size={16} />
                     Upload company logo
                   </button>
@@ -580,8 +320,8 @@ export function OfferLetters() {
                   type="text"
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                   placeholder="e.g. $150,000"
-                  value={formData.salary || ''}
-                  onChange={(e) => setFormData({...formData, salary: e.target.value})}
+                  value={formHook.formData.salary || ''}
+                  onChange={(e) => formHook.setFormData({...formHook.formData, salary: e.target.value})}
                   autoFocus
                 />
               </div>
@@ -593,8 +333,8 @@ export function OfferLetters() {
                     type="number"
                     className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                     placeholder="e.g. 140000"
-                    value={formData.salary_range_min ?? ''}
-                    onChange={(e) => setFormData({...formData, salary_range_min: e.target.value ? parseFloat(e.target.value) : undefined})}
+                    value={formHook.formData.salary_range_min ?? ''}
+                    onChange={(e) => formHook.setFormData({...formHook.formData, salary_range_min: e.target.value ? parseFloat(e.target.value) : undefined})}
                     autoFocus
                   />
                 </div>
@@ -604,20 +344,20 @@ export function OfferLetters() {
                     type="number"
                     className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                     placeholder="e.g. 160000"
-                    value={formData.salary_range_max ?? ''}
-                    onChange={(e) => setFormData({...formData, salary_range_max: e.target.value ? parseFloat(e.target.value) : undefined})}
+                    value={formHook.formData.salary_range_max ?? ''}
+                    onChange={(e) => formHook.setFormData({...formHook.formData, salary_range_max: e.target.value ? parseFloat(e.target.value) : undefined})}
                   />
                 </div>
               </div>
               )}
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Bonus Potential</label>
-                <input 
-                  type="text" 
-                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                   placeholder="e.g. 15% Annual"
-                  value={formData.bonus || ''}
-                  onChange={(e) => setFormData({...formData, bonus: e.target.value})}
+                  value={formHook.formData.bonus || ''}
+                  onChange={(e) => formHook.setFormData({...formHook.formData, bonus: e.target.value})}
                 />
               </div>
               <div className="sm:col-span-2">
@@ -626,16 +366,16 @@ export function OfferLetters() {
                   type="text" 
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. 5,000 RSUs"
-                  value={formData.stock_options || ''}
-                  onChange={(e) => setFormData({...formData, stock_options: e.target.value})}
+                  value={formHook.formData.stock_options || ''}
+                  onChange={(e) => formHook.setFormData({...formHook.formData, stock_options: e.target.value})}
                 />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Employment Type</label>
                 <select
                     className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
-                    value={formData.employment_type || 'Full-Time Exempt'}
-                    onChange={(e) => setFormData({...formData, employment_type: e.target.value})}
+                    value={formHook.formData.employment_type || 'Full-Time Exempt'}
+                    onChange={(e) => formHook.setFormData({...formHook.formData, employment_type: e.target.value})}
                 >
                     {EMPLOYMENT_TYPES.map(type => (
                       <option key={type} value={type}>{type}</option>
@@ -656,8 +396,8 @@ export function OfferLetters() {
                   type="text" 
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. David Chen"
-                  value={formData.manager_name || ''}
-                  onChange={(e) => setFormData({...formData, manager_name: e.target.value})}
+                  value={formHook.formData.manager_name || ''}
+                  onChange={(e) => formHook.setFormData({...formHook.formData, manager_name: e.target.value})}
                   autoFocus
                 />
               </div>
@@ -667,8 +407,8 @@ export function OfferLetters() {
                   type="text" 
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. VP of Engineering"
-                  value={formData.manager_title || ''}
-                  onChange={(e) => setFormData({...formData, manager_title: e.target.value})}
+                  value={formHook.formData.manager_title || ''}
+                  onChange={(e) => formHook.setFormData({...formHook.formData, manager_title: e.target.value})}
                 />
               </div>
               <div>
@@ -677,8 +417,8 @@ export function OfferLetters() {
                   type="text" 
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                   placeholder="e.g. San Francisco, CA (Hybrid)"
-                  value={formData.location || ''}
-                  onChange={(e) => setFormData({...formData, location: e.target.value})}
+                  value={formHook.formData.location || ''}
+                  onChange={(e) => formHook.setFormData({...formHook.formData, location: e.target.value})}
                 />
               </div>
             </div>
@@ -695,13 +435,13 @@ export function OfferLetters() {
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={formData.benefits_medical || false}
-                      onChange={(e) => setFormData({...formData, benefits_medical: e.target.checked})}
+                      checked={formHook.formData.benefits_medical || false}
+                      onChange={(e) => formHook.setFormData({...formHook.formData, benefits_medical: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
                     <span className="text-sm text-zinc-200">Medical insurance offered</span>
                   </label>
-                  {formData.benefits_medical && (
+                  {formHook.formData.benefits_medical && (
                     <div className="mt-3 pl-0 sm:pl-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[10px] uppercase text-zinc-500 mb-1">Employer Coverage %</label>
@@ -711,16 +451,16 @@ export function OfferLetters() {
                           max="100"
                           placeholder="e.g. 80"
                           className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 text-white text-sm rounded placeholder-zinc-600"
-                          value={formData.benefits_medical_coverage || ''}
-                          onChange={(e) => setFormData({...formData, benefits_medical_coverage: e.target.value ? parseInt(e.target.value) : undefined})}
+                          value={formHook.formData.benefits_medical_coverage || ''}
+                          onChange={(e) => formHook.setFormData({...formHook.formData, benefits_medical_coverage: e.target.value ? parseInt(e.target.value) : undefined})}
                         />
                       </div>
                       <div>
                         <label className="block text-[10px] uppercase text-zinc-500 mb-1">Waiting Period</label>
                         <select
                           className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 text-white text-sm rounded"
-                          value={formData.benefits_medical_waiting_days || 0}
-                          onChange={(e) => setFormData({...formData, benefits_medical_waiting_days: parseInt(e.target.value)})}
+                          value={formHook.formData.benefits_medical_waiting_days || 0}
+                          onChange={(e) => formHook.setFormData({...formHook.formData, benefits_medical_waiting_days: parseInt(e.target.value)})}
                         >
                           <option value={0}>No waiting period</option>
                           <option value={30}>30 days</option>
@@ -737,8 +477,8 @@ export function OfferLetters() {
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={formData.benefits_dental || false}
-                      onChange={(e) => setFormData({...formData, benefits_dental: e.target.checked})}
+                      checked={formHook.formData.benefits_dental || false}
+                      onChange={(e) => formHook.setFormData({...formHook.formData, benefits_dental: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
                     <span className="text-sm text-zinc-400">Dental insurance</span>
@@ -746,8 +486,8 @@ export function OfferLetters() {
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={formData.benefits_vision || false}
-                      onChange={(e) => setFormData({...formData, benefits_vision: e.target.checked})}
+                      checked={formHook.formData.benefits_vision || false}
+                      onChange={(e) => formHook.setFormData({...formHook.formData, benefits_vision: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
                     <span className="text-sm text-zinc-400">Vision insurance</span>
@@ -759,21 +499,21 @@ export function OfferLetters() {
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={formData.benefits_401k || false}
-                      onChange={(e) => setFormData({...formData, benefits_401k: e.target.checked})}
+                      checked={formHook.formData.benefits_401k || false}
+                      onChange={(e) => formHook.setFormData({...formHook.formData, benefits_401k: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
                     <span className="text-sm text-zinc-200">401(k) retirement plan</span>
                   </label>
-                  {formData.benefits_401k && (
+                  {formHook.formData.benefits_401k && (
                     <div className="mt-3 pl-6">
                       <label className="block text-[10px] uppercase text-zinc-500 mb-1">Employer Match (optional)</label>
                       <input
                         type="text"
                         placeholder="e.g. 4% match up to 6%"
                         className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 text-white text-sm rounded placeholder-zinc-600"
-                        value={formData.benefits_401k_match || ''}
-                        onChange={(e) => setFormData({...formData, benefits_401k_match: e.target.value})}
+                        value={formHook.formData.benefits_401k_match || ''}
+                        onChange={(e) => formHook.setFormData({...formHook.formData, benefits_401k_match: e.target.value})}
                       />
                     </div>
                   )}
@@ -786,8 +526,8 @@ export function OfferLetters() {
                     type="text"
                     placeholder="e.g. gym membership, mental health stipend"
                     className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
-                    value={formData.benefits_wellness || ''}
-                    onChange={(e) => setFormData({...formData, benefits_wellness: e.target.value})}
+                    value={formHook.formData.benefits_wellness || ''}
+                    onChange={(e) => formHook.setFormData({...formHook.formData, benefits_wellness: e.target.value})}
                   />
                 </div>
 
@@ -796,8 +536,8 @@ export function OfferLetters() {
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={formData.benefits_pto_vacation || false}
-                      onChange={(e) => setFormData({...formData, benefits_pto_vacation: e.target.checked})}
+                      checked={formHook.formData.benefits_pto_vacation || false}
+                      onChange={(e) => formHook.setFormData({...formHook.formData, benefits_pto_vacation: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
                     <span className="text-sm text-zinc-400">Paid vacation</span>
@@ -805,8 +545,8 @@ export function OfferLetters() {
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={formData.benefits_pto_sick || false}
-                      onChange={(e) => setFormData({...formData, benefits_pto_sick: e.target.checked})}
+                      checked={formHook.formData.benefits_pto_sick || false}
+                      onChange={(e) => formHook.setFormData({...formHook.formData, benefits_pto_sick: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
                     <span className="text-sm text-zinc-400">Paid sick leave</span>
@@ -814,8 +554,8 @@ export function OfferLetters() {
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={formData.benefits_holidays || false}
-                      onChange={(e) => setFormData({...formData, benefits_holidays: e.target.checked})}
+                      checked={formHook.formData.benefits_holidays || false}
+                      onChange={(e) => formHook.setFormData({...formHook.formData, benefits_holidays: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
                     <span className="text-sm text-zinc-400">Paid holidays</span>
@@ -829,8 +569,8 @@ export function OfferLetters() {
                     type="text"
                     placeholder="e.g. parking, commuter benefits"
                     className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
-                    value={formData.benefits_other || ''}
-                    onChange={(e) => setFormData({...formData, benefits_other: e.target.value})}
+                    value={formHook.formData.benefits_other || ''}
+                    onChange={(e) => formHook.setFormData({...formHook.formData, benefits_other: e.target.value})}
                   />
                 </div>
               </div>
@@ -844,8 +584,8 @@ export function OfferLetters() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.contingency_background_check || false}
-                    onChange={(e) => setFormData({...formData, contingency_background_check: e.target.checked})}
+                    checked={formHook.formData.contingency_background_check || false}
+                    onChange={(e) => formHook.setFormData({...formHook.formData, contingency_background_check: e.target.checked})}
                     className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                   />
                   <span className="text-sm text-zinc-400">Background check</span>
@@ -853,8 +593,8 @@ export function OfferLetters() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.contingency_credit_check || false}
-                    onChange={(e) => setFormData({...formData, contingency_credit_check: e.target.checked})}
+                    checked={formHook.formData.contingency_credit_check || false}
+                    onChange={(e) => formHook.setFormData({...formHook.formData, contingency_credit_check: e.target.checked})}
                     className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                   />
                   <span className="text-sm text-zinc-400">Credit check</span>
@@ -862,8 +602,8 @@ export function OfferLetters() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.contingency_drug_screening || false}
-                    onChange={(e) => setFormData({...formData, contingency_drug_screening: e.target.checked})}
+                    checked={formHook.formData.contingency_drug_screening || false}
+                    onChange={(e) => formHook.setFormData({...formHook.formData, contingency_drug_screening: e.target.checked})}
                     className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                   />
                   <span className="text-sm text-zinc-400">Drug screening</span>
@@ -877,8 +617,8 @@ export function OfferLetters() {
               <input
                 type="date"
                 className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
-                value={formData.expiration_date ? new Date(formData.expiration_date).toISOString().split('T')[0] : ''}
-                onChange={(e) => setFormData({...formData, expiration_date: e.target.value})}
+                value={formHook.formData.expiration_date ? new Date(formHook.formData.expiration_date).toISOString().split('T')[0] : ''}
+                onChange={(e) => formHook.setFormData({...formHook.formData, expiration_date: e.target.value})}
               />
             </div>
           </div>
@@ -890,23 +630,23 @@ export function OfferLetters() {
             <div className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm space-y-3">
               <div className="flex flex-col gap-1 border-b border-zinc-800 pb-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-zinc-500">Candidate</span>
-                <span className="font-medium text-white sm:text-right">{formData.candidate_name}</span>
+                <span className="font-medium text-white sm:text-right">{formHook.formData.candidate_name}</span>
               </div>
               <div className="flex flex-col gap-1 border-b border-zinc-800 pb-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-zinc-500">Role</span>
-                <span className="font-medium text-white sm:text-right">{formData.position_title}</span>
+                <span className="font-medium text-white sm:text-right">{formHook.formData.position_title}</span>
               </div>
               <div className="flex flex-col gap-1 border-b border-zinc-800 pb-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-zinc-500">Salary</span>
-                <span className="font-medium text-white sm:text-right">{formData.salary}</span>
+                <span className="font-medium text-white sm:text-right">{formHook.formData.salary}</span>
               </div>
               <div className="flex flex-col gap-1 border-b border-zinc-800 pb-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-zinc-500">Start Date</span>
-                <span className="font-medium text-white sm:text-right">{formData.start_date ? new Date(formData.start_date).toLocaleDateString() : 'TBD'}</span>
+                <span className="font-medium text-white sm:text-right">{formHook.formData.start_date ? new Date(formHook.formData.start_date).toLocaleDateString() : 'TBD'}</span>
               </div>
               <div className="pt-2">
                 <p className="text-zinc-500 mb-1 text-xs uppercase tracking-wide">Benefits</p>
-                <p className="text-zinc-300">{formData.benefits || 'Standard benefits'}</p>
+                <p className="text-zinc-300">{formHook.formData.benefits || 'Standard benefits'}</p>
               </div>
             </div>
           </div>
@@ -995,8 +735,8 @@ export function OfferLetters() {
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Role Title</label>
                 <input
                   type="text"
-                  value={guidanceRoleTitle}
-                  onChange={(e) => setGuidanceRoleTitle(e.target.value)}
+                  value={guidanceHook.guidanceRoleTitle}
+                  onChange={(e) => guidanceHook.setGuidanceRoleTitle(e.target.value)}
                   placeholder="e.g. Senior Product Manager"
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                 />
@@ -1004,7 +744,7 @@ export function OfferLetters() {
               <div>
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">City</label>
                 <select
-                  value={guidanceCity}
+                  value={guidanceHook.guidanceCity}
                   onChange={(e) => handleGuidanceCityChange(e.target.value)}
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
                 >
@@ -1017,8 +757,8 @@ export function OfferLetters() {
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">State</label>
                 <input
                   type="text"
-                  value={guidanceState}
-                  onChange={(e) => setGuidanceState(e.target.value)}
+                  value={guidanceHook.guidanceState}
+                  onChange={(e) => guidanceHook.setGuidanceState(e.target.value)}
                   maxLength={3}
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
                 />
@@ -1029,8 +769,8 @@ export function OfferLetters() {
                   type="number"
                   min={0}
                   max={40}
-                  value={guidanceYearsExperience}
-                  onChange={(e) => setGuidanceYearsExperience(Math.max(0, Math.min(40, Number(e.target.value) || 0)))}
+                  value={guidanceHook.guidanceYearsExperience}
+                  onChange={(e) => guidanceHook.setGuidanceYearsExperience(Math.max(0, Math.min(40, Number(e.target.value) || 0)))}
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
                 />
               </div>
@@ -1040,8 +780,8 @@ export function OfferLetters() {
               <div className="w-full sm:w-64">
                 <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Employment Type</label>
                 <select
-                  value={guidanceEmploymentType}
-                  onChange={(e) => setGuidanceEmploymentType(e.target.value)}
+                  value={guidanceHook.guidanceEmploymentType}
+                  onChange={(e) => guidanceHook.setGuidanceEmploymentType(e.target.value)}
                   className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
                 >
                   {EMPLOYMENT_TYPES.map((type) => (
@@ -1051,62 +791,62 @@ export function OfferLetters() {
               </div>
               <button
                 type="submit"
-                disabled={guidanceLoading}
+                disabled={guidanceHook.guidanceLoading}
                 className="inline-flex items-center justify-center px-5 py-2 bg-white text-black text-xs font-bold uppercase tracking-wider hover:bg-zinc-200 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
-                {guidanceLoading ? 'Generating...' : 'Generate Guidance'}
+                {guidanceHook.guidanceLoading ? 'Generating...' : 'Generate Guidance'}
               </button>
             </div>
 
-            {guidanceError && (
-              <p className="mt-3 text-xs text-red-400">{guidanceError}</p>
+            {guidanceHook.guidanceError && (
+              <p className="mt-3 text-xs text-red-400">{guidanceHook.guidanceError}</p>
             )}
 
-            {guidanceResult && (
+            {guidanceHook.guidanceResult && (
               <div className="mt-5 border border-white/10 bg-zinc-900/50 p-4">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-zinc-500">Base Salary Range</p>
                     <p className="mt-1 text-sm font-bold text-white">
-                      {formatUsd(guidanceResult.salary_low)} - {formatUsd(guidanceResult.salary_high)}
+                      {formatUsd(guidanceHook.guidanceResult.salary_low)} - {formatUsd(guidanceHook.guidanceResult.salary_high)}
                     </p>
-                    <p className="text-[11px] text-zinc-500">Midpoint: {formatUsd(guidanceResult.salary_mid)}</p>
+                    <p className="text-[11px] text-zinc-500">Midpoint: {formatUsd(guidanceHook.guidanceResult.salary_mid)}</p>
                   </div>
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-zinc-500">Bonus Target</p>
                     <p className="mt-1 text-sm font-bold text-white">
-                      {guidanceResult.bonus_target_pct_low}% - {guidanceResult.bonus_target_pct_high}%
+                      {guidanceHook.guidanceResult.bonus_target_pct_low}% - {guidanceHook.guidanceResult.bonus_target_pct_high}%
                     </p>
                   </div>
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-zinc-500">Role Family</p>
                     <p className="mt-1 text-sm font-bold text-white capitalize">
-                      {guidanceResult.role_family.replace(/_/g, ' ')}
+                      {guidanceHook.guidanceResult.role_family.replace(/_/g, ' ')}
                     </p>
                     <p className="text-[11px] text-zinc-500">
-                      {guidanceResult.normalized_city}
-                      {guidanceResult.normalized_state ? `, ${guidanceResult.normalized_state}` : ''}
+                      {guidanceHook.guidanceResult.normalized_city}
+                      {guidanceHook.guidanceResult.normalized_state ? `, ${guidanceHook.guidanceResult.normalized_state}` : ''}
                     </p>
                   </div>
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-zinc-500">Confidence</p>
-                    <p className="mt-1 text-sm font-bold text-white">{Math.round(guidanceResult.confidence * 100)}%</p>
+                    <p className="mt-1 text-sm font-bold text-white">{Math.round(guidanceHook.guidanceResult.confidence * 100)}%</p>
                     <div className="mt-2 h-1.5 w-full bg-zinc-800">
                       <div
                         className="h-full bg-emerald-400 transition-all"
-                        style={{ width: `${Math.round(guidanceResult.confidence * 100)}%` }}
+                        style={{ width: `${Math.round(guidanceHook.guidanceResult.confidence * 100)}%` }}
                       />
                     </div>
                   </div>
                 </div>
                 <div className="mt-4">
                   <p className="text-[10px] uppercase tracking-wider text-zinc-500">Equity Guidance</p>
-                  <p className="mt-1 text-xs text-zinc-300">{guidanceResult.equity_guidance}</p>
+                  <p className="mt-1 text-xs text-zinc-300">{guidanceHook.guidanceResult.equity_guidance}</p>
                 </div>
                 <div className="mt-4">
                   <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Rationale</p>
                   <ul className="space-y-1.5 text-xs text-zinc-400">
-                    {guidanceResult.rationale.map((line) => (
+                    {guidanceHook.guidanceResult.rationale.map((line) => (
                       <li key={line}>• {line}</li>
                     ))}
                   </ul>
@@ -1252,14 +992,14 @@ export function OfferLetters() {
                <div className="flex items-start justify-between gap-3 p-4 border-b border-white/10 sm:items-center sm:p-6">
                   <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <h2 className="text-base sm:text-xl font-bold text-white uppercase tracking-tight">
-                      {createMode === 'wizard' ? `Step ${wizardStep} of 5` : 'Create Offer Letter'}
+                      {createMode === 'wizard' ? `Step ${formHook.wizardStep} of 5` : 'Create Offer Letter'}
                     </h2>
                     {createMode === 'wizard' && (
                       <div className="flex gap-1 sm:ml-4">
                         {[1, 2, 3, 4, 5].map(step => (
                           <div 
                             key={step} 
-                            className={`w-1.5 h-1.5 rounded-full ${step <= wizardStep ? 'bg-white' : 'bg-zinc-700'}`}
+                            className={`w-1.5 h-1.5 rounded-full ${step <= formHook.wizardStep ? 'bg-white' : 'bg-zinc-700'}`}
                           />
                         ))}
                       </div>
@@ -1284,8 +1024,8 @@ export function OfferLetters() {
                               type="text" 
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="Enter full name"
-                              value={formData.candidate_name}
-                              onChange={(e) => setFormData({...formData, candidate_name: e.target.value})}
+                              value={formHook.formData.candidate_name}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, candidate_name: e.target.value})}
                               required
                             />
                           </div>
@@ -1295,8 +1035,8 @@ export function OfferLetters() {
                               type="text" 
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. Senior Engineer"
-                              value={formData.position_title}
-                              onChange={(e) => setFormData({...formData, position_title: e.target.value})}
+                              value={formHook.formData.position_title}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, position_title: e.target.value})}
                               required
                             />
                           </div>
@@ -1305,8 +1045,8 @@ export function OfferLetters() {
                             <input 
                               type="date" 
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
-                              value={formData.start_date ? new Date(formData.start_date).toISOString().split('T')[0] : ''}
-                              onChange={(e) => setFormData({...formData, start_date: e.target.value})}
+                              value={formHook.formData.start_date ? new Date(formHook.formData.start_date).toISOString().split('T')[0] : ''}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, start_date: e.target.value})}
                               required
                             />
                           </div>
@@ -1315,8 +1055,8 @@ export function OfferLetters() {
                             <input 
                               type="date" 
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
-                              value={formData.expiration_date ? new Date(formData.expiration_date).toISOString().split('T')[0] : ''}
-                              onChange={(e) => setFormData({...formData, expiration_date: e.target.value})}
+                              value={formHook.formData.expiration_date ? new Date(formHook.formData.expiration_date).toISOString().split('T')[0] : ''}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, expiration_date: e.target.value})}
                             />
                           </div>
                         </div>
@@ -1348,8 +1088,8 @@ export function OfferLetters() {
                               type="text"
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                               placeholder="e.g. $150,000"
-                              value={formData.salary || ''}
-                              onChange={(e) => setFormData({...formData, salary: e.target.value})}
+                              value={formHook.formData.salary || ''}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, salary: e.target.value})}
                             />
                           </div>
                           ) : (
@@ -1360,8 +1100,8 @@ export function OfferLetters() {
                                 type="number"
                                 className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                                 placeholder="e.g. 140000"
-                                value={formData.salary_range_min ?? ''}
-                                onChange={(e) => setFormData({...formData, salary_range_min: e.target.value ? parseFloat(e.target.value) : undefined})}
+                                value={formHook.formData.salary_range_min ?? ''}
+                                onChange={(e) => formHook.setFormData({...formHook.formData, salary_range_min: e.target.value ? parseFloat(e.target.value) : undefined})}
                               />
                             </div>
                             <div className="flex-1">
@@ -1370,8 +1110,8 @@ export function OfferLetters() {
                                 type="number"
                                 className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
                                 placeholder="e.g. 160000"
-                                value={formData.salary_range_max ?? ''}
-                                onChange={(e) => setFormData({...formData, salary_range_max: e.target.value ? parseFloat(e.target.value) : undefined})}
+                                value={formHook.formData.salary_range_max ?? ''}
+                                onChange={(e) => formHook.setFormData({...formHook.formData, salary_range_max: e.target.value ? parseFloat(e.target.value) : undefined})}
                               />
                             </div>
                           </div>
@@ -1382,8 +1122,8 @@ export function OfferLetters() {
                               type="text" 
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. 15% Annual"
-                              value={formData.bonus || ''}
-                              onChange={(e) => setFormData({...formData, bonus: e.target.value})}
+                              value={formHook.formData.bonus || ''}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, bonus: e.target.value})}
                             />
                           </div>
                           <div>
@@ -1392,16 +1132,16 @@ export function OfferLetters() {
                               type="text" 
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. 5,000 RSUs"
-                              value={formData.stock_options || ''}
-                              onChange={(e) => setFormData({...formData, stock_options: e.target.value})}
+                              value={formHook.formData.stock_options || ''}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, stock_options: e.target.value})}
                             />
                           </div>
                           <div>
                             <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Employment Type</label>
                             <select
                                 className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
-                                value={formData.employment_type || 'Full-Time Exempt'}
-                                onChange={(e) => setFormData({...formData, employment_type: e.target.value})}
+                                value={formHook.formData.employment_type || 'Full-Time Exempt'}
+                                onChange={(e) => formHook.setFormData({...formHook.formData, employment_type: e.target.value})}
                             >
                                 {EMPLOYMENT_TYPES.map(type => (
                                   <option key={type} value={type}>{type}</option>
@@ -1420,8 +1160,8 @@ export function OfferLetters() {
                               type="text" 
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. David Chen"
-                              value={formData.manager_name || ''}
-                              onChange={(e) => setFormData({...formData, manager_name: e.target.value})}
+                              value={formHook.formData.manager_name || ''}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, manager_name: e.target.value})}
                             />
                           </div>
                           <div>
@@ -1430,8 +1170,8 @@ export function OfferLetters() {
                               type="text" 
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. VP of Engineering"
-                              value={formData.manager_title || ''}
-                              onChange={(e) => setFormData({...formData, manager_title: e.target.value})}
+                              value={formHook.formData.manager_title || ''}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, manager_title: e.target.value})}
                             />
                           </div>
                           <div className="md:col-span-2">
@@ -1440,8 +1180,8 @@ export function OfferLetters() {
                               type="text" 
                               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700" 
                               placeholder="e.g. San Francisco, CA (Hybrid)"
-                              value={formData.location || ''}
-                              onChange={(e) => setFormData({...formData, location: e.target.value})}
+                              value={formHook.formData.location || ''}
+                              onChange={(e) => formHook.setFormData({...formHook.formData, location: e.target.value})}
                             />
                           </div>
                         </div>
@@ -1451,43 +1191,43 @@ export function OfferLetters() {
                         <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Benefits Package</h3>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_medical || false} onChange={(e) => setFormData({...formData, benefits_medical: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.benefits_medical || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_medical: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Medical insurance</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_dental || false} onChange={(e) => setFormData({...formData, benefits_dental: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.benefits_dental || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_dental: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Dental insurance</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_vision || false} onChange={(e) => setFormData({...formData, benefits_vision: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.benefits_vision || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_vision: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Vision insurance</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_401k || false} onChange={(e) => setFormData({...formData, benefits_401k: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.benefits_401k || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_401k: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">401(k)</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_pto_vacation || false} onChange={(e) => setFormData({...formData, benefits_pto_vacation: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.benefits_pto_vacation || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_pto_vacation: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Paid vacation</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_pto_sick || false} onChange={(e) => setFormData({...formData, benefits_pto_sick: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.benefits_pto_sick || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_pto_sick: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Paid sick leave</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.benefits_holidays || false} onChange={(e) => setFormData({...formData, benefits_holidays: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.benefits_holidays || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_holidays: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Paid holidays</span>
                           </label>
                         </div>
-                        {formData.benefits_medical && (
+                        {formHook.formData.benefits_medical && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pl-0 sm:pl-4 border-l-2 border-zinc-800">
                             <div>
                               <label className="block text-[10px] uppercase text-zinc-500 mb-1">Medical Coverage %</label>
-                              <input type="number" min="0" max="100" placeholder="e.g. 80" className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formData.benefits_medical_coverage || ''} onChange={(e) => setFormData({...formData, benefits_medical_coverage: e.target.value ? parseInt(e.target.value) : undefined})} />
+                              <input type="number" min="0" max="100" placeholder="e.g. 80" className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formHook.formData.benefits_medical_coverage || ''} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_medical_coverage: e.target.value ? parseInt(e.target.value) : undefined})} />
                             </div>
                             <div>
                               <label className="block text-[10px] uppercase text-zinc-500 mb-1">Waiting Period</label>
-                              <select className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formData.benefits_medical_waiting_days || 0} onChange={(e) => setFormData({...formData, benefits_medical_waiting_days: parseInt(e.target.value)})}>
+                              <select className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formHook.formData.benefits_medical_waiting_days || 0} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_medical_waiting_days: parseInt(e.target.value)})}>
                                 <option value={0}>No waiting</option>
                                 <option value={30}>30 days</option>
                                 <option value={60}>60 days</option>
@@ -1496,15 +1236,15 @@ export function OfferLetters() {
                             </div>
                           </div>
                         )}
-                        {formData.benefits_401k && (
+                        {formHook.formData.benefits_401k && (
                           <div className="pl-4 border-l-2 border-zinc-800">
                             <label className="block text-[10px] uppercase text-zinc-500 mb-1">401(k) Match</label>
-                            <input type="text" placeholder="e.g. 4% match" className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formData.benefits_401k_match || ''} onChange={(e) => setFormData({...formData, benefits_401k_match: e.target.value})} />
+                            <input type="text" placeholder="e.g. 4% match" className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formHook.formData.benefits_401k_match || ''} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_401k_match: e.target.value})} />
                           </div>
                         )}
                         <div>
                           <label className="block text-[10px] uppercase text-zinc-500 mb-1">Other Benefits</label>
-                          <input type="text" placeholder="e.g. wellness stipend, parking" className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formData.benefits_other || ''} onChange={(e) => setFormData({...formData, benefits_other: e.target.value})} />
+                          <input type="text" placeholder="e.g. wellness stipend, parking" className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm" value={formHook.formData.benefits_other || ''} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_other: e.target.value})} />
                         </div>
                       </div>
 
@@ -1513,15 +1253,15 @@ export function OfferLetters() {
                         <p className="text-xs text-zinc-500">I-9 verification is always required</p>
                         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-6">
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.contingency_background_check || false} onChange={(e) => setFormData({...formData, contingency_background_check: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.contingency_background_check || false} onChange={(e) => formHook.setFormData({...formHook.formData, contingency_background_check: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Background check</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.contingency_credit_check || false} onChange={(e) => setFormData({...formData, contingency_credit_check: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.contingency_credit_check || false} onChange={(e) => formHook.setFormData({...formHook.formData, contingency_credit_check: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Credit check</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={formData.contingency_drug_screening || false} onChange={(e) => setFormData({...formData, contingency_drug_screening: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
+                            <input type="checkbox" checked={formHook.formData.contingency_drug_screening || false} onChange={(e) => formHook.setFormData({...formHook.formData, contingency_drug_screening: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
                             <span className="text-sm text-zinc-300">Drug screening</span>
                           </label>
                         </div>
@@ -1530,14 +1270,14 @@ export function OfferLetters() {
                       <div className="space-y-4">
                         <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/10 pb-2">Company Logo</h3>
                         <div>
-                          <input type="file" ref={logoInputRef} accept="image/*" onChange={handleLogoChange} className="hidden" />
-                          {logoPreview ? (
+                          <input type="file" ref={formHook.logoInputRef} accept="image/*" onChange={handleLogoChange} className="hidden" />
+                          {formHook.logoPreview ? (
                             <div className="flex flex-wrap items-center gap-4">
-                              <img src={logoPreview} alt="Logo preview" className="h-12 max-w-[150px] object-contain" />
+                              <img src={formHook.logoPreview} alt="Logo preview" className="h-12 max-w-[150px] object-contain" />
                               <button type="button" onClick={removeLogo} className="text-xs text-red-400 hover:text-red-300">Remove</button>
                             </div>
                           ) : (
-                            <button type="button" onClick={() => logoInputRef.current?.click()} className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-zinc-700 text-sm text-zinc-400 hover:border-white hover:text-white transition-colors">
+                            <button type="button" onClick={() => formHook.logoInputRef.current?.click()} className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-zinc-700 text-sm text-zinc-400 hover:border-white hover:text-white transition-colors">
                               <Upload size={16} />
                               Upload company logo
                             </button>
@@ -1553,24 +1293,24 @@ export function OfferLetters() {
                   
                   {createMode === 'wizard' ? (
                     <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
-                      {wizardStep > 1 && (
-                        <Button variant="secondary" onClick={() => setWizardStep(wizardStep - 1)} className="w-full sm:w-auto bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">
+                      {formHook.wizardStep > 1 && (
+                        <Button variant="secondary" onClick={() => formHook.setWizardStep(formHook.wizardStep - 1)} className="w-full sm:w-auto bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">
                           <ArrowLeft size={14} className="mr-2" /> Back
                         </Button>
                       )}
-                      {wizardStep < 5 ? (
-                        <Button onClick={() => setWizardStep(wizardStep + 1)} className="w-full sm:w-auto bg-white text-black hover:bg-zinc-200">
+                      {formHook.wizardStep < 5 ? (
+                        <Button onClick={() => formHook.setWizardStep(formHook.wizardStep + 1)} className="w-full sm:w-auto bg-white text-black hover:bg-zinc-200">
                           Next <ArrowRight size={14} className="ml-2" />
                         </Button>
                       ) : (
-                        <Button onClick={() => handleCreate()} disabled={isSubmitting} className="w-full sm:w-auto bg-white text-black hover:bg-zinc-200">
-                          {isSubmitting ? 'Generating...' : 'Generate Offer'} <Check size={14} className="ml-2" />
+                        <Button onClick={() => handleCreate()} disabled={formHook.isSubmitting} className="w-full sm:w-auto bg-white text-black hover:bg-zinc-200">
+                          {formHook.isSubmitting ? 'Generating...' : 'Generate Offer'} <Check size={14} className="ml-2" />
                         </Button>
                       )}
                     </div>
                   ) : (
-                    <Button type="submit" form="quick-form" disabled={isSubmitting} className="w-full sm:w-auto bg-white text-black hover:bg-zinc-200">
-                      {isSubmitting ? 'Generating...' : 'Generate Offer'}
+                    <Button type="submit" form="quick-form" disabled={formHook.isSubmitting} className="w-full sm:w-auto bg-white text-black hover:bg-zinc-200">
+                      {formHook.isSubmitting ? 'Generating...' : 'Generate Offer'}
                     </Button>
                   )}
                </div>
@@ -1650,7 +1390,7 @@ export function OfferLetters() {
                            <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={() => handleEditDraft(selectedLetter)}>Edit Draft</Button>
                          )}
                          {selectedLetter.salary_range_min != null && selectedLetter.salary_range_max != null && !selectedLetter.range_match_status && (
-                           <Button data-tour="offer-send-range-btn" variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => { setShowSendRangePrompt(selectedLetter.id); setSendRangeEmail(selectedLetter.candidate_email || ''); }}>Send Range Offer</Button>
+                           <Button data-tour="offer-send-range-btn" variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => { rangeHook.setShowSendRangePrompt(selectedLetter.id); rangeHook.setSendRangeEmail(selectedLetter.candidate_email || ''); }}>Send Range Offer</Button>
                          )}
                          {(selectedLetter.range_match_status === 'no_match_low' || selectedLetter.range_match_status === 'no_match_high') &&
                            (selectedLetter.negotiation_round ?? 1) < (selectedLetter.max_negotiation_rounds ?? 3) && (
@@ -1776,7 +1516,7 @@ export function OfferLetters() {
         </div>
       )}
       {/* Send Range Email Prompt */}
-      {showSendRangePrompt && (
+      {rangeHook.showSendRangePrompt && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 shadow-2xl p-6">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Send Range Offer</h3>
@@ -1785,23 +1525,23 @@ export function OfferLetters() {
               type="email"
               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700 mb-4"
               placeholder="candidate@email.com"
-              value={sendRangeEmail}
-              onChange={(e) => setSendRangeEmail(e.target.value)}
+              value={rangeHook.sendRangeEmail}
+              onChange={(e) => rangeHook.setSendRangeEmail(e.target.value)}
               autoFocus
             />
             <div className="flex gap-3">
               <button
-                onClick={() => { setShowSendRangePrompt(null); setSendRangeEmail(''); }}
+                onClick={() => { rangeHook.setShowSendRangePrompt(null); rangeHook.setSendRangeEmail(''); }}
                 className="flex-1 px-4 py-2 text-xs font-bold uppercase tracking-wider border border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={() => handleSendRange(showSendRangePrompt)}
-                disabled={!sendRangeEmail || isSubmitting}
+                onClick={() => handleSendRange(rangeHook.showSendRangePrompt as string)}
+                disabled={!rangeHook.sendRangeEmail || rangeHook.isSubmitting}
                 className="flex-1 px-4 py-2 text-xs font-bold uppercase tracking-wider bg-white text-black hover:bg-zinc-200 disabled:opacity-50 transition-colors"
               >
-                {isSubmitting ? 'Sending...' : 'Send'}
+                {rangeHook.isSubmitting ? 'Sending...' : 'Send'}
               </button>
             </div>
           </div>
