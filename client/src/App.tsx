@@ -58,6 +58,7 @@ const TestBot = lazy(() => import('./pages/TestBot').then(m => ({ default: m.Tes
 const AdminOverview = lazy(() => import('./pages/admin/AdminOverview'));
 const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
 const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
+const BrokerManagement = lazy(() => import('./pages/admin/BrokerManagement'));
 const Jurisdictions = lazy(() => import('./pages/admin/Jurisdictions'));
 const PosterOrders = lazy(() => import('./pages/admin/PosterOrders'));
 const HRNews = lazy(() => import('./pages/admin/HRNews'));
@@ -573,6 +574,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <CompanyFeatures />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="admin/brokers"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <BrokerManagement />
                   </ProtectedRoute>
                 }
               />

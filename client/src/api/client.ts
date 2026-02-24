@@ -1780,6 +1780,62 @@ export const adminCompanyFeatures = {
     }),
 };
 
+// Admin Broker Management
+export interface AdminBroker {
+  id: string;
+  name: string;
+  slug: string;
+  status: 'pending' | 'active' | 'suspended' | 'terminated';
+  support_routing: 'broker_first' | 'matcha_first' | 'shared';
+  billing_mode: 'direct' | 'reseller' | 'hybrid';
+  invoice_owner: 'matcha' | 'broker';
+  terms_required_version: string;
+  branding_mode: 'direct' | 'co_branded' | 'white_label';
+  active_member_count: number;
+  active_company_count: number;
+  active_contract: {
+    id: string | null;
+    currency: string | null;
+    base_platform_fee: number | null;
+    pepm_rate: number | null;
+    minimum_monthly_commit: number | null;
+  } | null;
+  created_at: string | null;
+}
+
+export interface AdminBrokerCreateRequest {
+  broker_name: string;
+  owner_email: string;
+  owner_name: string;
+  owner_password?: string;
+  slug?: string;
+  support_routing?: string;
+  billing_mode?: string;
+  invoice_owner?: string;
+  terms_required_version?: string;
+}
+
+export const adminBrokers = {
+  list: (): Promise<{ brokers: AdminBroker[]; total: number }> =>
+    request('/admin/brokers'),
+
+  create: (data: AdminBrokerCreateRequest): Promise<{ broker_id: string; owner_id: string; contract_id: string }> =>
+    request('/admin/brokers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (brokerId: string, data: {
+    status?: string;
+    support_routing?: string;
+    terms_required_version?: string;
+  }): Promise<{ id: string; name: string; status: string; support_routing: string }> =>
+    request(`/admin/brokers/${brokerId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+};
+
 // Admin Overview
 export interface AdminOverviewCompany {
   id: string;
