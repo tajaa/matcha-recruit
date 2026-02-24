@@ -14,7 +14,7 @@ import {
     MapPin, Plus, Trash2, Edit2, X,
     ChevronDown, ChevronRight, AlertTriangle, Bell, CheckCircle,
     ExternalLink, Building2, Loader2, Clock, Calendar, Shield,
-    History, Eye, Zap, Info
+    History, Eye, Zap, Info, ShieldCheck
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FeatureGuideTrigger } from '../features/feature-guides';
@@ -25,7 +25,7 @@ function linkifyText(text: string) {
     if (parts.length === 1) return text;
     return parts.map((part, i) =>
         /^https?:\/\//.test(part) ? (
-            <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-emerald-300 hover:text-emerald-200 underline break-all">{part}</a>
+            <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 underline decoration-emerald-500/20 underline-offset-2">{part}</a>
         ) : part
     );
 }
@@ -125,42 +125,42 @@ const COMPLIANCE_CYCLE_STEPS: ComplianceWizardStep[] = [
   {
     id: 1,
     icon: 'locations',
-    title: 'Add Locations',
-    description: 'Pin the cities and states where you have employees or offices. We use this to map applicable laws.',
-    action: 'Click "Add Location" to register your first business site.',
+    title: 'Locations',
+    description: 'Map applicable laws by pinning business sites.',
+    action: 'Click "Add Location" to register a site.',
   },
   {
     id: 2,
     icon: 'research',
-    title: 'AI Research',
-    description: 'The AI researches federal, state, and local labor ordinances specific to each of your locations.',
-    action: 'Select a location and click "Check for Updates" to trigger AI research.',
+    title: 'Research',
+    description: 'AI scans federal, state, and local ordinances.',
+    action: 'Select a location and click "Check for Updates".',
   },
   {
     id: 3,
     icon: 'alerts',
-    title: 'Monitor Alerts',
-    description: 'Get notified when laws change, new requirements are detected, or deadlines are approaching.',
-    action: 'Check the "Alerts" tab for items needing your attention.',
+    title: 'Monitor',
+    description: 'Track changes and detected requirements.',
+    action: 'Review the "Alerts" tab for attention items.',
   },
   {
     id: 4,
     icon: 'posters',
-    title: 'Order Posters',
-    description: 'Fulfill mandatory posting requirements by ordering or downloading AI-generated compliance posters.',
-    action: 'Navigate to the "Posters" tab to view available downloads or place orders.',
+    title: 'Posters',
+    description: 'Order or download mandatory compliance signage.',
+    action: 'Navigate to "Posters" for downloads.',
   },
   {
     id: 5,
     icon: 'audit',
-    title: 'Audit History',
-    description: 'Maintain a verifiable record of all compliance checks and historical requirement states.',
-    action: 'View the "Log" tab for a full audit trail of your compliance monitoring.',
+    title: 'Audit',
+    description: 'Maintain verifiable records of all checks.',
+    action: 'View the "Log" for a full audit trail.',
   },
 ];
 
 function ComplianceCycleIcon({ icon, className = '' }: { icon: ComplianceStepIcon; className?: string }) {
-  const common = { className, width: 16, height: 16, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
+  const common = { className, width: 14, height: 14, viewBox: '0 0 20 20', fill: 'none', 'aria-hidden': true as const };
   
   if (icon === 'locations') {
     return (
@@ -221,89 +221,97 @@ function ComplianceCycleWizard({ locations, alerts }: { locations?: BusinessLoca
                   : 1;
 
   return (
-    <div className="border border-white/10 bg-zinc-950/60 mb-10">
+    <div className="border border-white/5 bg-zinc-900/30 rounded-sm overflow-hidden mb-8 shadow-sm">
       <button
         onClick={toggle}
-        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
       >
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Compliance Cycle</span>
+        <div className="flex items-center gap-4">
+          <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-zinc-500 font-mono">System Lifecycle</span>
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 border border-zinc-700 text-zinc-400">
-              Step {activeStep} of 5
+            <span className="px-1.5 py-0.5 text-[8px] font-mono font-bold uppercase tracking-widest bg-zinc-800 border border-white/5 text-zinc-400">
+              Stage 0{activeStep}
             </span>
-            <span className="text-[10px] text-zinc-600 hidden sm:inline">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600 hidden sm:inline">
               {COMPLIANCE_CYCLE_STEPS[activeStep - 1].title}
             </span>
           </div>
         </div>
-        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-200 shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
+        <ChevronDownIcon className={`text-zinc-600 transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`} />
       </button>
 
-      {!collapsed && (
-        <div className="border-t border-white/10">
-          <div className="relative px-5 pt-5 pb-2 overflow-x-auto no-scrollbar">
-            <div className="flex items-start gap-0 min-w-max">
-              {COMPLIANCE_CYCLE_STEPS.map((step, idx) => {
-                const isComplete = step.id < activeStep;
-                const isActive = step.id === activeStep;
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="border-t border-white/5 overflow-hidden"
+          >
+            <div className="px-4 py-6">
+              <div className="flex items-start justify-between gap-8 mb-6 overflow-x-auto no-scrollbar pb-2">
+                {COMPLIANCE_CYCLE_STEPS.map((step, idx) => {
+                  const isComplete = step.id < activeStep;
+                  const isActive = step.id === activeStep;
 
-                return (
-                  <div key={step.id} className="flex items-start">
-                    <div className="flex flex-col items-center w-28">
-                      <div className={`relative w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all ${
-                        isComplete
-                          ? 'bg-matcha-500/20 border-matcha-500/50 text-matcha-400'
-                          : isActive
-                          ? 'bg-white/10 border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)]'
-                          : 'bg-zinc-900 border-zinc-700 text-zinc-600'
-                      }`}>
-                        {isComplete ? '✓' : <ComplianceCycleIcon icon={step.icon} className="w-4 h-4" />}
+                  return (
+                    <div key={step.id} className="flex items-center gap-4 group flex-shrink-0">
+                      <div className="flex flex-col items-center">
+                        <div className={`relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-500 ${
+                          isComplete
+                            ? 'bg-matcha-500/10 border-matcha-500/30 text-matcha-500'
+                            : isActive
+                            ? 'bg-white/5 border-white/20 text-white shadow-[0_0_15px_rgba(255,255,255,0.05)]'
+                            : 'bg-zinc-900 border-white/5 text-zinc-700'
+                        }`}>
+                          {isComplete ? <CheckCircle size={14} strokeWidth={2.5} /> : <ComplianceCycleIcon icon={step.icon} />}
+                        </div>
+                        <span className={`mt-2 text-[8px] font-bold uppercase tracking-[0.15em] ${
+                          isActive ? 'text-white' : isComplete ? 'text-matcha-500/60' : 'text-zinc-700'
+                        }`}>
+                          {step.title}
+                        </span>
                       </div>
-                      <div className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider leading-tight px-1 ${
-                        isActive ? 'text-white' : isComplete ? 'text-matcha-400/70' : 'text-zinc-600'
-                      }`}>
-                        {step.title}
-                      </div>
+                      {idx < COMPLIANCE_CYCLE_STEPS.length - 1 && (
+                        <div className={`w-8 h-px transition-colors duration-700 ${
+                          step.id < activeStep ? 'bg-matcha-500/20' : 'bg-white/5'
+                        }`} />
+                      )}
                     </div>
-                    {idx < COMPLIANCE_CYCLE_STEPS.length - 1 && (
-                      <div className={`w-10 h-0.5 mt-[18px] flex-shrink-0 transition-colors ${
-                        step.id < activeStep ? 'bg-matcha-500/40' : 'bg-zinc-800'
-                      }`} />
+                  );
+                })}
+              </div>
+
+              <div className="p-4 bg-zinc-950/40 border border-white/5 rounded-sm">
+                <div className="flex items-start gap-4">
+                  <div className="p-2 bg-white/5 rounded-sm text-zinc-400">
+                    <ComplianceCycleIcon icon={COMPLIANCE_CYCLE_STEPS[activeStep - 1].icon} className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <h4 className="text-[10px] font-bold text-white uppercase tracking-widest">
+                        {COMPLIANCE_CYCLE_STEPS[activeStep - 1].title}
+                      </h4>
+                      <span className="text-[7px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 rounded-xs">
+                        Active Stage
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                      {COMPLIANCE_CYCLE_STEPS[activeStep - 1].description}
+                    </p>
+                    {COMPLIANCE_CYCLE_STEPS[activeStep - 1].action && (
+                      <p className="text-[10px] text-zinc-400 font-mono mt-2 opacity-80">
+                        <span className="text-matcha-500">→</span> {COMPLIANCE_CYCLE_STEPS[activeStep - 1].action}
+                      </p>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mx-5 mb-5 p-4 bg-white/[0.03] border border-white/10">
-            <div className="flex items-start gap-3">
-              <span className="text-xl flex-shrink-0 text-zinc-200">
-                <ComplianceCycleIcon icon={COMPLIANCE_CYCLE_STEPS[activeStep - 1].icon} className="w-5 h-5" />
-              </span>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-bold text-white uppercase tracking-wider">
-                    {COMPLIANCE_CYCLE_STEPS[activeStep - 1].title}
-                  </span>
-                  <span className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-white/10 text-zinc-400 border border-white/10">
-                    Current Step
-                  </span>
                 </div>
-                <p className="text-[11px] text-zinc-400 leading-relaxed mb-2">
-                  {COMPLIANCE_CYCLE_STEPS[activeStep - 1].description}
-                </p>
-                {COMPLIANCE_CYCLE_STEPS[activeStep - 1].action && (
-                  <p className="text-[11px] text-matcha-400/80 font-medium">
-                    → {COMPLIANCE_CYCLE_STEPS[activeStep - 1].action}
-                  </p>
-                )}
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -635,38 +643,44 @@ export function Compliance() {
     const unreadAlertsCount = locationAlerts.filter(a => a.status === 'unread').length;
 
     return (
-        <div className="max-w-7xl mx-auto space-y-8">
-            <div className="flex items-center justify-between border-b border-white/10 pb-8">
-                <div className="flex items-center gap-6">
+        <div className="max-w-7xl mx-auto space-y-10 pb-24">
+            <div className="flex items-center justify-between border-b border-white/5 pb-8">
+                <div className="flex items-center gap-8">
                     <div>
                         <div className="flex items-center gap-3">
                             <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Compliance</h1>
                             <FeatureGuideTrigger guideId="compliance" />
                         </div>
-                        <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
-                            Monitor labor laws, tax rates, and posting requirements
-                        </p>
+                        <div className="flex items-center gap-2 mt-2">
+                            <ShieldCheck size={12} className="text-matcha-500" />
+                            <p className="text-[10px] text-zinc-500 font-mono tracking-widest uppercase">
+                                Algorithmic Enforcement Node
+                            </p>
+                        </div>
                     </div>
                     {isAdmin && companies?.companies && companies.companies.length > 0 && (
-                        <select
-                            data-tour="compliance-company-select"
-                            value={selectedCompanyId || ''}
-                            onChange={e => setSelectedCompanyId(e.target.value)}
-                            className="px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-white/20 transition-colors min-w-[200px]"
-                        >
-                            {companies.companies.map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                        </select>
+                        <div className="flex flex-col gap-1.5 pl-8 border-l border-white/5">
+                            <span className="text-[8px] font-bold uppercase tracking-widest text-zinc-600">Company Context</span>
+                            <select
+                                data-tour="compliance-company-select"
+                                value={selectedCompanyId || ''}
+                                onChange={e => setSelectedCompanyId(e.target.value)}
+                                className="bg-zinc-950 border border-white/5 text-white text-[10px] font-mono uppercase tracking-[0.2em] focus:outline-none focus:border-white/20 transition-all px-3 py-1.5 rounded-sm min-w-[220px]"
+                            >
+                                {companies.companies.map(c => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                        </div>
                     )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     {wizardReturnPath && (
                         <button
                             onClick={() => navigate(wizardReturnPath)}
-                            className="flex items-center gap-2 px-4 py-2 border border-zinc-700 text-zinc-200 hover:text-white hover:border-zinc-500 text-xs font-bold uppercase tracking-wider transition-colors"
+                            className="px-5 py-2.5 border border-white/5 text-zinc-400 hover:text-white hover:bg-white/5 text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm"
                         >
-                            Back To Handbook
+                            Return To Handbook
                         </button>
                     )}
                     <button
@@ -677,7 +691,7 @@ export function Compliance() {
                             setJurisdictionSearch('');
                             setShowAddModal(true);
                         }}
-                        className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+                        className="flex items-center gap-2 px-6 py-2.5 bg-white text-black hover:bg-[#4ADE80] text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm shadow-xl"
                     >
                         <Plus size={14} />
                         Add Location
@@ -687,302 +701,280 @@ export function Compliance() {
 
             <ComplianceCycleWizard locations={locations} alerts={alerts} />
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div data-tour="compliance-locations" className="lg:col-span-1 space-y-4">
-                    <h2 className="text-xs font-bold text-white uppercase tracking-wider pb-2 border-b border-white/10">
-                        Locations
-                    </h2>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+                <div data-tour="compliance-locations" className="lg:col-span-1 space-y-6">
+                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                        <h2 className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.25em]">
+                            Endpoints
+                        </h2>
+                        <span className="text-[9px] font-mono text-zinc-700">[{locations?.length || 0}]</span>
+                    </div>
 
                     {loadingLocations ? (
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                             {[1, 2, 3].map(i => (
-                                <div key={i} className="bg-zinc-900 border border-zinc-800 rounded p-4 animate-pulse h-20" />
+                                <div key={i} className="bg-zinc-900/40 border border-white/5 rounded-sm p-4 animate-pulse h-20" />
                             ))}
                         </div>
                     ) : locations?.length === 0 ? (
-                        <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded p-8 text-center">
-                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                        <div className="bg-zinc-900/20 border border-dashed border-white/5 rounded-sm py-16 px-8 text-center">
+                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center opacity-40">
                                 <MapPin size={20} className="text-zinc-500" />
                             </div>
-                            <h3 className="text-white text-sm font-bold mb-1">No Locations</h3>
-                            <p className="text-zinc-500 text-xs mb-4">
-                                Add business locations to track compliance.
+                            <h3 className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-2">Zero Endpoints</h3>
+                            <p className="text-zinc-600 text-[10px] mb-6 leading-relaxed uppercase tracking-tighter">
+                                Register business locations to initialize monitoring.
                             </p>
                             <button
                                 onClick={() => setShowAddModal(true)}
-                                className="text-white text-xs font-bold hover:text-zinc-300 uppercase tracking-wider underline underline-offset-4"
+                                className="text-white text-[10px] font-bold hover:text-[#4ADE80] uppercase tracking-[0.2em] underline underline-offset-8 decoration-white/10"
                             >
-                                Add Location
+                                Register First Node
                             </button>
                         </div>
                     ) : (
-                        <div className="space-y-2">
-                            {locations?.map(location => (
-                                <div
-                                    data-tour="compliance-location-card"
-                                    key={location.id}
-                                    onClick={() => setSelectedLocationId(location.id)}
-                                    className={`border rounded p-4 cursor-pointer transition-all group ${
-                                        selectedLocationId === location.id
-                                            ? 'border-white bg-zinc-900 shadow-sm'
-                                            : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'
-                                    }`}
-                                >
-                                    <div className="flex items-start justify-between">
-                                        <div className="min-w-0 flex-1">
-                                            <h3 className={`font-bold text-sm truncate uppercase tracking-wide ${
+                    <div className="space-y-1.5">
+                        {locations?.map(location => (
+                            <motion.div
+                                layout
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                key={location.id}
+                                onClick={() => setSelectedLocationId(location.id)}
+                                className={`border rounded-sm p-3.5 cursor-pointer transition-all duration-300 group relative overflow-hidden ${
+                                    selectedLocationId === location.id
+                                        ? 'border-matcha-500/40 bg-matcha-500/[0.03] shadow-[0_0_20px_rgba(0,0,0,0.4)]'
+                                        : 'border-white/5 bg-zinc-900/40 hover:border-white/10 hover:bg-zinc-900/60'
+                                }`}
+                            >
+                                {selectedLocationId === location.id && (
+                                    <motion.div 
+                                        layoutId="active-location-indicator"
+                                        className="absolute left-0 top-0 bottom-0 w-0.5 bg-matcha-500" 
+                                    />
+                                )}
+                                <div className="flex items-start justify-between">
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2">
+                                            <h3 className={`font-bold text-xs truncate uppercase tracking-widest ${
                                                 selectedLocationId === location.id ? 'text-white' : 'text-zinc-400'
                                             }`}>
                                                 {location.name || `${location.city}, ${location.state}`}
                                             </h3>
-                                            <p className="text-zinc-600 text-xs truncate mt-1 font-mono">
-                                                {location.address ? `${location.address}, ` : ''}{location.city}, {location.state} {location.zipcode}
-                                            </p>
-                                            <div className="flex items-center gap-4 mt-3 text-[10px] uppercase tracking-wider">
-                                                <span className="text-zinc-500">
-                                                    {location.requirements_count} reqs
-                                                </span>
-                                                {location.unread_alerts_count > 0 && (
-                                                    <span className="text-amber-500 flex items-center gap-1 font-bold">
-                                                        <Bell size={10} />
-                                                        {location.unread_alerts_count} alerts
-                                                    </span>
-                                                )}
-                                            </div>
+                                            {location.has_local_ordinance && (
+                                                <span className="text-[7px] px-1 py-0.5 bg-white/5 text-zinc-500 border border-white/10 rounded-xs uppercase tracking-widest">Local</span>
+                                            )}
                                         </div>
-                                        <div className="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    openEditModal(location);
-                                                    setShowAddModal(true);
-                                                }}
-                                                className="p-1.5 text-zinc-500 hover:text-white rounded transition-colors"
-                                                title="Edit"
-                                            >
-                                                <Edit2 size={12} />
-                                            </button>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    if (confirm('Delete this location?')) {
-                                                        deleteLocationMutation.mutate(location.id);
-                                                    }
-                                                }}
-                                                className="p-1.5 text-zinc-500 hover:text-red-500 rounded transition-colors"
-                                                title="Delete"
-                                            >
-                                                <Trash2 size={12} />
-                                            </button>
+                                        <p className="text-zinc-600 text-[10px] truncate mt-1 font-mono uppercase tracking-tighter">
+                                            {location.city}, {location.state} {location.zipcode}
+                                        </p>
+                                        <div className="flex items-center gap-4 mt-3">
+                                            <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-zinc-500/80">
+                                                {location.requirements_count} Nodes
+                                            </span>
+                                            {location.unread_alerts_count > 0 && (
+                                                <span className="text-amber-500 flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] animate-pulse">
+                                                    <Bell size={8} />
+                                                    {location.unread_alerts_count} Alerts
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
+                                    <div className="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                openEditModal(location);
+                                                setShowAddModal(true);
+                                            }}
+                                            className="p-1.5 text-zinc-600 hover:text-white rounded transition-colors"
+                                            title="Edit"
+                                        >
+                                            <Edit2 size={11} />
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (confirm('Delete this location?')) {
+                                                    deleteLocationMutation.mutate(location.id);
+                                                }
+                                            }}
+                                            className="p-1.5 text-zinc-600 hover:text-red-500 rounded transition-colors"
+                                            title="Delete"
+                                        >
+                                            <Trash2 size={11} />
+                                        </button>
+                                    </div>
                                 </div>
-                            ))}
-                        </div>
+                            </motion.div>
+                        ))}
+                    </div>
                     )}
                 </div>
 
                 <div data-tour="compliance-content" className="lg:col-span-2">
                     {selectedLocationId && selectedLocation ? (
-                        <div className="bg-zinc-950 border border-white/10 rounded overflow-hidden min-h-[600px] flex flex-col">
-                            <div className="p-6 border-b border-white/10 bg-zinc-900/50">
-                                <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-                                        <Building2 size={20} className="text-white" />
-                                    </div>
-                                    <div>
-                                        <h2 className="text-lg font-bold text-white uppercase tracking-tight">
-                                            {selectedLocation.name || `${selectedLocation.city}, ${selectedLocation.state}`}
-                                        </h2>
-                                        <p className="text-xs text-zinc-500 font-mono mt-0.5">
-                                            {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zipcode}
-                                            {selectedLocation.last_compliance_check && (
-                                                <span className="ml-3 text-zinc-600">
-                                                    Updated {new Date(selectedLocation.last_compliance_check).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                        <div className="bg-zinc-900/20 border border-white/5 rounded-sm overflow-hidden min-h-[600px] flex flex-col shadow-2xl">
+                            <div className="p-6 md:p-8 border-b border-white/5 bg-zinc-900/40">
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                                    <div className="flex items-center gap-5">
+                                        <div className="w-12 h-12 rounded-sm bg-white/5 border border-white/10 flex items-center justify-center shadow-inner">
+                                            <Building2 size={24} className="text-zinc-400" />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-xl font-bold text-white uppercase tracking-tighter">
+                                                {selectedLocation.name || `${selectedLocation.city}, ${selectedLocation.state}`}
+                                            </h2>
+                                            <div className="flex items-center gap-3 mt-1.5">
+                                                <span className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">
+                                                    {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zipcode}
                                                 </span>
-                                            )}
-                                        </p>
+                                                {selectedLocation.last_compliance_check && (
+                                                    <>
+                                                        <div className="w-1 h-1 rounded-full bg-white/10" />
+                                                        <span className="text-[9px] text-zinc-600 font-mono uppercase tracking-widest">
+                                                            Last Sync: {new Date(selectedLocation.last_compliance_check).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                        </span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                                <button
-                                    disabled={checkInProgress}
-                                    onClick={async () => {
-                                        if (!selectedLocationId || checkInProgress) return;
-                                        setCheckInProgress(true);
-                                        setCheckMessages([]);
-                                        try {
-                                            const response = await complianceAPI.checkCompliance(selectedLocationId, companyId);
-                                            const reader = response.body?.getReader();
-                                            if (!reader) throw new Error('No response body');
-                                            const decoder = new TextDecoder();
-                                            let buffer = '';
-                                            while (true) {
-                                                const { done, value } = await reader.read();
-                                                if (done) break;
-                                                buffer += decoder.decode(value, { stream: true });
-                                                const lines = buffer.split('\n');
-                                                buffer = lines.pop() || '';
-                                                for (const line of lines) {
-                                                    const trimmed = line.trim();
-                                                    if (!trimmed.startsWith('data: ')) continue;
-                                                    const payload = trimmed.slice(6);
-                                                    if (payload === '[DONE]') continue;
-                                                    try {
-                                                        const event = JSON.parse(payload);
-                                                        setCheckMessages(prev => [...prev, event]);
-                                                    } catch { /* skip malformed */ }
+                                    <button
+                                        disabled={checkInProgress}
+                                        onClick={async () => {
+                                            if (!selectedLocationId || checkInProgress) return;
+                                            setCheckInProgress(true);
+                                            setCheckMessages([]);
+                                            try {
+                                                const response = await complianceAPI.checkCompliance(selectedLocationId, companyId);
+                                                const reader = response.body?.getReader();
+                                                if (!reader) throw new Error('No response body');
+                                                const decoder = new TextDecoder();
+                                                let buffer = '';
+                                                while (true) {
+                                                    const { done, value } = await reader.read();
+                                                    if (done) break;
+                                                    buffer += decoder.decode(value, { stream: true });
+                                                    const lines = buffer.split('\n');
+                                                    buffer = lines.pop() || '';
+                                                    for (const line of lines) {
+                                                        const trimmed = line.trim();
+                                                        if (!trimmed.startsWith('data: ')) continue;
+                                                        const payload = trimmed.slice(6);
+                                                        if (payload === '[DONE]') continue;
+                                                        try {
+                                                            const event = JSON.parse(payload);
+                                                            setCheckMessages(prev => [...prev, event]);
+                                                        } catch { /* skip malformed */ }
+                                                    }
                                                 }
+                                                queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId, companyId] });
+                                                queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
+                                                queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
+                                                queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
+                                            } catch (error) {
+                                                console.error('Compliance check failed:', error);
+                                                setCheckMessages(prev => [...prev, { type: 'error', message: 'Failed to run compliance check' }]);
+                                            } finally {
+                                                setCheckInProgress(false);
                                             }
-                                            queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId, companyId] });
-                                            queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
-                                            queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
-                                            queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
-                                        } catch (error) {
-                                            console.error('Compliance check failed:', error);
-                                            setCheckMessages(prev => [...prev, { type: 'error', message: 'Failed to run compliance check' }]);
-                                        } finally {
-                                            setCheckInProgress(false);
-                                        }
-                                    }}
-                                    className="text-[10px] uppercase tracking-wider font-bold text-zinc-500 hover:text-white transition-colors flex items-center gap-1.5 border border-zinc-800 px-3 py-1.5 bg-zinc-900 hover:border-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {checkInProgress ? (
-                                        <><Loader2 size={12} className="animate-spin" /> Checking...</>
-                                    ) : (
-                                        <><Bell size={12} /> Check for Updates</>
-                                    )}
-                                </button>
+                                        }}
+                                        className="relative group px-6 py-3 bg-white text-black text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-500 hover:bg-[#4ADE80] disabled:opacity-50 overflow-hidden rounded-sm"
+                                    >
+                                        <div className="relative z-10 flex items-center gap-2">
+                                            {checkInProgress ? (
+                                                <><Loader2 size={12} className="animate-spin" /> Initializing Scan</>
+                                            ) : (
+                                                <><Zap size={12} /> Sync Compliance</>
+                                            )}
+                                        </div>
+                                    </button>
                                 </div>
-
-
-
                             </div>
 
                             {checkMessages.length > 0 && (
-                                <div className="border-b border-white/10 bg-zinc-900/30">
-                                    {checkMessages.some(m => m.type === 'result') && (
-                                        <div className="flex items-center gap-3 px-6 pt-3 pb-2 border-b border-white/5 text-[10px] uppercase tracking-wider font-bold text-zinc-600">
-                                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> New</span>
-                                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Updated</span>
-                                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-600 inline-block" /> Same</span>
-                                        </div>
-                                    )}
-                                    <div className="px-6 py-3 space-y-1.5 max-h-40 overflow-y-auto">
-                                    {checkMessages.map((msg, i) => (
-                                        <div key={i} className="flex items-center gap-2 text-xs font-mono">
-                                            {msg.type === 'jurisdiction_info' ? (
-                                                <Info size={12} className="text-blue-400 flex-shrink-0" />
-                                            ) : msg.type === 'error' ? (
-                                                <X size={12} className="text-red-400 flex-shrink-0" />
-                                            ) : msg.type === 'completed' ? (
-                                                <CheckCircle size={12} className="text-emerald-400 flex-shrink-0" />
-                                            ) : msg.type === 'result' ? (
-                                                <CheckCircle size={12} className={
-                                                    msg.status === 'new' ? 'text-emerald-400 flex-shrink-0' :
-                                                    msg.status === 'updated' ? 'text-amber-400 flex-shrink-0' :
-                                                    'text-zinc-600 flex-shrink-0'
-                                                } />
-                                            ) : checkInProgress && i === checkMessages.length - 1 ? (
-                                                <Loader2 size={12} className="text-blue-400 animate-spin flex-shrink-0" />
-                                            ) : (
-                                                <CheckCircle size={12} className="text-zinc-600 flex-shrink-0" />
-                                            )}
-                                            {msg.type === 'result' && msg.status && (
-                                                <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded ${
-                                                    msg.status === 'new' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                                                    msg.status === 'updated' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                                                    'bg-zinc-800 text-zinc-500 border border-zinc-700'
-                                                }`}>
-                                                    {msg.status === 'unchanged' ? 'same' : msg.status}
-                                                </span>
-                                            )}
-                                            <span className={
-                                                msg.type === 'jurisdiction_info' ? 'text-blue-300' :
-                                                msg.type === 'error' ? 'text-red-400' :
-                                                msg.type === 'completed' ? 'text-emerald-400' :
-                                                msg.type === 'result' && msg.status === 'new' ? 'text-emerald-300' :
-                                                msg.type === 'result' && msg.status === 'updated' ? 'text-amber-300' :
-                                                i === checkMessages.length - 1 && checkInProgress ? 'text-zinc-300' :
-                                                'text-zinc-600'
-                                            }>
-                                                {msg.type === 'completed'
-                                                    ? `Done — ${msg.new} new, ${msg.updated} updated, ${msg.alerts} alerts`
-                                                    : msg.message || msg.location || msg.type}
-                                            </span>
-                                        </div>
-                                    ))}
+                                <motion.div 
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    className="border-b border-white/5 bg-black/40 overflow-hidden"
+                                >
+                                    <div className="flex items-center gap-4 px-8 py-3 border-b border-white/5 text-[8px] uppercase tracking-[0.3em] font-bold text-zinc-600">
+                                        <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" /> New</div>
+                                        <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Delta</div>
+                                        <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-zinc-700" /> Nominal</div>
                                     </div>
-                                </div>
+                                    <div className="px-8 py-4 space-y-2 max-h-48 overflow-y-auto font-mono">
+                                        {checkMessages.map((msg, i) => (
+                                            <div key={i} className="flex items-start gap-3 text-[10px] leading-relaxed">
+                                                {msg.type === 'result' ? (
+                                                    <span className={`flex-shrink-0 mt-0.5 px-1.5 py-0.5 rounded-xs font-bold border ${
+                                                        msg.status === 'new' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
+                                                        msg.status === 'updated' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                                        'bg-white/5 text-zinc-600 border-white/5'
+                                                    }`}>
+                                                        {msg.status?.toUpperCase()}
+                                                    </span>
+                                                ) : (
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-800 mt-1.5 flex-shrink-0" />
+                                                )}
+                                                <span className={
+                                                    msg.type === 'error' ? 'text-red-400' :
+                                                    msg.type === 'completed' ? 'text-white font-bold' :
+                                                    'text-zinc-500'
+                                                }>
+                                                    {msg.type === 'completed'
+                                                        ? `SYNC COMPLETE // ${msg.new} NEW // ${msg.updated} UPDATED`
+                                                        : msg.message || msg.location || msg.type}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </motion.div>
                             )}
 
-                            <div data-tour="compliance-tabs" className="flex border-b border-white/10">
-                                <button
-                                    onClick={() => setActiveTab('requirements')}
-                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${
-                                        activeTab === 'requirements'
-                                            ? 'text-white border-b-2 border-white bg-zinc-900'
-                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
-                                    }`}
-                                >
-                                    Requirements ({requirements?.length || 0})
-                                </button>
-                                <button
-                                    onClick={() => setActiveTab('alerts')}
-                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
-                                        activeTab === 'alerts'
-                                            ? 'text-white border-b-2 border-white bg-zinc-900'
-                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
-                                    }`}
-                                >
-                                    Alerts ({locationAlerts.length})
-                                    {unreadAlertsCount > 0 && (
-                                        <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-[10px] rounded-full font-bold border border-amber-500/30">
-                                            {unreadAlertsCount}
+                            <div data-tour="compliance-tabs" className="flex border-b border-white/5 bg-zinc-900/20 px-4">
+                                {[
+                                    { id: 'requirements', label: 'Matrix', count: requirements?.length },
+                                    { id: 'alerts', label: 'Alerts', count: locationAlerts.length, badge: unreadAlertsCount },
+                                    { id: 'upcoming', label: 'Future', count: upcomingLegislation?.length },
+                                    { id: 'history', label: 'Log' },
+                                    { id: 'posters', label: 'Vault' },
+                                ].map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id as any)}
+                                        className={`px-6 py-4 text-[10px] font-bold uppercase tracking-[0.2em] transition-all relative ${
+                                            activeTab === tab.id
+                                                ? 'text-white'
+                                                : 'text-zinc-600 hover:text-zinc-400'
+                                        }`}
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            {tab.label}
+                                            {tab.count !== undefined && (
+                                                <span className="text-[8px] opacity-40 font-mono">[{tab.count}]</span>
+                                            )}
+                                            {tab.badge ? (
+                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
+                                            ) : null}
                                         </span>
-                                    )}
-                                </button>
-                                <button
-                                    onClick={() => setActiveTab('upcoming')}
-                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
-                                        activeTab === 'upcoming'
-                                            ? 'text-white border-b-2 border-white bg-zinc-900'
-                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
-                                    }`}
-                                >
-                                    <Calendar size={12} />
-                                    Upcoming ({upcomingLegislation?.length || 0})
-                                </button>
-                                <button
-                                    onClick={() => setActiveTab('history')}
-                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
-                                        activeTab === 'history'
-                                            ? 'text-white border-b-2 border-white bg-zinc-900'
-                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
-                                    }`}
-                                >
-                                    <History size={12} />
-                                    Log
-                                </button>
-                                <button
-                                    onClick={() => setActiveTab('posters')}
-                                    className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 ${
-                                        activeTab === 'posters'
-                                            ? 'text-white border-b-2 border-white bg-zinc-900'
-                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-950 hover:bg-zinc-900'
-                                    }`}
-                                >
-                                    <Shield size={12} />
-                                    Posters
-                                </button>
+                                        {activeTab === tab.id && (
+                                            <motion.div 
+                                                layoutId="active-tab-indicator"
+                                                className="absolute bottom-0 left-6 right-6 h-0.5 bg-white" 
+                                            />
+                                        )}
+                                    </button>
+                                ))}
                             </div>
 
                             {selectedLocation?.has_local_ordinance === false && (
-                                <div className="mx-6 mt-4 px-4 py-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3">
+                                <div className="mx-6 mt-4 px-4 py-3 bg-blue-500/10 border border-blue-500/20 rounded-sm flex items-start gap-3">
                                     <Info size={14} className="text-blue-400 mt-0.5 flex-shrink-0" />
-                                    <p className="text-xs text-blue-300 leading-relaxed">
-                                        <span className="font-semibold">{selectedLocation.city}</span> does not have its own local labor ordinances.
-                                        All requirements shown are from {selectedLocation.county ? `${selectedLocation.county} County / ` : ''}{selectedLocation.state} state law.
+                                    <p className="text-[10px] text-blue-300 leading-relaxed uppercase tracking-tight">
+                                        <span className="font-bold">{selectedLocation.city}</span> does not have local labor ordinances.
+                                        Requirements inherited from {selectedLocation.county ? `${selectedLocation.county} County / ` : ''}{selectedLocation.state} State law.
                                     </p>
                                 </div>
                             )}
@@ -999,31 +991,26 @@ export function Compliance() {
                                         <div className="space-y-6">
                                             {/* Available posters by location */}
                                             <div>
-                                                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3">Available Posters</h3>
+                                                <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4 pb-2 border-b border-white/5">Available Posters</h3>
                                                 {availablePosters.length === 0 ? (
-                                                    <p className="text-zinc-500 text-sm">No poster templates available for your locations yet.</p>
+                                                    <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-widest">No templates generated for this endpoint context.</p>
                                                 ) : (
                                                     <div className="space-y-2">
                                                         {availablePosters.map(poster => (
-                                                            <div key={poster.location_id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex items-center justify-between">
+                                                            <div key={poster.location_id} className="bg-zinc-900/40 border border-white/5 rounded-sm p-5 flex items-center justify-between group hover:bg-zinc-900/60 transition-colors">
                                                                 <div>
-                                                                    <div className="text-sm font-medium text-white">
+                                                                    <div className="text-xs font-bold text-white uppercase tracking-widest">
                                                                         {poster.location_city}, {poster.location_state}
-                                                                        {poster.location_name && <span className="text-zinc-500 ml-1">({poster.location_name})</span>}
+                                                                        {poster.location_name && <span className="text-zinc-500 ml-2 font-light">({poster.location_name})</span>}
                                                                     </div>
                                                                     {poster.template_title && (
-                                                                        <div className="text-xs text-zinc-400 mt-1">
+                                                                        <div className="text-[9px] text-zinc-500 mt-1.5 font-mono uppercase tracking-tighter">
                                                                             {poster.template_title}
-                                                                            {poster.template_version && <span className="text-zinc-600 ml-1">v{poster.template_version}</span>}
-                                                                            {poster.categories_included && (
-                                                                                <span className="text-zinc-600 ml-2">
-                                                                                    ({poster.categories_included.join(', ')})
-                                                                                </span>
-                                                                            )}
+                                                                            {poster.template_version && <span className="text-zinc-600 ml-2 font-bold">v{poster.template_version}</span>}
                                                                         </div>
                                                                     )}
                                                                 </div>
-                                                                <div className="flex items-center gap-2">
+                                                                <div className="flex items-center gap-3">
                                                                     {poster.template_status === 'generated' && poster.template_id && (
                                                                         <>
                                                                             <button
@@ -1035,7 +1022,7 @@ export function Compliance() {
                                                                                         console.error('Preview failed:', err);
                                                                                     }
                                                                                 }}
-                                                                                className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded transition-colors"
+                                                                                className="px-4 py-2 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 hover:bg-white hover:text-black text-zinc-300 rounded-xs transition-all"
                                                                             >
                                                                                 Preview PDF
                                                                             </button>
@@ -1062,25 +1049,25 @@ export function Compliance() {
                                                                                             setPosterOrderLoading(null);
                                                                                         }
                                                                                     }}
-                                                                                    className="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded transition-colors disabled:opacity-50"
+                                                                                    className="px-4 py-2 text-[9px] font-bold uppercase tracking-widest bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs transition-all disabled:opacity-50"
                                                                                 >
                                                                                     {posterOrderLoading === poster.location_id ? 'Ordering...' : 'Order Poster'}
                                                                                 </button>
                                                                             )}
                                                                             {poster.has_active_order && (
-                                                                                <span className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-400 rounded-full border border-blue-500/30">
-                                                                                    Order Active
+                                                                                <span className="px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest bg-blue-500/10 text-blue-400 rounded-xs border border-blue-500/20">
+                                                                                    Order Logged
                                                                                 </span>
                                                                             )}
                                                                         </>
                                                                     )}
                                                                     {poster.template_status === 'pending' && (
-                                                                        <span className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-400 rounded-full border border-amber-500/30">
-                                                                            Pending
+                                                                        <span className="px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest bg-amber-500/10 text-amber-400 rounded-xs border border-amber-500/20 animate-pulse">
+                                                                            Synthesis Pending
                                                                         </span>
                                                                     )}
                                                                     {!poster.template_id && (
-                                                                        <span className="text-xs text-zinc-600">No poster available</span>
+                                                                        <span className="text-[9px] text-zinc-700 font-mono uppercase tracking-widest">Unavailable</span>
                                                                     )}
                                                                 </div>
                                                             </div>
@@ -1092,40 +1079,40 @@ export function Compliance() {
                                             {/* Order history */}
                                             {posterOrders.length > 0 && (
                                                 <div>
-                                                    <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3">Order History</h3>
+                                                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4 pb-2 border-b border-white/5">Vault History</h3>
                                                     <div className="space-y-2">
                                                         {posterOrders.map(order => (
-                                                            <div key={order.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+                                                            <div key={order.id} className="bg-zinc-900/20 border border-white/5 rounded-sm p-5 hover:bg-zinc-900/40 transition-colors">
                                                                 <div className="flex items-center justify-between">
                                                                     <div>
-                                                                        <div className="text-sm text-white">
+                                                                        <div className="text-xs font-bold text-zinc-300 uppercase tracking-widest">
                                                                             {order.location_city}, {order.location_state}
-                                                                            {order.location_name && <span className="text-zinc-500 ml-1">({order.location_name})</span>}
+                                                                            {order.location_name && <span className="text-zinc-600 ml-2">({order.location_name})</span>}
                                                                         </div>
-                                                                        <div className="text-xs text-zinc-500 mt-1">
-                                                                            {order.items.map(i => i.template_title || i.jurisdiction_name).join(', ')}
+                                                                        <div className="text-[9px] text-zinc-600 mt-1.5 font-mono uppercase tracking-tighter">
+                                                                            {order.items.map(i => i.template_title || i.jurisdiction_name).join(' // ')}
                                                                             {' \u00b7 '}{order.created_at ? new Date(order.created_at).toLocaleDateString() : ''}
                                                                         </div>
                                                                     </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border ${
-                                                                            order.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
-                                                                            order.status === 'shipped' ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' :
-                                                                            order.status === 'cancelled' ? 'bg-zinc-700 text-zinc-400 border-zinc-600' :
-                                                                            'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                                                                    <div className="flex items-center gap-3">
+                                                                        <span className={`px-2 py-1 text-[8px] font-bold uppercase tracking-widest rounded-xs border ${
+                                                                            order.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
+                                                                            order.status === 'shipped' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
+                                                                            order.status === 'cancelled' ? 'bg-zinc-800 text-zinc-500 border-zinc-700' :
+                                                                            'bg-blue-500/10 text-blue-400 border-blue-500/20'
                                                                         }`}>
                                                                             {order.status}
                                                                         </span>
                                                                         {order.tracking_number && (
-                                                                            <span className="text-xs text-zinc-500">#{order.tracking_number}</span>
+                                                                            <span className="text-[9px] text-zinc-600 font-mono tracking-tighter">#{order.tracking_number}</span>
                                                                         )}
                                                                     </div>
                                                                 </div>
                                                                 {order.quote_amount != null && (
-                                                                    <div className="text-xs text-zinc-500 mt-2">Quote: ${order.quote_amount.toFixed(2)}</div>
+                                                                    <div className="text-[9px] text-zinc-600 mt-3 font-mono uppercase tracking-widest">Settlement: ${order.quote_amount.toFixed(2)}</div>
                                                                 )}
                                                                 {order.admin_notes && (
-                                                                    <div className="text-xs text-zinc-500 mt-1 italic">Note: {order.admin_notes}</div>
+                                                                    <div className="text-[9px] text-zinc-700 mt-1.5 italic font-serif">Note: {order.admin_notes}</div>
                                                                 )}
                                                             </div>
                                                         ))}
@@ -1136,57 +1123,58 @@ export function Compliance() {
                                     )
                                 ) : activeTab === 'upcoming' ? (
                                     !upcomingLegislation || upcomingLegislation.length === 0 ? (
-                                        <div className="text-center py-12">
-                                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                                        <div className="text-center py-24 border border-dashed border-white/5 bg-white/[0.01]">
+                                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center opacity-40">
                                                 <Calendar size={20} className="text-zinc-500" />
                                             </div>
-                                            <p className="text-zinc-500 text-sm font-mono uppercase tracking-wider">No upcoming legislation detected.</p>
-                                            <p className="text-zinc-600 text-xs mt-2">Run a compliance check to scan for upcoming changes.</p>
+                                            <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">Zero Future Deltas Detected</p>
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
                                             {upcomingLegislation.map(leg => {
                                                 const statusColors: Record<string, string> = {
-                                                    proposed: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-                                                    passed: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-                                                    signed: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-                                                    effective_soon: 'bg-red-500/20 text-red-400 border-red-500/30',
+                                                    proposed: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+                                                    passed: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+                                                    signed: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+                                                    effective_soon: 'bg-red-500/10 text-red-400 border-red-500/20',
                                                 };
                                                 return (
-                                                    <div key={leg.id} className="border border-white/10 rounded-lg p-4 bg-zinc-900/50">
-                                                        <div className="flex items-start justify-between">
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center gap-2 flex-wrap mb-1">
-                                                                    <h4 className="text-sm font-bold text-white uppercase tracking-wide">{leg.title}</h4>
-                                                                    <span className={`text-[10px] px-1.5 py-0.5 border rounded font-bold uppercase tracking-wider ${statusColors[leg.current_status] || 'bg-zinc-700 text-zinc-400 border-zinc-600'}`}>
+                                                    <div key={leg.id} className="border border-white/5 rounded-sm p-6 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors">
+                                                        <div className="flex items-start justify-between gap-6">
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-3 flex-wrap mb-2">
+                                                                    <h4 className="text-sm font-bold text-white uppercase tracking-tight truncate">{leg.title}</h4>
+                                                                    <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${statusColors[leg.current_status] || 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}>
                                                                         {leg.current_status.replace('_', ' ')}
                                                                     </span>
                                                                     {leg.category && (
-                                                                        <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 rounded">
+                                                                        <span className="text-[8px] px-1.5 py-0.5 bg-white/5 text-zinc-500 border border-white/10 rounded-xs uppercase tracking-widest">
                                                                             {COMPLIANCE_CATEGORY_LABELS[leg.category] || leg.category}
                                                                         </span>
                                                                     )}
                                                                 </div>
                                                                 {leg.description && (
-                                                                    <p className="text-xs text-zinc-400 leading-relaxed mb-2">{leg.description}</p>
+                                                                    <p className="text-[11px] text-zinc-500 leading-relaxed mb-4 font-light">{leg.description}</p>
                                                                 )}
                                                                 {leg.impact_summary && (
-                                                                    <p className="text-xs text-amber-300/80 leading-relaxed mb-2">
-                                                                        <span className="font-bold uppercase tracking-wider text-[10px]">Impact:</span> {leg.impact_summary}
-                                                                    </p>
+                                                                    <div className="p-3 bg-amber-500/[0.03] border-l-2 border-amber-500/20 mb-4">
+                                                                        <p className="text-[10px] text-amber-200/70 leading-relaxed">
+                                                                            <span className="font-bold uppercase tracking-wider text-[8px] mr-2">Impact Analysis:</span> {leg.impact_summary}
+                                                                        </p>
+                                                                    </div>
                                                                 )}
-                                                                <div className="flex items-center gap-4 text-[10px] text-zinc-500">
+                                                                <div className="flex items-center gap-6 text-[9px] font-mono text-zinc-600 uppercase tracking-widest">
                                                                     {leg.expected_effective_date && (
-                                                                        <span className="flex items-center gap-1 font-mono">
-                                                                            <Calendar size={10} />
+                                                                        <span className="flex items-center gap-2">
+                                                                            <Calendar size={10} className="opacity-40" />
                                                                             {new Date(leg.expected_effective_date).toLocaleDateString()}
                                                                             {leg.days_until_effective !== null && (
                                                                                 <span className={`ml-1 font-bold ${
-                                                                                    leg.days_until_effective <= 30 ? 'text-red-400' :
-                                                                                    leg.days_until_effective <= 90 ? 'text-amber-400' :
-                                                                                    'text-zinc-400'
+                                                                                    leg.days_until_effective <= 30 ? 'text-red-500' :
+                                                                                    leg.days_until_effective <= 90 ? 'text-amber-500' :
+                                                                                    'text-zinc-500'
                                                                                 }`}>
-                                                                                    ({leg.days_until_effective <= 0 ? 'NOW' : `${leg.days_until_effective}d`})
+                                                                                    ({leg.days_until_effective <= 0 ? 'ENFORCED' : `${leg.days_until_effective}D REMAINING`})
                                                                                 </span>
                                                                             )}
                                                                         </span>
@@ -1195,23 +1183,23 @@ export function Compliance() {
                                                                         <span>Confidence: {Math.round(leg.confidence * 100)}%</span>
                                                                     )}
                                                                     {leg.source_url && (
-                                                                        <a href={leg.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                                                                            Source <ExternalLink size={10} />
+                                                                        <a href={leg.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-white flex items-center gap-1.5 transition-colors">
+                                                                            Authority <ExternalLink size={10} />
                                                                         </a>
                                                                     )}
                                                                 </div>
                                                             </div>
                                                             {leg.days_until_effective !== null && leg.days_until_effective <= 90 && (
-                                                                <div className={`text-right ml-4 ${
-                                                                    leg.days_until_effective <= 0 ? 'text-red-400' :
-                                                                    leg.days_until_effective <= 30 ? 'text-red-400' :
-                                                                    'text-amber-400'
+                                                                <div className={`text-right flex-shrink-0 ${
+                                                                    leg.days_until_effective <= 0 ? 'text-red-500' :
+                                                                    leg.days_until_effective <= 30 ? 'text-red-500' :
+                                                                    'text-amber-500'
                                                                 }`}>
-                                                                    <div className="text-2xl font-bold font-mono">
-                                                                        {leg.days_until_effective <= 0 ? 'NOW' : leg.days_until_effective}
+                                                                    <div className="text-3xl font-bold tracking-tighter">
+                                                                        {leg.days_until_effective <= 0 ? 'ACT' : leg.days_until_effective}
                                                                     </div>
                                                                     {leg.days_until_effective > 0 && (
-                                                                        <div className="text-[10px] uppercase tracking-wider">days</div>
+                                                                        <div className="text-[8px] font-bold uppercase tracking-[0.3em]">Days</div>
                                                                     )}
                                                                 </div>
                                                             )}
@@ -1223,49 +1211,49 @@ export function Compliance() {
                                     )
                                 ) : activeTab === 'history' ? (
                                     !checkLog || checkLog.length === 0 ? (
-                                        <div className="text-center py-12">
-                                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                                        <div className="text-center py-24 border border-dashed border-white/5 bg-white/[0.01]">
+                                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center opacity-40">
                                                 <History size={20} className="text-zinc-500" />
                                             </div>
-                                            <p className="text-zinc-500 text-sm font-mono uppercase tracking-wider">No check history yet.</p>
+                                            <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">Zero Sync Events</p>
                                         </div>
                                     ) : (
-                                        <div className="space-y-2">
+                                        <div className="space-y-1.5">
                                             {checkLog.map(entry => (
-                                                <div key={entry.id} className="flex items-center gap-4 p-3 border border-white/5 rounded bg-zinc-900/30">
-                                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                                                        entry.status === 'completed' ? 'bg-emerald-400' :
-                                                        entry.status === 'failed' ? 'bg-red-400' :
-                                                        'bg-amber-400 animate-pulse'
+                                                <div key={entry.id} className="flex items-center gap-6 p-4 border border-white/5 rounded-sm bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors group">
+                                                    <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 shadow-sm ${
+                                                        entry.status === 'completed' ? 'bg-emerald-500 shadow-emerald-500/20' :
+                                                        entry.status === 'failed' ? 'bg-red-500 shadow-red-500/20' :
+                                                        'bg-amber-500 animate-pulse'
                                                     }`} />
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold uppercase tracking-wider ${
-                                                                entry.check_type === 'scheduled' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
-                                                                entry.check_type === 'proactive' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' :
-                                                                'bg-zinc-800 text-zinc-400 border-zinc-700'
+                                                        <div className="flex items-center gap-4">
+                                                            <span className={`text-[8px] px-1.5 py-0.5 rounded-xs border font-bold uppercase tracking-widest ${
+                                                                entry.check_type === 'scheduled' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                                                                entry.check_type === 'proactive' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                                                                'bg-white/5 text-zinc-500 border-white/10'
                                                             }`}>
                                                                 {entry.check_type}
                                                             </span>
-                                                            <span className="text-xs text-zinc-400 font-mono">
+                                                            <span className="text-[10px] text-zinc-500 font-mono uppercase tracking-tighter">
                                                                 {new Date(entry.started_at).toLocaleString(undefined, {
                                                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                                                                 })}
                                                             </span>
                                                         </div>
                                                         {entry.status === 'completed' && (
-                                                            <p className="text-[10px] text-zinc-500 mt-1 font-mono">
-                                                                {entry.new_count} new, {entry.updated_count} updated, {entry.alert_count} alerts
+                                                            <p className="text-[9px] text-zinc-600 mt-1.5 font-mono uppercase tracking-tighter">
+                                                                {entry.new_count} New Nodes // {entry.updated_count} Delta Updates // {entry.alert_count} Protocol Alerts
                                                             </p>
                                                         )}
                                                         {entry.error_message && (
-                                                            <p className="text-[10px] text-red-400 mt-1 truncate">{entry.error_message}</p>
+                                                            <p className="text-[9px] text-red-400/70 mt-1.5 truncate font-mono uppercase tracking-tighter">Err: {entry.error_message}</p>
                                                         )}
                                                     </div>
-                                                    <span className={`text-[10px] uppercase tracking-wider font-bold ${
-                                                        entry.status === 'completed' ? 'text-emerald-400' :
-                                                        entry.status === 'failed' ? 'text-red-400' :
-                                                        'text-amber-400'
+                                                    <span className={`text-[9px] uppercase tracking-widest font-bold ${
+                                                        entry.status === 'completed' ? 'text-emerald-500/60' :
+                                                        entry.status === 'failed' ? 'text-red-500/60' :
+                                                        'text-amber-500/60'
                                                     }`}>
                                                         {entry.status}
                                                     </span>
@@ -1281,42 +1269,45 @@ export function Compliance() {
                                             ))}
                                         </div>
                                     ) : Object.keys(requirementsByCategory).length === 0 ? (
-                                        <div className="text-center py-12 text-zinc-500 text-sm font-mono uppercase tracking-wider">
-                                            No requirements found for this jurisdiction.
+                                        <div className="text-center py-24 text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em] border border-dashed border-white/5 bg-white/[0.01]">
+                                            Zero Nodes Detected
                                         </div>
                                     ) : (
-                                        <div className="space-y-px bg-white/10 border border-white/10">
+                                        <div className="space-y-px bg-white/5 border border-white/5">
                                             {orderedRequirementCategories.map(([category, reqs]) => (
-                                                <div key={category} className="bg-zinc-950">
+                                                <div key={category} className="bg-zinc-950/20">
                                                     <button
                                                         onClick={() => toggleCategory(category)}
-                                                        className="w-full flex items-center justify-between p-4 bg-zinc-900 hover:bg-zinc-800 transition-colors"
+                                                        className="w-full flex items-center justify-between p-5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors border-b border-white/[0.02]"
                                                     >
-                                                        <div className="flex items-center gap-3">
-                                                            <span className="text-white text-sm font-bold uppercase tracking-wider">
-                                                                {COMPLIANCE_CATEGORY_LABELS[category] || category}
-                                                            </span>
-                                                            <span className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-400 text-[10px] rounded-full font-mono">
-                                                                {reqs.length}
-                                                            </span>
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="flex flex-col items-start">
+                                                                <span className="text-white text-[11px] font-bold uppercase tracking-widest">
+                                                                    {COMPLIANCE_CATEGORY_LABELS[category] || category}
+                                                                </span>
+                                                                <span className="text-[8px] text-zinc-600 font-mono uppercase tracking-[0.2em] mt-0.5">
+                                                                    {reqs.length} Active Node{reqs.length !== 1 ? 's' : ''}
+                                                                </span>
+                                                            </div>
                                                             {(() => {
                                                                 const source = getCategoryJurisdiction(reqs);
                                                                 return (
-                                                                    <span className={`px-1.5 py-0.5 text-[10px] rounded border font-bold uppercase tracking-wider ${
+                                                                    <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
                                                                         source.type === 'local'
-                                                                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                                                                            : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                                                                            ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                                                                            : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
                                                                     }`}>
                                                                         {source.label}
                                                                     </span>
                                                                 );
                                                             })()}
                                                         </div>
-                                                        {expandedCategories.has(category) ? (
-                                                            <ChevronDown size={16} className="text-zinc-500" />
-                                                        ) : (
-                                                            <ChevronRight size={16} className="text-zinc-500" />
-                                                        )}
+                                                        <motion.div
+                                                            animate={{ rotate: expandedCategories.has(category) ? 180 : 0 }}
+                                                            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                                                        >
+                                                            <ChevronDown size={14} className="text-zinc-600" />
+                                                        </motion.div>
                                                     </button>
 
                                                     <AnimatePresence initial={false}>
@@ -1325,48 +1316,49 @@ export function Compliance() {
                                                                 initial={{ height: 0, opacity: 0 }}
                                                                 animate={{ height: 'auto', opacity: 1 }}
                                                                 exit={{ height: 0, opacity: 0 }}
-                                                                transition={{ duration: 0.2 }}
-                                                                className="overflow-hidden bg-zinc-950 border-t border-white/5"
+                                                                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                                                                className="overflow-hidden bg-zinc-950/40"
                                                             >
-                                                                <div className="divide-y divide-white/5">
+                                                                <div className="divide-y divide-white/5 px-2">
                                                                     {reqs.map(req => (
-                                                                        <div key={req.id} className="p-6 hover:bg-white/5 transition-colors">
-                                                                            <div className="flex items-start justify-between mb-3">
-                                                                                <div>
-                                                                                    <h4 className="text-white text-sm font-bold mb-1">
+                                                                        <div key={req.id} className="p-6 hover:bg-white/[0.02] transition-colors rounded-sm">
+                                                                            <div className="flex items-start justify-between mb-4 gap-6">
+                                                                                <div className="flex-1">
+                                                                                    <h4 className="text-white text-xs font-bold uppercase tracking-wide mb-2">
                                                                                         {req.title}
                                                                                     </h4>
-                                                                                    <div className="flex items-center gap-2">
-                                                                                        <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 text-[10px] uppercase tracking-wide rounded">
+                                                                                    <div className="flex items-center gap-3">
+                                                                                        <span className="px-1.5 py-0.5 bg-zinc-900 border border-white/5 text-[8px] uppercase tracking-widest text-zinc-500 font-bold rounded-xs">
                                                                                             {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
                                                                                         </span>
                                                                                         {req.category === 'minimum_wage' && req.rate_type && (
-                                                                                            <span className="px-1.5 py-0.5 bg-zinc-900 text-zinc-300 border border-zinc-700 text-[10px] uppercase tracking-wide rounded">
+                                                                                            <span className="px-1.5 py-0.5 bg-zinc-900 border border-white/5 text-[8px] uppercase tracking-widest text-zinc-400 font-bold rounded-xs">
                                                                                                 {RATE_TYPE_LABELS[req.rate_type] || req.rate_type.replace(/_/g, ' ')}
                                                                                             </span>
                                                                                         )}
-                                                                                        <span className="text-zinc-500 text-xs font-mono">
-                                                                                            {req.jurisdiction_name}
+                                                                                        <span className="text-zinc-600 text-[9px] font-mono uppercase tracking-tighter">
+                                                                                            Node: {req.jurisdiction_name}
                                                                                         </span>
                                                                                     </div>
                                                                                 </div>
                                                                                 {req.current_value && (
-                                                                                    <span className="text-emerald-400 font-mono text-sm bg-emerald-900/20 border border-emerald-900/50 px-2 py-1 rounded">
+                                                                                    <span className="text-emerald-400 font-mono text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-sm shadow-inner">
                                                                                         {req.current_value}
                                                                                     </span>
                                                                                 )}
                                                                             </div>
                                                                             {req.description && (
-                                                                                <p className="text-zinc-400 text-xs leading-relaxed mb-4 max-w-2xl">
+                                                                                <p className="text-zinc-500 text-xs leading-relaxed mb-6 max-w-2xl font-light">
                                                                                     {req.description}
                                                                                 </p>
                                                                             )}
-                                                                            <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase tracking-widest">
-                                                                                <div className="flex items-center gap-3">
+                                                                            <div className="flex items-center justify-between pt-4 border-t border-white/[0.03]">
+                                                                                <div className="flex items-center gap-4">
                                                                                     {req.effective_date && (
-                                                                                        <span>
-                                                                                            Effective: {new Date(req.effective_date).toLocaleDateString()}
-                                                                                        </span>
+                                                                                        <div className="flex items-center gap-2 text-[8px] text-zinc-600 uppercase tracking-widest font-mono">
+                                                                                            <Calendar size={10} className="opacity-40" />
+                                                                                            Enforced: {new Date(req.effective_date).toLocaleDateString()}
+                                                                                        </div>
                                                                                     )}
                                                                                 </div>
                                                                                 {req.source_url && (
@@ -1374,9 +1366,9 @@ export function Compliance() {
                                                                                         href={req.source_url}
                                                                                         target="_blank"
                                                                                         rel="noopener noreferrer"
-                                                                                        className="text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
+                                                                                        className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 hover:text-white flex items-center gap-1.5 transition-colors"
                                                                                     >
-                                                                                        Source <ExternalLink size={10} />
+                                                                                        Authority <ExternalLink size={10} />
                                                                                     </a>
                                                                                 )}
                                                                             </div>
@@ -1390,7 +1382,7 @@ export function Compliance() {
                                             ))}
                                         </div>
                                     )
-                                ) : (
+                                ) : activeTab === 'alerts' ? (
                                     loadingAlerts ? (
                                         <div className="space-y-3">
                                             {[1, 2, 3].map(i => (
@@ -1398,100 +1390,103 @@ export function Compliance() {
                                             ))}
                                         </div>
                                     ) : locationAlerts.length === 0 ? (
-                                        <div className="text-center py-12">
-                                            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-emerald-900/20 border border-emerald-900/50 flex items-center justify-center">
-                                                <CheckCircle size={20} className="text-emerald-500" />
+                                        <div className="text-center py-24 border border-dashed border-white/5 bg-white/[0.01]">
+                                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center">
+                                                <CheckCircle size={20} className="text-zinc-700" />
                                             </div>
-                                            <p className="text-zinc-500 text-sm font-mono uppercase tracking-wider">All systems nominal.</p>
+                                            <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">All Systems Nominal</p>
                                         </div>
                                     ) : (
-                                        <div className="space-y-3">
+                                        <div className="space-y-2">
                                             {locationAlerts.map(alert => {
                                                 const confidence = getConfidenceBadge(alert.confidence_score);
                                                 return (
-                                                <div
+                                                <motion.div
+                                                    layout
+                                                    initial={{ opacity: 0, y: 10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
                                                     key={alert.id}
-                                                    className={`border rounded-lg p-4 ${getSeverityStyles(alert.severity)} ${
-                                                        alert.status === 'unread' ? 'bg-opacity-10' : 'opacity-60 bg-zinc-900 border-zinc-800'
+                                                    className={`border rounded-sm p-5 transition-all ${getSeverityStyles(alert.severity)} ${
+                                                        alert.status === 'unread' ? 'bg-opacity-10 border-opacity-30' : 'opacity-50 bg-zinc-900/40 border-white/5'
                                                     }`}
                                                 >
-                                                    <div className="flex items-start justify-between">
-                                                        <div className="flex items-start gap-3">
-                                                            <span className="mt-0.5 flex-shrink-0">
+                                                    <div className="flex items-start justify-between gap-6">
+                                                        <div className="flex items-start gap-4 min-w-0">
+                                                            <div className="mt-1 flex-shrink-0 opacity-60">
                                                                 {getAlertTypeIcon(alert.alert_type)}
-                                                            </span>
-                                                            <div>
-                                                                <div className="flex items-center gap-2 flex-wrap">
-                                                                    <h4 className="text-sm font-bold uppercase tracking-wide">{alert.title}</h4>
+                                                            </div>
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-3 flex-wrap mb-2">
+                                                                    <h4 className="text-xs font-bold uppercase tracking-widest text-white">{alert.title}</h4>
                                                                     {alert.alert_type && alert.alert_type !== 'change' && (
-                                                                        <span className="text-[10px] px-1.5 py-0.5 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded uppercase tracking-wider font-bold">
+                                                                        <span className="text-[8px] px-1.5 py-0.5 bg-white/5 border border-white/10 rounded-xs uppercase tracking-widest font-bold text-zinc-400">
                                                                             {alert.alert_type.replace('_', ' ')}
                                                                         </span>
                                                                     )}
                                                                     {confidence && (
-                                                                        <span className={`text-[10px] px-1.5 py-0.5 border rounded font-bold uppercase tracking-wider ${confidence.color}`}>
-                                                                            <Shield size={8} className="inline mr-0.5" />
+                                                                        <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${confidence.color}`}>
                                                                             {confidence.tag} {confidence.label}
                                                                         </span>
                                                                     )}
                                                                     {alert.created_at && (
-                                                                        <span className="text-[10px] text-zinc-400 font-mono whitespace-nowrap">
-                                                                            {new Date(alert.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                                        <span className="text-[9px] text-zinc-600 font-mono uppercase tracking-tighter">
+                                                                            {new Date(alert.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                                                         </span>
                                                                     )}
                                                                 </div>
-                                                                <p className="text-xs mt-1 opacity-90 leading-relaxed">{linkifyText(alert.message)}</p>
-                                                                {alert.effective_date && (
-                                                                    <p className="text-[10px] mt-1.5 font-mono text-purple-300 flex items-center gap-1">
-                                                                        <Calendar size={10} /> Effective: {new Date(alert.effective_date).toLocaleDateString()}
-                                                                    </p>
-                                                                )}
-                                                                {(alert.source_url || alert.source_name) && (
-                                                                    <p className="text-[10px] mt-2 text-zinc-400">
-                                                                        <span className="uppercase tracking-wider">Source:</span>{' '}
-                                                                        {alert.source_url ? (
-                                                                            <a
-                                                                                href={alert.source_url}
-                                                                                target="_blank"
-                                                                                rel="noopener noreferrer"
-                                                                                className="text-emerald-300 hover:text-emerald-200 underline"
-                                                                            >
-                                                                                {alert.source_name || 'View source'}
-                                                                            </a>
-                                                                        ) : (
-                                                                            <span>{alert.source_name}</span>
-                                                                        )}
-                                                                    </p>
-                                                                )}
+                                                                <p className="text-xs text-zinc-400 leading-relaxed font-light">{linkifyText(alert.message)}</p>
+                                                                
+                                                                <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-4">
+                                                                    {alert.effective_date && (
+                                                                        <div className="text-[9px] font-mono text-purple-400 uppercase tracking-widest flex items-center gap-2">
+                                                                            <Calendar size={10} className="opacity-50" /> Enforce: {new Date(alert.effective_date).toLocaleDateString()}
+                                                                        </div>
+                                                                    )}
+                                                                    {(alert.source_url || alert.source_name) && (
+                                                                        <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-2">
+                                                                            <span className="opacity-40">Source:</span>
+                                                                            {alert.source_url ? (
+                                                                                <a href={alert.source_url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-white underline decoration-white/10 underline-offset-2 transition-colors">
+                                                                                    {alert.source_name || 'Authority'}
+                                                                                </a>
+                                                                            ) : (
+                                                                                <span>{alert.source_name}</span>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
                                                                 {alert.verification_sources && alert.verification_sources.length > 0 && (
-                                                                    <div className="mt-2">
+                                                                    <div className="mt-4">
                                                                         <button
                                                                             onClick={() => toggleAlertSources(alert.id)}
-                                                                            className="text-[10px] uppercase tracking-wider text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition-colors"
+                                                                            className="text-[8px] uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 flex items-center gap-2 transition-colors"
                                                                         >
                                                                             <Eye size={10} />
-                                                                            {expandedAlertSources.has(alert.id) ? 'Hide' : 'Show'} {alert.verification_sources.length} verification source(s)
+                                                                            {expandedAlertSources.has(alert.id) ? 'Hide' : 'Resolve'} {alert.verification_sources.length} Evidence Node(s)
                                                                         </button>
                                                                         {expandedAlertSources.has(alert.id) && (
-                                                                            <div className="mt-1.5 space-y-1 pl-3 border-l border-white/10">
+                                                                            <div className="mt-3 space-y-2 pl-4 border-l border-white/5">
                                                                                 {alert.verification_sources.map((src, idx) => (
-                                                                                    <div key={idx} className="text-[10px]">
-                                                                                        <span className={`px-1 py-0.5 rounded mr-1.5 uppercase tracking-wider font-bold ${
-                                                                                            src.type === 'official' ? 'bg-emerald-500/20 text-emerald-400' :
-                                                                                            src.type === 'news' ? 'bg-blue-500/20 text-blue-400' :
-                                                                                            'bg-zinc-700 text-zinc-400'
-                                                                                        }`}>
-                                                                                            {src.type}
-                                                                                        </span>
-                                                                                        {src.url ? (
-                                                                                            <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-emerald-300 hover:text-emerald-200 underline">
-                                                                                                {src.name || src.url}
-                                                                                            </a>
-                                                                                        ) : (
-                                                                                            <span className="text-zinc-400">{src.name}</span>
-                                                                                        )}
+                                                                                    <div key={idx} className="text-[9px]">
+                                                                                        <div className="flex items-center gap-2 mb-1">
+                                                                                            <span className={`px-1 py-0.5 rounded-xs uppercase tracking-widest font-bold text-[7px] ${
+                                                                                                src.type === 'official' ? 'bg-emerald-500/10 text-emerald-400' :
+                                                                                                src.type === 'news' ? 'bg-blue-500/10 text-blue-400' :
+                                                                                                'bg-zinc-800 text-zinc-500'
+                                                                                            }`}>
+                                                                                                {src.type}
+                                                                                            </span>
+                                                                                            {src.url ? (
+                                                                                                <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-white truncate max-w-xs transition-colors">
+                                                                                                    {src.name || src.url}
+                                                                                                </a>
+                                                                                            ) : (
+                                                                                                <span className="text-zinc-500">{src.name}</span>
+                                                                                            )}
+                                                                                        </div>
                                                                                         {src.snippet && (
-                                                                                            <p className="text-zinc-500 mt-0.5 italic">{src.snippet}</p>
+                                                                                            <p className="text-zinc-600 italic leading-relaxed pl-2 border-l border-white/[0.02]">{src.snippet}</p>
                                                                                         )}
                                                                                     </div>
                                                                                 ))}
@@ -1500,23 +1495,19 @@ export function Compliance() {
                                                                     </div>
                                                                 )}
                                                                 {alert.action_required && (
-                                                                    <p className="text-xs mt-2 font-bold uppercase tracking-wider bg-black/20 inline-block px-2 py-1 rounded">
-                                                                        Action: {alert.action_required}
-                                                                    </p>
-                                                                )}
-                                                                {alert.deadline && (
-                                                                    <p className="text-[10px] mt-2 font-mono opacity-70">
-                                                                        Deadline: {new Date(alert.deadline).toLocaleDateString()}
-                                                                    </p>
+                                                                    <div className="mt-4 p-3 bg-white/5 border border-white/5 rounded-sm">
+                                                                        <span className="text-[8px] font-bold uppercase tracking-[0.3em] text-zinc-500 block mb-1">Mandatory Action</span>
+                                                                        <span className="text-[10px] text-white font-bold uppercase tracking-wide">{alert.action_required}</span>
+                                                                    </div>
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <div className="flex items-center gap-1">
+                                                        <div className="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
                                                             {alert.status === 'unread' && (
                                                                 <button
                                                                     onClick={() => markAlertReadMutation.mutate(alert.id)}
-                                                                    className="p-1.5 hover:bg-black/20 rounded transition-colors"
-                                                                    title="Mark as read"
+                                                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-emerald-500"
+                                                                    title="Acknowledge"
                                                                 >
                                                                     <CheckCircle size={14} />
                                                                 </button>
@@ -1524,7 +1515,7 @@ export function Compliance() {
                                                             {alert.status !== 'dismissed' && (
                                                                 <button
                                                                     onClick={() => dismissAlertMutation.mutate(alert.id)}
-                                                                    className="p-1.5 hover:bg-black/20 rounded transition-colors"
+                                                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-red-500"
                                                                     title="Dismiss"
                                                                 >
                                                                     <X size={14} />
@@ -1532,7 +1523,153 @@ export function Compliance() {
                                                             )}
                                                         </div>
                                                     </div>
-                                                </div>
+                                                </motion.div>
+                                                );
+                                            })}
+                                        </div>
+                                    )
+                                ) : (
+                                    loadingAlerts ? (
+                                        <div className="space-y-3">
+                                            {[1, 2, 3].map(i => (
+                                                <div key={i} className="h-20 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
+                                            ))}
+                                        </div>
+                                    ) : locationAlerts.length === 0 ? (
+                                        <div className="text-center py-24 border border-dashed border-white/5 bg-white/[0.01]">
+                                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center">
+                                                <CheckCircle size={20} className="text-zinc-700" />
+                                            </div>
+                                            <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">All Systems Nominal</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {locationAlerts.map(alert => {
+                                                const confidence = getConfidenceBadge(alert.confidence_score);
+                                                return (
+                                                <motion.div
+                                                    layout
+                                                    initial={{ opacity: 0, y: 10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    key={alert.id}
+                                                    className={`border rounded-sm p-5 transition-all ${getSeverityStyles(alert.severity)} ${
+                                                        alert.status === 'unread' ? 'bg-opacity-10 border-opacity-30' : 'opacity-50 bg-zinc-900/40 border-white/5'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-start justify-between gap-6">
+                                                        <div className="flex items-start gap-4 min-w-0">
+                                                            <div className="mt-1 flex-shrink-0 opacity-60">
+                                                                {getAlertTypeIcon(alert.alert_type)}
+                                                            </div>
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-3 flex-wrap mb-2">
+                                                                    <h4 className="text-xs font-bold uppercase tracking-widest text-white">{alert.title}</h4>
+                                                                    {alert.alert_type && alert.alert_type !== 'change' && (
+                                                                        <span className="text-[8px] px-1.5 py-0.5 bg-white/5 border border-white/10 rounded-xs uppercase tracking-widest font-bold text-zinc-400">
+                                                                            {alert.alert_type.replace('_', ' ')}
+                                                                        </span>
+                                                                    )}
+                                                                    {confidence && (
+                                                                        <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${confidence.color}`}>
+                                                                            {confidence.tag} {confidence.label}
+                                                                        </span>
+                                                                    )}
+                                                                    {alert.created_at && (
+                                                                        <span className="text-[9px] text-zinc-600 font-mono uppercase tracking-tighter">
+                                                                            {new Date(alert.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-xs text-zinc-400 leading-relaxed font-light">{linkifyText(alert.message)}</p>
+                                                                
+                                                                <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-4">
+                                                                    {alert.effective_date && (
+                                                                        <div className="text-[9px] font-mono text-purple-400 uppercase tracking-widest flex items-center gap-2">
+                                                                            <Calendar size={10} className="opacity-50" /> Enforce: {new Date(alert.effective_date).toLocaleDateString()}
+                                                                        </div>
+                                                                    )}
+                                                                    {(alert.source_url || alert.source_name) && (
+                                                                        <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-2">
+                                                                            <span className="opacity-40">Source:</span>
+                                                                            {alert.source_url ? (
+                                                                                <a href={alert.source_url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-white underline decoration-white/10 underline-offset-2 transition-colors">
+                                                                                    {alert.source_name || 'Authority'}
+                                                                                </a>
+                                                                            ) : (
+                                                                                <span>{alert.source_name}</span>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                {alert.verification_sources && alert.verification_sources.length > 0 && (
+                                                                    <div className="mt-4">
+                                                                        <button
+                                                                            onClick={() => toggleAlertSources(alert.id)}
+                                                                            className="text-[8px] uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 flex items-center gap-2 transition-colors"
+                                                                        >
+                                                                            <Eye size={10} />
+                                                                            {expandedAlertSources.has(alert.id) ? 'Hide' : 'Resolve'} {alert.verification_sources.length} Evidence Node(s)
+                                                                        </button>
+                                                                        {expandedAlertSources.has(alert.id) && (
+                                                                            <div className="mt-3 space-y-2 pl-4 border-l border-white/5">
+                                                                                {alert.verification_sources.map((src, idx) => (
+                                                                                    <div key={idx} className="text-[9px]">
+                                                                                        <div className="flex items-center gap-2 mb-1">
+                                                                                            <span className={`px-1 py-0.5 rounded-xs uppercase tracking-widest font-bold text-[7px] ${
+                                                                                                src.type === 'official' ? 'bg-emerald-500/10 text-emerald-400' :
+                                                                                                src.type === 'news' ? 'bg-blue-500/10 text-blue-400' :
+                                                                                                'bg-zinc-800 text-zinc-500'
+                                                                                            }`}>
+                                                                                                {src.type}
+                                                                                            </span>
+                                                                                            {src.url ? (
+                                                                                                <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-white truncate max-w-xs transition-colors">
+                                                                                                    {src.name || src.url}
+                                                                                                </a>
+                                                                                            ) : (
+                                                                                                <span className="text-zinc-500">{src.name}</span>
+                                                                                            )}
+                                                                                        </div>
+                                                                                        {src.snippet && (
+                                                                                            <p className="text-zinc-600 italic leading-relaxed pl-2 border-l border-white/[0.02]">{src.snippet}</p>
+                                                                                        )}
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                                {alert.action_required && (
+                                                                    <div className="mt-4 p-3 bg-white/5 border border-white/5 rounded-sm">
+                                                                        <span className="text-[8px] font-bold uppercase tracking-[0.3em] text-zinc-500 block mb-1">Mandatory Action</span>
+                                                                        <span className="text-[10px] text-white font-bold uppercase tracking-wide">{alert.action_required}</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
+                                                            {alert.status === 'unread' && (
+                                                                <button
+                                                                    onClick={() => markAlertReadMutation.mutate(alert.id)}
+                                                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-emerald-500"
+                                                                    title="Acknowledge"
+                                                                >
+                                                                    <CheckCircle size={14} />
+                                                                </button>
+                                                            )}
+                                                            {alert.status !== 'dismissed' && (
+                                                                <button
+                                                                    onClick={() => dismissAlertMutation.mutate(alert.id)}
+                                                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-red-500"
+                                                                    title="Dismiss"
+                                                                >
+                                                                    <X size={14} />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </motion.div>
                                                 );
                                             })}
                                         </div>
@@ -1541,13 +1678,13 @@ export function Compliance() {
                             </div>
                         </div>
                     ) : (
-                        <div className="bg-zinc-900/30 border border-zinc-800 rounded p-12 text-center h-full flex flex-col items-center justify-center min-h-[400px]">
-                            <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                        <div className="bg-zinc-900/30 border border-white/5 rounded-sm p-12 text-center h-full flex flex-col items-center justify-center min-h-[400px]">
+                            <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center opacity-40">
                                 <MapPin size={24} className="text-zinc-600" />
                             </div>
-                            <h3 className="text-white font-bold uppercase tracking-wider mb-2">Select a Location</h3>
-                            <p className="text-zinc-500 text-xs max-w-sm font-mono">
-                                Choose a location from the left to view compliance requirements and alerts.
+                            <h3 className="text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-2">Select Global Endpoint</h3>
+                            <p className="text-zinc-600 text-[10px] max-w-sm font-mono uppercase tracking-tight">
+                                Choose a location from the matrix to initialize compliance telemetry and alert protocols.
                             </p>
                         </div>
                     )}
@@ -1560,7 +1697,7 @@ export function Compliance() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                        className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4"
                         onClick={() => {
                             setShowAddModal(false);
                             setEditingLocation(null);
@@ -1570,16 +1707,21 @@ export function Compliance() {
                         }}
                     >
                         <motion.div
-                            initial={{ scale: 0.95, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.95, opacity: 0 }}
-                            className="bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm p-8 w-full max-w-md"
+                            initial={{ scale: 0.98, opacity: 0, y: 10 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.98, opacity: 0, y: 10 }}
+                            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                            className="bg-zinc-950 border border-white/10 shadow-2xl rounded-sm p-10 w-full max-w-md relative overflow-hidden"
                             onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         >
-                            <div className="flex items-center justify-between mb-6 border-b border-white/10 pb-4">
-                                <h2 className="text-xl font-bold text-white uppercase tracking-tight">
-                                    {editingLocation ? 'Edit Location' : 'Add Location'}
-                                </h2>
+                            <div className="absolute top-0 left-0 w-full h-0.5 bg-white/5" />
+                            <div className="flex items-center justify-between mb-10">
+                                <div className="space-y-1">
+                                    <h2 className="text-2xl font-bold text-white uppercase tracking-tighter">
+                                        {editingLocation ? 'Edit Endpoint' : 'Register Node'}
+                                    </h2>
+                                    <p className="text-[9px] text-zinc-500 font-mono uppercase tracking-[0.2em]">Location Configuration</p>
+                                </div>
                                 <button
                                     onClick={() => {
                                         setShowAddModal(false);
@@ -1588,58 +1730,60 @@ export function Compliance() {
                                         setJurisdictionSearch('');
                                         setUseManualEntry(false);
                                     }}
-                                    className="p-1 text-zinc-500 hover:text-white transition-colors"
+                                    className="p-2 text-zinc-600 hover:text-white transition-colors"
                                 >
                                     <X size={20} />
                                 </button>
                             </div>
 
-                            <form onSubmit={handleSubmitLocation} className="space-y-4">
+                            <form onSubmit={handleSubmitLocation} className="space-y-6">
                                 <div>
-                                    <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                        Location Name (optional)
+                                    <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                        Logical Identifier (optional)
                                     </label>
                                     <input
                                         type="text"
                                         value={formData.name}
                                         onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                                        placeholder="e.g., Main Office, Warehouse"
-                                        className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                        placeholder="e.g. SF HEADQUARTERS"
+                                        className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm placeholder-zinc-800 font-mono uppercase tracking-tight"
                                     />
                                 </div>
 
                                 {showJurisdictionPicker ? (
-                                    <div>
-                                        <div className="flex items-center justify-between mb-1.5">
-                                            <label className="block text-[10px] tracking-wider uppercase text-zinc-500">
-                                                Jurisdiction <span className="text-red-500">*</span>
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold font-mono">
+                                                Jurisdiction Scan
                                             </label>
                                             <button
                                                 type="button"
                                                 onClick={() => { setUseManualEntry(true); setFormData(prev => ({ ...prev, jurisdictionKey: '' })); }}
-                                                className="text-[10px] text-zinc-600 hover:text-zinc-400 uppercase tracking-wider transition-colors"
+                                                className="text-[8px] text-zinc-600 hover:text-zinc-400 uppercase tracking-widest transition-colors font-bold"
                                             >
-                                                Enter manually
+                                                Manual Override
                                             </button>
                                         </div>
-                                        <input
-                                            type="text"
-                                            value={jurisdictionSearch}
-                                            onChange={e => setJurisdictionSearch(e.target.value)}
-                                            placeholder="Search by city or state..."
-                                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700 mb-2"
-                                        />
-                                        <div className="max-h-48 overflow-y-auto border border-zinc-800 rounded bg-zinc-900">
+                                        <div className="relative">
+                                            <input
+                                                type="text"
+                                                value={jurisdictionSearch}
+                                                onChange={e => setJurisdictionSearch(e.target.value)}
+                                                placeholder="SEARCH CITIES..."
+                                                className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm placeholder-zinc-800 font-mono uppercase tracking-widest"
+                                            />
+                                        </div>
+                                        <div className="max-h-40 overflow-y-auto border border-white/5 rounded-sm bg-black/40 no-scrollbar">
                                             {Object.keys(filteredJurisdictions).length === 0 ? (
-                                                <div className="px-3 py-4 text-center text-zinc-600 text-xs">
-                                                    {jurisdictionSearch ? 'No matching jurisdictions' : 'Loading jurisdictions...'}
+                                                <div className="px-4 py-8 text-center text-zinc-700 text-[9px] font-mono uppercase tracking-widest">
+                                                    {jurisdictionSearch ? 'Zero Matches' : 'Initializing Matrix...'}
                                                 </div>
                                             ) : (
                                                 Object.entries(filteredJurisdictions).map(([state, items]) => {
                                                     const stateLabel = US_STATES.find(s => s.value === state)?.label || state;
                                                     return (
                                                         <div key={state}>
-                                                            <div className="px-3 py-1.5 bg-zinc-950 text-[10px] text-zinc-500 font-bold uppercase tracking-wider sticky top-0">
+                                                            <div className="px-4 py-2 bg-zinc-950 text-[8px] text-zinc-600 font-bold uppercase tracking-[0.3em] sticky top-0 border-b border-white/5">
                                                                 {stateLabel}
                                                             </div>
                                                             {items.map(j => {
@@ -1658,16 +1802,16 @@ export function Compliance() {
                                                                                 jurisdictionKey: key,
                                                                             }));
                                                                         }}
-                                                                        className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between ${
+                                                                        className={`w-full text-left px-4 py-2.5 text-[11px] transition-all flex items-center justify-between border-b border-white/[0.02] last:border-0 ${
                                                                             isSelected
-                                                                                ? 'bg-white/10 text-white'
-                                                                                : 'text-zinc-400 hover:bg-white/5 hover:text-white'
+                                                                                ? 'bg-white/10 text-white font-bold'
+                                                                                : 'text-zinc-500 hover:bg-white/5 hover:text-zinc-300'
                                                                         }`}
                                                                     >
-                                                                        <span>{j.city}, {j.state}</span>
+                                                                        <span className="uppercase tracking-tight">{j.city}, {j.state}</span>
                                                                         {j.has_local_ordinance && (
-                                                                            <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded uppercase tracking-wider font-bold">
-                                                                                Local
+                                                                            <span className="text-[7px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-xs uppercase tracking-widest font-bold">
+                                                                                Ordinance
                                                                             </span>
                                                                         )}
                                                                     </button>
@@ -1679,9 +1823,12 @@ export function Compliance() {
                                             )}
                                         </div>
                                         {formData.jurisdictionKey && (
-                                            <div className="mt-2 px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded text-xs text-zinc-300">
-                                                Selected: <span className="text-white font-bold">{formData.city}, {formData.state}</span>
-                                                {formData.county && <span className="text-zinc-500 ml-1">({formData.county} County)</span>}
+                                            <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-sm">
+                                                <div className="text-[8px] text-emerald-500 font-bold uppercase tracking-widest mb-1">Matrix Resolution</div>
+                                                <div className="text-xs text-zinc-300 font-mono uppercase tracking-tighter">
+                                                    {formData.city}, {formData.state}
+                                                    {formData.county && <span className="text-zinc-600 ml-2 font-light">[{formData.county} County]</span>}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -1691,52 +1838,51 @@ export function Compliance() {
                                             <button
                                                 type="button"
                                                 onClick={() => { setUseManualEntry(false); setFormData(emptyFormData); }}
-                                                className="text-[10px] text-zinc-600 hover:text-zinc-400 uppercase tracking-wider transition-colors"
+                                                className="text-[8px] text-zinc-600 hover:text-zinc-400 uppercase tracking-widest transition-colors font-bold"
                                             >
-                                                Use jurisdiction picker
+                                                Revert to Matrix Search
                                             </button>
                                         )}
                                         <div>
-                                            <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                                Street Address (optional)
+                                            <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                                Street Address
                                             </label>
                                             <input
                                                 type="text"
                                                 value={formData.address}
                                                 onChange={e => setFormData(prev => ({ ...prev, address: e.target.value }))}
-                                                placeholder="123 Main St"
-                                                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                                placeholder="PHYSICAL LOCATION"
+                                                className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm placeholder-zinc-800 font-mono uppercase tracking-tight"
                                             />
                                         </div>
 
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                                    City <span className="text-red-500">*</span>
+                                                <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                                    City
                                                 </label>
                                                 <input
                                                     type="text"
                                                     value={formData.city}
                                                     onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))}
                                                     required
-                                                    placeholder="San Francisco"
-                                                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                                    className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm font-mono uppercase tracking-tight"
                                                 />
                                             </div>
                                             <div>
-                                                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                                    State <span className="text-red-500">*</span>
+                                                <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                                    State
                                                 </label>
                                                 <select
                                                     value={formData.state}
                                                     onChange={e => setFormData(prev => ({ ...prev, state: e.target.value }))}
                                                     required
-                                                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
+                                                    className="w-full px-4 py-3 bg-zinc-900 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm font-mono uppercase tracking-tight"
                                                 >
-                                                    <option value="">Select...</option>
+                                                    <option value="">--</option>
                                                     {US_STATES.map(state => (
                                                         <option key={state.value} value={state.value}>
-                                                            {state.label}
+                                                            {state.value}
                                                         </option>
                                                     ))}
                                                 </select>
@@ -1745,36 +1891,34 @@ export function Compliance() {
 
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                                    County (optional)
+                                                <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                                    County
                                                 </label>
                                                 <input
                                                     type="text"
                                                     value={formData.county}
                                                     onChange={e => setFormData(prev => ({ ...prev, county: e.target.value }))}
-                                                    placeholder="San Francisco"
-                                                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                                    className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm font-mono uppercase tracking-tight"
                                                 />
                                             </div>
                                             <div>
-                                                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">
-                                                    ZIP Code {!isClient && !isAdmin && <span className="text-red-500">*</span>}
+                                                <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                                    ZIP Code
                                                 </label>
                                                 <input
                                                     type="text"
                                                     value={formData.zipcode}
                                                     onChange={e => setFormData(prev => ({ ...prev, zipcode: e.target.value }))}
                                                     required={!isClient && !isAdmin}
-                                                    placeholder="94105"
                                                     maxLength={10}
-                                                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                                                    className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm font-mono uppercase tracking-tight"
                                                 />
                                             </div>
                                         </div>
                                     </>
                                 )}
 
-                                <div className="flex gap-3 pt-6 border-t border-white/10">
+                                <div className="flex gap-4 pt-8">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -1784,20 +1928,20 @@ export function Compliance() {
                                             setJurisdictionSearch('');
                                             setUseManualEntry(false);
                                         }}
-                                        className="flex-1 px-4 py-2 bg-transparent border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded text-xs font-bold uppercase tracking-wider transition-colors"
+                                        className="flex-1 px-6 py-3.5 bg-transparent border border-white/5 text-zinc-500 hover:text-white hover:bg-white/5 rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all"
                                     >
-                                        Cancel
+                                        Abort
                                     </button>
                                     <button
                                         type="submit"
                                         disabled={createLocationMutation.isPending || updateLocationMutation.isPending || (showJurisdictionPicker && !formData.jurisdictionKey)}
-                                        className="flex-1 px-4 py-2 bg-white hover:bg-zinc-200 text-black rounded text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                                        className="flex-1 px-6 py-3.5 bg-white hover:bg-[#4ADE80] text-black rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 shadow-lg"
                                     >
                                         {createLocationMutation.isPending || updateLocationMutation.isPending
-                                            ? 'Saving...'
+                                            ? 'Syncing...'
                                             : editingLocation
-                                                ? 'Update Location'
-                                                : 'Add Location'}
+                                                ? 'Update Logic'
+                                                : 'Authorize Node'}
                                     </button>
                                 </div>
                             </form>
