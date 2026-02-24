@@ -652,6 +652,7 @@ export interface CurrentUserResponse {
   };
   profile: AdminProfile | ClientProfile | CandidateAuthProfile | BrokerAuthProfile | null;
   onboarding_needed?: Record<string, boolean>;
+  visible_features?: string[];
 }
 
 export interface BrokerClientSetup {

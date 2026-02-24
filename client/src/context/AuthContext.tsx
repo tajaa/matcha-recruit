@@ -8,7 +8,7 @@ import type {
   UserRole,
   EnabledFeatures,
 } from '../types';
-import { auth, adminPlatformSettings, getAccessToken, clearTokens } from '../api/client';
+import { auth, getAccessToken, clearTokens } from '../api/client';
 
 interface AuthContextType {
   user: User | null;
@@ -129,31 +129,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await auth.login(data);
       // Set user immediately from login response
       setUser(result.user);
+      setProfile(null);
+      setBetaFeatures({});
+      setInterviewPrepTokens(0);
+      setAllowedInterviewRoles([]);
+      setCompanyFeatures({});
+      setOnboardingNeeded({});
+      setPlatformFeatures(new Set());
 
-      // Try to load full profile, but don't fail login if this errors
-      try {
-        const profileData = await auth.me();
-        setUser({
-          id: profileData.user.id,
-          email: profileData.user.email,
-          role: profileData.user.role,
-          is_active: true,
-          created_at: '',
-          last_login: null,
-        });
-        setProfile(profileData.profile);
-        setBetaFeatures(profileData.user.beta_features || {});
-        setInterviewPrepTokens(profileData.user.interview_prep_tokens || 0);
-        setAllowedInterviewRoles(profileData.user.allowed_interview_roles || []);
-        setCompanyFeatures(extractCompanyFeatures(profileData.profile));
-        setOnboardingNeeded(profileData.onboarding_needed || {});
-        if (Array.isArray(profileData.visible_features)) {
-          setPlatformFeatures(new Set(profileData.visible_features));
-        }
-      } catch (err) {
-        // Profile load failed, but login succeeded - keep the basic user info
-        console.warn('Failed to load full profile after login:', err);
-      }
+      // Load full profile in the background so navigation is not blocked.
+      void loadUser();
 
       return result.user;
     } finally {

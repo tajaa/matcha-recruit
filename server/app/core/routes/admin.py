@@ -28,6 +28,7 @@ from ..services.compliance_service import (
 )
 from ..services.rate_limiter import get_rate_limiter
 from ..services.auth import hash_password
+from ..services.platform_settings import get_visible_features, prime_visible_features_cache
 from ...config import get_settings
 
 router = APIRouter()
@@ -3652,11 +3653,7 @@ async def update_poster_order(order_id: UUID, request: PosterOrderUpdateRequest)
 
 @router.get("/platform-settings/features")
 async def get_platform_features(admin=Depends(require_admin)):
-    async with get_connection() as conn:
-        raw = await conn.fetchval(
-            "SELECT value FROM platform_settings WHERE key = 'visible_features'"
-        )
-    visible = json.loads(raw) if raw else ["offer_letters","client_management","blog","policies","handbooks","er_copilot","onboarding","employees"]
+    visible = await get_visible_features()
     return {"visible_features": visible}
 
 
@@ -3677,4 +3674,5 @@ async def update_platform_features(
             """,
             json.dumps(body.visible_features)
         )
-    return {"visible_features": body.visible_features}
+    visible = prime_visible_features_cache(body.visible_features)
+    return {"visible_features": visible}

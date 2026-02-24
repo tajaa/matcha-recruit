@@ -10,13 +10,12 @@ from ..database import get_connection
 security = HTTPBearer()
 
 
-async def get_current_user(
+async def get_token_payload(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    """Dependency to get the current authenticated user."""
+    """Decode and validate a bearer token payload."""
     # Import here to avoid circular imports
     from .services.auth import decode_token
-    from .models.auth import CurrentUser
 
     token = credentials.credentials
     payload = decode_token(token)
@@ -27,6 +26,17 @@ async def get_current_user(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    return payload
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Dependency to get the current authenticated user."""
+    from .models.auth import CurrentUser
+
+    payload = await get_token_payload(credentials)
 
     user_id = UUID(payload.sub)
 

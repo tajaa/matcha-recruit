@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -17,7 +18,7 @@ from ..models.auth import (
     BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
     BrokerClientInviteDetailsResponse, BrokerClientInviteAcceptRequest,
     BrokerBrandingRuntimeResponse,
-    CurrentUser,
+    CurrentUser, TokenPayload,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
     TokenAwardRequest, AllowedRolesRequest, CandidateSessionSummary
@@ -26,11 +27,12 @@ from ..services.auth import (
     hash_password, verify_password, verify_password_async,
     create_access_token, create_refresh_token, decode_token
 )
-from ..dependencies import get_current_user, require_admin, require_broker
+from ..dependencies import get_current_user, require_admin, require_broker, get_token_payload
 from ..feature_flags import (
     default_company_features_json,
     merge_company_features,
 )
+from ..services.platform_settings import get_visible_features
 from ...config import get_settings
 
 router = APIRouter()
@@ -69,6 +71,18 @@ def _json_object(value) -> dict:
     return {}
 
 
+def _json_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
 def _split_name(full_name: str) -> tuple[str, str]:
     parts = [part for part in full_name.strip().split() if part]
     if not parts:
@@ -76,6 +90,14 @@ def _split_name(full_name: str) -> tuple[str, str]:
     if len(parts) == 1:
         return parts[0], "User"
     return parts[0], " ".join(parts[1:])
+
+
+async def _touch_user_last_login(user_id: UUID) -> None:
+    try:
+        async with get_connection() as conn:
+            await conn.execute("UPDATE users SET last_login = NOW() WHERE id = $1", user_id)
+    except Exception:
+        logger.exception("Failed to update last_login for user_id=%s", user_id)
 
 
 async def _table_exists(conn, table_name: str) -> bool:
@@ -1076,11 +1098,8 @@ async def login(request: LoginRequest):
                 detail="Account is disabled"
             )
 
-        # Update last login
-        await conn.execute(
-            "UPDATE users SET last_login = NOW() WHERE id = $1",
-            user["id"]
-        )
+        # Non-critical analytics write; keep login response path lean.
+        asyncio.create_task(_touch_user_last_login(user["id"]))
 
         settings = get_settings()
         access_token = create_access_token(user["id"], user["email"], user["role"])
@@ -1920,15 +1939,41 @@ async def register_candidate(request: CandidateRegister):
 
 
 @router.get("/me")
-async def get_current_user_profile(current_user: CurrentUser = Depends(get_current_user)):
+async def get_current_user_profile(token_payload: TokenPayload = Depends(get_token_payload)):
     """Get current user with full profile."""
+    try:
+        user_id = UUID(token_payload.sub)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject")
+
     async with get_connection() as conn:
+        user_row = await conn.fetchrow(
+            """SELECT id, email, role, is_active,
+                      COALESCE(beta_features, '{}'::jsonb) as beta_features,
+                      COALESCE(interview_prep_tokens, 0) as interview_prep_tokens,
+                      COALESCE(allowed_interview_roles, '[]'::jsonb) as allowed_interview_roles
+               FROM users WHERE id = $1""",
+            user_id,
+        )
+        if not user_row or not user_row["is_active"]:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or inactive"
+            )
+
+        current_user = CurrentUser(
+            id=user_row["id"],
+            email=user_row["email"],
+            role=user_row["role"],
+            profile=None,
+            beta_features=_json_object(user_row["beta_features"]),
+            interview_prep_tokens=user_row["interview_prep_tokens"],
+            allowed_interview_roles=_json_list(user_row["allowed_interview_roles"]),
+        )
+
         # Fetch visible platform features for all roles so the client-side
         # sidebar gate can apply platform checks universally, not just for admins.
-        _raw_visible = await conn.fetchval(
-            "SELECT value FROM platform_settings WHERE key = 'visible_features'"
-        )
-        visible_features: list = json.loads(_raw_visible) if _raw_visible else []
+        visible_features = await get_visible_features(conn=conn)
 
         if current_user.role == "admin":
             profile = await conn.fetchrow(

@@ -1,5 +1,7 @@
 """Chat authentication routes."""
 
+import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -21,6 +23,18 @@ from ...models.chat import (
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
+logger = logging.getLogger(__name__)
+
+
+async def _touch_chat_user_last_seen(user_id: UUID) -> None:
+    try:
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE chat_users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1",
+                user_id,
+            )
+    except Exception:
+        logger.exception("Failed to update chat last_seen for user_id=%s", user_id)
 
 
 def create_chat_access_token(user_id: UUID, email: str) -> str:
@@ -94,11 +108,8 @@ async def get_current_chat_user(
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
 
-        # Update last_seen
-        await conn.execute(
-            "UPDATE chat_users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1",
-            UUID(payload.sub)
-        )
+        # Non-critical metadata write; keep request path fast.
+        asyncio.create_task(_touch_chat_user_last_seen(UUID(payload.sub)))
 
         return ChatUserPublic(
             id=user["id"],
@@ -197,11 +208,7 @@ async def login(data: ChatUserLogin):
         if not user or not await verify_password_async(data.password, user["password_hash"]):
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
-        # Update last_seen
-        await conn.execute(
-            "UPDATE chat_users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1",
-            user["id"]
-        )
+        asyncio.create_task(_touch_chat_user_last_seen(user["id"]))
 
         user_public = ChatUserPublic(
             id=user["id"],
