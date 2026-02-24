@@ -357,13 +357,18 @@ build_image() {
         build_args+=("--no-cache")
         log_info "Building with --no-cache"
     elif [ "$PUSH_TO_ECR" = true ]; then
-        # Use registry cache for cross-platform builds (requires ECR auth)
-        # image-manifest=true and oci-mediatypes=true required for ECR compatibility
-        build_args+=(
-            --cache-from "type=registry,ref=${image_uri}:buildcache"
-            --cache-to "type=registry,ref=${image_uri}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true"
-        )
-        log_info "Using registry cache: ${image_uri}:buildcache"
+        # Always read from registry cache
+        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache")
+        log_info "Using registry cache (read): ${image_uri}:buildcache"
+        # Only write cache back on main branch to avoid thrashing with feature-branch cache busts
+        local current_branch
+        current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        if [[ "$current_branch" == "main" || "$current_branch" == "master" ]]; then
+            build_args+=(--cache-to "type=registry,ref=${image_uri}:buildcache,mode=min,image-manifest=true,oci-mediatypes=true")
+            log_info "Writing registry cache (main branch, mode=min)"
+        else
+            log_info "Skipping cache write (branch: ${current_branch})"
+        fi
     else
         log_info "Local build - using default Docker cache"
     fi
