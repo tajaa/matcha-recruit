@@ -95,6 +95,7 @@ const Projects = lazy(() => import('./pages/Projects').then(m => ({ default: m.P
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
 const BrokerClients = lazy(() => import('./pages/broker/BrokerClients'));
 const BrokerReporting = lazy(() => import('./pages/broker/BrokerReporting'));
+const BrokerPartnerTerms = lazy(() => import('./pages/broker/BrokerPartnerTerms'));
 
 // Chat Pages (separate auth system)
 const ChatLogin = lazy(() => import('./pages/chat/ChatLogin'));
@@ -760,6 +761,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['broker']}>
                     <BrokerReporting />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="broker/terms"
+                element={
+                  <ProtectedRoute roles={['broker']}>
+                    <BrokerPartnerTerms />
                   </ProtectedRoute>
                 }
               />

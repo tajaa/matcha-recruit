@@ -17,6 +17,7 @@ export default function BrokerReporting() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [acceptingTerms, setAcceptingTerms] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [report, setReport] = useState<BrokerPortfolioReportResponse | null>(null);
 
   const loadReport = async () => {
@@ -37,7 +38,7 @@ export default function BrokerReporting() {
   }, []);
 
   const handleAcceptTerms = async () => {
-    if (!brokerProfile) return;
+    if (!brokerProfile || !agreedToTerms) return;
     setAcceptingTerms(true);
     setError('');
     try {
@@ -62,16 +63,43 @@ export default function BrokerReporting() {
       </div>
 
       {!brokerProfile?.terms_accepted && (
-        <div data-tour="broker-reporting-terms" className="border border-amber-600/40 bg-amber-950/20 p-4 rounded-sm">
-          <p className="text-sm text-amber-200 mb-3">
-            Accept broker partner terms ({brokerProfile?.terms_required_version || 'v1'}) to unlock reporting.
-          </p>
+        <div data-tour="broker-reporting-terms" className="border border-amber-600/40 bg-amber-950/20 p-6 rounded-sm">
+          <h3 className="text-lg font-medium text-amber-500 mb-2">Partner Terms & Conditions</h3>
+          <div className="text-sm text-zinc-300 space-y-3 mb-6">
+            <p>To access broker portfolio reporting and participate in the partner program, you must agree to our Broker Partner Terms:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li><strong>10% Commission:</strong> Recurring commission on base subscription fees for referred teams.</li>
+              <li><strong>No Liability:</strong> Matcha is not liable for service issues or compliance outcomes.</li>
+              <li><strong>Independent Relationship:</strong> We operate as independent contractors.</li>
+            </ul>
+            <p>
+              Please review the{' '}
+              <a href="/app/broker/terms" target="_blank" rel="noopener noreferrer" className="text-amber-500 underline underline-offset-4 hover:text-amber-400">
+                full Partner Terms
+              </a>{' '}
+              for complete details.
+            </p>
+          </div>
+
+          <div className="flex items-start gap-3 mb-6">
+            <input
+              id="terms-checkbox"
+              type="checkbox"
+              checked={agreedToTerms}
+              onChange={(e) => setAgreedToTerms(e.target.checked)}
+              className="mt-1 w-4 h-4 bg-zinc-900 border-zinc-700 text-amber-500 focus:ring-amber-500 focus:ring-offset-zinc-950 rounded-sm"
+            />
+            <label htmlFor="terms-checkbox" className="text-sm text-zinc-300 cursor-pointer select-none">
+              I have read and agree to the Broker Partner Terms, including the referral commission structure and liability disclaimers.
+            </label>
+          </div>
+
           <button
             onClick={handleAcceptTerms}
-            disabled={acceptingTerms}
-            className="px-3 py-2 text-xs uppercase tracking-wide bg-amber-500 text-black disabled:opacity-60"
+            disabled={acceptingTerms || !agreedToTerms}
+            className="px-6 py-2 text-xs uppercase tracking-widest font-bold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {acceptingTerms ? 'Accepting...' : 'Accept Terms'}
+            {acceptingTerms ? 'Recording Acceptance...' : 'Accept & Unlock Reporting'}
           </button>
         </div>
       )}
