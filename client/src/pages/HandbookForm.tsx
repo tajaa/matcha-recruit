@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Upload, X, Plus, CheckCircle2, Sparkles } from 'lucide-react';
 import { handbooks } from '../api/client';
@@ -8,8 +8,10 @@ import type {
   CompanyHandbookProfile,
   HandbookGuidedQuestion,
   HandbookMode,
+  HandbookSection,
   HandbookScope,
   HandbookSourceType,
+  HandbookWizardDraftState,
 } from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { getWizardHelperCopy, type WizardCardKind } from '../features/handbook-wizard/helperGuidance';
@@ -74,6 +76,8 @@ const QUICK_SIGNAL_FIELDS: Array<{ key: keyof CompanyHandbookProfile; label: str
 ];
 
 const MISSING_BOILERPLATE_COVERAGE_ERROR = 'Missing required state boilerplate coverage';
+const WIZARD_DRAFT_AUTOSAVE_MS = 5000;
+const HANDBOOK_WIZARD_RETURN_PATH = '/app/matcha/handbook/new';
 
 interface CustomSectionDraft {
   title: string;
@@ -89,6 +93,68 @@ interface WizardCard {
   required?: boolean;
   profileKey?: keyof CompanyHandbookProfile;
   questionId?: string;
+}
+
+function normalizeSavedProfile(profile: Partial<CompanyHandbookProfile> | null | undefined): CompanyHandbookProfile {
+  return {
+    ...DEFAULT_PROFILE,
+    ...(profile || {}),
+    legal_name: (profile?.legal_name || '').trim(),
+    dba: profile?.dba?.trim() || null,
+    ceo_or_president: (profile?.ceo_or_president || '').trim(),
+    headcount: typeof profile?.headcount === 'number' ? profile.headcount : null,
+  };
+}
+
+function normalizeSavedGuidedQuestions(value: unknown): HandbookGuidedQuestion[] {
+  if (!Array.isArray(value)) return [];
+  const questions: HandbookGuidedQuestion[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const id = typeof (raw as { id?: unknown }).id === 'string' ? (raw as { id: string }).id.trim() : '';
+    const question = typeof (raw as { question?: unknown }).question === 'string'
+      ? (raw as { question: string }).question.trim()
+      : '';
+    if (!id || !question) continue;
+    questions.push({
+      id,
+      question,
+      placeholder:
+        typeof (raw as { placeholder?: unknown }).placeholder === 'string'
+          ? (raw as { placeholder: string }).placeholder
+          : null,
+      required: Boolean((raw as { required?: unknown }).required ?? true),
+    });
+  }
+  return questions;
+}
+
+function normalizeSavedGuidedAnswers(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const answers: Record<string, string> = {};
+  for (const [key, answer] of Object.entries(value)) {
+    if (!key || typeof answer !== 'string') continue;
+    answers[key] = answer;
+  }
+  return answers;
+}
+
+function toWizardDraftSections(customSections: CustomSectionDraft[]): HandbookSection[] {
+  return customSections.map((section, index) => ({
+    section_key: `draft_custom_${index + 1}`,
+    title: section.title,
+    content: section.content,
+    section_order: 300 + index,
+    section_type: 'custom',
+    jurisdiction_scope: {},
+  }));
+}
+
+function fromWizardDraftSections(customSections: HandbookSection[]): CustomSectionDraft[] {
+  return customSections.map((section) => ({
+    title: section.title || '',
+    content: section.content || '',
+  }));
 }
 
 const DEFAULT_PROFILE: CompanyHandbookProfile = {
@@ -137,6 +203,14 @@ export function HandbookForm() {
   const [companyLocations, setCompanyLocations] = useState<BusinessLocation[]>([]);
   const [locationsStates, setLocationsStates] = useState<string[]>([]);
   const [wizardCardIndex, setWizardCardIndex] = useState(0);
+  const [wizardDraftLoaded, setWizardDraftLoaded] = useState(false);
+  const [wizardDraftDirty, setWizardDraftDirty] = useState(false);
+  const [wizardDraftSaving, setWizardDraftSaving] = useState(false);
+  const [wizardDraftError, setWizardDraftError] = useState<string | null>(null);
+  const [lastWizardDraftSavedAt, setLastWizardDraftSavedAt] = useState<string | null>(null);
+  const [wizardDraftRestored, setWizardDraftRestored] = useState(false);
+  const applyingWizardDraftRef = useRef(false);
+  const trackedWizardSnapshotRef = useRef<string | null>(null);
 
   useEffect(() => {
     const loadDefaults = async () => {
@@ -146,7 +220,7 @@ export function HandbookForm() {
           complianceAPI.getLocations().catch(() => []),
         ]);
 
-        if (!isEditing && defaultProfile) {
+        if (!isEditing && defaultProfile && !(isWizard && wizardDraftRestored)) {
           setProfile({
             ...defaultProfile,
             dba: defaultProfile.dba ?? null,
@@ -162,7 +236,75 @@ export function HandbookForm() {
       }
     };
     loadDefaults();
-  }, [isEditing]);
+  }, [isEditing, isWizard, wizardDraftRestored]);
+
+  useEffect(() => {
+    if (!isWizard) {
+      setWizardDraftLoaded(true);
+      return;
+    }
+
+    let active = true;
+    const loadWizardDraft = async () => {
+      try {
+        const draft = await handbooks.getWizardDraft();
+        if (!active || !draft?.state) return;
+
+        const state = draft.state;
+        applyingWizardDraftRef.current = true;
+        setWizardDraftRestored(true);
+
+        setTitle(typeof state.title === 'string' ? state.title : '');
+        setMode(state.mode === 'multi_state' ? 'multi_state' : 'single_state');
+        setSourceType(state.source_type === 'upload' ? 'upload' : 'template');
+        setSelectedStates(
+          Array.from(new Set((state.selected_states || []).map((item) => item.toUpperCase())))
+        );
+        setProfile(normalizeSavedProfile(state.profile));
+        setCustomSections(
+          fromWizardDraftSections(Array.isArray(state.custom_sections) ? state.custom_sections : [])
+        );
+        setIndustry(typeof state.industry === 'string' && state.industry.trim() ? state.industry : 'general');
+        setSubIndustry(typeof state.sub_industry === 'string' ? state.sub_industry : '');
+        setUploadedFileUrl(
+          typeof state.uploaded_file_url === 'string' && state.uploaded_file_url.trim()
+            ? state.uploaded_file_url
+            : null
+        );
+        setUploadedFilename(
+          typeof state.uploaded_filename === 'string' && state.uploaded_filename.trim()
+            ? state.uploaded_filename
+            : null
+        );
+        setGuidedQuestions(normalizeSavedGuidedQuestions(state.guided_questions));
+        setGuidedAnswers(normalizeSavedGuidedAnswers(state.guided_answers));
+        setGuidedSummary(
+          typeof state.guided_summary === 'string' && state.guided_summary.trim()
+            ? state.guided_summary
+            : null
+        );
+        const nextCardIndex = Number(state.wizard_card_index ?? 0);
+        setWizardCardIndex(Number.isFinite(nextCardIndex) && nextCardIndex >= 0 ? Math.floor(nextCardIndex) : 0);
+        setLastWizardDraftSavedAt(draft.updated_at || null);
+      } catch (err) {
+        console.error('Failed to load wizard draft:', err);
+      } finally {
+        if (!active) return;
+        setWizardDraftLoaded(true);
+        setWizardDraftDirty(false);
+        setWizardDraftError(null);
+        setTimeout(() => {
+          applyingWizardDraftRef.current = false;
+          trackedWizardSnapshotRef.current = null;
+        }, 0);
+      }
+    };
+
+    void loadWizardDraft();
+    return () => {
+      active = false;
+    };
+  }, [isWizard]);
 
   useEffect(() => {
     if (!isEditing || !id) return;
@@ -401,6 +543,67 @@ export function HandbookForm() {
     };
   }, [wizardCards, wizardCurrentCard, wizardCurrentStep]);
 
+  const wizardDraftState = useMemo<HandbookWizardDraftState>(() => ({
+    title,
+    mode,
+    source_type: sourceType,
+    selected_states: Array.from(new Set(selectedStates.map((state) => state.toUpperCase()))),
+    profile: normalizeSavedProfile(profile),
+    custom_sections: toWizardDraftSections(customSections),
+    industry,
+    sub_industry: subIndustry,
+    uploaded_file_url: uploadedFileUrl,
+    uploaded_filename: uploadedFilename,
+    guided_questions: guidedQuestions,
+    guided_answers: guidedAnswers,
+    guided_summary: guidedSummary,
+    wizard_card_index: wizardCardIndex,
+  }), [
+    title,
+    mode,
+    sourceType,
+    selectedStates,
+    profile,
+    customSections,
+    industry,
+    subIndustry,
+    uploadedFileUrl,
+    uploadedFilename,
+    guidedQuestions,
+    guidedAnswers,
+    guidedSummary,
+    wizardCardIndex,
+  ]);
+
+  const persistWizardDraft = useCallback(async (stateOverride?: HandbookWizardDraftState): Promise<boolean> => {
+    if (!isWizard || !wizardDraftLoaded || wizardDraftSaving) return false;
+    const payload = stateOverride || wizardDraftState;
+    setWizardDraftSaving(true);
+    setWizardDraftError(null);
+    try {
+      const saved = await handbooks.saveWizardDraft(payload);
+      setWizardDraftDirty(false);
+      setLastWizardDraftSavedAt(saved.updated_at || new Date().toISOString());
+      trackedWizardSnapshotRef.current = JSON.stringify(payload);
+      return true;
+    } catch (err) {
+      setWizardDraftError(err instanceof Error ? err.message : 'Failed to save draft');
+      return false;
+    } finally {
+      setWizardDraftSaving(false);
+    }
+  }, [isWizard, wizardDraftLoaded, wizardDraftSaving, wizardDraftState]);
+
+  const openComplianceFromRecovery = useCallback(async () => {
+    if (isWizard && wizardDraftLoaded) {
+      await persistWizardDraft();
+    }
+    const params = new URLSearchParams({
+      return_to: HANDBOOK_WIZARD_RETURN_PATH,
+    });
+    navigate(`/app/matcha/compliance?${params.toString()}`);
+  }, [isWizard, wizardDraftLoaded, persistWizardDraft, navigate]);
+
   const toggleState = (state: string) => {
     setSelectedStates((prev) => {
       const exists = prev.includes(state);
@@ -428,6 +631,36 @@ export function HandbookForm() {
       return Math.min(prev, maxIndex);
     });
   }, [isWizard, wizardCards.length]);
+
+  useEffect(() => {
+    if (!isWizard || !wizardDraftLoaded) return;
+    const snapshot = JSON.stringify(wizardDraftState);
+
+    if (applyingWizardDraftRef.current) {
+      trackedWizardSnapshotRef.current = snapshot;
+      return;
+    }
+
+    if (trackedWizardSnapshotRef.current === null) {
+      trackedWizardSnapshotRef.current = snapshot;
+      return;
+    }
+
+    if (snapshot !== trackedWizardSnapshotRef.current) {
+      trackedWizardSnapshotRef.current = snapshot;
+      setWizardDraftDirty(true);
+    }
+  }, [isWizard, wizardDraftLoaded, wizardDraftState]);
+
+  useEffect(() => {
+    if (!isWizard || !wizardDraftLoaded || !wizardDraftDirty) return;
+    const timer = window.setTimeout(() => {
+      void persistWizardDraft();
+    }, WIZARD_DRAFT_AUTOSAVE_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [isWizard, wizardDraftLoaded, wizardDraftDirty, persistWizardDraft]);
 
   const mergeSuggestedSections = (incoming: Array<{ title: string; content: string }>) => {
     if (!incoming.length) return;
@@ -775,6 +1008,10 @@ export function HandbookForm() {
               jurisdiction_scope: {},
             })),
         });
+        await handbooks.clearWizardDraft().catch(() => {
+          // Non-blocking cleanup.
+        });
+        setWizardDraftDirty(false);
         navigate(`/app/matcha/handbook/${created.id}`);
       }
     } catch (err) {
@@ -792,6 +1029,14 @@ export function HandbookForm() {
     isWizard &&
     sourceType === 'template' &&
     Boolean(error && error.includes(MISSING_BOILERPLATE_COVERAGE_ERROR));
+
+  if (isWizard && !wizardDraftLoaded) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-xs text-zinc-500 uppercase tracking-wider">Loading draft...</div>
+      </div>
+    );
+  }
 
   if (loading && isEditing && !title) {
     return (
@@ -1837,6 +2082,16 @@ export function HandbookForm() {
               />
             ))}
           </div>
+          <div className="mt-3 text-[10px] uppercase tracking-wider text-zinc-500 flex flex-wrap items-center gap-3">
+            <span>
+              {wizardDraftSaving
+                ? 'Saving draft...'
+                : lastWizardDraftSavedAt
+                ? `Draft saved ${new Date(lastWizardDraftSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                : 'Draft autosave enabled'}
+            </span>
+            {wizardDraftError ? <span className="text-red-400">{wizardDraftError}</span> : null}
+          </div>
         </div>
       )}
 
@@ -1857,7 +2112,9 @@ export function HandbookForm() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => navigate('/app/matcha/compliance')}
+                  onClick={() => {
+                    void openComplianceFromRecovery();
+                  }}
                   className="px-3 py-1.5 border border-red-400/40 bg-red-500/10 text-red-200 hover:text-white text-[10px] uppercase tracking-wider"
                 >
                   Open Compliance

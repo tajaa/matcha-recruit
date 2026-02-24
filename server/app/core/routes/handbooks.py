@@ -1,6 +1,6 @@
 from io import BytesIO
 import mimetypes
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -20,6 +20,8 @@ from ..models.handbook import (
     HandbookListItemResponse,
     HandbookPublishResponse,
     HandbookUpdateRequest,
+    HandbookWizardDraftResponse,
+    HandbookWizardDraftUpsertRequest,
 )
 from ..services.handbook_service import GuidedDraftRateLimitError, HandbookService
 from ..services.storage import get_storage
@@ -122,6 +124,45 @@ async def guided_handbook_draft(
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/wizard-draft", response_model=Optional[HandbookWizardDraftResponse])
+async def get_handbook_wizard_draft(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+    return await HandbookService.get_wizard_draft(str(company_id), str(current_user.id))
+
+
+@router.put("/wizard-draft", response_model=HandbookWizardDraftResponse)
+async def upsert_handbook_wizard_draft(
+    data: HandbookWizardDraftUpsertRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+    try:
+        return await HandbookService.upsert_wizard_draft(
+            str(company_id),
+            str(current_user.id),
+            data.state,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/wizard-draft")
+async def delete_handbook_wizard_draft(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+    deleted = await HandbookService.delete_wizard_draft(str(company_id), str(current_user.id))
+    return {"deleted": deleted}
 
 
 @router.get("/{handbook_id}", response_model=HandbookDetailResponse)

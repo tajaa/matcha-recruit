@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { BusinessLocation, ComplianceRequirement, LocationCreate, JurisdictionOption } from '../api/compliance';
 import {
@@ -324,6 +325,8 @@ function ChevronDownIcon({ className = '' }: { className?: string }) {
 
 export function Compliance() {
     const { user } = useAuth();
+    const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const isClient = user?.role === 'client';
     const isAdmin = user?.role === 'admin';
     const queryClient = useQueryClient();
@@ -343,6 +346,14 @@ export function Compliance() {
     const [posterOrders, setPosterOrders] = useState<PosterOrder[]>([]);
     const [postersLoading, setPostersLoading] = useState(false);
     const [posterOrderLoading, setPosterOrderLoading] = useState<string | null>(null);
+
+    const wizardReturnPath = useMemo(() => {
+        const rawPath = searchParams.get('return_to');
+        if (!rawPath) return null;
+        const normalized = rawPath.trim();
+        if (!normalized.startsWith('/app/matcha/')) return null;
+        return normalized;
+    }, [searchParams]);
 
     const { data: companies } = useQuery({
         queryKey: ['admin-overview'],
@@ -649,19 +660,29 @@ export function Compliance() {
                         </select>
                     )}
                 </div>
-                <button
-                    data-tour="compliance-add-btn"
-                    onClick={() => {
-                        setFormData(emptyFormData);
-                        setEditingLocation(null);
-                        setJurisdictionSearch('');
-                        setShowAddModal(true);
-                    }}
-                    className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
-                >
-                    <Plus size={14} />
-                    Add Location
-                </button>
+                <div className="flex items-center gap-2">
+                    {wizardReturnPath && (
+                        <button
+                            onClick={() => navigate(wizardReturnPath)}
+                            className="flex items-center gap-2 px-4 py-2 border border-zinc-700 text-zinc-200 hover:text-white hover:border-zinc-500 text-xs font-bold uppercase tracking-wider transition-colors"
+                        >
+                            Back To Handbook
+                        </button>
+                    )}
+                    <button
+                        data-tour="compliance-add-btn"
+                        onClick={() => {
+                            setFormData(emptyFormData);
+                            setEditingLocation(null);
+                            setJurisdictionSearch('');
+                            setShowAddModal(true);
+                        }}
+                        className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+                    >
+                        <Plus size={14} />
+                        Add Location
+                    </button>
+                </div>
             </div>
 
             <ComplianceCycleWizard locations={locations} alerts={alerts} />

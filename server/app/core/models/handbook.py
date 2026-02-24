@@ -218,3 +218,16 @@ class HandbookGuidedDraftResponse(BaseModel):
     questions: list[HandbookGuidedQuestion] = Field(default_factory=list)
     profile_updates: dict[str, Any] = Field(default_factory=dict)
     suggested_sections: list[HandbookGuidedSectionSuggestion] = Field(default_factory=list)
+
+
+class HandbookWizardDraftUpsertRequest(BaseModel):
+    state: dict[str, Any] = Field(default_factory=dict)
+
+
+class HandbookWizardDraftResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    user_id: UUID
+    state: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime

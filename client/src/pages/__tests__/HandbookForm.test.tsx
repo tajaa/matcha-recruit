@@ -9,6 +9,9 @@ const handbooksMock = vi.hoisted(() => ({
   update: vi.fn(),
   create: vi.fn(),
   uploadFile: vi.fn(),
+  getWizardDraft: vi.fn(),
+  saveWizardDraft: vi.fn(),
+  clearWizardDraft: vi.fn(),
 }));
 
 const complianceApiMock = vi.hoisted(() => ({
@@ -31,6 +34,16 @@ describe('HandbookForm (edit mode)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     handbooksMock.getProfile.mockResolvedValue(null);
+    handbooksMock.getWizardDraft.mockResolvedValue(null);
+    handbooksMock.saveWizardDraft.mockResolvedValue({
+      id: 'draft-1',
+      company_id: 'co-1',
+      user_id: 'user-1',
+      state: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    });
+    handbooksMock.clearWizardDraft.mockResolvedValue({ deleted: true });
     complianceApiMock.getLocations.mockResolvedValue([]);
     handbooksMock.update.mockResolvedValue({ id: 'hb-1' });
     handbooksMock.get.mockResolvedValue({
@@ -116,8 +129,75 @@ describe('HandbookForm (create wizard)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     handbooksMock.getProfile.mockResolvedValue(null);
+    handbooksMock.getWizardDraft.mockResolvedValue(null);
+    handbooksMock.saveWizardDraft.mockResolvedValue({
+      id: 'draft-1',
+      company_id: 'co-1',
+      user_id: 'user-1',
+      state: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    });
+    handbooksMock.clearWizardDraft.mockResolvedValue({ deleted: true });
     complianceApiMock.getLocations.mockResolvedValue([]);
     handbooksMock.create.mockResolvedValue({ id: 'hb-new' });
+  });
+
+  it('restores wizard inputs from a saved draft', async () => {
+    handbooksMock.getWizardDraft.mockResolvedValueOnce({
+      id: 'draft-1',
+      company_id: 'co-1',
+      user_id: 'user-1',
+      state: {
+        title: 'Recovered Wizard Handbook',
+        mode: 'single_state',
+        source_type: 'template',
+        selected_states: ['CA'],
+        profile: {
+          legal_name: 'Recovered LLC',
+          dba: null,
+          ceo_or_president: 'Recovered Owner',
+          headcount: 12,
+          remote_workers: false,
+          minors: false,
+          tipped_employees: false,
+          union_employees: false,
+          federal_contracts: false,
+          group_health_insurance: false,
+          background_checks: false,
+          hourly_employees: true,
+          salaried_employees: true,
+          commissioned_employees: false,
+          tip_pooling: false,
+        },
+        custom_sections: [],
+        industry: 'general',
+        sub_industry: '',
+        uploaded_file_url: null,
+        uploaded_filename: null,
+        guided_questions: [],
+        guided_answers: {},
+        guided_summary: null,
+        wizard_card_index: 0,
+      },
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T12:00:00Z',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/app/matcha/handbook/new']}>
+        <Routes>
+          <Route path="/app/matcha/handbook/new" element={<HandbookForm />} />
+          <Route path="/app/matcha/handbook/:id" element={<div>Handbook Detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+      { withRouter: false },
+    );
+
+    await waitFor(() => expect(handbooksMock.getWizardDraft).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText('Loading draft...')).not.toBeInTheDocument());
+    expect(screen.getByDisplayValue('Recovered Wizard Handbook')).toBeInTheDocument();
+    expect(screen.getByText(/Draft saved/i)).toBeInTheDocument();
   });
 
   it('shows one question at a time and branches by source type', async () => {
@@ -131,6 +211,7 @@ describe('HandbookForm (create wizard)', () => {
       { withRouter: false },
     );
 
+    await waitFor(() => expect(screen.queryByText('Loading draft...')).not.toBeInTheDocument());
     expect(screen.getByText('What should this handbook be called?')).toBeInTheDocument();
     expect(screen.getByText('Helper Guidance')).toBeInTheDocument();
     expect(screen.getByText(/This is the admin-visible name for your draft handbook/i)).toBeInTheDocument();
@@ -167,6 +248,7 @@ describe('HandbookForm (create wizard)', () => {
       { withRouter: false },
     );
 
+    await waitFor(() => expect(screen.getByPlaceholderText('e.g. 2026 Employee Handbook')).toBeInTheDocument());
     await user.type(screen.getByPlaceholderText('e.g. 2026 Employee Handbook'), 'CA Tech Handbook');
     await user.click(screen.getByRole('button', { name: 'Next' })); // mode
     await user.click(screen.getByRole('button', { name: 'Next' })); // source
@@ -194,6 +276,7 @@ describe('HandbookForm (create wizard)', () => {
       { withRouter: false },
     );
 
+    await waitFor(() => expect(screen.getByPlaceholderText('e.g. 2026 Employee Handbook')).toBeInTheDocument());
     await user.type(screen.getByPlaceholderText('e.g. 2026 Employee Handbook'), 'Hospitality Handbook');
     await user.click(screen.getByRole('button', { name: 'Next' })); // mode
     await user.click(screen.getByRole('button', { name: 'Next' })); // source
@@ -229,6 +312,7 @@ describe('HandbookForm (create wizard)', () => {
       { withRouter: false },
     );
 
+    await waitFor(() => expect(screen.getByPlaceholderText('e.g. 2026 Employee Handbook')).toBeInTheDocument());
     await user.type(screen.getByPlaceholderText('e.g. 2026 Employee Handbook'), 'Coverage Test Handbook');
 
     // Advance to state selection.
@@ -267,7 +351,9 @@ describe('HandbookForm (create wizard)', () => {
     expect(screen.getByRole('button', { name: 'Go To Policy Pack' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Compliance' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Go To Policy Pack' }));
-    expect(screen.getByText('Generate required boilerplate and guided follow-ups')).toBeInTheDocument();
+    handbooksMock.saveWizardDraft.mockClear();
+    await user.click(screen.getByRole('button', { name: 'Open Compliance' }));
+    await waitFor(() => expect(handbooksMock.saveWizardDraft).toHaveBeenCalled());
+    expect(screen.getByText('Compliance Page')).toBeInTheDocument();
   });
 });

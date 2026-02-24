@@ -28,6 +28,7 @@ from ..models.handbook import (
     HandbookSectionInput,
     HandbookSectionResponse,
     HandbookUpdateRequest,
+    HandbookWizardDraftResponse,
 )
 
 
@@ -1042,6 +1043,21 @@ def _coerce_jurisdiction_scope(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _sanitize_wizard_draft_state(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("Wizard draft state must be an object")
+    try:
+        encoded = json.dumps(value)
+    except TypeError as exc:
+        raise ValueError("Wizard draft state contains unsupported values") from exc
+    if len(encoded) > 500_000:
+        raise ValueError("Wizard draft state exceeds max size")
+    decoded = json.loads(encoded)
+    if not isinstance(decoded, dict):
+        raise ValueError("Wizard draft state must decode to an object")
+    return decoded
+
+
 def _translate_handbook_db_error(exc: Exception) -> Optional[str]:
     message = str(exc).lower()
     if "handbook_sections_handbook_version_id_section_key_key" in message:
@@ -1062,7 +1078,7 @@ def _translate_handbook_db_error(exc: Exception) -> Optional[str]:
         )
     ):
         return "Handbook tables are out of date. Restart the API to apply schema updates."
-    if 'relation "handbooks"' in message or 'relation "handbook_' in message:
+    if 'relation "handbooks"' in message or 'relation "handbook_' in message or 'relation "handbook_wizard_drafts"' in message:
         return "Handbook tables are not available yet. Run migrations and restart the API."
     return None
 
@@ -1621,6 +1637,79 @@ class HandbookService:
                 profile,
                 updated_by,
             )
+
+    @staticmethod
+    async def get_wizard_draft(
+        company_id: str,
+        user_id: str,
+    ) -> Optional[HandbookWizardDraftResponse]:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, company_id, user_id, draft_state, created_at, updated_at
+                FROM handbook_wizard_drafts
+                WHERE company_id = $1 AND user_id = $2
+                """,
+                company_id,
+                user_id,
+            )
+            if not row:
+                return None
+            payload = dict(row)
+            state = payload.pop("draft_state", {}) or {}
+            payload["state"] = state if isinstance(state, dict) else {}
+            return HandbookWizardDraftResponse(**payload)
+
+    @staticmethod
+    async def upsert_wizard_draft(
+        company_id: str,
+        user_id: str,
+        state: dict[str, Any],
+    ) -> HandbookWizardDraftResponse:
+        normalized_state = _sanitize_wizard_draft_state(state)
+        try:
+            async with get_connection() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO handbook_wizard_drafts (
+                        company_id, user_id, draft_state, created_at, updated_at
+                    )
+                    VALUES ($1, $2, $3::jsonb, NOW(), NOW())
+                    ON CONFLICT (company_id, user_id)
+                    DO UPDATE SET
+                        draft_state = EXCLUDED.draft_state,
+                        updated_at = NOW()
+                    RETURNING id, company_id, user_id, draft_state, created_at, updated_at
+                    """,
+                    company_id,
+                    user_id,
+                    json.dumps(normalized_state),
+                )
+        except Exception as exc:
+            translated = _translate_handbook_db_error(exc)
+            if translated:
+                raise ValueError(translated) from exc
+            raise
+
+        payload = dict(row)
+        payload["state"] = payload.pop("draft_state", {}) or {}
+        return HandbookWizardDraftResponse(**payload)
+
+    @staticmethod
+    async def delete_wizard_draft(
+        company_id: str,
+        user_id: str,
+    ) -> bool:
+        async with get_connection() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM handbook_wizard_drafts
+                WHERE company_id = $1 AND user_id = $2
+                """,
+                company_id,
+                user_id,
+            )
+            return result == "DELETE 1"
 
     @staticmethod
     async def _generate_guided_draft_ai_payload(

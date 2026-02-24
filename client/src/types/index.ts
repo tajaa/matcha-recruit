@@ -2108,6 +2108,32 @@ export interface HandbookGuidedDraftResponse {
   suggested_sections: HandbookSection[];
 }
 
+export interface HandbookWizardDraftState {
+  title: string;
+  mode: HandbookMode;
+  source_type: HandbookSourceType;
+  selected_states: string[];
+  profile: CompanyHandbookProfile;
+  custom_sections: HandbookSection[];
+  industry: string;
+  sub_industry: string;
+  uploaded_file_url: string | null;
+  uploaded_filename: string | null;
+  guided_questions: HandbookGuidedQuestion[];
+  guided_answers: Record<string, string>;
+  guided_summary: string | null;
+  wizard_card_index: number;
+}
+
+export interface HandbookWizardDraft {
+  id: string;
+  company_id: string;
+  user_id: string;
+  state: HandbookWizardDraftState;
+  created_at: string;
+  updated_at: string;
+}
+
 
 export interface IRAuditLogResponse {
   entries: IRAuditLogEntry[];

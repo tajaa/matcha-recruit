@@ -126,6 +126,8 @@ import type {
   HandbookChangeRequest,
   HandbookGuidedDraftRequest,
   HandbookGuidedDraftResponse,
+  HandbookWizardDraft,
+  HandbookWizardDraftState,
   HandbookDistributionResult,
   HandbookAcknowledgementSummary,
   HandbookReference,
@@ -2190,6 +2192,20 @@ export const handbooks = {
     request<HandbookGuidedDraftResponse>(`/handbooks/guided-draft`, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  getWizardDraft: () =>
+    request<HandbookWizardDraft | null>(`/handbooks/wizard-draft`),
+
+  saveWizardDraft: (state: HandbookWizardDraftState) =>
+    request<HandbookWizardDraft>(`/handbooks/wizard-draft`, {
+      method: 'PUT',
+      body: JSON.stringify({ state }),
+    }),
+
+  clearWizardDraft: () =>
+    request<{ deleted: boolean }>(`/handbooks/wizard-draft`, {
+      method: 'DELETE',
     }),
 
   uploadFile: async (file: File): Promise<{ url: string; filename: string }> => {
