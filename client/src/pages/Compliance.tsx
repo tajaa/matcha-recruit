@@ -12,8 +12,8 @@ import type { AvailablePoster, PosterOrder } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
     MapPin, Plus, Trash2, Edit2, X,
-    ChevronDown, ChevronRight, AlertTriangle, Bell, CheckCircle,
-    ExternalLink, Building2, Loader2, Clock, Calendar, Shield,
+    ChevronDown, AlertTriangle, Bell, CheckCircle,
+    ExternalLink, Building2, Loader2, Clock, Calendar,
     History, Eye, Zap, Info, ShieldCheck
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
