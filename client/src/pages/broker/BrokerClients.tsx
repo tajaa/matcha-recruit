@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import { auth, brokerPortal } from '../../api/client';
+import { useEffect, useState } from 'react';
+import { brokerPortal } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
-import { FeatureGuideTrigger } from '../../features/feature-guides';
-import type { BrokerAuthProfile, BrokerClientSetup, BrokerClientSetupCreateRequest } from '../../types';
+import type { BrokerAuthProfile } from '../../types';
+import { Check, Copy, ExternalLink } from 'lucide-react';
 
-const FEATURE_KEYS = ['compliance', 'policies', 'handbooks', 'incidents'] as const;
+const APP_BASE_URL = window.location.origin;
 
 function asBrokerProfile(profile: unknown): BrokerAuthProfile | null {
   if (!profile || typeof profile !== 'object') return null;
@@ -12,408 +12,233 @@ function asBrokerProfile(profile: unknown): BrokerAuthProfile | null {
   return profile as BrokerAuthProfile;
 }
 
-function googleProvisioningBadge(setup: BrokerClientSetup): { label: string; tone: string } {
-  const googleWorkspace = setup.google_workspace;
-  if (!googleWorkspace || !googleWorkspace.connected || googleWorkspace.status === 'disconnected') {
-    return {
-      label: 'Google Disconnected',
-      tone: 'border-zinc-700 bg-zinc-900 text-zinc-400',
-    };
+function statusBadge(status: string) {
+  switch (status) {
+    case 'active':
+      return 'border-emerald-600/40 bg-emerald-950/20 text-emerald-300';
+    case 'grace':
+      return 'border-amber-600/40 bg-amber-950/20 text-amber-300';
+    case 'terminated':
+      return 'border-red-600/40 bg-red-950/20 text-red-300';
+    default:
+      return 'border-zinc-700 bg-zinc-900 text-zinc-400';
   }
-  if (googleWorkspace.status === 'error' || googleWorkspace.status === 'needs_action') {
-    return {
-      label: 'Google Needs Attention',
-      tone: 'border-red-600/40 bg-red-950/20 text-red-300',
-    };
+}
+
+function companyStatusBadge(status: string) {
+  switch (status) {
+    case 'approved':
+      return 'text-emerald-400';
+    case 'pending':
+      return 'text-amber-400';
+    case 'suspended':
+      return 'text-red-400';
+    default:
+      return 'text-zinc-400';
   }
-  if (googleWorkspace.auto_provision_on_employee_create) {
-    return {
-      label: 'Google Auto-Provision ON',
-      tone: 'border-emerald-600/40 bg-emerald-950/20 text-emerald-300',
-    };
-  }
-  return {
-    label: 'Google Auto-Provision OFF',
-    tone: 'border-amber-600/40 bg-amber-950/20 text-amber-300',
-  };
+}
+
+interface ReferredClient {
+  company_id: string;
+  company_name: string;
+  industry: string | null;
+  company_size: string | null;
+  company_status: string;
+  link_status: string;
+  linked_at: string | null;
+  activated_at: string | null;
+  active_employee_count: number;
+  enabled_feature_count: number;
 }
 
 export default function BrokerClients() {
-  const { profile, refreshUser } = useAuth();
+  const { profile } = useAuth();
   const brokerProfile = asBrokerProfile(profile);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-  const [setups, setSetups] = useState<BrokerClientSetup[]>([]);
-  const [expiredCount, setExpiredCount] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const [acceptingTerms, setAcceptingTerms] = useState(false);
+  const [clients, setClients] = useState<ReferredClient[]>([]);
+  const [copied, setCopied] = useState(false);
 
-  const [form, setForm] = useState<BrokerClientSetupCreateRequest>({
-    company_name: '',
-    industry: '',
-    company_size: '',
-    contact_name: '',
-    contact_email: '',
-    headcount: undefined,
-    invite_immediately: false,
-    preconfigured_features: {
-      compliance: true,
-      policies: true,
-      handbooks: true,
-      incidents: false,
-    },
-  });
+  const referralLink = brokerProfile
+    ? `${APP_BASE_URL}/register?via=${brokerProfile.broker_slug}`
+    : '';
 
-  const loadSetups = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await brokerPortal.listSetups();
-      setSetups(response.setups);
-      setExpiredCount(response.expired_count);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load broker setups');
-    } finally {
-      setLoading(false);
-    }
+  const handleCopy = () => {
+    if (!referralLink) return;
+    navigator.clipboard.writeText(referralLink).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   useEffect(() => {
-    loadSetups();
+    const load = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const response = await brokerPortal.getReferredClients();
+        setClients(response.clients);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load referred clients');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
   }, []);
 
-  const counts = useMemo(() => {
-    return setups.reduce(
-      (acc, setup) => {
-        acc.total += 1;
-        acc[setup.status] += 1;
-        return acc;
-      },
-      {
-        total: 0,
-        draft: 0,
-        invited: 0,
-        activated: 0,
-        expired: 0,
-        cancelled: 0,
-      }
-    );
-  }, [setups]);
-
-  const handleCreate = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setSubmitting(true);
-    setError('');
-    setMessage('');
-    try {
-      const payload: BrokerClientSetupCreateRequest = {
-        ...form,
-        company_name: (form.company_name || '').trim(),
-        industry: form.industry || undefined,
-        company_size: form.company_size || undefined,
-        contact_name: form.contact_name || undefined,
-        contact_email: form.contact_email || undefined,
-        headcount: form.headcount || undefined,
-      };
-      const response = await brokerPortal.createSetup(payload);
-      if (payload.invite_immediately) {
-        if (response.invite_email_sent) {
-          setMessage(`Client setup created and invite email sent to ${response.setup.contact_email}`);
-        } else {
-          setMessage(
-            `Client setup created, but invite email was not sent (${response.invite_email_error || 'delivery unavailable'}). ` +
-              'Share the invite URL from the setup row manually.'
-          );
-        }
-      } else {
-        setMessage('Client setup created');
-      }
-      setForm({
-        company_name: '',
-        industry: '',
-        company_size: '',
-        contact_name: '',
-        contact_email: '',
-        headcount: undefined,
-        invite_immediately: false,
-        preconfigured_features: {
-          compliance: true,
-          policies: true,
-          handbooks: true,
-          incidents: false,
-        },
-      });
-      await loadSetups();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create setup');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleSendInvite = async (setupId: string) => {
-    setError('');
-    setMessage('');
-    try {
-      const response = await brokerPortal.sendInvite(setupId, 14);
-      if (response.invite_email_sent) {
-        setMessage(`Invite email sent for ${response.setup.company_name}`);
-      } else {
-        setMessage(
-          `Invite link generated for ${response.setup.company_name}, but email was not sent ` +
-            `(${response.invite_email_error || 'delivery unavailable'}). Share the invite URL manually.`
-        );
-      }
-      await loadSetups();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send invite');
-    }
-  };
-
-  const handleCancel = async (setupId: string) => {
-    setError('');
-    setMessage('');
-    try {
-      await brokerPortal.cancelSetup(setupId);
-      setMessage('Setup cancelled');
-      await loadSetups();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to cancel setup');
-    }
-  };
-
-  const handleExpireStale = async () => {
-    setError('');
-    setMessage('');
-    try {
-      const response = await brokerPortal.expireStale();
-      setMessage(`Expired ${response.expired_count} stale setup(s)`);
-      await loadSetups();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to expire stale setups');
-    }
-  };
-
-  const handleAcceptTerms = async () => {
-    if (!brokerProfile) return;
-    setAcceptingTerms(true);
-    setError('');
-    setMessage('');
-    try {
-      await auth.acceptBrokerTerms(brokerProfile.terms_required_version);
-      await refreshUser();
-      setMessage('Broker partner terms accepted');
-      await loadSetups();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to accept broker terms');
-    } finally {
-      setAcceptingTerms(false);
-    }
-  };
+  const activeCount = clients.filter((c) => c.link_status === 'active').length;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-white">Broker Client Onboarding</h1>
-            <FeatureGuideTrigger guideId="broker-clients" />
-          </div>
-          <p className="text-sm text-zinc-400">Pre-configure accounts, invite clients, and monitor activation.</p>
-        </div>
-        <button
-          data-tour="broker-clients-expire-btn"
-          onClick={handleExpireStale}
-          className="px-3 py-2 text-xs uppercase tracking-wide border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500"
-        >
-          Expire Stale ({expiredCount})
-        </button>
+      <div>
+        <h1 className="text-2xl font-semibold text-white">Your Referred Clients</h1>
+        <p className="text-sm text-zinc-400 mt-1">
+          Share your referral link — when a company registers through it, they're auto-approved and linked to you.
+        </p>
       </div>
 
-      {!brokerProfile?.terms_accepted && (
-        <div data-tour="broker-clients-terms" className="border border-amber-600/40 bg-amber-950/20 p-4 rounded-sm">
-          <p className="text-sm text-amber-200 mb-3">
-            You must accept broker partner terms ({brokerProfile?.terms_required_version || 'v1'}) before onboarding client companies.
-          </p>
+      {/* Referral link card */}
+      <div className="bg-zinc-900 border border-zinc-800 p-5 space-y-3">
+        <p className="text-[10px] uppercase tracking-wider text-zinc-500">Your Referral Link</p>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-300 font-mono truncate rounded-sm">
+            {referralLink || '—'}
+          </div>
           <button
-            onClick={handleAcceptTerms}
-            disabled={acceptingTerms}
-            className="px-3 py-2 text-xs uppercase tracking-wide bg-amber-500 text-black disabled:opacity-60"
+            onClick={handleCopy}
+            disabled={!referralLink}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs uppercase tracking-wide border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-40"
           >
-            {acceptingTerms ? 'Accepting...' : 'Accept Terms'}
+            {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+            {copied ? 'Copied' : 'Copy'}
           </button>
+          {referralLink && (
+            <a
+              href={referralLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs uppercase tracking-wide border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors"
+            >
+              <ExternalLink size={13} />
+              Preview
+            </a>
+          )}
         </div>
+        <p className="text-xs text-zinc-500">
+          Companies that register via this link are immediately approved and counted toward your referrals.
+        </p>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-zinc-900 border border-zinc-800 p-4">
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Total Referred</p>
+          <p className="text-2xl font-light text-white mt-1">{clients.length}</p>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4">
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Active</p>
+          <p className="text-2xl font-light text-emerald-400 mt-1">{activeCount}</p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="border border-red-600/40 bg-red-950/20 p-3 text-sm text-red-300">{error}</div>
       )}
 
-      {error && <div className="border border-red-600/40 bg-red-950/20 p-3 text-sm text-red-300">{error}</div>}
-      {message && <div className="border border-emerald-600/40 bg-emerald-950/20 p-3 text-sm text-emerald-300">{message}</div>}
-
-      <div data-tour="broker-clients-summary" className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <div className="bg-zinc-900 border border-zinc-800 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Total</p>
-          <p className="text-lg text-white">{counts.total}</p>
+      {/* Clients table */}
+      <div className="bg-zinc-900 border border-zinc-800 overflow-hidden">
+        <div className="px-4 py-3 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
+          Referred Companies
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Draft</p>
-          <p className="text-lg text-white">{counts.draft}</p>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Invited</p>
-          <p className="text-lg text-white">{counts.invited}</p>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Activated</p>
-          <p className="text-lg text-white">{counts.activated}</p>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Expired</p>
-          <p className="text-lg text-white">{counts.expired}</p>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Cancelled</p>
-          <p className="text-lg text-white">{counts.cancelled}</p>
-        </div>
-      </div>
-
-      <form data-tour="broker-clients-create-form" onSubmit={handleCreate} className="bg-zinc-900 border border-zinc-800 p-4 space-y-4">
-        <h2 className="text-sm uppercase tracking-wide text-zinc-300">Create Setup</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input
-            value={form.company_name || ''}
-            onChange={(e) => setForm((prev) => ({ ...prev, company_name: e.target.value }))}
-            placeholder="Company name"
-            className="bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
-            required
-          />
-          <input
-            value={form.industry || ''}
-            onChange={(e) => setForm((prev) => ({ ...prev, industry: e.target.value }))}
-            placeholder="Industry"
-            className="bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
-          />
-          <input
-            value={form.company_size || ''}
-            onChange={(e) => setForm((prev) => ({ ...prev, company_size: e.target.value }))}
-            placeholder="Company size (e.g. 11-50)"
-            className="bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
-          />
-          <input
-            value={form.contact_name || ''}
-            onChange={(e) => setForm((prev) => ({ ...prev, contact_name: e.target.value }))}
-            placeholder="Primary contact name"
-            className="bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
-          />
-          <input
-            value={form.contact_email || ''}
-            onChange={(e) => setForm((prev) => ({ ...prev, contact_email: e.target.value }))}
-            placeholder="Primary contact email"
-            type="email"
-            className="bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
-          />
-          <input
-            value={form.headcount || ''}
-            onChange={(e) => {
-              const val = e.target.value ? Number(e.target.value) : undefined;
-              setForm((prev) => ({ ...prev, headcount: val }));
-            }}
-            placeholder="Headcount"
-            type="number"
-            min={1}
-            className="bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white"
-          />
-        </div>
-
-        <div data-tour="broker-clients-feature-toggles" className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {FEATURE_KEYS.map((featureKey) => (
-            <label key={featureKey} className="flex items-center gap-2 text-xs text-zinc-300">
-              <input
-                type="checkbox"
-                checked={Boolean(form.preconfigured_features?.[featureKey])}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    preconfigured_features: {
-                      ...(prev.preconfigured_features || {}),
-                      [featureKey]: e.target.checked,
-                    },
-                  }))
-                }
-              />
-              {featureKey}
-            </label>
-          ))}
-        </div>
-
-        <label data-tour="broker-clients-invite-toggle" className="flex items-center gap-2 text-xs text-zinc-300">
-          <input
-            type="checkbox"
-            checked={Boolean(form.invite_immediately)}
-            onChange={(e) => setForm((prev) => ({ ...prev, invite_immediately: e.target.checked }))}
-          />
-          Send invite immediately after create
-        </label>
-
-        <button
-          type="submit"
-          disabled={submitting}
-          className="px-3 py-2 text-xs uppercase tracking-wide bg-white text-black disabled:opacity-60"
-        >
-          {submitting ? 'Creating...' : 'Create Setup'}
-        </button>
-      </form>
-
-      <div data-tour="broker-clients-setups-list" className="bg-zinc-900 border border-zinc-800 overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-800 text-sm uppercase tracking-wide text-zinc-300">Setups</div>
         {loading ? (
-          <div className="p-4 text-sm text-zinc-400">Loading setups...</div>
-        ) : setups.length === 0 ? (
-          <div className="p-4 text-sm text-zinc-400">No setups yet.</div>
-        ) : (
-          <div className="divide-y divide-zinc-800">
-            {setups.map((setup) => {
-              const provisioningBadge = googleProvisioningBadge(setup);
-              return (
-                <div key={setup.id} className="p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <div>
-                    <p className="text-sm text-white">{setup.company_name}</p>
-                    <p className="text-xs text-zinc-400">
-                      {setup.status.toUpperCase()} | {setup.contact_email || 'No contact email'}
-                    </p>
-                    <p className="mt-1">
-                      <span
-                        className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] uppercase tracking-wider ${provisioningBadge.tone}`}
-                      >
-                        {provisioningBadge.label}
-                      </span>
-                    </p>
-                    {setup.invite_url && (
-                      <p className="text-xs text-zinc-500 mt-1 break-all">{setup.invite_url}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {(setup.status === 'draft' || setup.status === 'invited') && (
-                      <button
-                        onClick={() => handleSendInvite(setup.id)}
-                        className="px-2 py-1 text-[10px] uppercase tracking-wide border border-zinc-700 text-zinc-300"
-                      >
-                        Send Invite
-                      </button>
-                    )}
-                    {(setup.status === 'draft' || setup.status === 'invited') && (
-                      <button
-                        onClick={() => handleCancel(setup.id)}
-                        className="px-2 py-1 text-[10px] uppercase tracking-wide border border-red-700 text-red-300"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="p-6 text-sm text-zinc-400">Loading...</div>
+        ) : clients.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="text-sm text-zinc-400 mb-1">No referrals yet</p>
+            <p className="text-xs text-zinc-600">Share your referral link to get started.</p>
           </div>
+        ) : (
+          <>
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
+                    <th className="text-left px-4 py-2 font-normal">Company</th>
+                    <th className="text-left px-4 py-2 font-normal">Industry</th>
+                    <th className="text-left px-4 py-2 font-normal">Status</th>
+                    <th className="text-right px-4 py-2 font-normal">Employees</th>
+                    <th className="text-right px-4 py-2 font-normal">Features</th>
+                    <th className="text-left px-4 py-2 font-normal">Joined</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800">
+                  {clients.map((client) => (
+                    <tr key={client.company_id} className="hover:bg-zinc-800/40 transition-colors">
+                      <td className="px-4 py-3">
+                        <p className="text-white">{client.company_name}</p>
+                        {client.company_size && (
+                          <p className="text-[10px] text-zinc-500">{client.company_size}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-400">{client.industry || '—'}</td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center border rounded px-2 py-0.5 text-[10px] uppercase tracking-wider ${statusBadge(client.link_status)}`}
+                        >
+                          {client.link_status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-zinc-300">
+                        {client.active_employee_count}
+                      </td>
+                      <td className="px-4 py-3 text-right text-zinc-300">
+                        {client.enabled_feature_count}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-400 text-xs">
+                        {client.linked_at
+                          ? new Date(client.linked_at).toLocaleDateString()
+                          : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-zinc-800">
+              {clients.map((client) => (
+                <div key={client.company_id} className="p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm text-white">{client.company_name}</p>
+                      <p className="text-xs text-zinc-500">{client.industry || '—'}</p>
+                    </div>
+                    <span
+                      className={`inline-flex items-center border rounded px-2 py-0.5 text-[10px] uppercase tracking-wider shrink-0 ${statusBadge(client.link_status)}`}
+                    >
+                      {client.link_status}
+                    </span>
+                  </div>
+                  <div className="flex gap-4 text-xs text-zinc-400">
+                    <span>{client.active_employee_count} employees</span>
+                    <span>{client.enabled_feature_count} features</span>
+                    <span className={companyStatusBadge(client.company_status)}>
+                      {client.company_status}
+                    </span>
+                  </div>
+                  {client.linked_at && (
+                    <p className="text-[10px] text-zinc-600">
+                      Joined {new Date(client.linked_at).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>

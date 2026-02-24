@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Clock, Mail } from 'lucide-react';
 
@@ -38,6 +38,9 @@ export function Register() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [registrationPending, setRegistrationPending] = useState(false);
+
+  const [searchParams] = useSearchParams();
+  const brokerRef = searchParams.get('via') || undefined;
 
   const { registerBusiness } = useAuth();
 
@@ -94,6 +97,7 @@ export function Register() {
         name,
         phone: phone || undefined,
         job_title: jobTitle || undefined,
+        broker_ref: brokerRef,
       });
       setRegistrationPending(true);
     } catch (err) {
