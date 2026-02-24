@@ -342,6 +342,25 @@ def test_filter_with_preemption_preempted_keeps_state():
     assert "City of West Hollywood Minimum Wage" not in titles
 
 
+def test_filter_with_preemption_preempted_promotes_local_when_state_missing():
+    requirements = [
+        {
+            "category": "minimum_wage",
+            "jurisdiction_level": "county",
+            "jurisdiction_name": "Clark County",
+            "title": "Clark County Minimum Wage",
+            "current_value": "$12.00",
+        }
+    ]
+    conn = _FakeConn([{"category": "minimum_wage", "allows_local_override": False}])
+
+    filtered = asyncio.run(cs._filter_with_preemption(conn, requirements, "NV"))
+    assert len(filtered) == 1
+    assert filtered[0]["jurisdiction_level"] == "state"
+    assert filtered[0]["jurisdiction_name"] == "Nevada"
+    assert filtered[0]["title"] == "Clark County Minimum Wage"
+
+
 def test_filter_with_preemption_min_wage_uses_most_beneficial():
     requirements = [
         {

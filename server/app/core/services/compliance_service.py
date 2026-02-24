@@ -1,4 +1,4 @@
-from typing import Optional, List, AsyncGenerator, Dict, Any
+from typing import Optional, List, AsyncGenerator, Dict, Any, Callable
 from uuid import UUID
 from datetime import date, datetime, timedelta
 import asyncio
@@ -813,6 +813,100 @@ async def _get_county_jurisdiction_id(conn, city_jurisdiction_id: UUID) -> Optio
     if county_row and county_row["city"] and county_row["city"].startswith("_county_"):
         return county_row["id"]
     return None
+
+
+async def _refresh_repository_missing_categories(
+    conn,
+    service,
+    *,
+    jurisdiction_id: UUID,
+    city: str,
+    state: str,
+    county: Optional[str],
+    has_local_ordinance: Optional[bool],
+    current_requirements: List[Dict[str, Any]],
+    missing_categories: List[str],
+    on_retry: Optional[Callable[[int, str], Any]] = None,
+) -> List[Dict[str, Any]]:
+    """Refresh missing categories, merge with current requirements, and upsert source-of-truth."""
+    if not missing_categories:
+        return list(current_requirements)
+
+    known_sources = await get_known_sources(conn, jurisdiction_id)
+    if not known_sources:
+        discovered = await service.discover_jurisdiction_sources(
+            city=city, state=state, county=county,
+        )
+        for src in discovered:
+            domain = (src.get("domain") or "").lower()
+            if domain:
+                for cat in src.get("categories", []):
+                    await record_source(conn, jurisdiction_id, domain, src.get("name"), cat)
+        known_sources = await get_known_sources(conn, jurisdiction_id)
+
+    source_context = build_context_prompt(known_sources)
+    corrections = await get_recent_corrections(jurisdiction_id)
+    corrections_context = format_corrections_for_prompt(corrections)
+
+    try:
+        preemption_rows = await conn.fetch(
+            "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+            state.upper(),
+        )
+        preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+    except asyncpg.UndefinedTableError:
+        preemption_rules = {}
+
+    refreshed_requirements = await service.research_location_compliance(
+        city=city,
+        state=state,
+        county=county,
+        categories=missing_categories,
+        source_context=source_context,
+        corrections_context=corrections_context,
+        preemption_rules=preemption_rules,
+        has_local_ordinance=has_local_ordinance,
+        on_retry=on_retry,
+    )
+    refreshed_requirements = refreshed_requirements or []
+
+    if not refreshed_requirements:
+        return list(current_requirements)
+
+    target_set = {_normalize_category(cat) or cat for cat in missing_categories}
+    preserved = [
+        req for req in current_requirements
+        if (_normalize_category(req.get("category")) or req.get("category")) not in target_set
+    ]
+    merged_requirements = preserved + refreshed_requirements
+
+    if has_local_ordinance is False:
+        merged_requirements = _filter_city_level_requirements(merged_requirements, state)
+
+    _normalize_requirement_categories(merged_requirements)
+    merged_requirements = await _filter_with_preemption(conn, merged_requirements, state)
+    for req in merged_requirements:
+        _clamp_varchar_fields(req)
+
+    await _upsert_jurisdiction_requirements(conn, jurisdiction_id, merged_requirements)
+
+    if has_local_ordinance is False:
+        county_jid = await _get_county_jurisdiction_id(conn, jurisdiction_id)
+        if county_jid:
+            await _upsert_jurisdiction_requirements(conn, county_jid, merged_requirements)
+            print(f"[Compliance] Also cached refreshed coverage to county jurisdiction {county_jid}")
+
+    for req in refreshed_requirements:
+        source_url = req.get("source_url", "")
+        if source_url:
+            domain = extract_domain(source_url)
+            if domain:
+                await record_source(
+                    conn, jurisdiction_id, domain,
+                    req.get("source_name"), req.get("category", "")
+                )
+
+    return merged_requirements
 
 
 async def _upsert_jurisdiction_requirements(conn, jurisdiction_id: UUID, reqs: List[Dict]):
@@ -1809,6 +1903,7 @@ async def _filter_with_preemption(conn, requirements, state: str):
        categories, or most-local for others (existing behavior).
     """
     norm_state = state.upper().strip()
+    state_name = _CODE_TO_STATE_NAME.get(norm_state, norm_state)
 
     # Load all preemption rules for this state in one query
     try:
@@ -1855,12 +1950,21 @@ async def _filter_with_preemption(conn, requirements, state: str):
                 if best:
                     filtered.append(best)
             else:
-                # Preempted but no state-level requirement found — drop this group entirely.
-                # Returning a local rule here would violate preemption.
-                print(
-                    f"[Compliance] WARNING: Category '{category}' is preempted in {norm_state} "
-                    f"but no state-level requirement found — dropping {len(reqs)} local-only requirement(s)"
-                )
+                # If preempted categories only have local-level rows, treat this as
+                # a labeling issue from research and promote the strongest row to state.
+                fallback = _pick_best_by_priority(reqs)
+                if fallback:
+                    if isinstance(fallback, dict):
+                        fallback["jurisdiction_level"] = "state"
+                        fallback["jurisdiction_name"] = state_name
+                    else:
+                        fallback.jurisdiction_level = "state"
+                        fallback.jurisdiction_name = state_name
+                    filtered.append(fallback)
+                    print(
+                        f"[Compliance] WARNING: Category '{category}' is preempted in {norm_state} "
+                        f"but had no state-level requirement — promoting local fallback to state."
+                    )
             continue
 
         # Not preempted (allows_local is True or None/unknown)
@@ -2187,17 +2291,77 @@ async def run_compliance_check_stream(
                     requirements = researched_requirements
             elif not used_repository:
                 missing_categories = _missing_required_categories(requirements)
+                used_repository = True
                 if missing_categories:
                     yield {
-                        "type": "repository_only",
+                        "type": "repository_refresh",
                         "jurisdiction_id": str(jurisdiction_id),
                         "missing_categories": missing_categories,
                         "message": (
-                            "Jurisdiction repository is missing "
-                            f"{', '.join(missing_categories)}. "
-                            "Run Admin > Jurisdictions research refresh for this city."
+                            "Repository coverage is incomplete. Triggering source-of-truth refresh for "
+                            f"{location_name} ({', '.join(missing_categories)})."
                         ),
                     }
+                    refresh_queue = asyncio.Queue()
+
+                    def _on_refresh_retry(attempt: int, error: str):
+                        refresh_queue.put_nowait(
+                            {"type": "retrying", "message": f"Retrying repository refresh (attempt {attempt + 1})..."}
+                        )
+
+                    refresh_task = asyncio.create_task(
+                        _refresh_repository_missing_categories(
+                            conn,
+                            service,
+                            jurisdiction_id=jurisdiction_id,
+                            city=location.city,
+                            state=location.state,
+                            county=location.county,
+                            has_local_ordinance=has_local_ordinance,
+                            current_requirements=requirements,
+                            missing_categories=missing_categories,
+                            on_retry=_on_refresh_retry,
+                        )
+                    )
+                    try:
+                        async for evt in _heartbeat_while(refresh_task, queue=refresh_queue):
+                            yield evt
+                        requirements = refresh_task.result() or requirements
+                    except Exception as refresh_error:
+                        print(
+                            "[Compliance] Repository refresh failed for "
+                            f"{location.city}, {location.state}: {refresh_error}"
+                        )
+
+                    missing_after_refresh = _missing_required_categories(requirements)
+                    if missing_after_refresh:
+                        yield {
+                            "type": "repository_only",
+                            "jurisdiction_id": str(jurisdiction_id),
+                            "missing_categories": missing_after_refresh,
+                            "message": (
+                                "Jurisdiction repository is still missing "
+                                f"{', '.join(missing_after_refresh)} after refresh. "
+                                "Run Admin > Jurisdictions research refresh for this city."
+                            ),
+                        }
+                    else:
+                        yield {
+                            "type": "repository_refreshed",
+                            "jurisdiction_id": str(jurisdiction_id),
+                            "message": (
+                                f"Source-of-truth refreshed for {location_name}. Re-syncing from repository."
+                            ),
+                        }
+
+                    if not requirements:
+                        stale_repo_rows = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+                        if stale_repo_rows:
+                            requirements = [_jurisdiction_row_to_dict(jr) for jr in stale_repo_rows]
+                            yield {
+                                "type": "fallback",
+                                "message": "Using existing repository data while coverage refresh completes.",
+                            }
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
             # Set used_repository = True to skip fresh-data logic (upserts, alerts, verification).
@@ -3315,12 +3479,50 @@ async def run_compliance_check_background(
                     requirements = preserved + requirements
             elif not used_repository:
                 missing_categories = _missing_required_categories(requirements)
+                used_repository = True
                 if missing_categories:
                     print(
                         f"[Compliance] Repository-only mode: missing categories for {location.city}, {location.state}: "
-                        f"{', '.join(missing_categories)}. "
-                        f"Run Admin > Jurisdictions research refresh (jurisdiction_id={jurisdiction_id})."
+                        f"{', '.join(missing_categories)}. Triggering source-of-truth refresh "
+                        f"(jurisdiction_id={jurisdiction_id})."
                     )
+                    try:
+                        requirements = await _refresh_repository_missing_categories(
+                            conn,
+                            service,
+                            jurisdiction_id=jurisdiction_id,
+                            city=location.city,
+                            state=location.state,
+                            county=location.county,
+                            has_local_ordinance=has_local_ordinance,
+                            current_requirements=requirements,
+                            missing_categories=missing_categories,
+                        )
+                    except Exception as refresh_error:
+                        print(
+                            f"[Compliance] Source-of-truth refresh failed for {location.city}, {location.state}: "
+                            f"{refresh_error}"
+                        )
+
+                    missing_after_refresh = _missing_required_categories(requirements)
+                    if missing_after_refresh:
+                        print(
+                            f"[Compliance] Repository still missing categories for {location.city}, {location.state}: "
+                            f"{', '.join(missing_after_refresh)} after refresh."
+                        )
+                    else:
+                        print(
+                            f"[Compliance] Repository refresh completed for {location.city}, {location.state}."
+                        )
+
+                    if not requirements:
+                        stale_repo_rows = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+                        if stale_repo_rows:
+                            requirements = [_jurisdiction_row_to_dict(jr) for jr in stale_repo_rows]
+                            print(
+                                f"[Compliance] Using stale repository fallback for {location.city}, {location.state} "
+                                f"({len(requirements)} requirement(s))."
+                            )
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
             # Set used_repository = True to skip fresh-data logic (upserts, alerts, verification).
