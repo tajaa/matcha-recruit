@@ -25,6 +25,7 @@ from .brokers import router as brokers_router
 from .provisioning import router as provisioning_router
 from .reach_out import router as reach_out_router
 from .internal_mobility import router as internal_mobility_router
+from .matcha_work import router as matcha_work_router
 from ..dependencies import require_feature
 
 # Create main Matcha router
@@ -70,6 +71,12 @@ matcha_router.include_router(
     tags=["internal-mobility"],
     dependencies=[Depends(require_feature("internal_mobility"))],
 )
+matcha_router.include_router(
+    matcha_work_router,
+    prefix="/matcha-work",
+    tags=["matcha-work"],
+    dependencies=[Depends(require_feature("matcha_work"))],
+)
 
 # Export individual routers for backwards compatibility
 __all__ = [
@@ -98,4 +105,5 @@ __all__ = [
     "brokers_router",
     "provisioning_router",
     "internal_mobility_router",
+    "matcha_work_router",
 ]

@@ -39,7 +39,7 @@ KNOWN_PLATFORM_ITEMS = {
     "onboarding", "employees", "offer_letters", "policies", "handbooks", "time_off",
     "accommodations", "internal_mobility", "er_copilot", "incidents",
     "xp_dashboard", "vibe_checks", "enps", "performance_reviews",
-    "compliance", "jurisdictions", "blog", "hr_news",
+    "compliance", "jurisdictions", "blog", "hr_news", "matcha_work",
 }
 
 class PlatformFeaturesUpdate(BaseModel):
@@ -156,7 +156,7 @@ KNOWN_FEATURES = {
     "offer_letters", "offer_letters_plus", "policies", "handbooks", "compliance", "compliance_plus",
     "employees", "vibe_checks", "enps", "performance_reviews",
     "er_copilot", "incidents", "time_off", "accommodations", "interview_prep",
-    "internal_mobility",
+    "internal_mobility", "matcha_work",
 }
 
 

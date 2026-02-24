@@ -3408,4 +3408,101 @@ async def init_db():
             json.dumps(["offer_letters","client_management","blog","policies","handbooks","er_copilot","onboarding","employees"])
         )
 
+        # Matcha Work tables (chat-driven offer letter generation)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_threads (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL DEFAULT 'Untitled Offer Letter',
+                task_type VARCHAR(40) NOT NULL DEFAULT 'offer_letter'
+                    CHECK (task_type IN ('offer_letter')),
+                status VARCHAR(20) NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'finalized', 'archived')),
+                current_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+                version INTEGER NOT NULL DEFAULT 0,
+                linked_offer_letter_id UUID REFERENCES offer_letters(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_threads_company_id ON mw_threads(company_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_threads_created_by ON mw_threads(created_by)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_threads_company_status ON mw_threads(company_id, status)"
+        )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_messages (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                thread_id UUID NOT NULL REFERENCES mw_threads(id) ON DELETE CASCADE,
+                role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+                content TEXT NOT NULL,
+                version_created INTEGER,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_messages_thread_id ON mw_messages(thread_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_messages_thread_created_at ON mw_messages(thread_id, created_at)"
+        )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_document_versions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                thread_id UUID NOT NULL REFERENCES mw_threads(id) ON DELETE CASCADE,
+                version INTEGER NOT NULL,
+                state_json JSONB NOT NULL,
+                diff_summary TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(thread_id, version)
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_document_versions_thread_id ON mw_document_versions(thread_id)"
+        )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_pdf_cache (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                thread_id UUID NOT NULL REFERENCES mw_threads(id) ON DELETE CASCADE,
+                version INTEGER NOT NULL,
+                pdf_url TEXT NOT NULL,
+                is_draft BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(thread_id, version, is_draft)
+            )
+        """)
+        # Backfill/repair uniqueness for existing environments created before is_draft-aware caching.
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'mw_pdf_cache_thread_id_version_key'
+                      AND conrelid = 'mw_pdf_cache'::regclass
+                ) THEN
+                    ALTER TABLE mw_pdf_cache DROP CONSTRAINT mw_pdf_cache_thread_id_version_key;
+                END IF;
+
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'mw_pdf_cache_thread_id_version_is_draft_key'
+                      AND conrelid = 'mw_pdf_cache'::regclass
+                ) THEN
+                    ALTER TABLE mw_pdf_cache
+                    ADD CONSTRAINT mw_pdf_cache_thread_id_version_is_draft_key
+                    UNIQUE(thread_id, version, is_draft);
+                END IF;
+            END $$;
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_pdf_cache_thread_id ON mw_pdf_cache(thread_id)"
+        )
+
         print("[DB] Tables initialized")

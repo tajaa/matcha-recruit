@@ -298,6 +298,9 @@ async function request<T>(
         const error = await retryResponse.json().catch(() => ({ detail: 'Request failed' }));
         throw new Error(extractErrorMessage(error, 'Request failed'));
       }
+      if (retryResponse.status === 204 || retryResponse.status === 205) {
+        return undefined as T;
+      }
       return retryResponse.json();
     }
     // Refresh failed, clear tokens and redirect to login
@@ -309,6 +312,10 @@ async function request<T>(
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(extractErrorMessage(error, 'Request failed'));
+  }
+
+  if (response.status === 204 || response.status === 205) {
+    return undefined as T;
   }
 
   return response.json();
@@ -2944,6 +2951,72 @@ export const adminNews = {
 
   refresh: (): Promise<HRNewsRefreshResponse> =>
     request<HRNewsRefreshResponse>('/admin/news/refresh', { method: 'POST' }),
+};
+
+// Matcha Work API (chat-driven offer letter generation)
+import type {
+  MWThread,
+  MWThreadDetail,
+  MWCreateThreadResponse,
+  MWSendMessageResponse,
+  MWDocumentVersion,
+  MWFinalizeResponse,
+} from '../types/matcha-work';
+
+export const matchaWork = {
+  createThread: (data: { title?: string; initial_message?: string }): Promise<MWCreateThreadResponse> =>
+    request<MWCreateThreadResponse>('/matcha-work/threads', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listThreads: (params?: { status?: string; limit?: number; offset?: number }): Promise<MWThread[]> => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.append('status', params.status);
+    if (params?.limit) searchParams.append('limit', String(params.limit));
+    if (params?.offset) searchParams.append('offset', String(params.offset));
+    const query = searchParams.toString();
+    return request<MWThread[]>(`/matcha-work/threads${query ? `?${query}` : ''}`);
+  },
+
+  getThread: (threadId: string): Promise<MWThreadDetail> =>
+    request<MWThreadDetail>(`/matcha-work/threads/${threadId}`),
+
+  sendMessage: (threadId: string, content: string): Promise<MWSendMessageResponse> =>
+    request<MWSendMessageResponse>(`/matcha-work/threads/${threadId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+
+  getVersions: (threadId: string): Promise<MWDocumentVersion[]> =>
+    request<MWDocumentVersion[]>(`/matcha-work/threads/${threadId}/versions`),
+
+  revert: (threadId: string, version: number): Promise<MWSendMessageResponse> =>
+    request<MWSendMessageResponse>(`/matcha-work/threads/${threadId}/revert`, {
+      method: 'POST',
+      body: JSON.stringify({ version }),
+    }),
+
+  finalize: (threadId: string): Promise<MWFinalizeResponse> =>
+    request<MWFinalizeResponse>(`/matcha-work/threads/${threadId}/finalize`, {
+      method: 'POST',
+    }),
+
+  getPdf: (threadId: string, version?: number): Promise<{ pdf_url: string; version: number }> => {
+    const query = version != null ? `?version=${version}` : '';
+    return request<{ pdf_url: string; version: number }>(
+      `/matcha-work/threads/${threadId}/pdf${query}`
+    );
+  },
+
+  archiveThread: (threadId: string): Promise<void> =>
+    request<void>(`/matcha-work/threads/${threadId}`, { method: 'DELETE' }),
+
+  updateTitle: (threadId: string, title: string): Promise<MWThread> =>
+    request<MWThread>(`/matcha-work/threads/${threadId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
 };
 
 // Combined API object for convenient imports

@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Create platform_settings table with seed data."""
     op.execute("""
-        CREATE TABLE platform_settings (
+        CREATE TABLE IF NOT EXISTS platform_settings (
             key VARCHAR(100) PRIMARY KEY,
             value JSONB NOT NULL,
             updated_at TIMESTAMPTZ DEFAULT NOW()
