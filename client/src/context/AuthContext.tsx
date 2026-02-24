@@ -80,14 +80,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAllowedInterviewRoles(data.user.allowed_interview_roles || []);
       setCompanyFeatures(extractCompanyFeatures(data.profile));
       setOnboardingNeeded(data.onboarding_needed || {});
-      // Load platform features for admin
-      if (data.user.role === 'admin') {
-        try {
-          const pfData = await adminPlatformSettings.get();
-          setPlatformFeatures(new Set(pfData.visible_features));
-        } catch (err) {
-          console.warn('Failed to load platform features:', err);
-        }
+      // visible_features is now returned for all roles directly in /auth/me
+      if (Array.isArray(data.visible_features)) {
+        setPlatformFeatures(new Set(data.visible_features));
       }
     } catch (err) {
       // Only clear tokens and user for auth errors (401), not server errors
@@ -152,14 +147,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAllowedInterviewRoles(profileData.user.allowed_interview_roles || []);
         setCompanyFeatures(extractCompanyFeatures(profileData.profile));
         setOnboardingNeeded(profileData.onboarding_needed || {});
-        // Load platform features for admin
-        if (profileData.user.role === 'admin') {
-          try {
-            const pfData = await adminPlatformSettings.get();
-            setPlatformFeatures(new Set(pfData.visible_features));
-          } catch (err) {
-            console.warn('Failed to load platform features:', err);
-          }
+        if (Array.isArray(profileData.visible_features)) {
+          setPlatformFeatures(new Set(profileData.visible_features));
         }
       } catch (err) {
         // Profile load failed, but login succeeded - keep the basic user info

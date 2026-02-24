@@ -1923,6 +1923,13 @@ async def register_candidate(request: CandidateRegister):
 async def get_current_user_profile(current_user: CurrentUser = Depends(get_current_user)):
     """Get current user with full profile."""
     async with get_connection() as conn:
+        # Fetch visible platform features for all roles so the client-side
+        # sidebar gate can apply platform checks universally, not just for admins.
+        _raw_visible = await conn.fetchval(
+            "SELECT value FROM platform_settings WHERE key = 'visible_features'"
+        )
+        visible_features: list = json.loads(_raw_visible) if _raw_visible else []
+
         if current_user.role == "admin":
             profile = await conn.fetchrow(
                 "SELECT id, user_id, name, created_at FROM admins WHERE user_id = $1",
@@ -1936,7 +1943,8 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "name": profile["name"],
                     "email": current_user.email,
                     "created_at": profile["created_at"].isoformat()
-                } if profile else None
+                } if profile else None,
+                "visible_features": visible_features,
             }
 
         elif current_user.role == "client":
@@ -1985,6 +1993,7 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "created_at": profile["created_at"].isoformat()
                 } if profile else None,
                 "onboarding_needed": onboarding_needed,
+                "visible_features": visible_features,
             }
 
         elif current_user.role == "candidate":
@@ -2014,7 +2023,8 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "skills": skills_data,
                     "experience_years": profile["experience_years"],
                     "created_at": profile["created_at"].isoformat()
-                } if profile else None
+                } if profile else None,
+                "visible_features": visible_features,
             }
 
         elif current_user.role == "employee":
@@ -2047,7 +2057,8 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "start_date": profile["start_date"].isoformat() if profile["start_date"] else None,
                     "manager_id": str(profile["manager_id"]) if profile["manager_id"] else None,
                     "created_at": profile["created_at"].isoformat()
-                } if profile else None
+                } if profile else None,
+                "visible_features": visible_features,
             }
 
         elif current_user.role == "broker":
@@ -2096,9 +2107,10 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
                     "created_at": profile["created_at"].isoformat(),
                 } if profile else None,
                 "onboarding_needed": {"broker_terms": not terms_accepted} if profile else {},
+                "visible_features": visible_features,
             }
 
-    return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role}, "profile": None}
+    return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role}, "profile": None, "visible_features": visible_features}
 
 
 @router.post("/broker/accept-terms", response_model=BrokerTermsAcceptanceResponse)

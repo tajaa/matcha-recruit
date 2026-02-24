@@ -680,8 +680,9 @@ export function Layout() {
       }
       return false;
     }
-    // Platform-level gate (admin-only: only admins have platformFeatures loaded)
-    if (user?.role === 'admin' && item.platformKey && !platformFeatures.has(item.platformKey)) return false;
+    // Platform-level gate — applies to all roles. visible_features is now
+    // returned in /auth/me for every role so platformFeatures is always populated.
+    if (item.platformKey && platformFeatures.size > 0 && !platformFeatures.has(item.platformKey)) return false;
     // Check company feature flag (admin bypassed inside hasFeature)
     if (item.feature && !hasFeature(item.feature)) return false;
     // Check if any of multiple features is enabled (e.g. XP Dashboard)
