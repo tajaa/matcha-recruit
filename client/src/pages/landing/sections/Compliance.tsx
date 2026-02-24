@@ -33,7 +33,7 @@ export const Compliance = () => {
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, margin: "-100px" }}
-      className="compliance-trigger py-64 px-6 relative border-t border-white/5 bg-[#0A0E0C]"
+      className="compliance-trigger py-64 px-6 md:px-16 lg:px-32 relative border-t border-white/5 bg-[#0A0E0C]"
     >
       <div className="max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center">
         <div className="space-y-16 pr-12">

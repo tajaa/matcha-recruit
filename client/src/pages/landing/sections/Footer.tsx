@@ -2,7 +2,7 @@ import { fonts } from "../constants";
 
 export const Footer = () => {
   return (
-    <footer className="bg-[#0A0E0C] text-[#F0EFEA] pt-32 pb-12 px-6 relative z-40 border-t border-white/5">
+    <footer className="bg-[#0A0E0C] text-[#F0EFEA] pt-32 pb-12 px-6 md:px-16 lg:px-32 relative z-40 border-t border-white/5">
       <div className="max-w-[1600px] mx-auto">
         <h2
           className="text-5xl md:text-8xl font-bold tracking-tighter leading-none mb-16"

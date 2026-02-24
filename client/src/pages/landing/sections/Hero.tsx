@@ -34,7 +34,7 @@ export const Hero = () => {
       variants={containerVariants}
       initial="hidden"
       animate="visible"
-      className="hero-trigger relative min-h-screen flex flex-col justify-center px-6 md:px-16 overflow-hidden"
+      className="hero-trigger relative min-h-screen flex flex-col justify-center px-6 md:px-16 lg:px-32 overflow-hidden"
     >
       {/* Background Layer with Iris Scan Effect */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">

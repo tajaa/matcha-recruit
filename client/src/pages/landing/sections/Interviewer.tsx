@@ -31,7 +31,7 @@ export const Interviewer = forwardRef<HTMLDivElement>((_, ref) => {
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, margin: "-100px" }}
-      className="interviewer-trigger py-64 px-6 relative bg-[#060807] overflow-hidden rounded-[4rem] mx-4 border border-white/5 shadow-2xl"
+      className="interviewer-trigger py-64 px-6 md:px-16 lg:px-32 relative bg-[#060807] overflow-hidden rounded-[4rem] border border-white/5 shadow-2xl"
       style={{ transform: "translateZ(0)" }}
     >
       {/* Dynamic Background Data-Flow */}

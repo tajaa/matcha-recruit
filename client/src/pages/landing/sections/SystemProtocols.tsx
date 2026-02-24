@@ -22,7 +22,7 @@ export const SystemProtocols = forwardRef<HTMLDivElement>((_, ref) => {
   };
 
   return (
-    <section ref={ref} className="system-trigger relative mt-64 space-y-32 px-4 md:px-12 pb-64">
+    <section ref={ref} className="system-trigger relative mt-64 space-y-32 px-6 md:px-16 lg:px-32 pb-64">
       {/* Card 1: Obsidian (ER Copilot) */}
       <motion.div 
         initial="offscreen"
