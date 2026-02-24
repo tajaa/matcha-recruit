@@ -23,6 +23,7 @@ async def _run_check(location_id: str, company_id: str, check_type: str = "sched
         location_id=UUID(location_id),
         company_id=UUID(company_id),
         check_type=check_type,
+        allow_live_research=False,
     )
     return result
 
@@ -133,9 +134,9 @@ def run_compliance_check_task(
 
     This task is enqueued by the dispatcher or can be called directly.
     It runs the full compliance check flow including:
-    - Gemini research
+    - Sync from jurisdiction repository
     - Change detection and verification
-    - Upcoming legislation scanning
+    - Upcoming legislation scan from repository-backed data
     - Deadline escalation
     """
     print(f"[Worker] Starting compliance check for location {location_id} (type: {check_type})")

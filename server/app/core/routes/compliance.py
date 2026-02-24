@@ -137,7 +137,11 @@ async def check_location_compliance_endpoint(
 
     async def event_stream():
         try:
-            async for event in run_compliance_check_stream(loc_uuid, company_id):
+            async for event in run_compliance_check_stream(
+                loc_uuid,
+                company_id,
+                allow_live_research=False,
+            ):
                 if event.get("type") == "heartbeat":
                     yield ": heartbeat\n\n"
                 else:

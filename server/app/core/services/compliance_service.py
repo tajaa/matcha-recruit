@@ -217,6 +217,58 @@ def _normalize_jurisdiction_name(name: Optional[str]) -> str:
     return s
 
 
+def _normalize_city_key(city: str) -> str:
+    normalized = (city or "").lower().strip()
+    normalized = normalized.replace(".", "")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
+_CITY_ALIAS_FALLBACKS = {
+    ("NY", "new york city"): "new york",
+    ("NY", "nyc"): "new york",
+    ("UT", "salt lake"): "salt lake city",
+}
+
+
+async def _resolve_reference_city(
+    conn,
+    city: str,
+    state: str,
+) -> tuple[str, Optional[str]]:
+    """Resolve input city to canonical jurisdiction_reference city + county."""
+    norm_city = _normalize_city_key(city)
+    norm_state = state.upper().strip()
+    lookup_city = _CITY_ALIAS_FALLBACKS.get((norm_state, norm_city), norm_city)
+
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT city, county
+            FROM jurisdiction_reference
+            WHERE state = $2
+              AND (
+                city = $1
+                OR EXISTS (
+                  SELECT 1
+                  FROM unnest(COALESCE(aliases, ARRAY[]::text[])) AS alias
+                  WHERE LOWER(alias) = $1
+                )
+              )
+            LIMIT 1
+            """,
+            lookup_city,
+            norm_state,
+        )
+    except asyncpg.UndefinedTableError:
+        row = None
+
+    if row:
+        return row["city"], row["county"]
+
+    return lookup_city, None
+
+
 _VARCHAR_100_FIELDS = ("jurisdiction_name", "current_value", "source_name")
 
 
@@ -527,20 +579,10 @@ async def _get_or_create_jurisdiction(conn, city: str, state: str, county: Optio
     Auto-resolves county from jurisdiction_reference when not provided,
     then links city -> county -> state via parent_id.
     """
-    norm_city = city.lower().strip()
+    norm_city, ref_county = await _resolve_reference_city(conn, city, state)
     norm_state = state.upper().strip()
-
-    # 1. Auto-resolve county from reference table if not provided
-    if not county:
-        try:
-            ref = await conn.fetchrow(
-                "SELECT county FROM jurisdiction_reference WHERE city = $1 AND state = $2",
-                norm_city, norm_state,
-            )
-            if ref:
-                county = ref["county"]
-        except asyncpg.UndefinedTableError:
-            pass
+    if not county and ref_county:
+        county = ref_county
 
     # 2. Get or create city jurisdiction
     await conn.execute(
@@ -629,10 +671,28 @@ async def _get_or_create_jurisdiction(conn, city: str, state: str, county: Optio
 
 async def _lookup_has_local_ordinance(conn, city: str, state: str) -> Optional[bool]:
     """Check jurisdiction_reference for whether a city has its own local ordinance."""
+    normalized_city = _normalize_city_key(city)
+    normalized_state = state.upper().strip()
+    lookup_city = _CITY_ALIAS_FALLBACKS.get((normalized_state, normalized_city), normalized_city)
+
     try:
         ref = await conn.fetchrow(
-            "SELECT has_local_ordinance FROM jurisdiction_reference WHERE city = $1 AND state = $2",
-            city.lower().strip(), state.upper().strip(),
+            """
+            SELECT has_local_ordinance
+            FROM jurisdiction_reference
+            WHERE state = $2
+              AND (
+                city = $1
+                OR EXISTS (
+                  SELECT 1
+                  FROM unnest(COALESCE(aliases, ARRAY[]::text[])) AS alias
+                  WHERE LOWER(alias) = $1
+                )
+              )
+            LIMIT 1
+            """,
+            lookup_city,
+            normalized_state,
         )
         result = ref["has_local_ordinance"] if ref else None
         print(f"[Compliance] has_local_ordinance lookup: city={city!r}, state={state!r} → {result}")
@@ -1905,7 +1965,9 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
         return location, has_repository_data
 
 async def run_compliance_check_stream(
-    location_id: UUID, company_id: UUID
+    location_id: UUID,
+    company_id: UUID,
+    allow_live_research: bool = True,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Runs a compliance check for a specific location.
@@ -2027,7 +2089,7 @@ async def run_compliance_check_stream(
             # ============================================================
             # TIER 3: Research with Gemini (stale or missing data)
             # ============================================================
-            if not used_repository:
+            if not used_repository and allow_live_research:
                 # Stale or missing — call Gemini
                 # First, get known sources for this jurisdiction (or discover them)
                 known_sources = await get_known_sources(conn, jurisdiction_id)
@@ -2101,6 +2163,17 @@ async def run_compliance_check_stream(
                     requirements = preserved + researched_requirements
                 else:
                     requirements = researched_requirements
+            elif not used_repository:
+                missing_categories = _missing_required_categories(requirements)
+                if missing_categories:
+                    yield {
+                        "type": "repository_only",
+                        "message": (
+                            "Jurisdiction repository is missing "
+                            f"{', '.join(missing_categories)}. "
+                            "Run Admin > Jurisdictions check to refresh source-of-truth coverage."
+                        ),
+                    }
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
             # Set used_repository = True to skip fresh-data logic (upserts, alerts, verification).
@@ -2369,8 +2442,8 @@ async def run_compliance_check_stream(
 
 
 async def run_compliance_check(location_id: UUID, company_id: UUID):
-    """Non-streaming wrapper for backward compatibility (e.g. background tasks on location create)."""
-    async for _ in run_compliance_check_stream(location_id, company_id):
+    """Repository-sync wrapper for background tasks on company locations."""
+    async for _ in run_compliance_check_stream(location_id, company_id, allow_live_research=False):
         pass
 
 
@@ -3060,7 +3133,10 @@ async def get_upcoming_legislation(
 
 
 async def run_compliance_check_background(
-    location_id: UUID, company_id: UUID, check_type: str = "scheduled"
+    location_id: UUID,
+    company_id: UUID,
+    check_type: str = "scheduled",
+    allow_live_research: bool = True,
 ) -> Dict[str, Any]:
     """Non-streaming compliance check for Celery tasks.
     Checks the jurisdiction repository first; only calls Gemini if stale/missing.
@@ -3162,7 +3238,7 @@ async def run_compliance_check_background(
                         used_repository = True
 
             # TIER 3: Research with Gemini (stale or missing data)
-            if not used_repository:
+            if not used_repository and allow_live_research:
                 # Get known sources for this jurisdiction (or discover them)
                 known_sources = await get_known_sources(conn, jurisdiction_id)
 
@@ -3213,6 +3289,13 @@ async def run_compliance_check_background(
                         if (_normalize_category(req.get("category")) or req.get("category")) not in target_set
                     ]
                     requirements = preserved + requirements
+            elif not used_repository:
+                missing_categories = _missing_required_categories(requirements)
+                if missing_categories:
+                    print(
+                        f"[Compliance] Repository-only mode: missing categories for {location.city}, {location.state}: "
+                        f"{', '.join(missing_categories)}. Run Admin > Jurisdictions check."
+                    )
 
             # Stale-data fallback: if Gemini returned nothing, try cached data.
             # Set used_repository = True to skip fresh-data logic (upserts, alerts, verification).

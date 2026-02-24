@@ -1833,6 +1833,11 @@ def _normalize_city_input(city: str) -> str:
     return normalized
 
 
+def _is_non_city_jurisdiction(city: Optional[str]) -> bool:
+    token = (city or "").strip().lower()
+    return token == "" or token.startswith("_county_")
+
+
 def _city_display(city: str) -> str:
     return " ".join(part.capitalize() for part in city.split())
 
@@ -2030,7 +2035,7 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
 async def list_jurisdictions():
     """List all jurisdictions with requirement/legislation counts and linked locations."""
     async with get_connection() as conn:
-        rows = await conn.fetch("""
+        all_rows = await conn.fetch("""
             SELECT
                 j.id,
                 j.city,
@@ -2052,6 +2057,35 @@ async def list_jurisdictions():
             GROUP BY j.id, pj.city, pj.state
             ORDER BY j.state, j.city
         """)
+
+        # Hide state/county/system rows from the main source-of-truth listing.
+        rows = [row for row in all_rows if not _is_non_city_jurisdiction(row["city"])]
+
+        # Collapse duplicate city rows that differ only by casing/alias history.
+        duplicate_groups: dict[tuple[str, str], list] = {}
+        for row in rows:
+            key = (row["state"], _normalize_city_input(row["city"]))
+            duplicate_groups.setdefault(key, []).append(row)
+
+        deduped_rows = []
+        grouped_rows_by_primary_id: dict[UUID, list] = {}
+        for group_rows in duplicate_groups.values():
+            def _row_priority(r):
+                last_verified_at = r["last_verified_at"]
+                created_at = r["created_at"]
+                return (
+                    (r["requirement_count"] or 0) + (r["legislation_count"] or 0),
+                    r["location_count"] or 0,
+                    r["auto_check_count"] or 0,
+                    1 if last_verified_at is not None else 0,
+                    last_verified_at or datetime.min,
+                    1 if created_at is not None else 0,
+                    created_at or datetime.min,
+                )
+
+            primary = max(group_rows, key=_row_priority)
+            deduped_rows.append(primary)
+            grouped_rows_by_primary_id[primary["id"]] = group_rows
 
         jurisdiction_ids = [row["id"] for row in rows]
         parent_relationships: dict[UUID, UUID] = {
@@ -2134,24 +2168,49 @@ async def list_jurisdictions():
             locations_by_jid.setdefault(loc["jurisdiction_id"], []).append(loc)
 
         jurisdictions = []
-        for row in rows:
-            locations = locations_by_jid.get(row["id"], [])
+        for row in deduped_rows:
+            grouped_rows = grouped_rows_by_primary_id.get(row["id"], [row])
+            grouped_ids = [r["id"] for r in grouped_rows]
+
+            merged_locations = []
+            for gid in grouped_ids:
+                merged_locations.extend(locations_by_jid.get(gid, []))
+
+            locations_by_id = {str(loc["id"]): loc for loc in merged_locations}
+            locations = list(locations_by_id.values())
+
+            requirement_count = max((r["requirement_count"] or 0) for r in grouped_rows)
+            legislation_count = max((r["legislation_count"] or 0) for r in grouped_rows)
+            children_count = max((r["children_count"] or 0) for r in grouped_rows)
+
+            parent_row = next((r for r in grouped_rows if r["parent_id"] is not None), row)
+            parent_id = parent_row["parent_id"]
+            parent_city = parent_row["parent_city"]
+            parent_state = parent_row["parent_state"]
+
+            last_verified_values = [r["last_verified_at"] for r in grouped_rows if r["last_verified_at"]]
+            last_verified_at = max(last_verified_values) if last_verified_values else None
+            created_values = [r["created_at"] for r in grouped_rows if r["created_at"]]
+            created_at = min(created_values) if created_values else None
+
+            inherits_from_parent = any(inherits_from_parent_map.get(r["id"], False) for r in grouped_rows)
+
             jurisdictions.append({
                 "id": str(row["id"]),
                 "city": row["city"],
                 "state": row["state"],
                 "county": row["county"],
-                "parent_id": str(row["parent_id"]) if row["parent_id"] else None,
-                "parent_city": row["parent_city"],
-                "parent_state": row["parent_state"],
-                "children_count": row["children_count"],
-                "requirement_count": row["requirement_count"] or 0,
-                "legislation_count": row["legislation_count"] or 0,
-                "location_count": row["location_count"],
-                "auto_check_count": row["auto_check_count"],
-                "inherits_from_parent": inherits_from_parent_map.get(row["id"], False),
-                "last_verified_at": row["last_verified_at"].isoformat() if row["last_verified_at"] else None,
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "parent_id": str(parent_id) if parent_id else None,
+                "parent_city": parent_city,
+                "parent_state": parent_state,
+                "children_count": children_count,
+                "requirement_count": requirement_count,
+                "legislation_count": legislation_count,
+                "location_count": len(locations),
+                "auto_check_count": sum(1 for loc in locations if loc["auto_check_enabled"]),
+                "inherits_from_parent": inherits_from_parent,
+                "last_verified_at": last_verified_at.isoformat() if last_verified_at else None,
+                "created_at": created_at.isoformat() if created_at else None,
                 "locations": [
                     {
                         "id": str(loc["id"]),
@@ -2168,22 +2227,240 @@ async def list_jurisdictions():
                 ],
             })
 
-        # Summary stats
-        totals = await conn.fetchrow("""
-            SELECT
-                COUNT(*) AS total_jurisdictions,
-                COALESCE(SUM(requirement_count), 0) AS total_requirements,
-                COALESCE(SUM(legislation_count), 0) AS total_legislation
-            FROM jurisdictions
-        """)
+        total_requirements = sum(int(j["requirement_count"] or 0) for j in jurisdictions)
+        total_legislation = sum(int(j["legislation_count"] or 0) for j in jurisdictions)
 
         return {
             "jurisdictions": jurisdictions,
             "totals": {
-                "total_jurisdictions": totals["total_jurisdictions"],
-                "total_requirements": totals["total_requirements"],
-                "total_legislation": totals["total_legislation"],
+                "total_jurisdictions": len(jurisdictions),
+                "total_requirements": total_requirements,
+                "total_legislation": total_legislation,
             },
+        }
+
+
+@router.post("/jurisdictions/cleanup-duplicates", dependencies=[Depends(require_admin)])
+async def cleanup_duplicate_jurisdictions(
+    dry_run: bool = Query(True),
+):
+    """Merge duplicate city jurisdictions by normalized city+state key."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, city, state, county, parent_id, requirement_count, legislation_count,
+                   created_at, last_verified_at
+            FROM jurisdictions
+            ORDER BY state, city, created_at ASC
+            """
+        )
+
+        city_rows = [row for row in rows if not _is_non_city_jurisdiction(row["city"])]
+        grouped: dict[tuple[str, str], list] = {}
+        for row in city_rows:
+            key = (row["state"], _normalize_city_input(row["city"]))
+            grouped.setdefault(key, []).append(row)
+
+        duplicate_groups = [group for group in grouped.values() if len(group) > 1]
+        if not duplicate_groups:
+            return {
+                "status": "ok",
+                "dry_run": dry_run,
+                "groups_found": 0,
+                "groups_merged": 0,
+                "duplicates_removed": 0,
+                "locations_relinked": 0,
+                "children_relinked": 0,
+                "details": [],
+            }
+
+        def _priority(row) -> tuple:
+            return (
+                (row["requirement_count"] or 0) + (row["legislation_count"] or 0),
+                1 if row["last_verified_at"] is not None else 0,
+                row["last_verified_at"] or datetime.min,
+                1 if row["created_at"] is not None else 0,
+                row["created_at"] or datetime.min,
+            )
+
+        details = []
+        groups_merged = 0
+        duplicates_removed = 0
+        locations_relinked = 0
+        children_relinked = 0
+
+        for group in duplicate_groups:
+            primary = max(group, key=_priority)
+            duplicates = [row for row in group if row["id"] != primary["id"]]
+            details.append({
+                "state": primary["state"],
+                "city_key": _normalize_city_input(primary["city"]),
+                "primary_id": str(primary["id"]),
+                "primary_city": primary["city"],
+                "duplicate_ids": [str(row["id"]) for row in duplicates],
+                "duplicate_cities": [row["city"] for row in duplicates],
+            })
+
+            if dry_run:
+                continue
+
+            groups_merged += 1
+            primary_parent_id = primary["parent_id"]
+            primary_county = primary["county"]
+
+            for dup in duplicates:
+                # Preserve hierarchy/county metadata if missing on primary.
+                if primary_parent_id is None and dup["parent_id"] is not None:
+                    await conn.execute(
+                        "UPDATE jurisdictions SET parent_id = $2 WHERE id = $1",
+                        primary["id"],
+                        dup["parent_id"],
+                    )
+                    primary_parent_id = dup["parent_id"]
+
+                if not primary_county and dup["county"]:
+                    await conn.execute(
+                        "UPDATE jurisdictions SET county = $2 WHERE id = $1",
+                        primary["id"],
+                        dup["county"],
+                    )
+                    primary_county = dup["county"]
+
+                dup_requirements = await conn.fetch(
+                    """
+                    SELECT requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
+                           title, description, current_value, numeric_value, source_url, source_name,
+                           effective_date, expiration_date, previous_value, last_changed_at, last_verified_at
+                    FROM jurisdiction_requirements
+                    WHERE jurisdiction_id = $1
+                    """,
+                    dup["id"],
+                )
+                for req in dup_requirements:
+                    await conn.execute(
+                        """
+                        INSERT INTO jurisdiction_requirements
+                            (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
+                             title, description, current_value, numeric_value, source_url, source_name,
+                             effective_date, expiration_date, previous_value, last_changed_at, last_verified_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                        ON CONFLICT (jurisdiction_id, requirement_key) DO NOTHING
+                        """,
+                        primary["id"],
+                        req["requirement_key"],
+                        req["category"],
+                        req["rate_type"],
+                        req["jurisdiction_level"],
+                        req["jurisdiction_name"],
+                        req["title"],
+                        req["description"],
+                        req["current_value"],
+                        req["numeric_value"],
+                        req["source_url"],
+                        req["source_name"],
+                        req["effective_date"],
+                        req["expiration_date"],
+                        req["previous_value"],
+                        req["last_changed_at"],
+                        req["last_verified_at"],
+                    )
+
+                dup_legislation = await conn.fetch(
+                    """
+                    SELECT legislation_key, category, title, description, current_status,
+                           expected_effective_date, impact_summary, source_url, source_name,
+                           confidence, last_verified_at
+                    FROM jurisdiction_legislation
+                    WHERE jurisdiction_id = $1
+                    """,
+                    dup["id"],
+                )
+                for leg in dup_legislation:
+                    await conn.execute(
+                        """
+                        INSERT INTO jurisdiction_legislation
+                            (jurisdiction_id, legislation_key, category, title, description, current_status,
+                             expected_effective_date, impact_summary, source_url, source_name, confidence, last_verified_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                        ON CONFLICT (jurisdiction_id, legislation_key) DO NOTHING
+                        """,
+                        primary["id"],
+                        leg["legislation_key"],
+                        leg["category"],
+                        leg["title"],
+                        leg["description"],
+                        leg["current_status"],
+                        leg["expected_effective_date"],
+                        leg["impact_summary"],
+                        leg["source_url"],
+                        leg["source_name"],
+                        leg["confidence"],
+                        leg["last_verified_at"],
+                    )
+
+                moved_locations = await conn.fetchval(
+                    """
+                    WITH moved AS (
+                        UPDATE business_locations
+                        SET jurisdiction_id = $1
+                        WHERE jurisdiction_id = $2
+                        RETURNING id
+                    )
+                    SELECT COUNT(*) FROM moved
+                    """,
+                    primary["id"],
+                    dup["id"],
+                )
+                locations_relinked += int(moved_locations or 0)
+
+                moved_children = await conn.fetchval(
+                    """
+                    WITH moved AS (
+                        UPDATE jurisdictions
+                        SET parent_id = $1
+                        WHERE parent_id = $2
+                        RETURNING id
+                    )
+                    SELECT COUNT(*) FROM moved
+                    """,
+                    primary["id"],
+                    dup["id"],
+                )
+                children_relinked += int(moved_children or 0)
+
+                await conn.execute("DELETE FROM jurisdiction_requirements WHERE jurisdiction_id = $1", dup["id"])
+                await conn.execute("DELETE FROM jurisdiction_legislation WHERE jurisdiction_id = $1", dup["id"])
+                await conn.execute("DELETE FROM jurisdictions WHERE id = $1", dup["id"])
+                duplicates_removed += 1
+
+            requirement_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                primary["id"],
+            )
+            legislation_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM jurisdiction_legislation WHERE jurisdiction_id = $1",
+                primary["id"],
+            )
+            await conn.execute(
+                """
+                UPDATE jurisdictions
+                SET requirement_count = $2, legislation_count = $3, updated_at = NOW()
+                WHERE id = $1
+                """,
+                primary["id"],
+                requirement_count,
+                legislation_count,
+            )
+
+        return {
+            "status": "ok",
+            "dry_run": dry_run,
+            "groups_found": len(duplicate_groups),
+            "groups_merged": groups_merged,
+            "duplicates_removed": duplicates_removed,
+            "locations_relinked": locations_relinked,
+            "children_relinked": children_relinked,
+            "details": details,
         }
 
 
