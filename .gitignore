@@ -27,6 +27,7 @@ Thumbs.db
 
 # Logs
 *.log
+.landing-build-version
 
 # Testing
 .pytest_cache/

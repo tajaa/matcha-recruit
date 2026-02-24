@@ -26,6 +26,7 @@ readonly GUMMFIT_BACKEND_DIR="${SCRIPT_DIR}/gummfit-agency/server"
 readonly GUMMFIT_FRONTEND_DIR="${SCRIPT_DIR}/gummfit-agency/client"
 readonly GUMMLOCAL_BACKEND_DIR="${SCRIPT_DIR}/gumm-local/server"
 readonly GUMMLOCAL_FRONTEND_DIR="${SCRIPT_DIR}/gumm-local/client"
+readonly LANDING_BUILD_VERSION_FILE="${SCRIPT_DIR}/.landing-build-version"
 
 # Default values
 PUSH_TO_ECR=true
@@ -38,6 +39,7 @@ BUILD_GUMMFIT_BACKEND=false
 BUILD_GUMMFIT_FRONTEND=false
 BUILD_GUMMLOCAL_BACKEND=false
 BUILD_GUMMLOCAL_FRONTEND=false
+LANDING_BUILD_VERSION="0"
 
 ################################################################################
 # Helper Functions
@@ -63,6 +65,23 @@ log_section() {
     echo -e "\n${MAGENTA}========================================${NC}"
     echo -e "${MAGENTA}$1${NC}"
     echo -e "${MAGENTA}========================================${NC}\n"
+}
+
+bump_landing_build_version() {
+    log_section "Bumping Landing Build Version"
+
+    local current_version="0"
+    if [ -f "$LANDING_BUILD_VERSION_FILE" ]; then
+        current_version=$(tr -d '[:space:]' < "$LANDING_BUILD_VERSION_FILE")
+        if [[ ! "$current_version" =~ ^[0-9]+$ ]]; then
+            log_warning "Invalid version value in ${LANDING_BUILD_VERSION_FILE}; resetting to 0"
+            current_version="0"
+        fi
+    fi
+
+    LANDING_BUILD_VERSION=$((current_version + 1))
+    printf "%s\n" "$LANDING_BUILD_VERSION" > "$LANDING_BUILD_VERSION_FILE"
+    log_success "Landing build version set to v${LANDING_BUILD_VERSION}"
 }
 
 # Print usage information
@@ -316,6 +335,7 @@ build_image() {
     local dockerfile_path=$2
     local context_dir=$3
     local image_uri=$4
+    local extra_build_args=("${@:5}")
 
     log_section "Building $name Image"
 
@@ -351,6 +371,10 @@ build_image() {
         --build-arg "BUILDKIT_INLINE_CACHE=1"
         -f "$dockerfile_path"
     )
+
+    if [ ${#extra_build_args[@]} -gt 0 ]; then
+        build_args+=("${extra_build_args[@]}")
+    fi
 
     # Add cache flags unless --no-cache is set
     if [ "$NO_CACHE" = true ]; then
@@ -429,7 +453,8 @@ build_frontend() {
         "Frontend" \
         "${FRONTEND_DIR}/Dockerfile" \
         "${FRONTEND_DIR}" \
-        "${FRONTEND_ECR_URI}"
+        "${FRONTEND_ECR_URI}" \
+        --build-arg "VITE_LANDING_BUILD_VERSION=${LANDING_BUILD_VERSION}"
 }
 
 # Build gummfit backend
@@ -481,6 +506,10 @@ main() {
 
     # Authenticate with ECR
     ecr_login
+
+    if [ "$BUILD_FRONTEND" = true ]; then
+        bump_landing_build_version
+    fi
 
     # Build images in parallel
     local pids=()

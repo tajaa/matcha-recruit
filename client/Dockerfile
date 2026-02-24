@@ -14,6 +14,9 @@ RUN --mount=type=cache,target=/root/.npm \
 # Copy source code
 COPY . .
 
+ARG VITE_LANDING_BUILD_VERSION=0
+ENV VITE_LANDING_BUILD_VERSION=${VITE_LANDING_BUILD_VERSION}
+
 # Build application (API_BASE will be replaced at runtime)
 RUN npm run build
 
