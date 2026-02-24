@@ -29,7 +29,7 @@ from ..services.compliance_service import (
     mark_alert_read,
     dismiss_alert,
     get_compliance_summary,
-    run_compliance_check,
+    run_compliance_check_background,
     run_compliance_check_stream,
     get_check_log,
     get_upcoming_legislation,
@@ -100,7 +100,7 @@ async def create_location_endpoint(
 
     # Only trigger background Gemini check if no repository data was found
     if not has_repository_data:
-        background_tasks.add_task(run_compliance_check, location.id, company_id)
+        background_tasks.add_task(run_compliance_check_background, location.id, company_id)
 
     return {
         "id": str(location.id),
@@ -135,12 +135,25 @@ async def check_location_compliance_endpoint(
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
 
+    # Enable Gemini research on first sync (no existing data in repository)
+    async with get_connection() as conn:
+        req_count = await conn.fetchval(
+            """
+            SELECT COALESCE(j.requirement_count, 0)
+            FROM business_locations bl
+            LEFT JOIN jurisdictions j ON j.id = bl.jurisdiction_id
+            WHERE bl.id = $1
+            """,
+            loc_uuid,
+        )
+    allow_live = req_count == 0
+
     async def event_stream():
         try:
             async for event in run_compliance_check_stream(
                 loc_uuid,
                 company_id,
-                allow_live_research=False,
+                allow_live_research=allow_live,
             ):
                 if event.get("type") == "heartbeat":
                     yield ": heartbeat\n\n"

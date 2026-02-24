@@ -756,6 +756,27 @@ export function Compliance() {
                         </div>
                     )}
 
+                    {syncStates.size > 0 && (() => {
+                        const coveredStates = new Set((locations || []).map(l => (l.state || '').toUpperCase()));
+                        const missingStates = [...syncStates].filter(s => !coveredStates.has(s));
+                        if (missingStates.length === 0) return null;
+                        return (
+                            <div className="border border-red-500/30 bg-red-500/10 px-4 py-3 rounded-sm text-xs text-red-200 space-y-1 mt-2">
+                                <p className="font-medium uppercase tracking-wider">Location required for compliance sync</p>
+                                <p>
+                                    Add a location in <strong>{missingStates.join(', ')}</strong> to your compliance dashboard,
+                                    then run <strong>Sync Compliance</strong> to populate handbook coverage data.{' '}
+                                    <button
+                                        onClick={() => setShowAddModal(true)}
+                                        className="underline underline-offset-2 decoration-red-400/50 hover:text-red-100 transition-colors"
+                                    >
+                                        Add Location
+                                    </button>
+                                </p>
+                            </div>
+                        );
+                    })()}
+
                     {loadingLocations ? (
                         <div className="space-y-2">
                             {[1, 2, 3].map(i => (
