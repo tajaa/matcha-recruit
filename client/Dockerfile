@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Stage 1: Build stage
-FROM --platform=linux/arm64 node:20.19-alpine AS builder
+FROM node:20.19-alpine AS builder
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Runtime with nginx
-FROM --platform=linux/arm64 nginx:1.25-alpine
+FROM nginx:1.25-alpine
 
 # Install gettext for envsubst
 RUN apk add --no-cache gettext
