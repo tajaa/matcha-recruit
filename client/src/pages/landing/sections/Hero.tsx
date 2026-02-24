@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
 import { fonts } from "../constants";
@@ -8,7 +8,7 @@ import { fonts } from "../constants";
 const ParticleSphere = lazy(() => import("../../../components/ParticleSphere"));
 
 export const Hero = () => {
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -19,7 +19,7 @@ export const Hero = () => {
     },
   };
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 30, filter: "blur(10px)" },
     visible: { 
       opacity: 1, 

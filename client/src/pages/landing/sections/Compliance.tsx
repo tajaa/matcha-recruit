@@ -1,5 +1,4 @@
-import React from "react";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { MapPin, Shield, Zap, Search } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
@@ -7,7 +6,7 @@ import { JurisdictionRows } from "../components/JurisdictionRows";
 import { fonts } from "../constants";
 
 export const Compliance = () => {
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -17,7 +16,7 @@ export const Compliance = () => {
     },
   };
 
-  const textVariants = {
+  const textVariants: Variants = {
     hidden: { opacity: 0, x: -40, filter: "blur(8px)" },
     visible: { 
       opacity: 1, 

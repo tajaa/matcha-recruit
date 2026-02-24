@@ -1,13 +1,13 @@
 import { forwardRef } from "react";
-import { motion } from "framer-motion";
-import { Activity, Mic2, Brain, Waves, Cpu } from "lucide-react";
+import { motion, type Variants } from "framer-motion";
+import { Activity, Mic2, Brain, Waves } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
 import { HorizontalAsciiEntity } from "../components/HorizontalAsciiEntity";
 import { fonts } from "../constants";
 
 export const Interviewer = forwardRef<HTMLDivElement>((_, ref) => {
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -15,7 +15,7 @@ export const Interviewer = forwardRef<HTMLDivElement>((_, ref) => {
     }
   };
 
-  const featureVariants = {
+  const featureVariants: Variants = {
     hidden: { opacity: 0, y: 20 },
     visible: { 
       opacity: 1, 

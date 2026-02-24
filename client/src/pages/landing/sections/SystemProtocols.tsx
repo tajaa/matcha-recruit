@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { ERInferenceEngine } from "../components/ERInferenceEngine";
 import { PolicyMatrixScanner } from "../components/PolicyMatrixScanner";
 import { IncidentAuditRing } from "../components/IncidentAuditRing";
@@ -7,7 +7,7 @@ import { TechnicalSpecs } from "../components/TechnicalSpecs";
 import { fonts } from "../constants";
 
 export const SystemProtocols = forwardRef<HTMLDivElement>((_, ref) => {
-  const cardVariants = {
+  const cardVariants: Variants = {
     offscreen: { y: 100, opacity: 0, scale: 0.95 },
     onscreen: { 
       y: 0, 

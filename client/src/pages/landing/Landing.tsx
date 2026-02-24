@@ -4,7 +4,6 @@ import React, {
   useRef,
   useState,
   useLayoutEffect,
-  Suspense,
 } from "react";
 import gsap from "gsap";
 import ScrollTrigger from "gsap/ScrollTrigger";
