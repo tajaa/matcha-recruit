@@ -47,6 +47,7 @@ class OfferLetterDocument(BaseModel):
     salary_range_min: Optional[float] = None
     salary_range_max: Optional[float] = None
     candidate_email: Optional[str] = None
+    recipient_emails: Optional[list[str]] = None
 
 
 class ReviewDocument(BaseModel):

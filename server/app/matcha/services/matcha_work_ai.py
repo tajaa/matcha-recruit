@@ -27,6 +27,7 @@ SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
     "save_draft",
+    "send_draft",
     "finalize",
     "send_requests",
     "track",
@@ -47,7 +48,7 @@ Current thread context:
 - valid_update_fields_for_current_task_type: {valid_fields}
 
 Supported skills:
-- offer_letter: create/update offer letter content, save_draft, finalize
+- offer_letter: create/update offer letter content, save_draft, send_draft, finalize
 - review: create/update anonymized review content, collect recipient_emails, send review requests, track responses
 - workbook: create/update HR workbook documents and section content
 
@@ -72,7 +73,7 @@ Output constraints:
 {{
   "mode": "skill|general|clarify|refuse",
   "skill": "offer_letter|review|workbook|none",
-  "operation": "create|update|save_draft|finalize|send_requests|track|none",
+  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|none",
   "confidence": 0.0,
   "updates": {{}},
   "missing_fields": [],
@@ -82,6 +83,7 @@ Output constraints:
 - If no state changes are needed, set "updates": {{}}.
 - If mode != skill, use "operation": "none" unless a clarify step for skill action is needed.
 - recipient_emails must be lowercase email strings in an array.
+- For offer_letter send_draft, include recipient_emails (or candidate_email) when the target email is provided.
 - overall_rating must be an integer 1-5.
 - For workbook "sections", ALWAYS return the full sections list (not a partial patch).
 - start_date and expiration_date must be ISO 8601 strings (YYYY-MM-DD). Always capture dates mentioned by the user.

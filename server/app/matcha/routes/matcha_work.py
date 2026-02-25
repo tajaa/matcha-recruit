@@ -90,6 +90,7 @@ WORKBOOK_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
     (r"\bguide\b", 1),
     (r"\bpolicy collection\b", 4),
 )
+EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 
 
 def _normalize_task_type(task_type: Optional[str]) -> str:
@@ -226,6 +227,54 @@ def _append_action_note(reply: str, note: Optional[str]) -> str:
     return f"{clean_reply}\n\n{clean_note}"
 
 
+def _extract_emails_from_text(text: str) -> list[str]:
+    if not text:
+        return []
+    return doc_svc.normalize_recipient_emails(EMAIL_REGEX.findall(text))
+
+
+def _looks_like_send_draft_command(content: str) -> bool:
+    text = (content or "").lower()
+    if not text:
+        return False
+    has_send = bool(re.search(r"\b(send|email)\b", text))
+    has_draft_context = bool(re.search(r"\b(draft|offer(?:\s+letter)?)\b", text))
+    has_email = bool(_extract_emails_from_text(content))
+    return has_send and has_draft_context and has_email
+
+
+def _collect_offer_draft_recipients(
+    *,
+    structured_update: Optional[dict],
+    current_state: dict,
+    user_message: str,
+) -> list[str]:
+    collected: list[str] = []
+
+    if isinstance(structured_update, dict):
+        raw_recipients = structured_update.get("recipient_emails")
+        if isinstance(raw_recipients, list):
+            collected.extend(str(v) for v in raw_recipients if str(v).strip())
+        elif isinstance(raw_recipients, str) and raw_recipients.strip():
+            collected.append(raw_recipients)
+
+        for key in ("candidate_email", "review_recipient_email"):
+            raw_email = structured_update.get(key)
+            if isinstance(raw_email, str) and raw_email.strip():
+                collected.append(raw_email)
+
+    state_recipients = current_state.get("recipient_emails")
+    if isinstance(state_recipients, list):
+        collected.extend(str(v) for v in state_recipients if str(v).strip())
+
+    candidate_email = current_state.get("candidate_email")
+    if isinstance(candidate_email, str) and candidate_email.strip():
+        collected.append(candidate_email)
+
+    collected.extend(_extract_emails_from_text(user_message))
+    return doc_svc.normalize_recipient_emails(collected)
+
+
 async def _apply_ai_updates_and_operations(
     *,
     thread_id: UUID,
@@ -234,6 +283,7 @@ async def _apply_ai_updates_and_operations(
     ai_resp,
     current_state: dict,
     current_version: int,
+    user_message: str,
 ) -> tuple[dict, int, Optional[str], bool, str]:
     """Apply structured updates, execute supported operations, and return updated response state."""
     normalized_task_type = _normalize_task_type(task_type)
@@ -246,6 +296,11 @@ async def _apply_ai_updates_and_operations(
         ai_resp.mode == "skill"
         and (ai_resp.confidence >= 0.65 or not ai_resp.missing_fields)
     )
+    force_send_draft = (
+        _is_offer_letter_task(normalized_task_type)
+        and _looks_like_send_draft_command(user_message)
+    )
+    can_execute_operation = should_execute_skill or force_send_draft
 
     if should_execute_skill and ai_resp.structured_update:
         safe_updates = _validate_updates(normalized_task_type, ai_resp.structured_update)
@@ -261,7 +316,10 @@ async def _apply_ai_updates_and_operations(
                 )
 
     operation = str(ai_resp.operation or "none").strip().lower()
-    if should_execute_skill and operation not in {"none", "create", "update", "track"}:
+    if force_send_draft and operation in {"none", "create", "update", "track"}:
+        operation = "send_draft"
+
+    if can_execute_operation and operation not in {"none", "create", "update", "track"}:
         action_note: Optional[str] = None
         try:
             if operation == "save_draft":
@@ -270,6 +328,36 @@ async def _apply_ai_updates_and_operations(
                 else:
                     saved = await doc_svc.save_offer_letter_draft(thread_id, company_id)
                     action_note = f"Saved draft successfully ({saved['offer_status']})."
+            elif operation == "send_draft":
+                if not _is_offer_letter_task(normalized_task_type):
+                    action_note = "Draft sending is only available for offer letters."
+                else:
+                    recipients = _collect_offer_draft_recipients(
+                        structured_update=ai_resp.structured_update
+                        if isinstance(ai_resp.structured_update, dict)
+                        else None,
+                        current_state=current_state,
+                        user_message=user_message,
+                    )
+                    send_result = await doc_svc.send_offer_letter_draft(
+                        thread_id=thread_id,
+                        company_id=company_id,
+                        recipient_emails=recipients,
+                    )
+                    if send_result.get("pdf_url"):
+                        pdf_url = send_result["pdf_url"]
+                    action_note = (
+                        f"Draft email send complete: {send_result['sent_count']} sent, "
+                        f"{send_result['failed_count']} failed."
+                    )
+                    if send_result["failed_count"] > 0:
+                        failed_recipients = [
+                            str(row.get("email"))
+                            for row in send_result.get("recipients", [])
+                            if row.get("status") != "sent" and row.get("email")
+                        ]
+                        if failed_recipients:
+                            action_note += f" Failed recipient(s): {', '.join(failed_recipients[:3])}."
             elif operation == "send_requests":
                 if normalized_task_type != "review":
                     action_note = "Sending review requests is only available in review threads."
@@ -387,6 +475,7 @@ async def create_thread(
                 ai_resp=ai_resp,
                 current_state=thread["current_state"],
                 current_version=new_version,
+                user_message=body.initial_message,
             )
             thread["current_state"] = updated_state
 
@@ -622,6 +711,7 @@ async def send_message(
         ai_resp=ai_resp,
         current_state=thread["current_state"],
         current_version=current_version,
+        user_message=body.content,
     )
 
     # Save assistant message
@@ -745,6 +835,7 @@ async def send_message_stream(
                 ai_resp=ai_resp,
                 current_state=thread["current_state"],
                 current_version=current_version,
+                user_message=body.content,
             )
 
             # Save assistant message

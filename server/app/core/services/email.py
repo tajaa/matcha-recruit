@@ -26,8 +26,14 @@ class EmailService:
         to_name: Optional[str],
         subject: str,
         html_content: str,
+        text_content: Optional[str] = None,
+        attachments: Optional[list[dict]] = None,
     ) -> bool:
-        """Send a generic email via MailerSend."""
+        """Send a generic email via MailerSend.
+
+        Attachments should match MailerSend format:
+        {"filename": "...", "content": "<base64>", "disposition": "attachment"}
+        """
         if not self.is_configured():
             print("[Email] MailerSend not configured, skipping email send")
             return False
@@ -46,6 +52,10 @@ class EmailService:
             "subject": subject,
             "html": html_content,
         }
+        if text_content:
+            payload["text"] = text_content
+        if attachments:
+            payload["attachments"] = attachments
 
         try:
             async with httpx.AsyncClient() as client:

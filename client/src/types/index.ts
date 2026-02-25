@@ -811,6 +811,8 @@ export interface SlackConnectionStatus {
   slack_team_name: string | null;
   slack_team_domain: string | null;
   bot_user_id: string | null;
+  oauth_redirect_uri: string | null;
+  default_oauth_redirect_uri: string | null;
   last_tested_at: string | null;
   last_error: string | null;
   updated_at: string | null;

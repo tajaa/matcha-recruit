@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import secrets
+import string
 import time
 from typing import Any, Optional
 from uuid import uuid4
@@ -45,6 +47,23 @@ class GoogleWorkspaceService:
 
     def __init__(self, *, timeout_seconds: float = 20.0):
         self.timeout_seconds = timeout_seconds
+
+    @staticmethod
+    def _generate_initial_password(length: int = 20) -> str:
+        """Generate a strong temporary password for newly provisioned users."""
+        if length < 12:
+            length = 12
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
+        required = [
+            secrets.choice(string.ascii_lowercase),
+            secrets.choice(string.ascii_uppercase),
+            secrets.choice(string.digits),
+            secrets.choice("!@#$%^&*()-_=+"),
+        ]
+        remaining = [secrets.choice(alphabet) for _ in range(length - len(required))]
+        chars = required + remaining
+        secrets.SystemRandom().shuffle(chars)
+        return "".join(chars)
 
     async def test_connection(self, config: dict, secrets: dict) -> tuple[bool, Optional[str]]:
         mode = (config or {}).get("mode") or "mock"
@@ -238,6 +257,7 @@ class GoogleWorkspaceService:
                 "givenName": first_name,
                 "familyName": last_name,
             },
+            "password": self._generate_initial_password(),
             "changePasswordAtNextLogin": True,
         }
         if org_unit:

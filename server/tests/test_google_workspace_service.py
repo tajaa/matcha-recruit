@@ -68,3 +68,51 @@ def test_google_workspace_service_account_requires_delegated_admin():
                 {"email": "jane@example.com", "first_name": "Jane", "last_name": "Doe"},
             )
         )
+
+
+def test_google_workspace_api_token_sets_temporary_password(monkeypatch: pytest.MonkeyPatch):
+    captured_payload = {}
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+            self.text = ""
+            self.content = b"{}"
+
+        def json(self):
+            return self._payload
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url: str, headers=None, json=None):
+            if url.endswith("/users"):
+                captured_payload.update(json or {})
+                return _FakeResponse(201, {"id": "google-user-1", "primaryEmail": "jane@example.com"})
+            if "/groups/" in url and "/members" in url:
+                return _FakeResponse(201, {})
+            raise AssertionError(f"Unexpected POST URL {url}")
+
+    monkeypatch.setattr("app.matcha.services.google_workspace_service.httpx.AsyncClient", _FakeAsyncClient)
+
+    service = GoogleWorkspaceService()
+    result = asyncio.run(
+        service.provision_user(
+            {"mode": "api_token", "default_groups": ["engineering@example.com"]},
+            {"access_token": "token-123"},
+            {"email": "jane@example.com", "first_name": "Jane", "last_name": "Doe"},
+        )
+    )
+
+    assert isinstance(captured_payload.get("password"), str)
+    assert len(captured_payload["password"]) >= 12
+    assert captured_payload["changePasswordAtNextLogin"] is True
+    assert result["external_email"] == "jane@example.com"

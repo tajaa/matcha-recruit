@@ -56,7 +56,6 @@ function hydrateFormFromStatus(status: SlackConnectionStatus): SlackProvisioning
 export default function SlackProvisioning() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const expectedRedirectUri = `${window.location.origin}/api/provisioning/slack/oauth/callback`;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [oauthStarting, setOauthStarting] = useState(false);
@@ -104,6 +103,10 @@ export default function SlackProvisioning() {
   }, [searchParams, setSearchParams]);
 
   const currentStatus = status?.status || 'disconnected';
+  const expectedRedirectUri =
+    status?.oauth_redirect_uri ||
+    status?.default_oauth_redirect_uri ||
+    `${window.location.origin}/api/provisioning/slack/oauth/callback`;
   const statusBadgeText = useMemo(() => {
     if (loading) return 'Checking';
     if (!status || status.status === 'disconnected') return 'Not Connected';

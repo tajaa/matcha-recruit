@@ -127,14 +127,10 @@ def _default_slack_oauth_redirect_uri() -> str:
     return f"{settings.app_base_url.rstrip('/')}/api/provisioning/slack/oauth/callback"
 
 
-def _slack_oauth_redirect_uri() -> Optional[str]:
-    """Return explicitly configured Slack OAuth redirect URI, if provided.
-
-    If unset, OAuth requests omit redirect_uri and Slack uses the app's
-    configured redirect URLs.
-    """
+def _slack_oauth_redirect_uri() -> str:
+    """Return Slack OAuth redirect URI, preferring explicit env override."""
     explicit = (os.getenv("SLACK_OAUTH_REDIRECT_URI") or "").strip()
-    return explicit or None
+    return explicit or _default_slack_oauth_redirect_uri()
 
 
 def _build_slack_oauth_state(company_id: UUID) -> str:
@@ -244,6 +240,8 @@ class SlackConnectionStatus(BaseModel):
     slack_team_name: Optional[str] = None
     slack_team_domain: Optional[str] = None
     bot_user_id: Optional[str] = None
+    oauth_redirect_uri: Optional[str] = None
+    default_oauth_redirect_uri: Optional[str] = None
     last_tested_at: Optional[datetime] = None
     last_error: Optional[str] = None
     updated_at: Optional[datetime] = None
@@ -333,12 +331,16 @@ def _connection_status_payload(row) -> GoogleWorkspaceConnectionStatus:
 
 
 def _slack_connection_status_payload(row) -> SlackConnectionStatus:
+    resolved_redirect_uri = _slack_oauth_redirect_uri()
+    default_redirect_uri = _default_slack_oauth_redirect_uri()
     if not row:
         return SlackConnectionStatus(
             connected=False,
             status="disconnected",
             oauth_scopes=list(DEFAULT_SLACK_SCOPES),
             has_client_secret=False,
+            oauth_redirect_uri=resolved_redirect_uri,
+            default_oauth_redirect_uri=default_redirect_uri,
         )
 
     config = _json_object(row["config"])
@@ -360,6 +362,8 @@ def _slack_connection_status_payload(row) -> SlackConnectionStatus:
         slack_team_name=config.get("slack_team_name"),
         slack_team_domain=config.get("slack_team_domain"),
         bot_user_id=config.get("bot_user_id"),
+        oauth_redirect_uri=resolved_redirect_uri,
+        default_oauth_redirect_uri=default_redirect_uri,
         last_tested_at=row["last_tested_at"],
         last_error=row["last_error"],
         updated_at=row["updated_at"],
@@ -730,21 +734,20 @@ async def start_slack_oauth(
         scopes = _normalize_slack_scopes(config.get("oauth_scopes"))
 
     state_value = _build_slack_oauth_state(company_id)
-    configured_redirect_uri = _slack_oauth_redirect_uri()
+    oauth_redirect_uri = _slack_oauth_redirect_uri()
     authorize_params = {
         "client_id": client_id,
         "scope": ",".join(scopes),
         "state": state_value,
+        "redirect_uri": oauth_redirect_uri,
     }
-    if configured_redirect_uri:
-        authorize_params["redirect_uri"] = configured_redirect_uri
 
     query = urlencode(authorize_params)
     authorize_url = f"https://slack.com/oauth/v2/authorize?{query}"
     return SlackOAuthStartResponse(
         authorize_url=authorize_url,
         state=state_value,
-        redirect_uri=configured_redirect_uri,
+        redirect_uri=oauth_redirect_uri,
         default_redirect_uri=_default_slack_oauth_redirect_uri(),
     )
 
@@ -812,14 +815,13 @@ async def slack_oauth_callback(
         )
 
     try:
-        configured_redirect_uri = _slack_oauth_redirect_uri()
+        oauth_redirect_uri = _slack_oauth_redirect_uri()
         token_request_payload = {
             "client_id": client_id,
             "client_secret": client_secret,
             "code": code,
+            "redirect_uri": oauth_redirect_uri,
         }
-        if configured_redirect_uri:
-            token_request_payload["redirect_uri"] = configured_redirect_uri
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.post(

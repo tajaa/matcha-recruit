@@ -1,3 +1,4 @@
+import base64
 import asyncio
 import html
 import json
@@ -131,6 +132,17 @@ def _coerce_state_recipient_emails(state: dict) -> list[str]:
     return normalize_recipient_emails([str(item) for item in raw])
 
 
+def _coerce_offer_draft_recipient_emails(state: dict) -> list[str]:
+    values: list[str] = []
+    raw_recipients = state.get("recipient_emails")
+    if isinstance(raw_recipients, list):
+        values.extend(str(item) for item in raw_recipients if str(item).strip())
+    candidate_email = state.get("candidate_email")
+    if isinstance(candidate_email, str) and candidate_email.strip():
+        values.append(candidate_email)
+    return normalize_recipient_emails(values)
+
+
 def _row_to_review_request_status(row: dict) -> dict:
     status = str(row.get("status") or "pending")
     if status not in VALID_REVIEW_REQUEST_STATUSES:
@@ -212,6 +224,39 @@ def _render_review_request_email_html(
       </p>
       <p style="margin: 0; color: #6b7280; font-size: 12px;">
         If the button does not work, open this link directly: {response_url}
+      </p>
+    </div>
+  </body>
+</html>
+"""
+
+
+def _render_offer_letter_draft_email_html(
+    *,
+    company_name: str,
+    candidate_name: str,
+    position_title: str,
+    custom_message: Optional[str],
+) -> str:
+    safe_company_name = html.escape(company_name.strip() or "Your HR Team")
+    safe_candidate_name = html.escape(candidate_name.strip() or "Candidate")
+    safe_position_title = html.escape(position_title.strip() or "Position")
+    message_block = (
+        f"<p>{html.escape(custom_message.strip())}</p>"
+        if custom_message and custom_message.strip()
+        else ""
+    )
+    return f"""
+<!DOCTYPE html>
+<html>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #111827; line-height: 1.5;">
+    <div style="max-width: 560px; margin: 0 auto; padding: 20px;">
+      <h2 style="margin: 0 0 12px;">Offer Letter Draft for Review</h2>
+      <p style="margin: 0 0 12px;">{safe_company_name} shared an offer letter draft for <strong>{safe_candidate_name}</strong> (<strong>{safe_position_title}</strong>).</p>
+      {message_block}
+      <p style="margin: 0 0 12px;">The draft PDF is attached to this email for your review.</p>
+      <p style="margin: 0; color: #6b7280; font-size: 12px;">
+        Sent from Matcha Work.
       </p>
     </div>
   </body>
@@ -1095,6 +1140,149 @@ async def save_offer_letter_draft(thread_id: UUID, company_id: UUID) -> dict:
                 "offer_status": saved["status"],
                 "saved_at": saved["updated_at"],
             }
+
+
+async def send_offer_letter_draft(
+    thread_id: UUID,
+    company_id: UUID,
+    recipient_emails: list[str],
+    custom_message: Optional[str] = None,
+) -> dict:
+    async with get_connection() as conn:
+        thread_row = await conn.fetchrow(
+            """
+            SELECT t.title, t.task_type, t.status, t.current_state, t.version, c.name AS company_name
+            FROM mw_threads t
+            JOIN companies c ON c.id = t.company_id
+            WHERE t.id=$1 AND t.company_id=$2
+            """,
+            thread_id,
+            company_id,
+        )
+    if thread_row is None:
+        raise ValueError("Thread not found")
+    if thread_row["task_type"] != "offer_letter":
+        raise ValueError("Draft sending is only available for offer letter threads")
+    if thread_row["status"] == "archived":
+        raise ValueError("Cannot send draft from an archived thread")
+    if thread_row["status"] == "finalized":
+        raise ValueError("Thread is finalized. Draft sending is only available before finalize")
+
+    state = _parse_jsonb(thread_row["current_state"])
+    normalized_recipients = normalize_recipient_emails(recipient_emails)
+    if not normalized_recipients:
+        normalized_recipients = _coerce_offer_draft_recipient_emails(state)
+    if not normalized_recipients:
+        raise ValueError("At least one valid recipient email is required")
+    if len(normalized_recipients) > 20:
+        raise ValueError("A maximum of 20 recipients is supported per draft send")
+
+    # Reuse existing draft-save validations and persist the latest state first.
+    draft_result = await save_offer_letter_draft(thread_id, company_id)
+
+    version = int(thread_row["version"] or 0)
+    pdf_url = await generate_pdf(state, thread_id, version, is_draft=True)
+    if not pdf_url:
+        raise ValueError("Unable to generate draft PDF")
+
+    try:
+        pdf_bytes = await get_storage().download_file(pdf_url)
+    except Exception as exc:
+        logger.warning("Failed to download Matcha Work draft PDF for thread %s: %s", thread_id, exc)
+        raise ValueError("Unable to load draft PDF for email attachment") from exc
+
+    attachment_filename = f"offer-letter-draft-v{version}.pdf"
+    attachment = {
+        "filename": attachment_filename,
+        "content": base64.b64encode(pdf_bytes).decode("ascii"),
+        "disposition": "attachment",
+    }
+
+    candidate_name = str(state.get("candidate_name") or "").strip()
+    position_title = str(state.get("position_title") or "").strip()
+    company_name = str(thread_row["company_name"] or "").strip() or "Your HR Team"
+
+    subject = (
+        f"Offer letter draft for review — {candidate_name} ({position_title})"
+        if candidate_name and position_title
+        else "Offer letter draft for review"
+    )
+    html_content = _render_offer_letter_draft_email_html(
+        company_name=company_name,
+        candidate_name=candidate_name,
+        position_title=position_title,
+        custom_message=custom_message,
+    )
+    text_content = (
+        f"{company_name} shared an offer letter draft for {candidate_name or 'a candidate'} "
+        f"({position_title or 'position attached'}). The draft PDF is attached for review."
+    )
+
+    email_service = EmailService()
+    sent_count = 0
+    failed_count = 0
+    recipients: list[dict] = []
+
+    for recipient_email in normalized_recipients:
+        status_value = "failed"
+        last_error = None
+        if not email_service.is_configured():
+            last_error = "email_service_not_configured"
+        else:
+            try:
+                sent = await email_service.send_email(
+                    to_email=recipient_email,
+                    to_name=None,
+                    subject=subject,
+                    html_content=html_content,
+                    text_content=text_content,
+                    attachments=[attachment],
+                )
+                if sent:
+                    status_value = "sent"
+                else:
+                    last_error = "send_failed"
+            except Exception as exc:
+                logger.warning(
+                    "Failed to send Matcha Work offer draft email to %s: %s",
+                    recipient_email,
+                    exc,
+                )
+                last_error = "send_exception"
+
+        if status_value == "sent":
+            sent_count += 1
+        else:
+            failed_count += 1
+        recipients.append(
+            {
+                "email": recipient_email,
+                "status": status_value,
+                "last_error": last_error,
+            }
+        )
+
+    await add_message(
+        thread_id,
+        "system",
+        (
+            f"Offer letter draft email send attempted: {sent_count} sent, "
+            f"{failed_count} failed ({len(normalized_recipients)} recipient(s))."
+        ),
+        version_created=None,
+    )
+
+    return {
+        "thread_id": thread_id,
+        "version": version,
+        "pdf_url": pdf_url,
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "recipients": recipients,
+        "linked_offer_letter_id": draft_result["linked_offer_letter_id"],
+        "offer_status": draft_result["offer_status"],
+        "saved_at": draft_result["saved_at"],
+    }
 
 
 async def finalize_thread(thread_id: UUID, company_id: UUID) -> dict:
