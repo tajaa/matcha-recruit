@@ -20,6 +20,16 @@ def _parse_jsonb(value) -> dict:
     return {}
 
 
+def _default_state_for_task_type(task_type: str) -> dict:
+    normalized_task_type = "review" if task_type == "review" else "offer_letter"
+    if normalized_task_type == "review":
+        return {
+            "review_title": "Anonymous Performance Review",
+            "anonymized": True,
+        }
+    return {}
+
+
 def _parse_date_str(date_str: str) -> Optional[datetime]:
     """Try common date formats."""
     formats = [
@@ -124,12 +134,13 @@ async def create_thread(
     task_type: str = "offer_letter",
 ) -> dict:
     normalized_task_type = "review" if task_type == "review" else "offer_letter"
+    default_state = _default_state_for_task_type(normalized_task_type)
     async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                INSERT INTO mw_threads(company_id, created_by, title, task_type)
-                VALUES($1, $2, $3, $4)
+                INSERT INTO mw_threads(company_id, created_by, title, task_type, current_state)
+                VALUES($1, $2, $3, $4, $5::jsonb)
                 RETURNING id, company_id, created_by, title, task_type, status,
                           current_state, version, is_pinned, linked_offer_letter_id,
                           created_at, updated_at
@@ -138,6 +149,7 @@ async def create_thread(
                 user_id,
                 title,
                 normalized_task_type,
+                json.dumps(default_state),
             )
             await _upsert_element_from_thread_row(conn, dict(row))
         d = dict(row)
@@ -356,17 +368,19 @@ async def set_thread_task_type(
     task_type: str,
 ) -> Optional[dict]:
     normalized_task_type = "review" if task_type == "review" else "offer_letter"
+    default_state = _default_state_for_task_type(normalized_task_type)
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
             UPDATE mw_threads
-            SET task_type=$1, updated_at=NOW()
-            WHERE id=$2 AND company_id=$3
+            SET task_type=$1, current_state=$2::jsonb, updated_at=NOW()
+            WHERE id=$3 AND company_id=$4
             RETURNING id, company_id, created_by, title, task_type, status,
                       current_state, version, is_pinned, linked_offer_letter_id,
                       created_at, updated_at
             """,
             normalized_task_type,
+            json.dumps(default_state),
             thread_id,
             company_id,
         )

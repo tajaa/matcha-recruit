@@ -775,9 +775,17 @@ export default function MatchaWorkThread() {
                     toItemList(thread.current_state.strengths).length === 0 &&
                     toItemList(thread.current_state.growth_areas).length === 0 &&
                     !thread.current_state.next_steps && (
-                      <p className="text-sm text-zinc-500">
-                        Review summary will appear here as details are captured.
-                      </p>
+                      <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/40 p-3">
+                        <p className="text-xs uppercase tracking-wider text-zinc-500 mb-2">
+                          Starter Template
+                        </p>
+                        <ul className="space-y-1 text-sm text-zinc-400">
+                          <li>Summary: Add a concise overview of overall performance.</li>
+                          <li>Strengths: List key wins, impact, and standout behaviors.</li>
+                          <li>Growth Areas: Add focused improvement opportunities.</li>
+                          <li>Next Steps: Add action items, owner, and check-in timing.</li>
+                        </ul>
+                      </div>
                     )}
                 </div>
               </div>
