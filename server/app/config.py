@@ -72,7 +72,7 @@ class Settings:
 
     # Gemini API Rate Limits
     gemini_hourly_limit: int = 15
-    gemini_daily_limit: int = 25
+    gemini_daily_limit: int = 50
 
 
 # Global settings instance
