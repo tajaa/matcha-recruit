@@ -91,7 +91,26 @@ const RATE_TYPE_LABELS: Record<string, string> = {
     small_employer: 'Small Employer',
 };
 
-function getRequirementEmptyStateCopy(category: string): string {
+function normalizeCategoryKey(category: string): string {
+    return category.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function getRequirementEmptyStateCopy(category: string, sourceCoverageMissing: boolean = false): string {
+    const sourceCoverageCopy = 'Source-of-truth is currently missing this category for this jurisdiction. Run Admin > Jurisdictions research refresh, then sync this location again.';
+    if (sourceCoverageMissing) {
+        switch (category) {
+            case 'minimum_wage':
+                return `Coverage pending. This section should include general minimum wage, tipped/tip-credit treatment, and the exempt salary threshold. ${sourceCoverageCopy}`;
+            case 'final_pay':
+                return `Coverage pending. This section should capture final pay timing for voluntary and involuntary separations, including payout rules for accrued sick/vacation balances. ${sourceCoverageCopy}`;
+            case 'minor_work_permit':
+                return `Coverage pending. This section should capture minor work permit/certificate requirements and any age- or hour-based limits. ${sourceCoverageCopy}`;
+            case 'scheduling_reporting':
+                return `Coverage pending. This section should capture fair-workweek/scheduling-notice and reporting-time rules when they apply. ${sourceCoverageCopy}`;
+            default:
+                return `Coverage pending. ${sourceCoverageCopy}`;
+        }
+    }
     switch (category) {
         case 'minimum_wage':
             return 'Coverage pending. This section should include general minimum wage, tipped/tip-credit treatment, and the exempt salary threshold.';
@@ -173,6 +192,29 @@ export function Compliance() {
     const { checkInProgress, checkMessages, runComplianceCheck } = complianceCheckHook;
     const { orderedRequirementCategories } = complianceReqHook;
     const { jurisdictionSearch, setJurisdictionSearch, filteredJurisdictions } = jurisdictionSearchHook;
+    const latestMissingCoverageCategories = useMemo(() => {
+        for (let index = checkMessages.length - 1; index >= 0; index -= 1) {
+            const msg = checkMessages[index];
+            if (!Array.isArray(msg.missing_categories) || msg.missing_categories.length === 0) continue;
+            const normalized = msg.missing_categories
+                .map((cat) => normalizeCategoryKey(String(cat)))
+                .filter(Boolean);
+            if (normalized.length > 0) {
+                return Array.from(new Set(normalized));
+            }
+        }
+        return [] as string[];
+    }, [checkMessages]);
+    const missingCoverageCategorySet = useMemo(
+        () => new Set(latestMissingCoverageCategories),
+        [latestMissingCoverageCategories],
+    );
+    const latestMissingCoverageLabel = useMemo(
+        () => latestMissingCoverageCategories
+            .map((cat) => COMPLIANCE_CATEGORY_LABELS[cat] || cat)
+            .join(', '),
+        [latestMissingCoverageCategories],
+    );
 
     // UI-specific state (not in hooks)
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -973,7 +1015,18 @@ export function Compliance() {
                                         </div>
                                     )
                                 ) : activeTab === 'requirements' ? (
-                                    loadingRequirements ? (
+                                    <>
+                                    {latestMissingCoverageCategories.length > 0 && (
+                                        <div className="mb-4 p-4 border border-amber-500/30 bg-amber-500/10 rounded-sm">
+                                            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300">
+                                                Source Coverage Missing
+                                            </p>
+                                            <p className="mt-2 text-[11px] text-amber-100 leading-relaxed">
+                                                This jurisdiction is still missing verified source-of-truth coverage for: <span className="font-semibold">{latestMissingCoverageLabel}</span>. Run Admin &gt; Jurisdictions research refresh, then sync this location again.
+                                            </p>
+                                        </div>
+                                    )}
+                                    {loadingRequirements ? (
                                         <div className="space-y-4">
                                             {[1, 2, 3].map(i => (
                                                 <div key={i} className="h-16 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
@@ -1014,8 +1067,12 @@ export function Compliance() {
                                                                     );
                                                                 })()
                                                             ) : (
-                                                                <span className="px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] bg-zinc-900 text-zinc-500 border-zinc-800">
-                                                                    Coverage Pending
+                                                                <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
+                                                                    missingCoverageCategorySet.has(category)
+                                                                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                                                        : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                                                                }`}>
+                                                                    {missingCoverageCategorySet.has(category) ? 'Missing Source Coverage' : 'Coverage Pending'}
                                                                 </span>
                                                             )}
                                                         </div>
@@ -1039,7 +1096,7 @@ export function Compliance() {
                                                                 <div className="divide-y divide-white/5 px-2">
                                                                     {reqs.length === 0 ? (
                                                                         <div className="p-6 text-zinc-500 text-xs leading-relaxed font-light">
-                                                                            {getRequirementEmptyStateCopy(category)}
+                                                                            {getRequirementEmptyStateCopy(category, missingCoverageCategorySet.has(category))}
                                                                         </div>
                                                                     ) : (
                                                                         reqs.map(req => (
@@ -1104,7 +1161,8 @@ export function Compliance() {
                                                 </div>
                                             ))}
                                         </div>
-                                    )
+                                    )}
+                                    </>
                                 ) : activeTab === 'alerts' ? (
                                     loadingAlerts ? (
                                         <div className="space-y-3">

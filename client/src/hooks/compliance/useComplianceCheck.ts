@@ -10,6 +10,8 @@ export interface ComplianceCheckMessage {
   new?: number;
   updated?: number;
   alerts?: number;
+  missing_categories?: string[];
+  jurisdiction_id?: string;
 }
 
 export function useComplianceCheck(selectedLocationId: string | null, companyId: string | null, onComplete: () => void) {
