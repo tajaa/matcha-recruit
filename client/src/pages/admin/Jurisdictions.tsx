@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { adminJurisdictions, adminSchedulers } from '../../api/client';
+import { adminJurisdictions, adminSchedulers, adminPlatformSettings } from '../../api/client';
 import type {
   Jurisdiction, JurisdictionTotals, JurisdictionDetail, JurisdictionCreate,
   JurisdictionRequirement, JurisdictionLegislation, JurisdictionLocation,
@@ -365,20 +365,23 @@ export function Jurisdictions() {
   } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [jurisdictionModelMode, setJurisdictionModelMode] = useState<'light' | 'heavy'>('light');
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const [jData, schedulerData, statsData] = await Promise.all([
+      const [jData, schedulerData, statsData, platformSettings] = await Promise.all([
         adminJurisdictions.list(),
         adminSchedulers.list(),
         adminSchedulers.stats(),
+        adminPlatformSettings.get(),
       ]);
       setJurisdictions(jData.jurisdictions);
       setTotals(jData.totals);
       setSchedulers(schedulerData);
       setStats(statsData);
+      setJurisdictionModelMode(platformSettings.jurisdiction_research_model_mode as 'light' | 'heavy');
     } catch (err) {
       console.error('Failed to fetch data:', err);
       setError('Failed to load data');
@@ -893,6 +896,22 @@ export function Jurisdictions() {
           <button onClick={() => setNotice(null)} className="text-[10px] uppercase tracking-wider underline hover:text-emerald-200 shrink-0">Dismiss</button>
         </div>
       )}
+
+      {/* Model mode banner */}
+      <div className="px-6 py-2 bg-zinc-900/60 border-b border-white/5 flex items-center gap-2 text-[10px] font-mono tracking-wider text-zinc-500">
+        <span className="uppercase">Compliance Research AI</span>
+        <span className="text-zinc-600">·</span>
+        <span className={jurisdictionModelMode === 'heavy' ? 'text-amber-400 font-bold' : 'text-zinc-400'}>
+          {jurisdictionModelMode === 'heavy' ? 'gemini-3.1-pro-preview' : 'gemini-3-flash-preview'}
+        </span>
+        <span className={`ml-1 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-widest ${
+          jurisdictionModelMode === 'heavy'
+            ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+            : 'bg-zinc-800 text-zinc-500 border border-white/5'
+        }`}>
+          {jurisdictionModelMode}
+        </span>
+      </div>
 
       {(topMetroRunning || topMetroRows.length > 0 || topMetroSummary) && (
         <div className="border border-blue-500/20 bg-blue-500/[0.04]">

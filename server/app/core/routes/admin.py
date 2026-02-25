@@ -30,7 +30,8 @@ from ..services.rate_limiter import get_rate_limiter
 from ..services.auth import hash_password
 from ..services.platform_settings import (
     get_visible_features, prime_visible_features_cache,
-    get_matcha_work_model_mode, prime_matcha_work_model_mode_cache
+    get_matcha_work_model_mode, prime_matcha_work_model_mode_cache,
+    get_jurisdiction_research_model_mode, prime_jurisdiction_research_model_mode_cache,
 )
 from ...config import get_settings
 
