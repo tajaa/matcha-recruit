@@ -21,92 +21,69 @@ OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
 REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())
 WORKBOOK_FIELDS = list(WorkbookDocument.model_fields.keys())
 
-OFFER_LETTER_SYSTEM_PROMPT_TEMPLATE = """You are an offer letter assistant. Help the user create and refine a professional job offer letter.
+SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
+SUPPORTED_AI_SKILLS = {"offer_letter", "review", "workbook", "none"}
+SUPPORTED_AI_OPERATIONS = {
+    "create",
+    "update",
+    "save_draft",
+    "finalize",
+    "send_requests",
+    "track",
+    "none",
+}
 
-Current document state (JSON):
-{current_state}
+MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE = """You are Matcha Work, an HR copilot for US employers.
 
-Your job:
-1. Understand what the user wants to add, change, or clarify about the offer letter.
-2. Extract any structured field updates from the user's message.
-3. Reply conversationally, confirming changes and asking for any missing required information.
+Mission:
+1) Provide high-quality general HR guidance for US teams.
+2) Detect and execute supported Matcha Work skills from natural language.
+3) Ask concise clarifying questions when required inputs are missing.
+4) Never block normal Q&A just because no skill is invoked.
 
-Respond ONLY with valid JSON in this exact format:
+Current thread context:
+- current_task_type: {current_task_type}
+- current_state (JSON): {current_state}
+- valid_update_fields_for_current_task_type: {valid_fields}
+
+Supported skills:
+- offer_letter: create/update offer letter content, save_draft, finalize
+- review: create/update anonymized review content, collect recipient_emails, send review requests, track responses
+- workbook: create/update HR workbook documents and section content
+
+Mode selection:
+- mode=skill when user clearly asks for a supported action.
+- mode=general for informational/advisory HR questions.
+- mode=clarify when action is requested but required details are missing.
+- mode=refuse only for unsafe/disallowed or unsupported actions.
+
+US HR policy:
+- Default to US federal baseline.
+- For legal/compliance-sensitive guidance, ask for state before definitive recommendations.
+- For high-risk topics (termination, discrimination, wage-hour classification, leave, investigations):
+  - surface uncertainty if facts are missing
+  - provide practical next steps
+  - include a short "not legal advice" caution
+- Do not fabricate statutes, agencies, case law, or deadlines.
+
+Output constraints:
+- Return ONLY valid JSON, no markdown, no prose outside JSON.
+- JSON format:
 {{
-  "reply": "Your conversational response to the user",
-  "updates": {{
-    "field_name": "value"
-  }}
+  "mode": "skill|general|clarify|refuse",
+  "skill": "offer_letter|review|workbook|none",
+  "operation": "create|update|save_draft|finalize|send_requests|track|none",
+  "confidence": 0.0,
+  "updates": {{}},
+  "missing_fields": [],
+  "reply": ""
 }}
-
-Rules:
-- Only include fields in "updates" that should actually be changed based on the user's message
-- If no fields should be updated, use an empty object: "updates": {{}}
-- Always include both "reply" and "updates" keys
-- Valid field names: {valid_fields}
-- For dates, use ISO format (YYYY-MM-DD) or a human-readable format like "March 1, 2026"
-- For salary, use a descriptive string like "$180,000/year" or "$90/hour"
-- Return only the JSON object — no markdown fences, no extra text
-"""
-
-REVIEW_SYSTEM_PROMPT_TEMPLATE = """You are an anonymized performance review assistant. Help the user draft a one-off anonymous review.
-
-Current review state (JSON):
-{current_state}
-
-Your job:
-1. Understand what the user wants to add, change, or clarify in the anonymous review.
-2. Extract structured review updates from the user's message.
-3. Reply conversationally, confirming changes and suggesting any missing details.
-
-Respond ONLY with valid JSON in this exact format:
-{{
-  "reply": "Your conversational response to the user",
-  "updates": {{
-    "field_name": "value"
-  }}
-}}
-
-Rules:
-- Only include fields in "updates" that should actually be changed
-- If no fields should be updated, use an empty object: "updates": {{}}
-- Always include both "reply" and "updates" keys
-- Valid field names: {valid_fields}
-- Keep all output professional and anonymized by default
-- For overall_rating use an integer from 1-5
-- If recipient_emails is empty or missing, ask the user to provide the email addresses to request feedback from
-- When the user provides one or more emails, set recipient_emails as a JSON array of normalized email strings
-- Do not invent or infer recipient emails that the user did not provide
-- Return only the JSON object — no markdown fences, no extra text
-"""
-
-WORKBOOK_SYSTEM_PROMPT_TEMPLATE = """You are an HR workbook assistant. Help the user create and refine a structured HR document, manual, or workbook.
-
-Current workbook state (JSON):
-{current_state}
-
-Your job:
-1. Understand the user's objective for this workbook (e.g., orientation guide, manager playbook, culture memo).
-2. Extract structured updates, including the title, industry, objective, and a list of sections.
-3. Reply conversationally, confirming changes and suggesting new sections or refinements based on best practices.
-
-Respond ONLY with valid JSON in this exact format:
-{{
-  "reply": "Your conversational response to the user",
-  "updates": {{
-    "field_name": "value"
-  }}
-}}
-
-Rules:
-- Only include fields in "updates" that should actually be changed
-- If no fields should be updated, use an empty object: "updates": {{}}
-- Always include both "reply" and "updates" keys
-- Valid field names: {valid_fields}
-- For "sections", ALWAYS return the COMPLETE list of sections (existing + new/modified). The sections array is replaced in full on every update — never return a partial list or you will erase prior content.
-- Each section is an object with "title" (string) and "content" (Markdown allowed)
-- Suggest sections that align with the user's industry and objective
-- Return only the JSON object — no markdown fences, no extra text
+- "updates" may include only keys from valid_update_fields_for_current_task_type.
+- If no state changes are needed, set "updates": {{}}.
+- If mode != skill, use "operation": "none" unless a clarify step for skill action is needed.
+- recipient_emails must be lowercase email strings in an array.
+- overall_rating must be an integer 1-5.
+- For workbook "sections", ALWAYS return the full sections list (not a partial patch).
 """
 
 
@@ -137,6 +114,11 @@ async def _get_model(settings) -> str:
 class AIResponse:
     assistant_reply: str
     structured_update: dict | None = field(default=None)
+    mode: str = "general"
+    skill: str = "none"
+    operation: str = "none"
+    confidence: float = 0.0
+    missing_fields: list[str] = field(default_factory=list)
     token_usage: dict | None = field(default=None)
 
 
@@ -184,7 +166,14 @@ class GeminiProvider(MatchaWorkAIProvider):
 
         try:
             response = await asyncio.wait_for(
-                asyncio.to_thread(self._call_gemini, system_prompt, contents, valid_fields, model),
+                asyncio.to_thread(
+                    self._call_gemini,
+                    system_prompt,
+                    contents,
+                    valid_fields,
+                    model,
+                    _normalize_task_type(task_type),
+                ),
                 timeout=GEMINI_CALL_TIMEOUT,
             )
             return response
@@ -201,7 +190,14 @@ class GeminiProvider(MatchaWorkAIProvider):
                 structured_update=None,
             )
 
-    def _call_gemini(self, system_prompt: str, contents: list, valid_fields: list[str], model: str) -> AIResponse:
+    def _call_gemini(
+        self,
+        system_prompt: str,
+        contents: list,
+        valid_fields: list[str],
+        model: str,
+        fallback_task_type: str,
+    ) -> AIResponse:
         response = self.client.models.generate_content(
             model=model,
             contents=contents,
@@ -225,20 +221,60 @@ class GeminiProvider(MatchaWorkAIProvider):
             return AIResponse(
                 assistant_reply=raw_text or "I processed your request.",
                 structured_update=None,
+                mode="general",
+                skill="none",
+                operation="none",
             )
 
         reply = parsed.get("reply", "Done.")
-        updates = parsed.get("updates", {})
-
-        if isinstance(updates, dict):
+        raw_updates = parsed.get("updates", {})
+        if isinstance(raw_updates, dict):
             allowed = set(valid_fields)
-            updates = {k: v for k, v in updates.items() if k in allowed}
+            updates = {k: v for k, v in raw_updates.items() if k in allowed}
         else:
             updates = {}
+
+        raw_mode = str(parsed.get("mode") or "").strip().lower()
+        mode = raw_mode if raw_mode in SUPPORTED_AI_MODES else ""
+
+        # Backward compatibility with older reply/updates-only JSON.
+        if not mode:
+            mode = "skill" if updates else "general"
+
+        raw_skill = str(parsed.get("skill") or "").strip().lower()
+        skill = raw_skill if raw_skill in SUPPORTED_AI_SKILLS else ""
+        if not skill:
+            skill = fallback_task_type if mode == "skill" else "none"
+
+        raw_operation = str(parsed.get("operation") or "").strip().lower()
+        operation = raw_operation if raw_operation in SUPPORTED_AI_OPERATIONS else ""
+        if not operation:
+            if mode == "skill":
+                operation = "update" if updates else "track"
+            else:
+                operation = "none"
+
+        raw_confidence = parsed.get("confidence")
+        try:
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError):
+            confidence = 0.8 if mode == "skill" else 0.5
+        confidence = max(0.0, min(1.0, confidence))
+
+        raw_missing_fields = parsed.get("missing_fields", [])
+        if isinstance(raw_missing_fields, list):
+            missing_fields = [str(item).strip() for item in raw_missing_fields if str(item).strip()]
+        else:
+            missing_fields = []
 
         return AIResponse(
             assistant_reply=reply,
             structured_update=updates if updates else None,
+            mode=mode,
+            skill=skill,
+            operation=operation,
+            confidence=confidence,
+            missing_fields=missing_fields,
             token_usage=self._extract_usage_metadata(response, model),
         )
 
@@ -273,22 +309,16 @@ class GeminiProvider(MatchaWorkAIProvider):
         normalized_task_type = _normalize_task_type(task_type)
         if normalized_task_type == "review":
             valid_fields = REVIEW_FIELDS
-            system_prompt = REVIEW_SYSTEM_PROMPT_TEMPLATE.format(
-                current_state=json.dumps(current_state, indent=2, default=str),
-                valid_fields=", ".join(valid_fields),
-            )
         elif normalized_task_type == "workbook":
             valid_fields = WORKBOOK_FIELDS
-            system_prompt = WORKBOOK_SYSTEM_PROMPT_TEMPLATE.format(
-                current_state=json.dumps(current_state, indent=2, default=str),
-                valid_fields=", ".join(valid_fields),
-            )
         else:
             valid_fields = OFFER_LETTER_FIELDS
-            system_prompt = OFFER_LETTER_SYSTEM_PROMPT_TEMPLATE.format(
-                current_state=json.dumps(current_state, indent=2, default=str),
-                valid_fields=", ".join(valid_fields),
-            )
+
+        system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
+            current_task_type=normalized_task_type,
+            current_state=json.dumps(current_state, indent=2, default=str),
+            valid_fields=", ".join(valid_fields),
+        )
 
         contents = []
         for msg in windowed:

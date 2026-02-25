@@ -107,7 +107,7 @@ export default function MatchaWorkChats() {
             Stored chats for your company. Pin important threads to keep them at the top.
           </p>
           <p className="text-xs text-zinc-500 mt-2">
-            Skills: offer letters, anonymized reviews, HR workbooks. Ask naturally. Unsupported requests return: "I can't do that."
+            Default mode: US HR chat. Skills: offer letters, anonymized reviews, HR workbooks. Ask naturally and Matcha will route supported commands.
           </p>
         </div>
 

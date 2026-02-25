@@ -700,7 +700,7 @@ export default function MatchaWorkThread() {
                   Tell me what you need in natural language.
                 </p>
                 <div className="mt-3 text-[11px] text-zinc-500 max-w-sm">
-                  Skills: offer letters, anonymized reviews, HR workbooks. Unsupported requests will return: "I can't do that."
+                  Default mode: US HR chat. Skills: offer letters, anonymized reviews, HR workbooks. Ask naturally and Matcha will route commands when supported.
                 </div>
                 <div className="mt-1 text-[11px] text-zinc-600 max-w-sm">
                   For review workflows, include recipient emails and use Send Requests to distribute links.
