@@ -830,6 +830,40 @@ async def _try_load_state_requirements(
     return None
 
 
+async def _fill_missing_categories_from_parents(
+    conn, jurisdiction_id: UUID, requirements: List[Dict], threshold_days: int
+) -> bool:
+    """Attempt to fill missing categories from county or state caches. Returns True if any gaps were filled."""
+    missing = _missing_required_categories(requirements)
+    if not missing:
+        return False
+    
+    filled_any = False
+    
+    # Try county
+    county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, threshold_days)
+    if county_reqs:
+        target_set = {_normalize_category(c) or c for c in missing}
+        fill = [r for r in county_reqs if (_normalize_category(r.get("category")) or r.get("category")) in target_set]
+        if fill:
+            requirements.extend(fill)
+            filled_any = True
+            missing = _missing_required_categories(requirements)
+            if not missing:
+                return True
+                
+    # Try state
+    state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, threshold_days)
+    if state_reqs:
+        target_set = {_normalize_category(c) or c for c in missing}
+        fill = [r for r in state_reqs if (_normalize_category(r.get("category")) or r.get("category")) in target_set]
+        if fill:
+            requirements.extend(fill)
+            filled_any = True
+            
+    return filled_any
+
+
 async def _get_county_jurisdiction_id(conn, city_jurisdiction_id: UUID) -> Optional[UUID]:
     """Get the county jurisdiction ID from parent_id chain."""
     row = await conn.fetchrow(
@@ -2059,26 +2093,20 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
         req_dicts = None
         if has_repository_rows:
             req_dicts = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+            await _fill_missing_categories_from_parents(conn, jurisdiction_id, req_dicts, 7)
         else:
             if has_local_ordinance is False:
                 county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, 7)
                 if county_reqs:
                     req_dicts = county_reqs
-                    # If county is missing categories, try filling gaps from state
-                    missing_from_county = _missing_required_categories(req_dicts)
-                    if missing_from_county:
-                        state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, 7)
-                        if state_reqs:
-                            target_set = {_normalize_category(c) or c for c in missing_from_county}
-                            state_fill = [
-                                r for r in state_reqs 
-                                if (_normalize_category(r.get("category")) or r.get("category")) in target_set
-                            ]
-                            req_dicts.extend(state_fill)
                 else:
                     state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, 7)
                     if state_reqs:
                         req_dicts = state_reqs
+                
+                # If we loaded from county or state, fill any remaining gaps from parents
+                if req_dicts:
+                    await _fill_missing_categories_from_parents(conn, jurisdiction_id, req_dicts, 7)
 
         if req_dicts:
             # Normalize and filter (with preemption awareness) before cloning.
@@ -2229,6 +2257,12 @@ async def run_compliance_check_stream(
                 yield {"type": "repository", "message": f"Loading compliance data for {location_name}..."}
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+                
+                # Fill any gaps from state or county, even if the city has its own local ordinances
+                filled = await _fill_missing_categories_from_parents(conn, jurisdiction_id, requirements, location.auto_check_interval_days or 7)
+                if filled:
+                    yield {"type": "repository", "message": f"Filled missing categories from state/county data..."}
+                    
                 missing_categories = _missing_required_categories(requirements)
                 if missing_categories:
                     research_categories = missing_categories
@@ -2250,24 +2284,12 @@ async def run_compliance_check_stream(
                 if county_reqs:
                     yield {"type": "repository", "message": f"Using {location.county or 'county'} data for {location.city}..."}
                     requirements = county_reqs
+                    
+                    filled = await _fill_missing_categories_from_parents(conn, jurisdiction_id, requirements, location.auto_check_interval_days or 7)
+                    if filled:
+                        yield {"type": "repository", "message": f"Filled missing categories from state data..."}
+                    
                     missing_categories = _missing_required_categories(requirements)
-                    
-                    if missing_categories:
-                        # Try filling missing categories from state before live research
-                        state_reqs = await _try_load_state_requirements(
-                            conn, jurisdiction_id, location.auto_check_interval_days or 7
-                        )
-                        if state_reqs:
-                            target_set = {_normalize_category(c) or c for c in missing_categories}
-                            state_fill = [
-                                r for r in state_reqs 
-                                if (_normalize_category(r.get("category")) or r.get("category")) in target_set
-                            ]
-                            if state_fill:
-                                requirements.extend(state_fill)
-                                yield {"type": "repository", "message": f"Filled missing categories from state data..."}
-                                missing_categories = _missing_required_categories(requirements)
-                    
                     if missing_categories:
                         research_categories = missing_categories
                         cached_requirements_for_merge = list(requirements)
@@ -2284,6 +2306,9 @@ async def run_compliance_check_stream(
                     if state_reqs:
                         yield {"type": "repository", "message": f"Using state data for {location.city}..."}
                         requirements = state_reqs
+                        
+                        filled = await _fill_missing_categories_from_parents(conn, jurisdiction_id, requirements, location.auto_check_interval_days or 7)
+                        
                         missing_categories = _missing_required_categories(requirements)
                         if missing_categories:
                             research_categories = missing_categories
@@ -3481,6 +3506,9 @@ async def run_compliance_check_background(
             elif await _is_jurisdiction_fresh(conn, jurisdiction_id, threshold):
                 j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
                 requirements = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+                
+                await _fill_missing_categories_from_parents(conn, jurisdiction_id, requirements, threshold)
+                
                 missing_categories = _missing_required_categories(requirements)
                 if missing_categories:
                     research_categories = missing_categories
@@ -3497,20 +3525,10 @@ async def run_compliance_check_background(
                 county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, threshold)
                 if county_reqs:
                     requirements = county_reqs
-                    missing_categories = _missing_required_categories(requirements)
                     
-                    if missing_categories:
-                        state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, threshold)
-                        if state_reqs:
-                            target_set = {_normalize_category(c) or c for c in missing_categories}
-                            state_fill = [
-                                r for r in state_reqs 
-                                if (_normalize_category(r.get("category")) or r.get("category")) in target_set
-                            ]
-                            if state_fill:
-                                requirements.extend(state_fill)
-                                missing_categories = _missing_required_categories(requirements)
-                                
+                    await _fill_missing_categories_from_parents(conn, jurisdiction_id, requirements, threshold)
+                    
+                    missing_categories = _missing_required_categories(requirements)
                     if missing_categories:
                         research_categories = missing_categories
                         cached_requirements_for_merge = list(requirements)
@@ -3524,6 +3542,9 @@ async def run_compliance_check_background(
                     state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, threshold)
                     if state_reqs:
                         requirements = state_reqs
+                        
+                        await _fill_missing_categories_from_parents(conn, jurisdiction_id, requirements, threshold)
+                        
                         missing_categories = _missing_required_categories(requirements)
                         if missing_categories:
                             research_categories = missing_categories
