@@ -272,6 +272,18 @@ async def create_thread(
 
     default_state = _default_state_for_task_type(normalized_task_type)
     async with get_connection() as conn:
+        # Pre-populate company name and logo for offer letter threads
+        if normalized_task_type == "offer_letter":
+            company_row = await conn.fetchrow(
+                "SELECT name, logo_url FROM companies WHERE id = $1",
+                company_id,
+            )
+            if company_row:
+                if company_row["name"]:
+                    default_state["company_name"] = company_row["name"]
+                if company_row["logo_url"]:
+                    default_state["company_logo_url"] = company_row["logo_url"]
+
         async with conn.transaction():
             row = await conn.fetchrow(
                 """

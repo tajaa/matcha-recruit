@@ -84,6 +84,8 @@ Output constraints:
 - recipient_emails must be lowercase email strings in an array.
 - overall_rating must be an integer 1-5.
 - For workbook "sections", ALWAYS return the full sections list (not a partial patch).
+- start_date and expiration_date must be ISO 8601 strings (YYYY-MM-DD). Always capture dates mentioned by the user.
+- company_logo_url must NOT be set by AI — it is managed via file upload only.
 """
 
 
