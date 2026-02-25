@@ -41,6 +41,9 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
           <h2 className="text-2xl font-bold text-white tracking-tight">
             {state.workbook_title || 'Untitled Workbook'}
           </h2>
+          {state.company_name && (
+            <p className="text-sm text-zinc-400 mt-1">{state.company_name}</p>
+          )}
           {(state.industry || state.objective) && (
             <div className="flex flex-wrap gap-2 mt-4">
               {state.industry && (
@@ -243,6 +246,8 @@ export default function MatchaWorkThread() {
           }
           if (resp.pdf_url) {
             setPdfUrl(resp.pdf_url);
+            setActiveTab('preview');
+          } else if (resp.current_state?.sections && resp.current_state.sections.length > 0) {
             setActiveTab('preview');
           }
           if (resp.token_usage) {

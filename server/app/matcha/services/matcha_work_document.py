@@ -40,10 +40,7 @@ def _default_state_for_task_type(task_type: str) -> dict:
             "review_pending_responses": 0,
         }
     if task_type == "workbook":
-        return {
-            "workbook_title": "HR Workbook",
-            "sections": [],
-        }
+        return {"sections": []}
     return {}
 
 

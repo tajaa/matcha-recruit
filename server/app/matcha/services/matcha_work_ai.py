@@ -103,7 +103,8 @@ Rules:
 - If no fields should be updated, use an empty object: "updates": {{}}
 - Always include both "reply" and "updates" keys
 - Valid field names: {valid_fields}
-- For "sections", provide a list of objects with "title" and "content" (Markdown allowed in content)
+- For "sections", ALWAYS return the COMPLETE list of sections (existing + new/modified). The sections array is replaced in full on every update — never return a partial list or you will erase prior content.
+- Each section is an object with "title" (string) and "content" (Markdown allowed)
 - Suggest sections that align with the user's industry and objective
 - Return only the JSON object — no markdown fences, no extra text
 """
