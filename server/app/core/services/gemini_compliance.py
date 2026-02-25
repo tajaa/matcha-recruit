@@ -17,6 +17,10 @@ from .platform_settings import get_jurisdiction_research_model_mode
 # Timeout for individual Gemini API calls (seconds)
 GEMINI_CALL_TIMEOUT = 120
 
+DEFAULT_LIGHT_MODEL = "gemini-3-flash-preview"
+DEFAULT_HEAVY_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
+
 VALID_CATEGORIES = {
     "minimum_wage",
     "overtime",
@@ -81,6 +85,16 @@ _RATE_TYPE_ALIASES = {
 
 # Errors that should not be retried (API config / quota issues)
 _NON_RETRYABLE_KEYWORDS = {"API_KEY", "PERMISSION", "QUOTA", "RATE"}
+
+_MODEL_UNAVAILABLE_SNIPPETS = (
+    "not found for api version",
+    "model not found",
+    "unknown model",
+    "invalid model",
+    "does not support tool",
+    "does not support tools",
+    "unsupported model",
+)
 
 # Structured correction hints for retry prompts
 CORRECTION_HINTS = {
@@ -176,6 +190,13 @@ def _build_correction_feedback(error_type: str, **kwargs) -> str:
         # Fallback if kwargs don't match template
         message = template
     return "\n\nPREVIOUS ATTEMPT FAILED: " + message
+
+
+def _is_model_unavailable_error(error_message: str) -> bool:
+    text = (error_message or "").lower()
+    if "models/" in text and "not found" in text:
+        return True
+    return any(snippet in text for snippet in _MODEL_UNAVAILABLE_SNIPPETS)
 
 
 class GeminiExhaustedError(Exception):
@@ -379,11 +400,66 @@ class GeminiComplianceService:
         api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
         return bool(api_key) or self.settings.use_vertex
 
-    async def _resolve_model(self) -> str:
+    async def _resolve_model_candidates(self) -> List[str]:
         mode = await get_jurisdiction_research_model_mode()
-        if mode == "heavy":
-            return "gemini-3.1-pro-preview"
-        return self.settings.analysis_model
+        light_model = (self.settings.analysis_model or DEFAULT_LIGHT_MODEL).strip() or DEFAULT_LIGHT_MODEL
+
+        if mode != "heavy":
+            return [light_model]
+
+        configured_heavy = (
+            os.getenv("GEMINI_JURISDICTION_HEAVY_MODEL")
+            or os.getenv("GEMINI_HEAVY_MODEL")
+            or DEFAULT_HEAVY_MODEL
+        )
+
+        candidates: List[str] = []
+        for candidate in [configured_heavy, DEFAULT_HEAVY_FALLBACK_MODEL, light_model]:
+            model = str(candidate or "").strip()
+            if model and model not in candidates:
+                candidates.append(model)
+        return candidates
+
+    async def _generate_content_with_model_fallback(
+        self,
+        *,
+        contents: Any,
+        config: types.GenerateContentConfig,
+        timeout_seconds: int = GEMINI_CALL_TIMEOUT,
+    ) -> tuple[Any, str]:
+        model_candidates = await self._resolve_model_candidates()
+        if not model_candidates:
+            raise RuntimeError("No Gemini model candidates are configured")
+
+        last_exc: Optional[Exception] = None
+        for idx, model in enumerate(model_candidates):
+            try:
+                response = await asyncio.wait_for(
+                    self.client.aio.models.generate_content(
+                        model=model,
+                        contents=contents,
+                        config=config,
+                    ),
+                    timeout=timeout_seconds,
+                )
+                if idx > 0:
+                    print(f"[Gemini Compliance] Fallback model engaged: {model}")
+                return response, model
+            except Exception as exc:
+                message = str(exc)
+                if _is_model_unavailable_error(message) and idx < len(model_candidates) - 1:
+                    next_model = model_candidates[idx + 1]
+                    print(
+                        f"[Gemini Compliance] Model '{model}' unavailable for this call; "
+                        f"trying fallback '{next_model}'"
+                    )
+                    last_exc = exc
+                    continue
+                raise
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Gemini content generation failed before model invocation")
 
     async def _call_with_retry(
         self,
@@ -424,18 +500,14 @@ class GeminiComplianceService:
                     if on_retry is not None:
                         on_retry(attempt, last_error)
 
-                model = await self._resolve_model()
-                response = await asyncio.wait_for(
-                    self.client.aio.models.generate_content(
-                        model=model,
-                        contents=current_prompt,
-                        config=types.GenerateContentConfig(
-                            temperature=0.0,
-                            tools=tools,
-                            response_modalities=["TEXT"],
-                        ),
+                response, _model_used = await self._generate_content_with_model_fallback(
+                    contents=current_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.0,
+                        tools=tools,
+                        response_modalities=["TEXT"],
                     ),
-                    timeout=GEMINI_CALL_TIMEOUT,
+                    timeout_seconds=GEMINI_CALL_TIMEOUT,
                 )
 
                 # Record the actual API call
@@ -478,6 +550,8 @@ class GeminiComplianceService:
             except Exception as e:
                 error_msg = str(e).upper()
                 if any(kw in error_msg for kw in _NON_RETRYABLE_KEYWORDS):
+                    raise
+                if _is_model_unavailable_error(str(e)):
                     raise
                 last_error = str(e)
                 current_prompt = prompt + f"\n\nPREVIOUS ATTEMPT FAILED: {last_error}"
@@ -877,19 +951,15 @@ Be conservative with confidence scores:
                 print(f"[Gemini Compliance] Rate limit hit during adaptive retry, returning first result")
                 return first
 
-            model = await self._resolve_model()
             tools = [types.Tool(google_search=types.GoogleSearch())]
-            response = await asyncio.wait_for(
-                self.client.aio.models.generate_content(
-                    model=model,
-                    contents=refined_prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.0,
-                        tools=tools,
-                        response_modalities=["TEXT"],
-                    ),
+            response, _model_used = await self._generate_content_with_model_fallback(
+                contents=refined_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    tools=tools,
+                    response_modalities=["TEXT"],
                 ),
-                timeout=GEMINI_CALL_TIMEOUT,
+                timeout_seconds=GEMINI_CALL_TIMEOUT,
             )
 
             raw_text = response.text
@@ -1010,19 +1080,15 @@ You MUST return exactly {len(changes)} results, one for each change listed above
                 print(f"[Gemini Compliance] Rate limit hit during batch verification")
                 return [VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Rate limit exceeded")] * len(changes)
 
-            model = await self._resolve_model()
             tools = [types.Tool(google_search=types.GoogleSearch())]
-            response = await asyncio.wait_for(
-                self.client.aio.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.0,
-                        tools=tools,
-                        response_modalities=["TEXT"],
-                    ),
+            response, _model_used = await self._generate_content_with_model_fallback(
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    tools=tools,
+                    response_modalities=["TEXT"],
                 ),
-                timeout=GEMINI_CALL_TIMEOUT * 2,  # Double timeout for batch
+                timeout_seconds=GEMINI_CALL_TIMEOUT * 2,  # Double timeout for batch
             )
 
             raw_text = response.text
