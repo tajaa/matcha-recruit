@@ -71,7 +71,7 @@ class Settings:
     celery_result_backend: Optional[str] = None  # Falls back to redis_url
 
     # Gemini API Rate Limits
-    gemini_hourly_limit: int = 15
+    gemini_hourly_limit: int = 50
     gemini_daily_limit: int = 50
 
 
