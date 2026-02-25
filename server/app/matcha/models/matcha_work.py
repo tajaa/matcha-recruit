@@ -272,3 +272,16 @@ class PublicReviewSubmitRequest(BaseModel):
 class PublicReviewSubmitResponse(BaseModel):
     status: Literal["submitted"]
     submitted_at: datetime
+
+
+class SendHandbookSignaturesRequest(BaseModel):
+    handbook_id: UUID
+    employee_ids: list[UUID] = Field(default_factory=list)
+
+
+class SendHandbookSignaturesResponse(BaseModel):
+    handbook_id: UUID
+    handbook_version: int
+    assigned_count: int
+    skipped_existing_count: int
+    distributed_at: datetime

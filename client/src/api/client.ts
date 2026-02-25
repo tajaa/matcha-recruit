@@ -3001,6 +3001,7 @@ import type {
   MWUsageSummaryResponse,
   MWReviewRequestStatus,
   MWSendReviewRequestsResponse,
+  MWSendHandbookSignaturesResponse,
   MWPublicReviewRequest,
   MWPublicReviewSubmitResponse,
 } from '../types/matcha-work';
@@ -3148,6 +3149,15 @@ export const matchaWork = {
     data: { recipient_emails?: string[]; custom_message?: string }
   ): Promise<MWSendReviewRequestsResponse> =>
     request<MWSendReviewRequestsResponse>(`/matcha-work/threads/${threadId}/review-requests/send`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  sendHandbookSignatures: (
+    threadId: string,
+    data: { handbook_id: string; employee_ids?: string[] }
+  ): Promise<MWSendHandbookSignaturesResponse> =>
+    request<MWSendHandbookSignaturesResponse>(`/matcha-work/threads/${threadId}/handbook/send-signatures`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),

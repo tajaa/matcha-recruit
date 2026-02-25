@@ -10,8 +10,10 @@ import type {
   MWUsageSummaryResponse,
   MWReviewRequestStatus,
 } from '../types/matcha-work';
-import { matchaWork } from '../api/client';
+import type { HandbookListItem } from '../types';
+import { handbooks, matchaWork } from '../api/client';
 import { LogoUpload } from '../components/matcha-work/LogoUpload';
+import HandbookDistributeModal from '../components/HandbookDistributeModal';
 
 type Tab = 'chat' | 'preview';
 
@@ -170,6 +172,12 @@ export default function MatchaWorkThread() {
   const [sendingReviewRequests, setSendingReviewRequests] = useState(false);
   const [reviewRecipientInput, setReviewRecipientInput] = useState('');
   const [reviewEmailMessage, setReviewEmailMessage] = useState('');
+  const [loadingActiveHandbooks, setLoadingActiveHandbooks] = useState(false);
+  const [sendingHandbookSignatures, setSendingHandbookSignatures] = useState(false);
+  const [showHandbookSelectorModal, setShowHandbookSelectorModal] = useState(false);
+  const [showHandbookDistributeModal, setShowHandbookDistributeModal] = useState(false);
+  const [activeHandbooks, setActiveHandbooks] = useState<HandbookListItem[]>([]);
+  const [selectedHandbook, setSelectedHandbook] = useState<{ id: string; title: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -460,6 +468,61 @@ export default function MatchaWorkThread() {
     }
   };
 
+  const handleOpenHandbookSignatures = async () => {
+    if (!threadId || loadingActiveHandbooks || isArchived || !isWorkbook) return;
+    try {
+      setLoadingActiveHandbooks(true);
+      setError(null);
+      const allHandbooks = await handbooks.list();
+      const active = allHandbooks.filter((row) => row.status === 'active');
+      setActiveHandbooks(active);
+
+      if (active.length === 0) {
+        setError('No active handbooks found. Publish a handbook first in /handbook.');
+        return;
+      }
+
+      if (active.length === 1) {
+        setSelectedHandbook({ id: active[0].id, title: active[0].title });
+        setShowHandbookDistributeModal(true);
+        return;
+      }
+
+      setShowHandbookSelectorModal(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load active handbooks');
+    } finally {
+      setLoadingActiveHandbooks(false);
+    }
+  };
+
+  const handleSelectHandbookForSignatures = (handbook: HandbookListItem) => {
+    setSelectedHandbook({ id: handbook.id, title: handbook.title });
+    setShowHandbookSelectorModal(false);
+    setShowHandbookDistributeModal(true);
+  };
+
+  const handleSendHandbookSignatures = async (employeeIds?: string[]) => {
+    if (!threadId || !selectedHandbook || sendingHandbookSignatures) return;
+    try {
+      setSendingHandbookSignatures(true);
+      setError(null);
+      const result = await matchaWork.sendHandbookSignatures(threadId, {
+        handbook_id: selectedHandbook.id,
+        employee_ids: employeeIds,
+      });
+      alert(
+        `Distributed handbook v${result.handbook_version} to ${result.assigned_count} employees (${result.skipped_existing_count} already assigned).`
+      );
+      setShowHandbookDistributeModal(false);
+      await loadThread();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send handbook signatures');
+    } finally {
+      setSendingHandbookSignatures(false);
+    }
+  };
+
   const isFinalized = thread?.status === 'finalized';
   const isArchived = thread?.status === 'archived';
   const isOfferLetter = thread?.task_type === 'offer_letter';
@@ -649,6 +712,16 @@ export default function MatchaWorkThread() {
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded-lg transition-colors"
             >
               {sendingReviewRequests ? 'Sending...' : 'Send Requests'}
+            </button>
+          )}
+
+          {isWorkbook && !isArchived && (
+            <button
+              onClick={handleOpenHandbookSignatures}
+              disabled={loadingActiveHandbooks || sendingHandbookSignatures}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+            >
+              {loadingActiveHandbooks ? 'Loading...' : sendingHandbookSignatures ? 'Sending...' : 'Send Signatures'}
             </button>
           )}
 
@@ -1038,6 +1111,50 @@ export default function MatchaWorkThread() {
           </div>
         </div>
       </div>
+
+      {showHandbookSelectorModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
+            <h2 className="text-base font-semibold text-zinc-100 mb-2">Select Handbook</h2>
+            <p className="text-sm text-zinc-400 mb-4">
+              Choose an active handbook to send for acknowledgement signatures.
+            </p>
+            <div className="max-h-72 overflow-y-auto space-y-2">
+              {activeHandbooks.map((handbook) => (
+                <button
+                  key={handbook.id}
+                  onClick={() => handleSelectHandbookForSignatures(handbook)}
+                  className="w-full text-left rounded-lg border border-zinc-700 hover:border-zinc-500 bg-zinc-800/60 hover:bg-zinc-800 px-3 py-2 transition-colors"
+                >
+                  <p className="text-sm text-zinc-100">{handbook.title}</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">
+                    v{handbook.active_version} · {handbook.scope_states?.join(', ') || 'N/A'}
+                  </p>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={() => setShowHandbookSelectorModal(false)}
+                className="flex-1 px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 border border-zinc-700 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <HandbookDistributeModal
+        open={showHandbookDistributeModal}
+        handbookId={selectedHandbook?.id ?? null}
+        handbookTitle={selectedHandbook?.title}
+        submitting={sendingHandbookSignatures}
+        onClose={() => {
+          if (!sendingHandbookSignatures) setShowHandbookDistributeModal(false);
+        }}
+        onSubmit={handleSendHandbookSignatures}
+      />
 
       {/* Review requests modal */}
       {showReviewRequestsModal && (

@@ -38,10 +38,13 @@ from ..models.matcha_work import (
     PublicReviewRequestResponse,
     PublicReviewSubmitRequest,
     PublicReviewSubmitResponse,
+    SendHandbookSignaturesRequest,
+    SendHandbookSignaturesResponse,
     WorkbookDocument,
 )
 from ..services import matcha_work_document as doc_svc
 from ..services.matcha_work_ai import get_ai_provider
+from ...core.services.handbook_service import HandbookService
 
 logger = logging.getLogger(__name__)
 
@@ -1060,6 +1063,47 @@ async def send_review_requests(
         raise HTTPException(status_code=400, detail=detail)
 
     return SendReviewRequestsResponse(**result)
+
+
+@router.post(
+    "/threads/{thread_id}/handbook/send-signatures",
+    response_model=SendHandbookSignaturesResponse,
+)
+async def send_handbook_signatures(
+    thread_id: UUID,
+    body: SendHandbookSignaturesRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Send handbook acknowledgement signatures from a workbook thread."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread["status"] == "archived":
+        raise HTTPException(status_code=400, detail="Cannot send handbook signatures for an archived thread")
+    if _normalize_task_type(thread.get("task_type")) != "workbook":
+        raise HTTPException(status_code=400, detail="Handbook signatures are only available for workbook threads")
+
+    employee_ids = [str(employee_id) for employee_id in body.employee_ids] if body.employee_ids else None
+
+    try:
+        distributed = await HandbookService.distribute_to_employees(
+            handbook_id=str(body.handbook_id),
+            company_id=str(company_id),
+            distributed_by=str(current_user.id),
+            employee_ids=employee_ids,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if distributed is None:
+        raise HTTPException(status_code=404, detail="Handbook not found")
+
+    payload = distributed.model_dump() if hasattr(distributed, "model_dump") else dict(distributed)
+    return SendHandbookSignaturesResponse(**payload)
 
 
 @router.patch("/threads/{thread_id}", response_model=ThreadListItem)

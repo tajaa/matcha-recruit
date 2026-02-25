@@ -216,6 +216,14 @@ export interface MWSendReviewRequestsResponse {
   recipients: MWReviewRequestStatus[];
 }
 
+export interface MWSendHandbookSignaturesResponse {
+  handbook_id: string;
+  handbook_version: number;
+  assigned_count: number;
+  skipped_existing_count: number;
+  distributed_at: string;
+}
+
 export interface MWPublicReviewRequest {
   token: string;
   review_title: string;
