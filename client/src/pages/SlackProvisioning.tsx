@@ -56,6 +56,7 @@ function hydrateFormFromStatus(status: SlackConnectionStatus): SlackProvisioning
 export default function SlackProvisioning() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const expectedRedirectUri = `${window.location.origin}/api/provisioning/slack/oauth/callback`;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [oauthStarting, setOauthStarting] = useState(false);
@@ -177,6 +178,9 @@ export default function SlackProvisioning() {
         </div>
         <p className="text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
           Configure workspace defaults and connect OAuth for onboarding invites.
+        </p>
+        <p className="mt-3 text-[11px] text-zinc-400">
+          Slack Redirect URL: <span className="font-mono text-zinc-200">{expectedRedirectUri}</span>
         </p>
       </div>
 

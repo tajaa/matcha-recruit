@@ -819,6 +819,8 @@ export interface SlackConnectionStatus {
 export interface SlackOAuthStartResponse {
   authorize_url: string;
   state: string;
+  redirect_uri?: string | null;
+  default_redirect_uri?: string | null;
 }
 
 export interface ProvisioningStepStatus {
