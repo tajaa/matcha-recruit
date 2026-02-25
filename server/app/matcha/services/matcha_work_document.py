@@ -350,6 +350,34 @@ async def set_thread_pinned(
         return dict(row)
 
 
+async def set_thread_task_type(
+    thread_id: UUID,
+    company_id: UUID,
+    task_type: str,
+) -> Optional[dict]:
+    normalized_task_type = "review" if task_type == "review" else "offer_letter"
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE mw_threads
+            SET task_type=$1, updated_at=NOW()
+            WHERE id=$2 AND company_id=$3
+            RETURNING id, company_id, created_by, title, task_type, status,
+                      current_state, version, is_pinned, linked_offer_letter_id,
+                      created_at, updated_at
+            """,
+            normalized_task_type,
+            thread_id,
+            company_id,
+        )
+        if row is None:
+            return None
+        await _sync_element_for_thread(conn, thread_id)
+        d = dict(row)
+        d["current_state"] = _parse_jsonb(d["current_state"])
+        return d
+
+
 async def get_thread_messages(thread_id: UUID) -> list[dict]:
     async with get_connection() as conn:
         rows = await conn.fetch(

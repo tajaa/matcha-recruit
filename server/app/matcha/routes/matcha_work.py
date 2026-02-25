@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -39,6 +40,30 @@ router = APIRouter()
 
 VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys())
 VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
+UNSUPPORTED_SKILL_REPLY = "I can't do that. I can help with offer letters and anonymized reviews."
+
+OFFER_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
+    (r"\boffer letter\b", 4),
+    (r"\bjob offer\b", 4),
+    (r"\bemployment offer\b", 4),
+    (r"\boffer\b", 1),
+    (r"\bsalary\b", 1),
+    (r"\bcompensation\b", 1),
+    (r"\bbenefits?\b", 1),
+    (r"\bstart date\b", 1),
+    (r"\bcandidate\b", 1),
+)
+
+REVIEW_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
+    (r"\bperformance review\b", 4),
+    (r"\banonym(?:ous|ized)\s+review\b", 4),
+    (r"\breview\b", 1),
+    (r"\bfeedback\b", 1),
+    (r"\bstrengths?\b", 1),
+    (r"\bgrowth areas?\b", 1),
+    (r"\brating\b", 1),
+    (r"\bevaluation\b", 1),
+)
 
 
 def _normalize_task_type(task_type: Optional[str]) -> str:
@@ -53,6 +78,63 @@ def _validate_updates(task_type: Optional[str], updates: dict) -> dict:
     """Filter AI updates to known fields for the thread task type."""
     valid_fields = VALID_OFFER_LETTER_FIELDS if _is_offer_letter_task(task_type) else VALID_REVIEW_FIELDS
     return {k: v for k, v in updates.items() if k in valid_fields}
+
+
+def _intent_score(text: str, patterns: tuple[tuple[str, int], ...]) -> int:
+    score = 0
+    for pattern, weight in patterns:
+        if re.search(pattern, text):
+            score += weight
+    return score
+
+
+def _detect_requested_task_type(content: str) -> Optional[str]:
+    text = content.lower().strip()
+    if not text:
+        return None
+    offer_score = _intent_score(text, OFFER_INTENT_PATTERNS)
+    review_score = _intent_score(text, REVIEW_INTENT_PATTERNS)
+    if offer_score == 0 and review_score == 0:
+        return None
+    if offer_score > review_score:
+        return "offer_letter"
+    if review_score > offer_score:
+        return "review"
+    if re.search(r"\boffer letter\b|\bjob offer\b|\bemployment offer\b", text):
+        return "offer_letter"
+    if re.search(r"\bperformance review\b|\banonym(?:ous|ized)\s+review\b", text):
+        return "review"
+    return None
+
+
+def _thread_has_existing_work(thread: dict, prior_message_count: int = 0) -> bool:
+    return bool(thread.get("current_state")) or int(thread.get("version", 0)) > 0 or prior_message_count > 0
+
+
+async def _resolve_task_type_for_message(
+    thread: dict,
+    company_id: UUID,
+    content: str,
+    prior_message_count: int = 0,
+) -> tuple[Optional[str], dict, Optional[str]]:
+    current_task_type = _normalize_task_type(thread.get("task_type"))
+    requested_task_type = _detect_requested_task_type(content)
+    has_existing_work = _thread_has_existing_work(thread, prior_message_count=prior_message_count)
+
+    if requested_task_type is None:
+        if has_existing_work:
+            return current_task_type, thread, None
+        return None, thread, UNSUPPORTED_SKILL_REPLY
+
+    if requested_task_type != current_task_type:
+        if has_existing_work:
+            return None, thread, UNSUPPORTED_SKILL_REPLY
+        switched = await doc_svc.set_thread_task_type(thread["id"], company_id, requested_task_type)
+        if switched is not None:
+            thread = switched
+        current_task_type = requested_task_type
+
+    return current_task_type, thread, None
 
 
 def _row_to_message(row: dict) -> MWMessageOut:
@@ -92,53 +174,64 @@ async def create_thread(
     if body.initial_message:
         # Save user message
         await doc_svc.add_message(thread_id, "user", body.initial_message)
-
-        # Call AI
-        ai_provider = get_ai_provider()
-        messages = [{"role": "user", "content": body.initial_message}]
-        estimated_usage = ai_provider.estimate_usage(
-            messages, thread["current_state"], task_type=thread["task_type"]
+        resolved_task_type, thread, unsupported_reply = await _resolve_task_type_for_message(
+            thread,
+            company_id,
+            body.initial_message,
+            prior_message_count=0,
         )
-        ai_resp = await ai_provider.generate(
-            messages, thread["current_state"], task_type=thread["task_type"]
-        )
-        final_usage = ai_resp.token_usage or estimated_usage
 
-        new_version = thread["version"]
-        applied_update = False
-        if ai_resp.structured_update:
-            safe_updates = _validate_updates(thread["task_type"], ai_resp.structured_update)
-            if safe_updates:
-                result = await doc_svc.apply_update(thread_id, safe_updates)
-                new_version = result["version"]
-                thread["current_state"] = result["current_state"]
-                applied_update = True
-
-        await doc_svc.add_message(
-            thread_id,
-            "assistant",
-            ai_resp.assistant_reply,
-            version_created=new_version if applied_update else None,
-        )
-        try:
-            await doc_svc.log_token_usage_event(
-                company_id=company_id,
-                user_id=current_user.id,
-                thread_id=thread_id,
-                token_usage=final_usage,
-                operation="send_message",
+        if unsupported_reply:
+            await doc_svc.add_message(thread_id, "assistant", unsupported_reply)
+            assistant_reply = unsupported_reply
+        else:
+            # Call AI
+            ai_provider = get_ai_provider()
+            messages = [{"role": "user", "content": body.initial_message}]
+            estimated_usage = ai_provider.estimate_usage(
+                messages, thread["current_state"], task_type=resolved_task_type
             )
-        except Exception as e:
-            logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
-
-        thread["version"] = new_version
-        assistant_reply = ai_resp.assistant_reply
-
-        # Offer-letter threads render draft PDFs; review threads remain chat-only.
-        if _is_offer_letter_task(thread["task_type"]) and thread["current_state"]:
-            pdf_url = await doc_svc.generate_pdf(
-                thread["current_state"], thread_id, new_version, is_draft=True
+            ai_resp = await ai_provider.generate(
+                messages, thread["current_state"], task_type=resolved_task_type
             )
+            final_usage = ai_resp.token_usage or estimated_usage
+
+            new_version = thread["version"]
+            applied_update = False
+            if ai_resp.structured_update:
+                safe_updates = _validate_updates(resolved_task_type, ai_resp.structured_update)
+                if safe_updates:
+                    result = await doc_svc.apply_update(thread_id, safe_updates)
+                    new_version = result["version"]
+                    thread["current_state"] = result["current_state"]
+                    applied_update = True
+
+            await doc_svc.add_message(
+                thread_id,
+                "assistant",
+                ai_resp.assistant_reply,
+                version_created=new_version if applied_update else None,
+            )
+            try:
+                await doc_svc.log_token_usage_event(
+                    company_id=company_id,
+                    user_id=current_user.id,
+                    thread_id=thread_id,
+                    token_usage=final_usage,
+                    operation="send_message",
+                )
+            except Exception as e:
+                logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
+
+            thread["version"] = new_version
+            thread["task_type"] = resolved_task_type
+            assistant_reply = ai_resp.assistant_reply
+
+            # Offer-letter threads render draft PDFs; review threads remain chat-only.
+            if _is_offer_letter_task(resolved_task_type) and thread["current_state"]:
+                pdf_url = await doc_svc.generate_pdf(
+                    thread["current_state"], thread_id, new_version, is_draft=True
+                )
 
     return CreateThreadResponse(
         id=thread_id,
@@ -244,14 +337,37 @@ async def send_message(
     # Fetch message history for context (sliding window handled by AI provider)
     messages = await doc_svc.get_thread_messages(thread_id)
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
+    prior_message_count = max(0, len(messages) - 1)
+    resolved_task_type, thread, unsupported_reply = await _resolve_task_type_for_message(
+        thread,
+        company_id,
+        body.content,
+        prior_message_count=prior_message_count,
+    )
+
+    if unsupported_reply:
+        assistant_msg = await doc_svc.add_message(
+            thread_id,
+            "assistant",
+            unsupported_reply,
+            version_created=None,
+        )
+        return SendMessageResponse(
+            user_message=_row_to_message(user_msg),
+            assistant_message=_row_to_message(assistant_msg),
+            current_state=thread["current_state"],
+            version=thread["version"],
+            pdf_url=None,
+            token_usage=None,
+        )
 
     # Call AI
     ai_provider = get_ai_provider()
     estimated_usage = ai_provider.estimate_usage(
-        msg_dicts, thread["current_state"], task_type=thread["task_type"]
+        msg_dicts, thread["current_state"], task_type=resolved_task_type
     )
     ai_resp = await ai_provider.generate(
-        msg_dicts, thread["current_state"], task_type=thread["task_type"]
+        msg_dicts, thread["current_state"], task_type=resolved_task_type
     )
     final_usage = ai_resp.token_usage or estimated_usage
 
@@ -262,14 +378,14 @@ async def send_message(
 
     # Apply updates if AI returned any
     if ai_resp.structured_update:
-        safe_updates = _validate_updates(thread["task_type"], ai_resp.structured_update)
+        safe_updates = _validate_updates(resolved_task_type, ai_resp.structured_update)
         if safe_updates:
             result = await doc_svc.apply_update(thread_id, safe_updates)
             current_version = result["version"]
             current_state = result["current_state"]
             applied_update = True
 
-            if _is_offer_letter_task(thread["task_type"]):
+            if _is_offer_letter_task(resolved_task_type):
                 # Generate PDF for offer-letter mode.
                 pdf_url = await doc_svc.generate_pdf(
                     current_state, thread_id, current_version, is_draft=True
@@ -331,10 +447,39 @@ async def send_message_stream(
     # Fetch message history for context (sliding window handled by AI provider)
     messages = await doc_svc.get_thread_messages(thread_id)
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
+    prior_message_count = max(0, len(messages) - 1)
+    resolved_task_type, thread, unsupported_reply = await _resolve_task_type_for_message(
+        thread,
+        company_id,
+        body.content,
+        prior_message_count=prior_message_count,
+    )
+
+    if unsupported_reply:
+        assistant_msg = await doc_svc.add_message(
+            thread_id,
+            "assistant",
+            unsupported_reply,
+            version_created=None,
+        )
+        unsupported_response = SendMessageResponse(
+            user_message=_row_to_message(user_msg),
+            assistant_message=_row_to_message(assistant_msg),
+            current_state=thread["current_state"],
+            version=thread["version"],
+            pdf_url=None,
+            token_usage=None,
+        )
+
+        async def unsupported_stream():
+            yield _sse_data({"type": "complete", "data": unsupported_response.model_dump(mode="json")})
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(unsupported_stream(), media_type="text/event-stream")
 
     ai_provider = get_ai_provider()
     estimated_usage = ai_provider.estimate_usage(
-        msg_dicts, thread["current_state"], task_type=thread["task_type"]
+        msg_dicts, thread["current_state"], task_type=resolved_task_type
     )
 
     async def event_stream():
@@ -350,7 +495,7 @@ async def send_message_stream(
             )
 
             ai_resp = await ai_provider.generate(
-                msg_dicts, thread["current_state"], task_type=thread["task_type"]
+                msg_dicts, thread["current_state"], task_type=resolved_task_type
             )
 
             current_version = thread["version"]
@@ -360,14 +505,14 @@ async def send_message_stream(
 
             # Apply updates if AI returned any
             if ai_resp.structured_update:
-                safe_updates = _validate_updates(thread["task_type"], ai_resp.structured_update)
+                safe_updates = _validate_updates(resolved_task_type, ai_resp.structured_update)
                 if safe_updates:
                     result = await doc_svc.apply_update(thread_id, safe_updates)
                     current_version = result["version"]
                     current_state = result["current_state"]
                     applied_update = True
 
-                    if _is_offer_letter_task(thread["task_type"]):
+                    if _is_offer_letter_task(resolved_task_type):
                         # Generate PDF for offer-letter mode.
                         pdf_url = await doc_svc.generate_pdf(
                             current_state, thread_id, current_version, is_draft=True

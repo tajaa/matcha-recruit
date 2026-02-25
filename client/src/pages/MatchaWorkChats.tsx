@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { matchaWork } from '../api/client';
-import type { MWTaskType, MWThread, MWThreadStatus } from '../types/matcha-work';
+import type { MWThread, MWThreadStatus } from '../types/matcha-work';
 
 type StatusFilter = 'all' | MWThreadStatus;
 
@@ -32,7 +32,7 @@ export default function MatchaWorkChats() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [creatingType, setCreatingType] = useState<MWTaskType | null>(null);
+  const [creatingChat, setCreatingChat] = useState(false);
   const [pinningThreadId, setPinningThreadId] = useState<string | null>(null);
 
   const loadThreads = useCallback(async () => {
@@ -56,16 +56,16 @@ export default function MatchaWorkChats() {
     loadThreads();
   }, [loadThreads]);
 
-  const handleCreateThread = async (taskType: MWTaskType) => {
+  const handleCreateThread = async () => {
     try {
-      setCreatingType(taskType);
+      setCreatingChat(true);
       setError(null);
-      const title = taskType === 'review' ? 'Untitled Review' : 'Untitled Chat';
-      const thread = await matchaWork.createThread({ title, task_type: taskType });
+      const thread = await matchaWork.createThread({ title: 'Untitled Chat' });
       navigate(`/app/matcha/work/${thread.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create chat');
-      setCreatingType(null);
+    } finally {
+      setCreatingChat(false);
     }
   };
 
@@ -106,22 +106,18 @@ export default function MatchaWorkChats() {
           <p className="text-sm text-zinc-400 mt-0.5">
             Stored chats for your company. Pin important threads to keep them at the top.
           </p>
+          <p className="text-xs text-zinc-500 mt-2">
+            Skills: offer letters, anonymized reviews. Ask naturally. Unsupported requests return: "I can't do that."
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => handleCreateThread('offer_letter')}
-            disabled={creatingType !== null}
+            onClick={handleCreateThread}
+            disabled={creatingChat}
             className="px-3 py-2 text-sm rounded-lg bg-matcha-600 hover:bg-matcha-700 disabled:opacity-50 text-white transition-colors"
           >
-            {creatingType === 'offer_letter' ? 'Creating...' : 'New Offer Letter'}
-          </button>
-          <button
-            onClick={() => handleCreateThread('review')}
-            disabled={creatingType !== null}
-            className="px-3 py-2 text-sm rounded-lg bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white transition-colors"
-          >
-            {creatingType === 'review' ? 'Creating...' : 'New Anonymous Review'}
+            {creatingChat ? 'Creating...' : 'New Chat'}
           </button>
         </div>
       </div>

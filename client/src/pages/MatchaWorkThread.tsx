@@ -309,9 +309,7 @@ export default function MatchaWorkThread() {
     try {
       setCreatingChat(true);
       setError(null);
-      const taskType = thread.task_type;
-      const title = taskType === 'review' ? 'Untitled Review' : 'Untitled Chat';
-      const created = await matchaWork.createThread({ title, task_type: taskType });
+      const created = await matchaWork.createThread({ title: 'Untitled Chat' });
       navigate(`/app/matcha/work/${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create chat');
@@ -324,6 +322,11 @@ export default function MatchaWorkThread() {
   const isArchived = thread?.status === 'archived';
   const isOfferLetter = thread?.task_type === 'offer_letter';
   const isReview = thread?.task_type === 'review';
+  const isUnscopedChat = thread
+    ? thread.version === 0 &&
+      messages.length === 0 &&
+      Object.keys(thread.current_state || {}).length === 0
+    : false;
   const inputDisabled = isFinalized || isArchived || sending;
   const formatTokenCount = (value: number | null | undefined) =>
     value == null ? '—' : value.toLocaleString();
@@ -373,7 +376,7 @@ export default function MatchaWorkThread() {
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-xs text-zinc-500">v{thread.version}</span>
               <span className="text-xs bg-zinc-700/60 text-zinc-300 px-1.5 py-0.5 rounded capitalize">
-                {thread.task_type === 'review' ? 'Anonymous Review' : 'Offer Letter'}
+                {isUnscopedChat ? 'Intent-driven chat' : thread.task_type === 'review' ? 'Anonymous Review' : 'Offer Letter'}
               </span>
               {isFinalized && (
                 <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
@@ -536,10 +539,11 @@ export default function MatchaWorkThread() {
                 </div>
                 <p className="text-sm text-zinc-400 font-medium">Start chatting</p>
                 <p className="text-xs text-zinc-600 mt-1 max-w-xs">
-                  {isReview
-                    ? 'Describe the anonymized review you want to draft. Include strengths, growth areas, and summary details.'
-                    : 'Describe what you want to create. Offer letters and anonymized reviews are supported as Matcha Work elements.'}
+                  Tell me what you need in natural language.
                 </p>
+                <div className="mt-3 text-[11px] text-zinc-500 max-w-sm">
+                  Skills: offer letters, anonymized reviews. Unsupported requests will return: "I can't do that."
+                </div>
               </div>
             ) : (
               messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
@@ -578,7 +582,9 @@ export default function MatchaWorkThread() {
                   onKeyDown={handleKeyDown}
                   disabled={inputDisabled}
                   placeholder={
-                    isReview
+                    isUnscopedChat
+                      ? 'Ask for an offer letter or anonymized review...'
+                      : isReview
                       ? 'Add anonymized review details...'
                       : 'Describe changes or add details...'
                   }

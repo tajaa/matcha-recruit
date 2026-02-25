@@ -12,6 +12,7 @@ REMOTE_HOST="ec2-user@3.101.83.217"
 REMOTE_PORT="5432"
 DEFAULT_LOCAL_PORT="5432"
 DEFAULT_REDIS_PORT="6380"
+DEFAULT_BACKEND_PORT="8001"
 DEFAULT_FRONTEND_PORT="5174"
 DEFAULT_CHAT_PORT="8080"
 CHAT_MODEL_DIR="$HOME/Documents/github/models"
@@ -111,6 +112,13 @@ if [ -n "${FRONTEND_PORT:-}" ]; then
     FRONTEND_PORT_SOURCE="env"
 else
     FRONTEND_PORT="$DEFAULT_FRONTEND_PORT"
+fi
+
+if [ -n "${BACKEND_PORT:-}" ]; then
+    BACKEND_PORT_SOURCE="env"
+else
+    BACKEND_PORT_SOURCE="default"
+    BACKEND_PORT="$DEFAULT_BACKEND_PORT"
 fi
 
 CHAT_PORT_SOURCE="default"
@@ -247,7 +255,7 @@ fi
 
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && ${CHAT_ENV}source venv/bin/activate && echo 'Waiting for DB tunnel on localhost:$LOCAL_PORT...' && WAITED=0 && MAX_WAIT=60 && until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
+    "export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && ${CHAT_ENV}source venv/bin/activate && echo 'Waiting for DB tunnel on localhost:$LOCAL_PORT...' && WAITED=0 && MAX_WAIT=60 && until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
 # Enable mouse mode for clicking panes and scrolling
@@ -266,7 +274,7 @@ tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
 
 # Pane 3: Frontend - Split below worker
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
-    "npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
+    "echo 'Waiting for backend health at http://127.0.0.1:$BACKEND_PORT/health...' && WAITED=0 && MAX_WAIT=120 && until curl -fsS http://127.0.0.1:$BACKEND_PORT/health >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'Backend healthcheck did not become ready within 120s. Check backend/tunnel panes.'; exit 1; fi; done && VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
 
 # Pane 4 (optional): AI Chat Model Server
 if [ "$ENABLE_CHAT" = true ] && [ "$CHAT_REUSE_EXISTING" = false ]; then
@@ -280,7 +288,7 @@ tmux select-pane -t "$SESSION_NAME:dev.0"
 echo -e "${GREEN}Remote Dev environment started!${NC}"
 echo -e "  - Database: Tunnel to $REMOTE_HOST:$REMOTE_PORT (mapped to localhost:$LOCAL_PORT)"
 echo -e "  - Redis:    Local ($REDIS_PORT)"
-echo -e "  - Backend:  http://localhost:8001"
+echo -e "  - Backend:  http://localhost:$BACKEND_PORT"
 echo -e "  - Frontend: http://localhost:$FRONTEND_PORT"
 if [ "$ENABLE_CHAT" = true ]; then
     echo -e "  - AI Chat:  http://localhost:$CHAT_PORT (Qwen2-VL-2B)"
