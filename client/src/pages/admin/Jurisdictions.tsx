@@ -392,6 +392,16 @@ export function Jurisdictions() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  useEffect(() => {
+    const handlePlatformSettingsUpdate = () => {
+      fetchData();
+    };
+    window.addEventListener('platform-settings-updated', handlePlatformSettingsUpdate);
+    return () => {
+      window.removeEventListener('platform-settings-updated', handlePlatformSettingsUpdate);
+    };
+  }, [fetchData]);
+
   const filteredJurisdictions = useMemo(() => {
     if (!search.trim()) return jurisdictions;
     const q = search.trim().toLowerCase();
@@ -899,7 +909,7 @@ export function Jurisdictions() {
 
       {/* Model mode banner */}
       <div className="px-6 py-2 bg-zinc-900/60 border-b border-white/5 flex items-center gap-2 text-[10px] font-mono tracking-wider text-zinc-500">
-        <span className="uppercase">Compliance Research AI</span>
+        <span className="uppercase">Jurisdiction Research</span>
         <span className="text-zinc-600">·</span>
         <span className={jurisdictionModelMode === 'heavy' ? 'text-amber-400 font-bold' : 'text-zinc-400'}>
           {jurisdictionModelMode === 'heavy' ? 'gemini-3.1-pro-preview' : 'gemini-3-flash-preview'}

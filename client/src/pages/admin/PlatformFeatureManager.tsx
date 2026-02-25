@@ -181,6 +181,7 @@ export function PlatformFeatureManager({ onClose }: Props) {
         adminPlatformSettings.updateJurisdictionResearchModelMode(jurisdictionModelMode),
       ]);
       setPlatformFeatures(new Set(featuresResult.visible_features));
+      window.dispatchEvent(new Event('platform-settings-updated'));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save changes');
@@ -293,7 +294,7 @@ export function PlatformFeatureManager({ onClose }: Props) {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold">Compliance Research AI:</span>
+                  <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold">Jurisdiction Research:</span>
                   <div className="flex bg-zinc-900 border border-white/5 p-0.5 rounded">
                     <button
                       onClick={() => setJurisdictionModelMode('light')}
