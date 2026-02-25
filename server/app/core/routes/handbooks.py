@@ -27,6 +27,7 @@ from ..models.handbook import (
 )
 from ..services.handbook_service import GuidedDraftRateLimitError, HandbookService
 from ..services.storage import get_storage
+from ...database import get_connection
 
 router = APIRouter(prefix="/handbooks", tags=["handbooks"])
 
@@ -365,11 +366,21 @@ async def download_handbook_pdf(
     handbook_id: str,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=403, detail="Access denied")
+    if current_user.role == "admin":
+        # Admins can access any handbook. Look up the company_id from the handbook itself.
+        async with get_connection() as conn:
+            company_id_val = await conn.fetchval("SELECT company_id FROM handbooks WHERE id = $1::uuid", handbook_id)
+            if not company_id_val:
+                raise HTTPException(status_code=404, detail="Handbook not found")
+            company_id = str(company_id_val)
+    else:
+        # Clients are restricted to their own company
+        company_id_val = await get_client_company_id(current_user)
+        if company_id_val is None:
+            raise HTTPException(status_code=403, detail="Access denied")
+        company_id = str(company_id_val)
 
-    handbook = await HandbookService.get_handbook_by_id(handbook_id, str(company_id))
+    handbook = await HandbookService.get_handbook_by_id(handbook_id, company_id)
     if handbook is None:
         raise HTTPException(status_code=404, detail="Handbook not found")
 
