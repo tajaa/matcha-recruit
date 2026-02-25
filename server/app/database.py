@@ -3421,6 +3421,7 @@ async def init_db():
                     CHECK (status IN ('active', 'finalized', 'archived')),
                 current_state JSONB NOT NULL DEFAULT '{}'::jsonb,
                 version INTEGER NOT NULL DEFAULT 0,
+                is_pinned BOOLEAN NOT NULL DEFAULT false,
                 linked_offer_letter_id UUID REFERENCES offer_letters(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -3445,6 +3446,17 @@ async def init_db():
             WHERE title = 'Untitled Offer Letter'
             """
         )
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'mw_threads' AND column_name = 'is_pinned'
+                ) THEN
+                    ALTER TABLE mw_threads ADD COLUMN is_pinned BOOLEAN NOT NULL DEFAULT false;
+                END IF;
+            END $$;
+        """)
         await conn.execute("""
             DO $$
             DECLARE

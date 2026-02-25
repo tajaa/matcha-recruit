@@ -328,10 +328,10 @@ export default function MatchaWorkThread() {
         <div className="text-center">
           <p className="text-zinc-400">Thread not found</p>
           <button
-            onClick={() => navigate('/app/matcha/work/elements')}
+            onClick={() => navigate('/app/matcha/work/chats')}
             className="mt-3 text-sm text-matcha-400 hover:text-matcha-300"
           >
-            Open Matcha Elements
+            Open Chats
           </button>
         </div>
       </div>
@@ -344,7 +344,7 @@ export default function MatchaWorkThread() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <button
-            onClick={() => navigate('/app/matcha/work/elements')}
+            onClick={() => navigate('/app/matcha/work/chats')}
             className="text-zinc-400 hover:text-zinc-200 transition-colors flex-shrink-0"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -404,6 +404,12 @@ export default function MatchaWorkThread() {
               Chat
             </button>
             <button
+              onClick={() => navigate('/app/matcha/work/chats')}
+              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Chats
+            </button>
+            <button
               onClick={() => navigate('/app/matcha/work/elements')}
               className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
             >
@@ -438,6 +444,12 @@ export default function MatchaWorkThread() {
               className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
             >
               Elements
+            </button>
+            <button
+              onClick={() => navigate('/app/matcha/work/chats')}
+              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Chats
             </button>
           </div>
 

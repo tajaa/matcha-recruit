@@ -3111,6 +3111,12 @@ export const matchaWork = {
   archiveThread: (threadId: string): Promise<void> =>
     request<void>(`/matcha-work/threads/${threadId}`, { method: 'DELETE' }),
 
+  pinThread: (threadId: string, isPinned: boolean): Promise<MWThread> =>
+    request<MWThread>(`/matcha-work/threads/${threadId}/pin`, {
+      method: 'POST',
+      body: JSON.stringify({ is_pinned: isPinned }),
+    }),
+
   updateTitle: (threadId: string, title: string): Promise<MWThread> =>
     request<MWThread>(`/matcha-work/threads/${threadId}`, {
       method: 'PATCH',

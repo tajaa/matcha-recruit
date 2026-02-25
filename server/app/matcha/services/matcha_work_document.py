@@ -131,7 +131,7 @@ async def create_thread(
                 INSERT INTO mw_threads(company_id, created_by, title, task_type)
                 VALUES($1, $2, $3, $4)
                 RETURNING id, company_id, created_by, title, task_type, status,
-                          current_state, version, linked_offer_letter_id,
+                          current_state, version, is_pinned, linked_offer_letter_id,
                           created_at, updated_at
                 """,
                 company_id,
@@ -150,7 +150,7 @@ async def get_thread(thread_id: UUID, company_id: UUID) -> Optional[dict]:
         row = await conn.fetchrow(
             """
             SELECT id, company_id, created_by, title, task_type, status,
-                   current_state, version, linked_offer_letter_id,
+                   current_state, version, is_pinned, linked_offer_letter_id,
                    created_at, updated_at
             FROM mw_threads
             WHERE id=$1 AND company_id=$2
@@ -175,10 +175,10 @@ async def list_threads(
         if status:
             rows = await conn.fetch(
                 """
-                SELECT id, title, task_type, status, version, created_at, updated_at
+                SELECT id, title, task_type, status, version, is_pinned, created_at, updated_at
                 FROM mw_threads
                 WHERE company_id=$1 AND status=$2
-                ORDER BY updated_at DESC
+                ORDER BY is_pinned DESC, updated_at DESC
                 LIMIT $3 OFFSET $4
                 """,
                 company_id,
@@ -189,10 +189,10 @@ async def list_threads(
         else:
             rows = await conn.fetch(
                 """
-                SELECT id, title, task_type, status, version, created_at, updated_at
+                SELECT id, title, task_type, status, version, is_pinned, created_at, updated_at
                 FROM mw_threads
                 WHERE company_id=$1
-                ORDER BY updated_at DESC
+                ORDER BY is_pinned DESC, updated_at DESC
                 LIMIT $2 OFFSET $3
                 """,
                 company_id,
@@ -314,6 +314,29 @@ async def _sync_element_for_thread(conn, thread_id: UUID) -> None:
 async def sync_element_record(thread_id: UUID) -> None:
     async with get_connection() as conn:
         await _sync_element_for_thread(conn, thread_id)
+
+
+async def set_thread_pinned(
+    thread_id: UUID,
+    company_id: UUID,
+    is_pinned: bool,
+) -> Optional[dict]:
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE mw_threads
+            SET is_pinned=$1, updated_at=NOW()
+            WHERE id=$2 AND company_id=$3
+            RETURNING id, title, task_type, status, version, is_pinned, created_at, updated_at
+            """,
+            is_pinned,
+            thread_id,
+            company_id,
+        )
+        if row is None:
+            return None
+        await _sync_element_for_thread(conn, thread_id)
+        return dict(row)
 
 
 async def get_thread_messages(thread_id: UUID) -> list[dict]:

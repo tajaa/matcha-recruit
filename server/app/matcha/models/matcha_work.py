@@ -73,9 +73,11 @@ class CreateThreadRequest(BaseModel):
 class CreateThreadResponse(BaseModel):
     id: UUID
     title: str
+    task_type: MatchaWorkTaskType
     status: str
     current_state: dict
     version: int
+    is_pinned: bool = False
     created_at: datetime
     assistant_reply: Optional[str] = None
     pdf_url: Optional[str] = None
@@ -117,6 +119,7 @@ class ThreadListItem(BaseModel):
     task_type: MatchaWorkTaskType
     status: str
     version: int
+    is_pinned: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -140,6 +143,7 @@ class ThreadDetailResponse(BaseModel):
     status: str
     current_state: dict
     version: int
+    is_pinned: bool = False
     linked_offer_letter_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -176,6 +180,10 @@ class SaveDraftResponse(BaseModel):
 
 class UpdateTitleRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
+
+
+class PinThreadRequest(BaseModel):
+    is_pinned: bool = True
 
 
 class UsageTotals(BaseModel):

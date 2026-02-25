@@ -23,6 +23,7 @@ from ..models.matcha_work import (
     SaveDraftResponse,
     SendMessageRequest,
     SendMessageResponse,
+    PinThreadRequest,
     ThreadDetailResponse,
     ThreadListItem,
     OfferLetterDocument,
@@ -142,9 +143,11 @@ async def create_thread(
     return CreateThreadResponse(
         id=thread_id,
         title=thread["title"],
+        task_type=thread["task_type"],
         status=thread["status"],
         current_state=thread["current_state"],
         version=thread["version"],
+        is_pinned=thread.get("is_pinned", False),
         created_at=thread["created_at"],
         assistant_reply=assistant_reply,
         pdf_url=pdf_url,
@@ -206,6 +209,7 @@ async def get_thread(
         status=thread["status"],
         current_state=thread["current_state"],
         version=thread["version"],
+        is_pinned=thread.get("is_pinned", False),
         linked_offer_letter_id=thread.get("linked_offer_letter_id"),
         created_at=thread["created_at"],
         updated_at=thread["updated_at"],
@@ -650,7 +654,7 @@ async def update_thread_title(
             UPDATE mw_threads
             SET title=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, task_type, status, version, created_at, updated_at
+            RETURNING id, title, task_type, status, version, is_pinned, created_at, updated_at
             """,
             body.title,
             thread_id,
@@ -661,3 +665,21 @@ async def update_thread_title(
     await doc_svc.sync_element_record(thread_id)
 
     return ThreadListItem(**dict(row))
+
+
+@router.post("/threads/{thread_id}/pin", response_model=ThreadListItem)
+async def set_thread_pin(
+    thread_id: UUID,
+    body: PinThreadRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Pin or unpin a thread for faster access in chat history."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    row = await doc_svc.set_thread_pinned(thread_id, company_id, body.is_pinned)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    return ThreadListItem(**row)

@@ -8,6 +8,7 @@ export interface MWThread {
   task_type: MWTaskType;
   status: MWThreadStatus;
   version: number;
+  is_pinned: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -85,6 +86,7 @@ export interface MWThreadDetail {
   status: MWThreadStatus;
   current_state: MWDocumentState;
   version: number;
+  is_pinned: boolean;
   linked_offer_letter_id: string | null;
   created_at: string;
   updated_at: string;
@@ -94,9 +96,11 @@ export interface MWThreadDetail {
 export interface MWCreateThreadResponse {
   id: string;
   title: string;
+  task_type: MWTaskType;
   status: MWThreadStatus;
   current_state: MWDocumentState;
   version: number;
+  is_pinned: boolean;
   created_at: string;
   assistant_reply: string | null;
   pdf_url: string | null;
