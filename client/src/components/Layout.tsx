@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
@@ -648,10 +648,23 @@ export function Layout() {
   const { user, profile, logout, hasRole, hasBetaFeature, hasFeature, platformFeatures } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showFeatureManager, setShowFeatureManager] = useState(false);
-  const [themeMode, setThemeMode] = useState<'dark' | 'lightSidebar' | 'lightPages'>('dark');
+  const [themeMode, setThemeMode] = useState<'dark' | 'lightSidebar' | 'lightPages'>(() => {
+    if (typeof window === 'undefined') return 'lightSidebar';
+    const saved = window.localStorage.getItem('matcha_theme_mode');
+    if (saved === 'dark' || saved === 'lightSidebar' || saved === 'lightPages') {
+      return saved;
+    }
+    return 'lightSidebar';
+  });
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
     () => new Set(navSections.map(s => s.title))
   );
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('matcha_theme_mode', themeMode);
+    }
+  }, [themeMode]);
 
   const toggleSection = (title: string) => {
     setCollapsedSections(prev => {

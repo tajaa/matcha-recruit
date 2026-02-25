@@ -808,7 +808,7 @@ function HandbookDetailPage() {
                         <textarea
                           value={activeSection.content}
                           onChange={(e) => handleSectionChange(activeSectionIndex, e.target.value)}
-                          className="w-full min-h-[420px] px-3 py-3 bg-zinc-900 border border-white/10 text-sm text-zinc-100 focus:outline-none focus:border-white/30 resize-y"
+                          className="w-full min-h-[420px] px-3 py-3 bg-zinc-900 border border-white/10 text-sm text-zinc-100 font-serif leading-[1.5] focus:outline-none focus:border-white/30 resize-y"
                         />
                       </div>
                       <div className="flex-shrink-0 w-8">
@@ -875,7 +875,7 @@ function HandbookDetailPage() {
                     {change.rationale && <p className="text-xs text-zinc-400">{change.rationale}</p>}
                     <div>
                       <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Proposed Content</p>
-                      <div className="text-xs text-zinc-300 whitespace-pre-wrap">{change.proposed_content}</div>
+                      <div className="text-xs text-zinc-300 whitespace-pre-wrap font-serif leading-[1.5]">{change.proposed_content}</div>
                         </div>
                         <div className="flex justify-end">
                           <button
