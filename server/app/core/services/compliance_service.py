@@ -840,8 +840,8 @@ async def _fill_missing_categories_from_parents(
     
     filled_any = False
     
-    # Try county
-    county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, threshold_days)
+    # Try county — county ordinances change slowly, use lenient threshold
+    county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, max(threshold_days, 30))
     if county_reqs:
         target_set = {_normalize_category(c) or c for c in missing}
         fill = [r for r in county_reqs if (_normalize_category(r.get("category")) or r.get("category")) in target_set]
@@ -851,9 +851,9 @@ async def _fill_missing_categories_from_parents(
             missing = _missing_required_categories(requirements)
             if not missing:
                 return True
-                
-    # Try state
-    state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, threshold_days)
+
+    # Try state — state law changes slowly, use a much more lenient threshold
+    state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, max(threshold_days, 90))
     if state_reqs:
         target_set = {_normalize_category(c) or c for c in missing}
         fill = [r for r in state_reqs if (_normalize_category(r.get("category")) or r.get("category")) in target_set]
@@ -877,6 +877,114 @@ async def _get_county_jurisdiction_id(conn, city_jurisdiction_id: UUID) -> Optio
     if county_row and county_row["city"] and county_row["city"].startswith("_county_"):
         return county_row["id"]
     return None
+
+
+async def _get_state_jurisdiction_id(conn, jurisdiction_id: UUID) -> Optional[UUID]:
+    """Walk parent_id chain to find the state jurisdiction ID."""
+    current_id = jurisdiction_id
+    for _ in range(3):  # Walk up to 3 levels (city -> county -> state)
+        row = await conn.fetchrow("SELECT parent_id FROM jurisdictions WHERE id = $1", current_id)
+        if not row or not row["parent_id"]:
+            return None
+        current_id = row["parent_id"]
+        j_row = await conn.fetchrow("SELECT id, city FROM jurisdictions WHERE id = $1", current_id)
+        if j_row and j_row["city"] == "":  # State jurisdictions have empty city
+            return j_row["id"]
+    return None
+
+
+async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[Dict]):
+    """Upsert requirements to a jurisdiction without deleting existing rows."""
+    for req in reqs:
+        requirement_key = _compute_requirement_key(req)
+        await conn.execute(
+            """
+            INSERT INTO jurisdiction_requirements
+                (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
+                 title, description, current_value, numeric_value, source_url, source_name,
+                 effective_date, expiration_date, last_verified_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+            ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
+                category = EXCLUDED.category,
+                rate_type = EXCLUDED.rate_type,
+                jurisdiction_level = EXCLUDED.jurisdiction_level,
+                jurisdiction_name = EXCLUDED.jurisdiction_name,
+                title = EXCLUDED.title,
+                description = EXCLUDED.description,
+                previous_value = jurisdiction_requirements.current_value,
+                current_value = EXCLUDED.current_value,
+                numeric_value = EXCLUDED.numeric_value,
+                source_url = EXCLUDED.source_url,
+                source_name = EXCLUDED.source_name,
+                effective_date = EXCLUDED.effective_date,
+                expiration_date = EXCLUDED.expiration_date,
+                last_verified_at = NOW(),
+                last_changed_at = CASE
+                    WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
+                    THEN NOW() ELSE jurisdiction_requirements.last_changed_at END,
+                updated_at = NOW()
+            """,
+            jurisdiction_id, requirement_key,
+            req.get("category"), req.get("rate_type"), req.get("jurisdiction_level"),
+            req.get("jurisdiction_name"), req.get("title"), req.get("description"),
+            req.get("current_value"), req.get("numeric_value"),
+            req.get("source_url"), req.get("source_name"),
+            parse_date(req.get("effective_date")), parse_date(req.get("expiration_date")),
+        )
+
+
+async def _fill_from_state_fallback(
+    conn, service, jurisdiction_id: UUID,
+    city: str, state: str, county: Optional[str],
+    has_local_ordinance: Optional[bool],
+    requirements: List[Dict],
+    still_missing: List[str],
+    threshold_days: int,
+) -> List[Dict]:
+    """For categories still missing after Tier 3, try state cache then Gemini state research."""
+    state_name = _CODE_TO_STATE_NAME.get(state.upper(), state)
+
+    # 1. Try state cache with lenient threshold
+    state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, threshold_days)
+    if state_reqs:
+        target_set = set(still_missing)
+        fill = [r for r in state_reqs if (_normalize_category(r.get("category")) or r.get("category")) in target_set]
+        if fill:
+            print(f"[Compliance] State-level fallback filled {len(fill)} missing categories for {city}: {still_missing}")
+            return requirements + fill
+
+    # 2. State cache empty or stale — research at state level via Gemini
+    print(f"[Compliance] Researching {still_missing} at state level ({state}) for {city}")
+    state_researched = await service.research_location_compliance(
+        city="",
+        state=state,
+        county="",
+        categories=still_missing,
+        source_context="",
+        corrections_context="",
+        preemption_rules={},
+        has_local_ordinance=None,
+        on_retry=None,
+    )
+    if state_researched:
+        # Annotate as state-level and note city follows state law for this category
+        for r in state_researched:
+            r["jurisdiction_level"] = "state"
+            r["jurisdiction_name"] = state_name
+            desc = r.get("description") or ""
+            note = f" [Applies via {state_name} state law; {city} has no local ordinance for this category.]"
+            if note not in desc:
+                r["description"] = desc + note
+
+        # Cache to state jurisdiction additively (don't delete existing state rows)
+        state_jid = await _get_state_jurisdiction_id(conn, jurisdiction_id)
+        if state_jid:
+            await _upsert_requirements_additive(conn, state_jid, state_researched)
+            print(f"[Compliance] Cached {len(state_researched)} state-level reqs to jurisdiction {state_jid}")
+
+        return requirements + state_researched
+
+    return requirements
 
 
 async def _refresh_repository_missing_categories(
@@ -2397,6 +2505,20 @@ async def run_compliance_check_stream(
                     requirements = preserved + researched_requirements
                 else:
                     requirements = researched_requirements
+
+                # After Tier 3: if some research categories are still missing, fall back to
+                # state-level data (e.g., final_pay / minor_work_permit governed by state law).
+                still_missing = [
+                    cat for cat in (research_categories or [])
+                    if cat not in {_normalize_category(r.get("category")) for r in requirements}
+                ]
+                if still_missing:
+                    requirements = await _fill_from_state_fallback(
+                        conn, service, jurisdiction_id,
+                        location.city, location.state, location.county,
+                        has_local_ordinance, requirements, still_missing,
+                        threshold_days=max(location.auto_check_interval_days or 7, 90),
+                    )
             elif not used_repository:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
