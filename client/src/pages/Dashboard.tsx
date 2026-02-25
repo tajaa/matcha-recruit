@@ -102,9 +102,6 @@ export function Dashboard() {
   ];
 
   const complianceRate = dashStats?.compliance_rate ?? 0;
-  // SVG circle: radius 88, circumference ~553
-  const circumference = 2 * Math.PI * 88;
-  const strokeOffset = circumference - (complianceRate / 100) * circumference;
 
   const dashboardWidgets = [
     { id: 'stats', label: 'Key Metrics', icon: Activity },
