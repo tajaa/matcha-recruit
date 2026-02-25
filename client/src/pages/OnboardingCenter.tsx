@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { onboarding, provisioning } from '../api/client';
 import { FeatureGuideTrigger } from '../features/feature-guides';
-import type { GoogleWorkspaceConnectionStatus, OnboardingAnalytics } from '../types';
+import type { GoogleWorkspaceConnectionStatus, OnboardingAnalytics, SlackConnectionStatus } from '../types';
 import Employees from './Employees';
 import OnboardingTemplates from './OnboardingTemplates';
 import CompanyProfile from './CompanyProfile';
@@ -96,6 +96,9 @@ export default function OnboardingCenter() {
   const [loadingGoogle, setLoadingGoogle] = useState(true);
   const [googleStatus, setGoogleStatus] = useState<GoogleWorkspaceConnectionStatus | null>(null);
   const [googleStatusError, setGoogleStatusError] = useState('');
+  const [loadingSlack, setLoadingSlack] = useState(true);
+  const [slackStatus, setSlackStatus] = useState<SlackConnectionStatus | null>(null);
+  const [slackStatusError, setSlackStatusError] = useState('');
 
   useEffect(() => {
     const tab = searchParams.get('tab');
@@ -129,15 +132,27 @@ export default function OnboardingCenter() {
       let mounted = true;
       const loadGoogleStatus = async () => {
         setLoadingGoogle(true);
+        setLoadingSlack(true);
         setGoogleStatusError('');
+        setSlackStatusError('');
         try {
-          const status = await provisioning.getGoogleWorkspaceStatus();
-          if (mounted) setGoogleStatus(status);
+          const [google, slack] = await Promise.all([
+            provisioning.getGoogleWorkspaceStatus(),
+            provisioning.getSlackStatus(),
+          ]);
+          if (!mounted) return;
+          setGoogleStatus(google);
+          setSlackStatus(slack);
         } catch (err) {
           if (!mounted) return;
-          setGoogleStatusError(err instanceof Error ? err.message : 'Could not load Google status');
+          const message = err instanceof Error ? err.message : 'Could not load provisioning status';
+          setGoogleStatusError(message);
+          setSlackStatusError(message);
         } finally {
-          if (mounted) setLoadingGoogle(false);
+          if (mounted) {
+            setLoadingGoogle(false);
+            setLoadingSlack(false);
+          }
         }
       };
       loadGoogleStatus();
@@ -167,6 +182,22 @@ export default function OnboardingCenter() {
     }
     return { label: googleStatus.status.toUpperCase(), tone: statusTone(googleStatus.status) };
   }, [loadingGoogle, googleStatus]);
+
+  const slackBadge = useMemo(() => {
+    if (loadingSlack) {
+      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
+    }
+    if (!slackStatus || slackStatus.status === 'disconnected') {
+      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
+    }
+    if (slackStatus.status === 'connected') {
+      return { label: 'Connected', tone: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200' };
+    }
+    if (slackStatus.status === 'error') {
+      return { label: 'Needs Attention', tone: 'border-red-500/40 bg-red-950/30 text-red-200' };
+    }
+    return { label: slackStatus.status.toUpperCase(), tone: statusTone(slackStatus.status) };
+  }, [loadingSlack, slackStatus]);
 
   const activeCycleStep = useMemo(
     () => computeOnboardingCycleStep(analytics, googleStatus),
@@ -275,13 +306,23 @@ export default function OnboardingCenter() {
                     <h2 className="text-sm font-semibold tracking-wide text-white">Slack</h2>
                     <p className="text-xs text-zinc-500 mt-1">Auto-invite, channels, and workspace defaults.</p>
                   </div>
-                  <span className="rounded border border-zinc-700 bg-zinc-900/70 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-300">
-                    Draft Ready
+                  <span className={`rounded border px-2 py-1 text-[10px] uppercase tracking-wider ${slackBadge.tone}`}>
+                    {slackBadge.label}
                   </span>
                 </div>
-                <p className="text-[11px] text-zinc-400">
-                  Configure your workspace defaults now and wire OAuth when your Slack app is enabled.
-                </p>
+
+                {slackStatusError && (
+                  <p className="text-xs text-red-300">Status check failed: {slackStatusError}</p>
+                )}
+
+                {slackStatus && (
+                  <div className="space-y-1 text-[11px] text-zinc-400">
+                    <p>Workspace: <span className="text-zinc-200">{slackStatus.workspace_url || 'not set'}</span></p>
+                    <p>Team: <span className="text-zinc-200">{slackStatus.slack_team_name || 'not connected'}</span></p>
+                    <p>Auto-invite: <span className="text-zinc-200">{slackStatus.auto_invite_on_employee_create ? 'on' : 'off'}</span></p>
+                  </div>
+                )}
+
                 <button
                   data-tour="onboarding-configure-slack"
                   onClick={() => navigate('/app/matcha/slack-provisioning')}

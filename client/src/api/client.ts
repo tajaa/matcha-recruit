@@ -39,6 +39,9 @@ import type {
   BrokerPortfolioReportResponse,
   GoogleWorkspaceConnectionRequest,
   GoogleWorkspaceConnectionStatus,
+  SlackConnectionRequest,
+  SlackConnectionStatus,
+  SlackOAuthStartResponse,
   ProvisioningRunStatus,
   EmployeeGoogleWorkspaceProvisioningStatus,
   OnboardingAnalytics,
@@ -525,6 +528,20 @@ export const provisioning = {
     request<GoogleWorkspaceConnectionStatus>('/provisioning/google-workspace/connect', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  getSlackStatus: () =>
+    request<SlackConnectionStatus>('/provisioning/slack/status'),
+
+  connectSlack: (data: SlackConnectionRequest) =>
+    request<SlackConnectionStatus>('/provisioning/slack/connect', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  startSlackOAuth: () =>
+    request<SlackOAuthStartResponse>('/provisioning/slack/oauth/start', {
+      method: 'POST',
     }),
 
   provisionEmployeeGoogleWorkspace: (employeeId: string) =>

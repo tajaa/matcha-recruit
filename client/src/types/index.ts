@@ -783,6 +783,44 @@ export interface GoogleWorkspaceConnectionStatus {
   updated_at: string | null;
 }
 
+export interface SlackConnectionRequest {
+  client_id?: string;
+  client_secret?: string;
+  workspace_url?: string;
+  admin_email?: string;
+  default_channels?: string[];
+  oauth_scopes?: string[];
+  auto_invite_on_employee_create?: boolean;
+  sync_display_name?: boolean;
+}
+
+export interface SlackConnectionStatus {
+  provider: 'slack';
+  connected: boolean;
+  status: 'disconnected' | 'connected' | 'error' | 'needs_action' | string;
+  client_id: string | null;
+  has_client_secret: boolean;
+  workspace_url: string | null;
+  admin_email: string | null;
+  default_channels: string[];
+  oauth_scopes: string[];
+  auto_invite_on_employee_create: boolean;
+  sync_display_name: boolean;
+  has_bot_token: boolean;
+  slack_team_id: string | null;
+  slack_team_name: string | null;
+  slack_team_domain: string | null;
+  bot_user_id: string | null;
+  last_tested_at: string | null;
+  last_error: string | null;
+  updated_at: string | null;
+}
+
+export interface SlackOAuthStartResponse {
+  authorize_url: string;
+  state: string;
+}
+
 export interface ProvisioningStepStatus {
   step_id: string;
   step_key: string;
