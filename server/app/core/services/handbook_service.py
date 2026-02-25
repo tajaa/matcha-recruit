@@ -143,6 +143,39 @@ LEGAL_OPERATIONAL_HOOKS = {
     "legal_owner": "[LEGAL_REVIEW_OWNER]",
 }
 
+ATTENDANCE_NOTICE_WINDOW_HOOK = "[ATTENDANCE_NOTICE_WINDOW]"
+
+WORKWEEK_DAY_ALIASES = {
+    "mon": "Monday",
+    "monday": "Monday",
+    "tue": "Tuesday",
+    "tues": "Tuesday",
+    "tuesday": "Tuesday",
+    "wed": "Wednesday",
+    "weds": "Wednesday",
+    "wednesday": "Wednesday",
+    "thu": "Thursday",
+    "thur": "Thursday",
+    "thurs": "Thursday",
+    "thursday": "Thursday",
+    "fri": "Friday",
+    "friday": "Friday",
+    "sat": "Saturday",
+    "saturday": "Saturday",
+    "sun": "Sunday",
+    "sunday": "Sunday",
+}
+
+WORKWEEK_TIME_PATTERN = re.compile(
+    r"\b((?:[01]?\d|2[0-3])(?::[0-5]\d)?\s?(?:AM|PM)?)\b",
+    re.IGNORECASE,
+)
+WORKWEEK_TIMEZONE_PATTERN = re.compile(
+    r"\b(PT|PST|PDT|MT|MST|MDT|CT|CST|CDT|ET|EST|EDT|UTC(?:[+-]\d{1,2})?|GMT(?:[+-]\d{1,2})?)\b",
+    re.IGNORECASE,
+)
+EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
 GUIDED_PROFILE_BOOL_KEYS = {
     "remote_workers",
     "minors",
@@ -179,9 +212,27 @@ GUIDED_COMMON_QUESTIONS = [
         "required": True,
     },
     {
+        "id": "harassment_email",
+        "question": "What email should be listed as a harassment reporting channel?",
+        "placeholder": "hr-reports@company.com",
+        "required": True,
+    },
+    {
         "id": "workweek_definition",
         "question": "When does your payroll workweek start (day, time, and timezone)?",
         "placeholder": "Sunday 12:00 AM PT",
+        "required": True,
+    },
+    {
+        "id": "payday_frequency",
+        "question": "What payroll cadence applies for regular paydays?",
+        "placeholder": "e.g., weekly or biweekly",
+        "required": True,
+    },
+    {
+        "id": "payday_anchor",
+        "question": "What day should be used as the payroll anchor/cutoff reference?",
+        "placeholder": "e.g., Friday",
         "required": True,
     },
     {
@@ -1223,6 +1274,7 @@ def _build_template_sections(
     custom_sections: list[HandbookSectionInput],
     industry_key: str = "general",
     state_requirement_map: Optional[dict[str, list[dict[str, Any]]]] = None,
+    guided_answers: Optional[dict[str, str]] = None,
 ) -> list[dict[str, Any]]:
     unique_states, selected_cities_by_state, _ = _collect_state_city_scope(scopes)
     _validate_required_state_coverage(industry_key, unique_states, state_requirement_map or {})
@@ -1234,7 +1286,9 @@ def _build_template_sections(
         selected_cities_by_state=selected_cities_by_state,
     )
     custom = _normalize_custom_sections(custom_sections)
-    return sorted(base_sections + state_sections + custom, key=lambda item: item["section_order"])
+    sections = sorted(base_sections + state_sections + custom, key=lambda item: item["section_order"])
+    hook_values = _build_operational_hook_values(profile, guided_answers or {})
+    return _apply_operational_hooks_to_sections(sections, hook_values)
 
 
 def _handbook_filename(title: str, version_number: int) -> str:
@@ -1291,6 +1345,164 @@ def _sanitize_answer_map(raw_answers: dict[str, str]) -> dict[str, str]:
         if clean_value:
             sanitized[clean_key] = clean_value[:500]
     return sanitized
+
+
+def _normalize_hook_text(value: Optional[str], max_len: int = 160) -> Optional[str]:
+    if not value:
+        return None
+    cleaned = " ".join(str(value).split()).strip()
+    if not cleaned:
+        return None
+    if re.fullmatch(r"\[[A-Z0-9_]+\]", cleaned):
+        return None
+    return cleaned[:max_len]
+
+
+def _extract_email(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    match = EMAIL_PATTERN.search(value)
+    if not match:
+        return None
+    return match.group(0)
+
+
+def _normalize_workweek_day(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    token = re.sub(r"[^a-z]", "", value.strip().lower())
+    if not token:
+        return None
+    return WORKWEEK_DAY_ALIASES.get(token)
+
+
+def _parse_workweek_definition(value: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    cleaned = _normalize_hook_text(value, max_len=120)
+    if not cleaned:
+        return None, None, None
+
+    day_match = re.search(
+        r"\b(mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b",
+        cleaned,
+        re.IGNORECASE,
+    )
+    day = _normalize_workweek_day(day_match.group(0) if day_match else None)
+
+    time_match = WORKWEEK_TIME_PATTERN.search(cleaned)
+    time_value = _normalize_hook_text(time_match.group(1) if time_match else None, max_len=30)
+
+    timezone_match = WORKWEEK_TIMEZONE_PATTERN.search(cleaned)
+    timezone_value = _normalize_hook_text(timezone_match.group(1).upper() if timezone_match else None, max_len=20)
+
+    return day, time_value, timezone_value
+
+
+def _build_operational_hook_values(
+    profile: dict[str, Any],
+    answers: dict[str, str],
+) -> dict[str, str]:
+    safe_answers = _sanitize_answer_map(answers)
+
+    hr_answer = safe_answers.get("hr_contact_email")
+    leave_answer = safe_answers.get("leave_admin_email")
+    hotline_answer = safe_answers.get("harassment_hotline")
+    harassment_email_answer = (
+        safe_answers.get("harassment_email")
+        or safe_answers.get("harassment_reporting_email")
+    )
+
+    workweek_definition_answer = safe_answers.get("workweek_definition")
+    parsed_day, parsed_time, parsed_timezone = _parse_workweek_definition(workweek_definition_answer)
+    workweek_start_day = _normalize_workweek_day(safe_answers.get("workweek_start_day")) or parsed_day
+    workweek_start_time = _normalize_hook_text(safe_answers.get("workweek_start_time"), max_len=30) or parsed_time
+    workweek_timezone = (
+        _normalize_hook_text(safe_answers.get("workweek_timezone"), max_len=20)
+        or parsed_timezone
+    )
+
+    payday_frequency_answer = (
+        safe_answers.get("payday_frequency")
+        or safe_answers.get("pay_frequency")
+        or safe_answers.get("payroll_frequency")
+    )
+    payday_anchor_answer = (
+        safe_answers.get("payday_anchor")
+        or safe_answers.get("payday_anchor_day")
+        or safe_answers.get("payday_day")
+    )
+    attendance_notice_answer = safe_answers.get("attendance_notice_window")
+    legal_owner_answer = safe_answers.get("legal_owner") or safe_answers.get("legal_review_owner")
+
+    hr_contact_email = _extract_email(hr_answer) or _normalize_hook_text(hr_answer, max_len=120)
+    leave_admin_email = _extract_email(leave_answer) or _normalize_hook_text(leave_answer, max_len=120)
+    harassment_hotline = _normalize_hook_text(hotline_answer, max_len=120)
+    harassment_email = (
+        _extract_email(harassment_email_answer)
+        or _extract_email(hotline_answer)
+        or _extract_email(hr_answer)
+        or _normalize_hook_text(harassment_email_answer, max_len=120)
+        or _normalize_hook_text(hr_answer, max_len=120)
+    )
+    payday_frequency = _normalize_hook_text(payday_frequency_answer, max_len=80)
+    payday_anchor = _normalize_hook_text(payday_anchor_answer, max_len=80)
+    attendance_notice_window = _normalize_hook_text(attendance_notice_answer, max_len=120)
+    legal_owner = (
+        _normalize_hook_text(legal_owner_answer, max_len=120)
+        or _normalize_hook_text(profile.get("ceo_or_president"), max_len=120)
+        or _normalize_hook_text(profile.get("legal_name"), max_len=120)
+    )
+
+    fallback_values = {
+        LEGAL_OPERATIONAL_HOOKS["hr_contact_email"]: "the designated HR contact channel",
+        LEGAL_OPERATIONAL_HOOKS["leave_admin_email"]: "the designated leave and accommodation contact channel",
+        LEGAL_OPERATIONAL_HOOKS["harassment_hotline"]: "the designated harassment reporting channel",
+        LEGAL_OPERATIONAL_HOOKS["harassment_email"]: "the designated harassment reporting email channel",
+        LEGAL_OPERATIONAL_HOOKS["workweek_start_day"]: "the designated workweek start day",
+        LEGAL_OPERATIONAL_HOOKS["workweek_start_time"]: "the designated workweek start time",
+        LEGAL_OPERATIONAL_HOOKS["workweek_timezone"]: "local time",
+        LEGAL_OPERATIONAL_HOOKS["payday_frequency"]: "the company's standard payroll cadence",
+        LEGAL_OPERATIONAL_HOOKS["payday_anchor"]: "the designated payroll anchor day",
+        LEGAL_OPERATIONAL_HOOKS["legal_owner"]: "designated company leadership",
+        ATTENDANCE_NOTICE_WINDOW_HOOK: "as much advance notice as practicable",
+    }
+
+    resolved_values = {
+        LEGAL_OPERATIONAL_HOOKS["hr_contact_email"]: hr_contact_email,
+        LEGAL_OPERATIONAL_HOOKS["leave_admin_email"]: leave_admin_email,
+        LEGAL_OPERATIONAL_HOOKS["harassment_hotline"]: harassment_hotline,
+        LEGAL_OPERATIONAL_HOOKS["harassment_email"]: harassment_email,
+        LEGAL_OPERATIONAL_HOOKS["workweek_start_day"]: workweek_start_day,
+        LEGAL_OPERATIONAL_HOOKS["workweek_start_time"]: workweek_start_time,
+        LEGAL_OPERATIONAL_HOOKS["workweek_timezone"]: workweek_timezone,
+        LEGAL_OPERATIONAL_HOOKS["payday_frequency"]: payday_frequency,
+        LEGAL_OPERATIONAL_HOOKS["payday_anchor"]: payday_anchor,
+        LEGAL_OPERATIONAL_HOOKS["legal_owner"]: legal_owner,
+        ATTENDANCE_NOTICE_WINDOW_HOOK: attendance_notice_window,
+    }
+
+    return {
+        token: (resolved_values.get(token) or fallback)
+        for token, fallback in fallback_values.items()
+    }
+
+
+def _apply_operational_hooks_to_sections(
+    sections: list[dict[str, Any]],
+    hook_values: dict[str, str],
+) -> list[dict[str, Any]]:
+    hydrated: list[dict[str, Any]] = []
+    for section in sections:
+        content = section.get("content")
+        if not isinstance(content, str) or not content:
+            hydrated.append(section)
+            continue
+
+        resolved_content = content
+        for token, replacement in hook_values.items():
+            if token in resolved_content:
+                resolved_content = resolved_content.replace(token, replacement)
+        hydrated.append({**section, "content": resolved_content})
+    return hydrated
 
 
 def _parse_bool_like(value: Any) -> Optional[bool]:
@@ -1949,6 +2161,7 @@ class HandbookService:
     ) -> HandbookDetailResponse:
         normalized_scopes = [_normalize_scope(scope) for scope in data.scopes]
         profile = _normalize_profile(data.profile)
+        guided_answers = _sanitize_answer_map(data.guided_answers)
         profile_row: Optional[CompanyHandbookProfileResponse] = None
         _validate_handbook_file_reference(data.file_url)
 
@@ -2023,6 +2236,7 @@ class HandbookService:
                             data.custom_sections,
                             industry_key=industry_key,
                             state_requirement_map=state_requirement_map,
+                            guided_answers=guided_answers,
                         )
                     else:
                         sections = [

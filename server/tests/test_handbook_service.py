@@ -369,6 +369,76 @@ def test_build_template_sections_requires_mandatory_topics_for_hospitality():
         )
 
 
+def test_build_template_sections_hydrates_operational_hooks_from_guided_answers():
+    profile = {
+        "legal_name": "Matcha Foods LLC",
+        "dba": None,
+        "ceo_or_president": "Jordan Finch",
+        "headcount": 32,
+        "remote_workers": False,
+        "minors": False,
+        "tipped_employees": True,
+        "union_employees": False,
+        "federal_contracts": False,
+        "group_health_insurance": True,
+        "background_checks": True,
+        "hourly_employees": True,
+        "salaried_employees": True,
+        "commissioned_employees": False,
+        "tip_pooling": True,
+    }
+
+    sections = _build_template_sections(
+        mode="single_state",
+        scopes=[{"state": "CA", "city": None, "zipcode": None, "location_id": None}],
+        profile=profile,
+        custom_sections=[
+            SimpleNamespace(
+                section_key="custom_notice",
+                title="Attendance Notice",
+                content="Foreseeable absences require [ATTENDANCE_NOTICE_WINDOW] notice.",
+                section_order=300,
+                section_type="custom",
+                jurisdiction_scope={},
+            )
+        ],
+        industry_key="general",
+        state_requirement_map={"CA": []},
+        guided_answers={
+            "hr_contact_email": "hr@itsmatcha.net",
+            "leave_admin_email": "leave@itsmatcha.net",
+            "harassment_hotline": "1-800-555-0123",
+            "workweek_definition": "Sunday 12:00 AM PT",
+            "payday_frequency": "biweekly",
+            "payday_anchor": "Friday",
+            "attendance_notice_window": "24 hours",
+        },
+    )
+
+    combined_content = "\n".join(section["content"] for section in sections)
+    assert "hr@itsmatcha.net" in combined_content
+    assert "leave@itsmatcha.net" in combined_content
+    assert "1-800-555-0123" in combined_content
+    assert "runs from Sunday at 12:00 AM (PT)" in combined_content
+    assert "Paydays follow biweekly with payroll cutoff anchored to Friday." in combined_content
+    assert "24 hours notice" in combined_content
+
+    unresolved_tokens = (
+        "[HR_CONTACT_EMAIL]",
+        "[LEAVE_ADMIN_EMAIL]",
+        "[HARASSMENT_REPORTING_HOTLINE]",
+        "[HARASSMENT_REPORTING_EMAIL]",
+        "[WORKWEEK_START_DAY]",
+        "[WORKWEEK_START_TIME]",
+        "[WORKWEEK_TIMEZONE]",
+        "[PAYDAY_FREQUENCY]",
+        "[PAYDAY_ANCHOR_DAY]",
+        "[LEGAL_REVIEW_OWNER]",
+        "[ATTENDANCE_NOTICE_WINDOW]",
+    )
+    assert not any(token in combined_content for token in unresolved_tokens)
+
+
 def _guided_profile() -> dict:
     return {
         "legal_name": "Matcha Tech Inc.",
@@ -459,7 +529,10 @@ def test_generate_guided_draft_merges_ai_payload_and_skips_existing_titles(monke
         "hr_contact_email": "hr@matcha-tech.com",
         "leave_admin_email": "leave@matcha-tech.com",
         "harassment_hotline": "1-800-555-0123",
+        "harassment_email": "report@matcha-tech.com",
         "workweek_definition": "Sunday 12:00 AM PT",
+        "payday_frequency": "biweekly",
+        "payday_anchor": "Friday",
         "attendance_notice_window": "24 hours",
         "remote_work_jurisdiction_tracking": "Notify HR five business days before any state change.",
         "security_incident_reporting_window": "Immediate report to security@matcha-tech.com",

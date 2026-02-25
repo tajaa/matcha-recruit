@@ -54,6 +54,7 @@ class HandbookCreateRequest(BaseModel):
     scopes: list[HandbookScopeInput]
     profile: CompanyHandbookProfileInput
     custom_sections: list[HandbookSectionInput] = Field(default_factory=list)
+    guided_answers: dict[str, str] = Field(default_factory=dict)
     file_url: Optional[str] = None
     file_name: Optional[str] = None
     create_from_template: bool = True

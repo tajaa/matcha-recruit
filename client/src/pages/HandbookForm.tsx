@@ -994,6 +994,10 @@ export function HandbookForm() {
         });
         navigate(`/app/matcha/handbook/${id}`);
       } else {
+        const finalGuidedAnswers =
+          sourceType === 'template'
+            ? buildGuidedAnswersPayload()
+            : {};
         const created = await handbooks.create({
           title: title.trim(),
           mode,
@@ -1001,6 +1005,7 @@ export function HandbookForm() {
           industry: sourceType === 'template' ? industry : null,
           scopes,
           profile: normalizedProfile,
+          guided_answers: sourceType === 'template' ? finalGuidedAnswers : undefined,
           create_from_template: sourceType === 'template',
           file_url: uploadedFileUrl,
           file_name: uploadedFilename,

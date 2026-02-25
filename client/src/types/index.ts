@@ -2035,6 +2035,7 @@ export interface HandbookCreate {
   scopes: Omit<HandbookScope, 'id'>[];
   profile: CompanyHandbookProfile;
   custom_sections?: HandbookSection[];
+  guided_answers?: Record<string, string>;
   file_url?: string | null;
   file_name?: string | null;
   create_from_template?: boolean;
