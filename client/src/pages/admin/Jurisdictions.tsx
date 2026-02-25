@@ -1128,68 +1128,65 @@ export function Jurisdictions() {
                           const isLoading = detailLoading === j.id;
                           return (
                             <div key={j.id} className={isExpanded ? 'bg-white/[0.015]' : ''}>
-                              <div className="px-4 py-4 hover:bg-white/[0.03] transition-colors">
-                                <div className="flex items-start gap-2.5">
-                                  <button onClick={() => handleExpand(j.id)} className="mt-1 shrink-0" aria-label="Toggle detail">
+                              <div className="px-4 py-4 hover:bg-white/[0.03] transition-colors group">
+                                <div className="flex items-start md:items-center gap-3">
+                                  <button onClick={() => handleExpand(j.id)} className="mt-0.5 md:mt-0 shrink-0 p-1" aria-label="Toggle detail">
                                     <span className={`text-[9px] font-mono text-zinc-600 transition-transform duration-150 inline-block ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
                                   </button>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between gap-3">
-                                      <button onClick={() => handleExpand(j.id)} className="text-sm text-white font-medium truncate min-w-0 text-left leading-tight">
-                                        {displayCity(j.city)}, {j.state}
-                                      </button>
-                                      <div className="flex items-center gap-1.5 shrink-0">
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
-                                          disabled={topMetroRunning || checkingId !== null || deletingId !== null}
-                                          className={`relative px-3 py-2 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
-                                            checkingId === j.id ? 'text-blue-300 border-blue-500/40 bg-blue-500/5' : 'text-zinc-500 border-zinc-700/60 hover:text-white hover:border-zinc-500 disabled:opacity-30'
-                                          }`}
-                                        >
-                                          {checkingId === j.id && <span className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/10 to-transparent" style={{ animation: 'scanX 1.5s ease-in-out infinite' }} />}
-                                          <span className="relative flex items-center gap-1.5">
-                                            {checkingId === j.id ? (
-                                              <><svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>Scanning</>
-                                            ) : (
-                                              <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>Research</>
-                                            )}
+                                  <div className="flex-1 min-w-0 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                    <div className="flex flex-col min-w-0 cursor-pointer" onClick={() => handleExpand(j.id)}>
+                                      <div className="flex items-center gap-2 flex-wrap mb-1.5 md:mb-1">
+                                        <span className="text-sm text-white font-medium">{displayCity(j.city)}, {j.state}</span>
+                                        {j.county && <span className="text-[9px] text-zinc-500 font-mono">{j.county} Co.</span>}
+                                        {j.parent_id && j.parent_city && (
+                                          <span className={`text-[8px] px-1.5 py-0.5 font-mono border ${j.inherits_from_parent ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                                            {j.inherits_from_parent ? `inherits ${formatInheritanceParent(displayCity(j.parent_city), j.parent_state)}` : `↳ ${displayCity(j.parent_city)}`}
                                           </span>
-                                        </button>
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); void handleDelete(j); }}
-                                          disabled={topMetroRunning || checkingId !== null || deletingId !== null}
-                                          className={`p-2 border transition-colors disabled:opacity-30 ${deletingId === j.id ? 'text-red-300 border-red-500/40 bg-red-500/5' : 'text-zinc-700 border-zinc-800 hover:text-red-400 hover:border-red-700/60'}`}
-                                          title="Delete jurisdiction"
-                                        >
-                                          {deletingId === j.id ? (
-                                            <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>
-                                          ) : (
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                          )}
-                                        </button>
+                                        )}
+                                        {j.children_count > 0 && <span className="text-[8px] px-1.5 py-0.5 font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">{j.children_count} {j.children_count === 1 ? 'child' : 'children'}</span>}
+                                        <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${j.requirement_count > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-zinc-800/40 text-zinc-600 border-zinc-700/30'}`}>
+                                          {j.requirement_count > 0 ? 'Populated' : 'Empty'}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-x-3 gap-y-1 text-[9px] font-mono text-zinc-500 flex-wrap">
+                                        <span><strong className="text-zinc-400">{j.requirement_count}</strong> reqs</span>
+                                        <span className="opacity-30">|</span>
+                                        <span><strong className="text-zinc-400">{j.legislation_count}</strong> leg</span>
+                                        <span className="opacity-30">|</span>
+                                        <span><strong className="text-zinc-400">{j.location_count}</strong> loc</span>
+                                        <span className="opacity-30">|</span>
+                                        <span>Verified {formatRelative(j.last_verified_at)}</span>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                                      {j.county && <span className="text-[9px] text-zinc-600 font-mono">{j.county} Co.</span>}
-                                      {j.parent_id && j.parent_city && (
-                                        <span className={`text-[8px] px-1.5 py-0.5 font-mono border ${j.inherits_from_parent ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
-                                          {j.inherits_from_parent ? `inherits ${formatInheritanceParent(displayCity(j.parent_city), j.parent_state)}` : `↳ ${displayCity(j.parent_city)}`}
+                                    <div className="flex items-center gap-2 shrink-0 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
+                                        disabled={topMetroRunning || checkingId !== null || deletingId !== null}
+                                        className={`relative px-3 py-2 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
+                                          checkingId === j.id ? 'text-blue-300 border-blue-500/40 bg-blue-500/5' : 'text-zinc-500 border-zinc-700/60 hover:text-white hover:border-zinc-500 disabled:opacity-30'
+                                        }`}
+                                      >
+                                        {checkingId === j.id && <span className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/10 to-transparent" style={{ animation: 'scanX 1.5s ease-in-out infinite' }} />}
+                                        <span className="relative flex items-center gap-1.5">
+                                          {checkingId === j.id ? (
+                                            <><svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>Scanning</>
+                                          ) : (
+                                            <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>Research</>
+                                          )}
                                         </span>
-                                      )}
-                                      {j.children_count > 0 && <span className="text-[8px] px-1.5 py-0.5 font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">{j.children_count} {j.children_count === 1 ? 'child' : 'children'}</span>}
-                                      <span className={`text-[8px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${j.requirement_count > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-zinc-800/40 text-zinc-600 border-zinc-700/30'}`}>
-                                        {j.requirement_count > 0 ? 'Populated' : 'Empty'}
-                                      </span>
-                                      <div className="ml-auto flex items-center gap-4 text-[9px] font-mono text-zinc-600 tabular-nums">
-                                        <div className="flex flex-col items-end sm:flex-row sm:gap-4">
-                                          <span>{j.requirement_count} requirements</span>
-                                          <span className="hidden sm:inline opacity-20">|</span>
-                                          <span>{j.legislation_count} legislation</span>
-                                          <span className="hidden sm:inline opacity-20">|</span>
-                                          <span>{j.location_count} locations</span>
-                                        </div>
-                                        <span className="text-zinc-700">Verified {formatRelative(j.last_verified_at)}</span>
-                                      </div>
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); void handleDelete(j); }}
+                                        disabled={topMetroRunning || checkingId !== null || deletingId !== null}
+                                        className={`p-2 border transition-colors disabled:opacity-30 ${deletingId === j.id ? 'text-red-300 border-red-500/40 bg-red-500/5' : 'text-zinc-700 border-zinc-800 hover:text-red-400 hover:border-red-700/60'}`}
+                                        title="Delete jurisdiction"
+                                      >
+                                        {deletingId === j.id ? (
+                                          <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>
+                                        ) : (
+                                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        )}
+                                      </button>
                                     </div>
                                   </div>
                                 </div>
@@ -1201,45 +1198,65 @@ export function Jurisdictions() {
                                 const hasError = checkMessages.some(m => m.type === 'error');
                                 const resultCount = checkMessages.filter(m => m.type === 'result').length;
                                 return (
-                                  <div className="border-t border-white/5 overflow-hidden">
+                                  <div className="border-t border-white/5 bg-zinc-950/80 overflow-hidden font-mono">
                                     {isActive && <div className="h-[2px] w-full bg-zinc-800 overflow-hidden"><div className="h-full w-1/3 bg-gradient-to-r from-transparent via-blue-400 to-transparent" style={{ animation: 'scanX 1.2s ease-in-out infinite' }} /></div>}
                                     {completed && !isActive && <div className="h-[2px] w-full bg-emerald-500/60" style={{ animation: 'fadeIn 0.4s ease-out' }} />}
                                     {hasError && !isActive && <div className="h-[2px] w-full bg-red-500/60" style={{ animation: 'fadeIn 0.4s ease-out' }} />}
-                                    {resultCount > 0 && (
-                                      <div className="flex items-center gap-4 px-6 pt-3 pb-2 border-b border-white/5 bg-zinc-950/40" style={{ animation: 'fadeSlideDown 0.3s ease-out' }}>
-                                        <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> New</span>
-                                        <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Updated</span>
-                                        <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-zinc-600"><span className="w-1.5 h-1.5 rounded-full bg-zinc-600" /> Existing</span>
-                                        {isActive && <span className="ml-auto text-[10px] text-zinc-600 font-mono tabular-nums">{resultCount} found</span>}
+                                    
+                                    <div className="flex items-center justify-between px-6 py-3 border-b border-white/5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Research Stream</span>
+                                        {isActive && <span className="flex items-center gap-1.5"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-40" /><span className="relative inline-flex rounded-full h-2 w-2 bg-blue-400" /></span></span>}
                                       </div>
-                                    )}
-                                    <div className="max-h-56 overflow-y-auto bg-zinc-950/30">
-                                      {checkMessages.map((msg, i) => {
+                                      {resultCount > 0 && (
+                                        <div className="flex items-center gap-4 text-[9px] uppercase tracking-wider font-bold">
+                                          <span className="flex items-center gap-1 text-emerald-400"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> New</span>
+                                          <span className="flex items-center gap-1 text-amber-400"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Updated</span>
+                                          <span className="flex items-center gap-1 text-zinc-500"><span className="w-1.5 h-1.5 rounded-full bg-zinc-600" /> Existing</span>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <div className="max-h-[300px] overflow-y-auto p-4 space-y-1 bg-[#0a0a0a] text-[11px] leading-relaxed flex flex-col-reverse">
+                                      {[...checkMessages].reverse().map((msg, idx) => {
+                                        const i = checkMessages.length - 1 - idx;
                                         const isLast = i === checkMessages.length - 1;
                                         const isResult = msg.type === 'result';
+                                        
+                                        let icon = <span className="text-zinc-600">›</span>;
+                                        if (msg.type === 'error') icon = <span className="text-red-400">✖</span>;
+                                        else if (msg.type === 'completed') icon = <span className="text-emerald-400">✔</span>;
+                                        else if (isActive && isLast) icon = <span className="text-blue-400">●</span>;
+
+                                        let typeColor = 'text-zinc-500';
+                                        if (msg.type === 'researching') typeColor = 'text-blue-400';
+                                        if (msg.type === 'verifying') typeColor = 'text-cyan-400';
+                                        if (msg.type === 'scanning') typeColor = 'text-purple-400';
+                                        if (msg.type === 'confidence_retry') typeColor = 'text-amber-400';
+                                        
                                         return (
-                                          <div key={i} className="flex items-center gap-2.5 text-xs font-mono px-6 py-1.5 hover:bg-white/[0.02]" style={{ animation: `fadeSlideDown 0.25s ease-out ${Math.min(i * 0.04, 0.4)}s both` }}>
-                                            {msg.type === 'error' ? (
-                                              <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-red-400"><svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg></span>
-                                            ) : msg.type === 'completed' ? (
-                                              <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-emerald-400" style={{ animation: 'popIn 0.3s ease-out' }}><svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
-                                            ) : isActive && isLast ? (
-                                              <span className="w-4 h-4 flex items-center justify-center flex-shrink-0"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-40" /><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-400" /></span></span>
-                                            ) : (
-                                              <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-zinc-700"><svg className="w-3 h-3" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
-                                            )}
-                                            {isResult && msg.status && <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 border flex-shrink-0 ${msg.status === 'new' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' : msg.status === 'updated' ? 'bg-amber-500/15 text-amber-400 border-amber-500/25' : 'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'}`}>{msg.status === 'existing' ? 'same' : msg.status}</span>}
-                                            {!isResult && msg.type !== 'completed' && msg.type !== 'error' && msg.type !== 'started' && <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 border flex-shrink-0 ${msg.type === 'researching' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : msg.type === 'scanning' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : msg.type === 'verifying' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : msg.type === 'confidence_retry' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' : msg.type === 'confidence_gate' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' : msg.type === 'legislation' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'}`}>{msg.type}</span>}
-                                            <span className={`truncate ${msg.type === 'error' ? 'text-red-400' : msg.type === 'completed' ? 'text-emerald-300 font-medium' : isResult && msg.status === 'new' ? 'text-emerald-300/80' : isResult && msg.status === 'updated' ? 'text-amber-300/80' : isActive && isLast ? 'text-zinc-200' : 'text-zinc-500'}`}>{msg.type === 'completed' ? `Complete — ${msg.new ?? 0} requirements, ${msg.updated ?? 0} updated, ${msg.low_confidence ?? 0} below 95%` : msg.message || msg.location || ''}</span>
+                                          <div key={i} className={`flex items-start gap-3 px-2 py-1 rounded-sm ${isActive && isLast ? 'bg-blue-500/5' : 'hover:bg-white/[0.02]'}`} style={{ animation: `fadeIn 0.2s ease-out` }}>
+                                            <div className="w-4 shrink-0 flex justify-center mt-0.5">{icon}</div>
+                                            <div className="flex-1 min-w-0 break-words">
+                                              {!isResult && msg.type !== 'completed' && msg.type !== 'error' && msg.type !== 'started' && (
+                                                <span className={`mr-2 font-bold ${typeColor}`}>[{msg.type}]</span>
+                                              )}
+                                              {isResult && msg.status && (
+                                                <span className={`mr-2 font-bold ${msg.status === 'new' ? 'text-emerald-400' : msg.status === 'updated' ? 'text-amber-400' : 'text-zinc-500'}`}>[{msg.status}]</span>
+                                              )}
+                                              <span className={`${msg.type === 'error' ? 'text-red-400' : msg.type === 'completed' ? 'text-emerald-300 font-bold' : isResult ? 'text-zinc-300' : isActive && isLast ? 'text-zinc-200' : 'text-zinc-400'}`}>
+                                                {msg.type === 'completed' ? `Complete — ${msg.new ?? 0} requirements, ${msg.updated ?? 0} updated, ${msg.low_confidence ?? 0} below 95%` : msg.message || msg.location || ''}
+                                              </span>
+                                            </div>
                                           </div>
                                         );
                                       })}
                                     </div>
                                     {completed && !isActive && (
-                                      <div className="px-6 py-3 border-t border-emerald-500/10 bg-emerald-500/[0.03]" style={{ animation: 'fadeSlideDown 0.4s ease-out' }}>
+                                      <div className="px-6 py-3 border-t border-emerald-500/20 bg-emerald-500/[0.05]" style={{ animation: 'fadeSlideDown 0.4s ease-out' }}>
                                         <div className="flex items-center gap-4">
-                                          <div className="flex items-center gap-2"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40 animate-ping" style={{ animationDuration: '2s' }} /><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" /></span><span className="text-[10px] uppercase tracking-widest font-mono font-bold text-emerald-400">Research Complete</span></div>
-                                          <div className="flex items-center gap-3 ml-auto text-[11px] font-mono"><span className="text-emerald-400">{completed.new ?? 0} <span className="text-zinc-600">reqs</span></span><span className="text-amber-400">{completed.updated ?? 0} <span className="text-zinc-600">updated</span></span><span className="text-zinc-500">{completed.alerts ?? 0} <span className="text-zinc-600">alerts</span></span><span className="text-amber-200">{completed.low_confidence ?? 0} <span className="text-zinc-600">below 95%</span></span></div>
+                                          <div className="flex items-center gap-2"><span className="text-[10px] uppercase tracking-widest font-bold text-emerald-400">Research Complete</span></div>
+                                          <div className="flex items-center gap-3 ml-auto text-[11px] font-mono"><span className="text-emerald-400">{completed.new ?? 0} <span className="text-emerald-400/50">reqs</span></span><span className="text-amber-400">{completed.updated ?? 0} <span className="text-amber-400/50">updated</span></span><span className="text-zinc-400">{completed.alerts ?? 0} <span className="text-zinc-500">alerts</span></span><span className="text-amber-300">{completed.low_confidence ?? 0} <span className="text-amber-300/50">below 95%</span></span></div>
                                         </div>
                                       </div>
                                     )}
