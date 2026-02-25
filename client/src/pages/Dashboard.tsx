@@ -7,7 +7,7 @@ import { Collapsible } from '../components/Collapsible';
 import { Tabs } from '../components/Tabs';
 import { WidgetContainer } from '../components/WidgetContainer';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 interface PTOSummary {
   pending_count: number;

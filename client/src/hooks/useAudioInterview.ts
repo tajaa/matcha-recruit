@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { WSMessage } from '../types';
-import { getAccessToken } from '../api/client';
+import { getAccessToken, getInterviewWSUrl } from '../api/client';
 
 const AUDIO_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
@@ -257,9 +257,8 @@ export function useAudioInterview(
       return;
     }
 
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
-    const wsBase = apiBase.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
-    const ws = new WebSocket(`${wsBase}/ws/interview/${interviewId}?token=${encodeURIComponent(authToken)}`);
+    const wsUrl = getInterviewWSUrl(interviewId);
+    const ws = new WebSocket(`${wsUrl}?token=${encodeURIComponent(authToken)}`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {

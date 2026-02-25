@@ -167,7 +167,7 @@ import type {
   SearchResult,
 } from '../types/leads';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 // Token storage helpers
 const TOKEN_KEY = 'matcha_access_token';
@@ -1347,13 +1347,18 @@ export const tutorMetrics = {
 
 // WebSocket URL helper
 export function getInterviewWSUrl(interviewId: string): string {
-  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
-  const wsBase = apiBase.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
-  return `${wsBase}/ws/interview/${interviewId}`;
+  const apiBase = import.meta.env.VITE_API_URL || '/api';
+  if (apiBase.startsWith('http://') || apiBase.startsWith('https://')) {
+    const wsBase = apiBase.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+    return `${wsBase}/ws/interview/${interviewId}`;
+  }
+
+  const wsOrigin = window.location.origin.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+  return `${wsOrigin}/ws/interview/${interviewId}`;
 }
 
 // Public Jobs API (no auth required)
-const JOBS_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:8001/api'}/job-board`;
+const JOBS_BASE = `${import.meta.env.VITE_API_URL || '/api'}/job-board`;
 
 export const publicJobs = {
   list: async (filters?: {
@@ -2962,6 +2967,8 @@ import type {
   MWDocumentVersion,
   MWFinalizeResponse,
   MWSaveDraftResponse,
+  MWMessageStreamEvent,
+  MWUsageSummaryResponse,
 } from '../types/matcha-work';
 
 export const matchaWork = {
@@ -2989,6 +2996,76 @@ export const matchaWork = {
       body: JSON.stringify({ content }),
     }),
 
+  sendMessageStream: async (
+    threadId: string,
+    content: string,
+    onEvent: (event: MWMessageStreamEvent) => void,
+    signal?: AbortSignal
+  ): Promise<void> => {
+    const runRequest = async (): Promise<Response> => {
+      const token = getAccessToken();
+      return fetch(`${API_BASE}/matcha-work/threads/${threadId}/messages/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ content }),
+        signal,
+      });
+    };
+
+    let response = await runRequest();
+    if (response.status === 401) {
+      const refreshed = await tryRefreshToken();
+      if (refreshed) {
+        response = await runRequest();
+      } else {
+        clearTokens();
+        window.location.href = '/login';
+        throw new Error('Session expired');
+      }
+    }
+
+    if (!response.ok || !response.body) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to stream message' }));
+      throw new Error(extractErrorMessage(error, 'Failed to stream message'));
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const processLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data: ')) return;
+      const payload = trimmed.slice(6);
+      if (payload === '[DONE]') return;
+      try {
+        const event = JSON.parse(payload) as MWMessageStreamEvent;
+        onEvent(event);
+      } catch {
+        // Ignore malformed SSE payload chunks.
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        processLine(line);
+      }
+    }
+
+    if (buffer.trim()) {
+      processLine(buffer);
+    }
+  },
+
   getVersions: (threadId: string): Promise<MWDocumentVersion[]> =>
     request<MWDocumentVersion[]>(`/matcha-work/threads/${threadId}/versions`),
 
@@ -3014,6 +3091,9 @@ export const matchaWork = {
       `/matcha-work/threads/${threadId}/pdf${query}`
     );
   },
+
+  getUsageSummary: (periodDays = 30): Promise<MWUsageSummaryResponse> =>
+    request<MWUsageSummaryResponse>(`/matcha-work/usage/summary?period_days=${periodDays}`),
 
   archiveThread: (threadId: string): Promise<void> =>
     request<void>(`/matcha-work/threads/${threadId}`, { method: 'DELETE' }),

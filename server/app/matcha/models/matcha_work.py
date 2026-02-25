@@ -75,12 +75,21 @@ class MWMessageOut(BaseModel):
     created_at: datetime
 
 
+class TokenUsage(BaseModel):
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    estimated: bool = False
+    model: Optional[str] = None
+
+
 class SendMessageResponse(BaseModel):
     user_message: MWMessageOut
     assistant_message: MWMessageOut
     current_state: dict
     version: int
     pdf_url: Optional[str] = None
+    token_usage: Optional[TokenUsage] = None
 
 
 class ThreadListItem(BaseModel):
@@ -136,3 +145,29 @@ class SaveDraftResponse(BaseModel):
 
 class UpdateTitleRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
+
+
+class UsageTotals(BaseModel):
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    operation_count: int = 0
+    estimated_operations: int = 0
+
+
+class UsageByModel(BaseModel):
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    operation_count: int = 0
+    estimated_operations: int = 0
+    first_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+
+
+class UsageSummaryResponse(BaseModel):
+    period_days: int
+    generated_at: datetime
+    totals: UsageTotals
+    by_model: list[UsageByModel]

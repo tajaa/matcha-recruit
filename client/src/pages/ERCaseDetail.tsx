@@ -430,7 +430,7 @@ export function ERCaseDetail() {
   useEffect(() => {
     if (!id) return;
 
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+    const apiBase = import.meta.env.VITE_API_URL || '/api';
     const wsHost = apiBase.replace(/^https?:\/\//, '').replace(/\/api$/, '');
     const wsProtocol = apiBase.startsWith('https') ? 'wss' : 'ws';
     const wsUrl = `${wsProtocol}://${wsHost}/ws/notifications`;

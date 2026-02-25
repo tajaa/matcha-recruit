@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Any
 
 from google import genai
 from google.genai import types
@@ -59,6 +59,7 @@ def _clean_json_text(text: str) -> str:
 class AIResponse:
     assistant_reply: str
     structured_update: dict | None = field(default=None)
+    token_usage: dict | None = field(default=None)
 
 
 class MatchaWorkAIProvider:
@@ -96,21 +97,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         messages: list[dict],
         current_state: dict,
     ) -> AIResponse:
-        windowed = messages[-20:]
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            current_state=json.dumps(current_state, indent=2, default=str),
-            valid_fields=", ".join(VALID_FIELDS),
-        )
-
-        contents = []
-        for msg in windowed:
-            role = "user" if msg["role"] == "user" else "model"
-            contents.append(
-                types.Content(
-                    role=role,
-                    parts=[types.Part(text=msg["content"])],
-                )
-            )
+        system_prompt, contents = self._build_prompt_and_contents(messages, current_state)
 
         try:
             response = await asyncio.wait_for(
@@ -170,7 +157,88 @@ class GeminiProvider(MatchaWorkAIProvider):
         return AIResponse(
             assistant_reply=reply,
             structured_update=updates if updates else None,
+            token_usage=self._extract_usage_metadata(response, model),
         )
+
+    def estimate_usage(
+        self,
+        messages: list[dict],
+        current_state: dict,
+    ) -> dict:
+        system_prompt, _ = self._build_prompt_and_contents(messages, current_state)
+        windowed = messages[-20:]
+        char_count = len(system_prompt) + sum(len(str(msg.get("content", ""))) for msg in windowed)
+        prompt_tokens = max(1, char_count // 4)
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": None,
+            "total_tokens": prompt_tokens,
+            "estimated": True,
+            "model": self.settings.analysis_model,
+        }
+
+    def _build_prompt_and_contents(
+        self,
+        messages: list[dict],
+        current_state: dict,
+    ) -> tuple[str, list]:
+        windowed = messages[-20:]
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+            current_state=json.dumps(current_state, indent=2, default=str),
+            valid_fields=", ".join(VALID_FIELDS),
+        )
+
+        contents = []
+        for msg in windowed:
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part(text=msg["content"])],
+                )
+            )
+        return system_prompt, contents
+
+    def _extract_usage_metadata(self, response: Any, model: str) -> Optional[dict]:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is None:
+            return None
+
+        def _get(*keys: str) -> Optional[Any]:
+            for key in keys:
+                value = getattr(usage, key, None)
+                if value is None and isinstance(usage, dict):
+                    value = usage.get(key)
+                if value is not None:
+                    return value
+            return None
+
+        def _to_int(value: Any) -> Optional[int]:
+            if value is None:
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        prompt_tokens = _to_int(_get("prompt_token_count", "input_token_count", "promptTokenCount"))
+        completion_tokens = _to_int(
+            _get("candidates_token_count", "output_token_count", "candidatesTokenCount")
+        )
+        total_tokens = _to_int(_get("total_token_count", "totalTokenCount"))
+        if total_tokens is None and (prompt_tokens is not None or completion_tokens is not None):
+            total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
+
+        if prompt_tokens is None and completion_tokens is None and total_tokens is None:
+            return None
+
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "estimated": False,
+            "model": model,
+        }
 
 
 _provider: Optional[GeminiProvider] = None

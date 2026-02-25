@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import type { MWMessage, MWThreadDetail, MWDocumentVersion } from '../types/matcha-work';
+import type {
+  MWMessage,
+  MWThreadDetail,
+  MWDocumentVersion,
+  MWTokenUsage,
+  MWUsageSummaryResponse,
+} from '../types/matcha-work';
 import { matchaWork } from '../api/client';
 
 type Tab = 'chat' | 'preview';
@@ -63,6 +69,8 @@ export default function MatchaWorkThread() {
   const [finalizing, setFinalizing] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState<(MWTokenUsage & { stage: 'estimate' | 'final' }) | null>(null);
+  const [usageSummary, setUsageSummary] = useState<MWUsageSummaryResponse | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -75,13 +83,16 @@ export default function MatchaWorkThread() {
     if (!threadId) return;
     try {
       setLoading(true);
-      const [threadData, verData] = await Promise.all([
+      setTokenUsage(null);
+      const [threadData, verData, usageData] = await Promise.all([
         matchaWork.getThread(threadId),
         matchaWork.getVersions(threadId),
+        matchaWork.getUsageSummary(30).catch(() => null),
       ]);
       setThread(threadData);
       setMessages(threadData.messages);
       setVersions(verData);
+      setUsageSummary(usageData);
       // Get PDF URL for current version
       if (threadData.version > 0) {
         const pdfData = await matchaWork.getPdf(threadId);
@@ -109,19 +120,101 @@ export default function MatchaWorkThread() {
     setInput('');
     setSending(true);
     setError(null);
+    setTokenUsage(null);
+
+    let streamError: string | null = null;
+    let receivedComplete = false;
+    let shouldRefreshVersions = false;
 
     try {
-      const resp = await matchaWork.sendMessage(threadId, content);
-      setMessages((prev) => [...prev, resp.user_message, resp.assistant_message]);
-      if (thread) {
-        setThread((prev) => prev ? { ...prev, current_state: resp.current_state, version: resp.version } : prev);
+      await matchaWork.sendMessageStream(threadId, content, (event) => {
+        if (event.type === 'usage') {
+          setTokenUsage(event.data);
+          return;
+        }
+
+        if (event.type === 'complete') {
+          const resp = event.data;
+          receivedComplete = true;
+          setMessages((prev) => [...prev, resp.user_message, resp.assistant_message]);
+          setThread((prev) =>
+            prev ? { ...prev, current_state: resp.current_state, version: resp.version } : prev
+          );
+          if (resp.pdf_url) {
+            setPdfUrl(resp.pdf_url);
+            setActiveTab('preview');
+            shouldRefreshVersions = true;
+          }
+          if (resp.token_usage) {
+            setTokenUsage({ ...resp.token_usage, stage: 'final' });
+            setUsageSummary((prev) => {
+              if (!prev || !resp.token_usage?.model) return prev;
+
+              const promptTokens = resp.token_usage.prompt_tokens ?? 0;
+              const completionTokens = resp.token_usage.completion_tokens ?? 0;
+              const totalTokens =
+                resp.token_usage.total_tokens ?? promptTokens + completionTokens;
+              const model = resp.token_usage.model;
+              const nowIso = new Date().toISOString();
+
+              let found = false;
+              const byModel = prev.by_model.map((row) => {
+                if (row.model !== model) return row;
+                found = true;
+                return {
+                  ...row,
+                  prompt_tokens: row.prompt_tokens + promptTokens,
+                  completion_tokens: row.completion_tokens + completionTokens,
+                  total_tokens: row.total_tokens + totalTokens,
+                  operation_count: row.operation_count + 1,
+                  estimated_operations: row.estimated_operations + (resp.token_usage?.estimated ? 1 : 0),
+                  last_seen_at: nowIso,
+                };
+              });
+
+              if (!found) {
+                byModel.push({
+                  model,
+                  prompt_tokens: promptTokens,
+                  completion_tokens: completionTokens,
+                  total_tokens: totalTokens,
+                  operation_count: 1,
+                  estimated_operations: resp.token_usage?.estimated ? 1 : 0,
+                  first_seen_at: nowIso,
+                  last_seen_at: nowIso,
+                });
+              }
+
+              byModel.sort((a, b) => b.total_tokens - a.total_tokens);
+
+              return {
+                ...prev,
+                totals: {
+                  prompt_tokens: prev.totals.prompt_tokens + promptTokens,
+                  completion_tokens: prev.totals.completion_tokens + completionTokens,
+                  total_tokens: prev.totals.total_tokens + totalTokens,
+                  operation_count: prev.totals.operation_count + 1,
+                  estimated_operations: prev.totals.estimated_operations + (resp.token_usage?.estimated ? 1 : 0),
+                },
+                by_model: byModel,
+              };
+            });
+          }
+          return;
+        }
+
+        if (event.type === 'error') {
+          streamError = event.message || 'Failed to send message';
+        }
+      });
+
+      if (streamError) {
+        setError(streamError);
+      } else if (!receivedComplete) {
+        setError('Failed to send message');
       }
-      if (resp.pdf_url) {
-        setPdfUrl(resp.pdf_url);
-        setActiveTab('preview');
-      }
-      // Refresh versions if state changed
-      if (resp.pdf_url) {
+
+      if (shouldRefreshVersions) {
         const verData = await matchaWork.getVersions(threadId);
         setVersions(verData);
       }
@@ -194,6 +287,8 @@ export default function MatchaWorkThread() {
   const isFinalized = thread?.status === 'finalized';
   const isArchived = thread?.status === 'archived';
   const inputDisabled = isFinalized || isArchived || sending;
+  const formatTokenCount = (value: number | null | undefined) =>
+    value == null ? '—' : value.toLocaleString();
 
   if (loading) {
     return (
@@ -254,7 +349,28 @@ export default function MatchaWorkThread() {
                   Draft Saved
                 </span>
               )}
+              {tokenUsage && (
+                <span className="text-xs bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">
+                  {tokenUsage.estimated ? '~' : ''}
+                  {formatTokenCount(tokenUsage.total_tokens)} tokens
+                </span>
+              )}
             </div>
+            {tokenUsage && (
+              <div className="text-[11px] text-zinc-500 mt-0.5">
+                Approx billed tokens ({tokenUsage.estimated ? 'estimate' : 'final'}): p{' '}
+                {formatTokenCount(tokenUsage.prompt_tokens)} | c{' '}
+                {formatTokenCount(tokenUsage.completion_tokens)} | t{' '}
+                {formatTokenCount(tokenUsage.total_tokens)}
+              </div>
+            )}
+            {usageSummary && usageSummary.by_model.length > 0 && (
+              <div className="text-[11px] text-zinc-500 mt-0.5">
+                30d tracked: {formatTokenCount(usageSummary.totals.total_tokens)} tokens across{' '}
+                {usageSummary.by_model.length} model{usageSummary.by_model.length === 1 ? '' : 's'}.
+                Top: {usageSummary.by_model[0].model} ({formatTokenCount(usageSummary.by_model[0].total_tokens)})
+              </div>
+            )}
           </div>
         </div>
 

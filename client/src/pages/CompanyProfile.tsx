@@ -6,7 +6,7 @@ import { getAccessToken, provisioning } from '../api/client';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import type { ClientProfile, GoogleWorkspaceConnectionStatus } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 const INDUSTRIES = [
   'Technology', 'Healthcare', 'Finance', 'Education', 'Retail',

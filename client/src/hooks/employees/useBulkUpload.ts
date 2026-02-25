@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { getAccessToken } from '../../api/client';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 export function useBulkUpload(onSuccess: () => void) {
   const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);

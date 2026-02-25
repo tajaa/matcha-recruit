@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -228,6 +228,120 @@ async def add_message(
             version_created,
         )
         return dict(row)
+
+
+async def log_token_usage_event(
+    company_id: UUID,
+    user_id: UUID,
+    thread_id: UUID,
+    token_usage: Optional[dict],
+    operation: str = "send_message",
+) -> None:
+    if not token_usage:
+        return
+
+    model = str(token_usage.get("model") or "unknown").strip() or "unknown"
+    prompt_tokens = _coerce_int(token_usage.get("prompt_tokens"))
+    completion_tokens = _coerce_int(token_usage.get("completion_tokens"))
+    total_tokens = _coerce_int(token_usage.get("total_tokens"))
+    if total_tokens is None and (prompt_tokens is not None or completion_tokens is not None):
+        total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
+
+    estimated = _coerce_bool(token_usage.get("estimated"), False)
+
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO mw_token_usage_events(
+                company_id, user_id, thread_id, model,
+                prompt_tokens, completion_tokens, total_tokens,
+                estimated, operation
+            )
+            VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """,
+            company_id,
+            user_id,
+            thread_id,
+            model,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            estimated,
+            operation,
+        )
+
+
+async def get_token_usage_summary(
+    company_id: UUID,
+    user_id: UUID,
+    period_days: int = 30,
+) -> dict:
+    async with get_connection() as conn:
+        by_model_rows = await conn.fetch(
+            """
+            SELECT
+                model,
+                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                COUNT(*) AS operation_count,
+                COUNT(*) FILTER (WHERE estimated) AS estimated_operations,
+                MIN(created_at) AS first_seen_at,
+                MAX(created_at) AS last_seen_at
+            FROM mw_token_usage_events
+            WHERE company_id=$1
+              AND user_id=$2
+              AND created_at >= NOW() - ($3::int * INTERVAL '1 day')
+            GROUP BY model
+            ORDER BY total_tokens DESC, model ASC
+            """,
+            company_id,
+            user_id,
+            period_days,
+        )
+
+        totals_row = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                COUNT(*) AS operation_count,
+                COUNT(*) FILTER (WHERE estimated) AS estimated_operations
+            FROM mw_token_usage_events
+            WHERE company_id=$1
+              AND user_id=$2
+              AND created_at >= NOW() - ($3::int * INTERVAL '1 day')
+            """,
+            company_id,
+            user_id,
+            period_days,
+        )
+
+    return {
+        "period_days": period_days,
+        "generated_at": datetime.now(timezone.utc),
+        "totals": {
+            "prompt_tokens": totals_row["prompt_tokens"] if totals_row else 0,
+            "completion_tokens": totals_row["completion_tokens"] if totals_row else 0,
+            "total_tokens": totals_row["total_tokens"] if totals_row else 0,
+            "operation_count": totals_row["operation_count"] if totals_row else 0,
+            "estimated_operations": totals_row["estimated_operations"] if totals_row else 0,
+        },
+        "by_model": [
+            {
+                "model": row["model"],
+                "prompt_tokens": row["prompt_tokens"],
+                "completion_tokens": row["completion_tokens"],
+                "total_tokens": row["total_tokens"],
+                "operation_count": row["operation_count"],
+                "estimated_operations": row["estimated_operations"],
+                "first_seen_at": row["first_seen_at"],
+                "last_seen_at": row["last_seen_at"],
+            }
+            for row in by_model_rows
+        ],
+    }
 
 
 async def apply_update(

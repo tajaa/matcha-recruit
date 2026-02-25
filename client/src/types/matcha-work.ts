@@ -79,12 +79,62 @@ export interface MWCreateThreadResponse {
   pdf_url: string | null;
 }
 
+export interface MWTokenUsage {
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  estimated: boolean;
+  model: string | null;
+}
+
 export interface MWSendMessageResponse {
   user_message: MWMessage;
   assistant_message: MWMessage;
   current_state: MWDocumentState;
   version: number;
   pdf_url: string | null;
+  token_usage?: MWTokenUsage | null;
+}
+
+export interface MWUsageStreamEvent {
+  type: 'usage';
+  data: MWTokenUsage & { stage: 'estimate' | 'final' };
+}
+
+export interface MWCompleteStreamEvent {
+  type: 'complete';
+  data: MWSendMessageResponse;
+}
+
+export interface MWErrorStreamEvent {
+  type: 'error';
+  message: string;
+}
+
+export type MWMessageStreamEvent =
+  | MWUsageStreamEvent
+  | MWCompleteStreamEvent
+  | MWErrorStreamEvent;
+
+export interface MWUsageTotals {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  operation_count: number;
+  estimated_operations: number;
+}
+
+export interface MWUsageByModel extends MWUsageTotals {
+  model: string;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+}
+
+export interface MWUsageSummaryResponse {
+  period_days: number;
+  generated_at: string;
+  totals: MWUsageTotals;
+  by_model: MWUsageByModel[];
 }
 
 export interface MWDocumentVersion {

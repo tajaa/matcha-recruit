@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { CheckCircle, Clock, FileText, Laptop, GraduationCap, Settings, AlertCircle, RotateCcw } from 'lucide-react';
 import { FeatureGuideTrigger } from '../../features/feature-guides';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 interface OnboardingTask {
   id: string;

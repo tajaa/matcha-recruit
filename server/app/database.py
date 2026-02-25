@@ -3504,5 +3504,32 @@ async def init_db():
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mw_pdf_cache_thread_id ON mw_pdf_cache(thread_id)"
         )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_token_usage_events (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                thread_id UUID NOT NULL REFERENCES mw_threads(id) ON DELETE CASCADE,
+                model VARCHAR(120) NOT NULL,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                total_tokens INTEGER,
+                estimated BOOLEAN NOT NULL DEFAULT false,
+                operation VARCHAR(40) NOT NULL DEFAULT 'send_message',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_mw_token_usage_events_company_user_model_created
+            ON mw_token_usage_events(company_id, user_id, model, created_at)
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_token_usage_events_thread_id ON mw_token_usage_events(thread_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_token_usage_events_user_created ON mw_token_usage_events(user_id, created_at)"
+        )
 
         print("[DB] Tables initialized")

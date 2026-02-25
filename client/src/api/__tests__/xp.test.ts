@@ -12,7 +12,7 @@ import {
   mockVibeCheckResponse,
 } from '../../test/fixtures/xp';
 
-const API_BASE = 'http://localhost:8001/api';
+const API_BASE = '/api';
 
 describe('vibeChecksApi', () => {
   beforeEach(() => {

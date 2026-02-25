@@ -2,10 +2,12 @@
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from ...core.models.auth import CurrentUser
 from ..dependencies import require_admin_or_client, get_client_company_id
@@ -22,6 +24,7 @@ from ..models.matcha_work import (
     ThreadDetailResponse,
     ThreadListItem,
     OfferLetterDocument,
+    UsageSummaryResponse,
     UpdateTitleRequest,
 )
 from ..services import matcha_work_document as doc_svc
@@ -50,6 +53,10 @@ def _row_to_message(row: dict) -> MWMessageOut:
     )
 
 
+def _sse_data(payload: dict) -> str:
+    return f"data: {json.dumps(payload, default=str)}\n\n"
+
+
 @router.post("/threads", response_model=CreateThreadResponse, status_code=201)
 async def create_thread(
     body: CreateThreadRequest,
@@ -74,7 +81,9 @@ async def create_thread(
         # Call AI
         ai_provider = get_ai_provider()
         messages = [{"role": "user", "content": body.initial_message}]
+        estimated_usage = ai_provider.estimate_usage(messages, thread["current_state"])
         ai_resp = await ai_provider.generate(messages, thread["current_state"])
+        final_usage = ai_resp.token_usage or estimated_usage
 
         new_version = thread["version"]
         if ai_resp.structured_update:
@@ -87,6 +96,17 @@ async def create_thread(
         await doc_svc.add_message(
             thread_id, "assistant", ai_resp.assistant_reply, version_created=new_version
         )
+        try:
+            await doc_svc.log_token_usage_event(
+                company_id=company_id,
+                user_id=current_user.id,
+                thread_id=thread_id,
+                token_usage=final_usage,
+                operation="send_message",
+            )
+        except Exception as e:
+            logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
+
         thread["version"] = new_version
         assistant_reply = ai_resp.assistant_reply
 
@@ -184,7 +204,9 @@ async def send_message(
 
     # Call AI
     ai_provider = get_ai_provider()
+    estimated_usage = ai_provider.estimate_usage(msg_dicts, thread["current_state"])
     ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"])
+    final_usage = ai_resp.token_usage or estimated_usage
 
     current_version = thread["version"]
     current_state = thread["current_state"]
@@ -211,13 +233,167 @@ async def send_message(
         version_created=current_version if ai_resp.structured_update else None,
     )
 
+    try:
+        await doc_svc.log_token_usage_event(
+            company_id=company_id,
+            user_id=current_user.id,
+            thread_id=thread_id,
+            token_usage=final_usage,
+            operation="send_message",
+        )
+    except Exception as e:
+        logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
+
     return SendMessageResponse(
         user_message=_row_to_message(user_msg),
         assistant_message=_row_to_message(assistant_msg),
         current_state=current_state,
         version=current_version,
         pdf_url=pdf_url,
+        token_usage=final_usage,
     )
+
+
+@router.post("/threads/{thread_id}/messages/stream")
+async def send_message_stream(
+    thread_id: UUID,
+    body: SendMessageRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Send message with SSE progress + token usage events."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if thread["status"] == "finalized":
+        raise HTTPException(status_code=400, detail="Cannot send messages to a finalized thread")
+
+    if thread["status"] == "archived":
+        raise HTTPException(status_code=400, detail="Cannot send messages to an archived thread")
+
+    # Save user message before streaming
+    user_msg = await doc_svc.add_message(thread_id, "user", body.content)
+
+    # Fetch message history for context (sliding window handled by AI provider)
+    messages = await doc_svc.get_thread_messages(thread_id)
+    msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
+
+    ai_provider = get_ai_provider()
+    estimated_usage = ai_provider.estimate_usage(msg_dicts, thread["current_state"])
+
+    async def event_stream():
+        try:
+            yield _sse_data(
+                {
+                    "type": "usage",
+                    "data": {
+                        **estimated_usage,
+                        "stage": "estimate",
+                    },
+                }
+            )
+
+            ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"])
+
+            current_version = thread["version"]
+            current_state = thread["current_state"]
+            pdf_url = None
+
+            # Apply updates if AI returned any
+            if ai_resp.structured_update:
+                safe_updates = _validate_updates(ai_resp.structured_update)
+                if safe_updates:
+                    result = await doc_svc.apply_update(thread_id, safe_updates)
+                    current_version = result["version"]
+                    current_state = result["current_state"]
+
+                    # Generate PDF
+                    pdf_url = await doc_svc.generate_pdf(
+                        current_state, thread_id, current_version, is_draft=True
+                    )
+
+            # Save assistant message
+            assistant_msg = await doc_svc.add_message(
+                thread_id,
+                "assistant",
+                ai_resp.assistant_reply,
+                version_created=current_version if ai_resp.structured_update else None,
+            )
+
+            final_usage = ai_resp.token_usage or estimated_usage
+            try:
+                await doc_svc.log_token_usage_event(
+                    company_id=company_id,
+                    user_id=current_user.id,
+                    thread_id=thread_id,
+                    token_usage=final_usage,
+                    operation="send_message",
+                )
+            except Exception as e:
+                logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
+
+            if final_usage:
+                yield _sse_data(
+                    {
+                        "type": "usage",
+                        "data": {
+                            **final_usage,
+                            "stage": "final",
+                        },
+                    }
+                )
+
+            response = SendMessageResponse(
+                user_message=_row_to_message(user_msg),
+                assistant_message=_row_to_message(assistant_msg),
+                current_state=current_state,
+                version=current_version,
+                pdf_url=pdf_url,
+                token_usage=final_usage,
+            )
+
+            yield _sse_data({"type": "complete", "data": response.model_dump(mode="json")})
+        except Exception as e:
+            logger.error("Matcha Work stream failed for thread %s: %s", thread_id, e, exc_info=True)
+            yield _sse_data(
+                {
+                    "type": "error",
+                    "message": "Failed to process message. Please try again.",
+                }
+            )
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/usage/summary", response_model=UsageSummaryResponse)
+async def get_usage_summary(
+    period_days: int = Query(30, ge=1, le=365),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get Matcha Work token usage totals for the current user, grouped by model."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return UsageSummaryResponse(
+            period_days=period_days,
+            generated_at=datetime.now(timezone.utc),
+            totals={
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "operation_count": 0,
+                "estimated_operations": 0,
+            },
+            by_model=[],
+        )
+
+    summary = await doc_svc.get_token_usage_summary(company_id, current_user.id, period_days)
+    return UsageSummaryResponse(**summary)
 
 
 @router.get("/threads/{thread_id}/versions", response_model=list[DocumentVersionResponse])

@@ -16,7 +16,7 @@ export function WorkWithUs() {
     setIsSubmitting(true);
 
     try {
-      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+      const apiBase = import.meta.env.VITE_API_URL || '/api';
       const response = await fetch(`${apiBase}/contact`, {
         method: 'POST',
         headers: {

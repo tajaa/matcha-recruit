@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getAccessToken, onboardingDraft } from '../../api/client';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 type EmailEntryMode = 'generated' | 'existing';
 type WorkLocationMode = 'remote' | 'office';

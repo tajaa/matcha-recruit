@@ -12,7 +12,7 @@ import type {
   PerformanceReview,
 } from '../types/xp';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 // Helper function to make authenticated requests
 async function fetchWithAuth(url: string, options: RequestInit = {}) {
