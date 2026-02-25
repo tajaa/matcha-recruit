@@ -15,7 +15,7 @@ from ..models.matcha_work import OfferLetterDocument, ReviewDocument, WorkbookDo
 
 logger = logging.getLogger(__name__)
 
-GEMINI_CALL_TIMEOUT = 60
+GEMINI_CALL_TIMEOUT = 120
 
 OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
 REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())

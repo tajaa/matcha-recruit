@@ -15,7 +15,7 @@ from .search_strategy import build_search_strategy_prompt
 from .platform_settings import get_jurisdiction_research_model_mode
 
 # Timeout for individual Gemini API calls (seconds)
-GEMINI_CALL_TIMEOUT = 45
+GEMINI_CALL_TIMEOUT = 120
 
 VALID_CATEGORIES = {
     "minimum_wage",
