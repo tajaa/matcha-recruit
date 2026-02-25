@@ -255,7 +255,7 @@ fi
 
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && ${CHAT_ENV}source venv/bin/activate && echo 'Waiting for DB tunnel on localhost:$LOCAL_PORT...' && WAITED=0 && MAX_WAIT=60 && until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
+    "export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=false && ${CHAT_ENV}source venv/bin/activate && echo 'Waiting for DB tunnel on localhost:$LOCAL_PORT...' && WAITED=0 && MAX_WAIT=60 && until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
 # Enable mouse mode for clicking panes and scrolling
@@ -263,7 +263,7 @@ tmux set-option -t "$SESSION_NAME" mouse on
 
 # Pane 1: SSH Tunnel - Split right side (30% width)
 tmux split-window -t "$SESSION_NAME:dev" -h -p 30 -c "$PROJECT_ROOT" \
-    "while true; do echo 'Starting SSH Tunnel...'; ssh -i $KEY_FILE -N -L $LOCAL_PORT:localhost:$REMOTE_PORT $REMOTE_HOST -o ExitOnForwardFailure=yes; echo 'Tunnel dropped. Respawning in 2s...'; sleep 2; done"
+    "while true; do echo 'Starting SSH Tunnel...'; ssh -i $KEY_FILE -N -L $LOCAL_PORT:localhost:$REMOTE_PORT $REMOTE_HOST -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o ConnectTimeout=15; echo 'Tunnel dropped. Respawning in 2s...'; sleep 2; done"
 
 echo -e "${YELLOW}Waiting for tunnel...${NC}"
 sleep 2

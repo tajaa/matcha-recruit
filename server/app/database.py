@@ -11,7 +11,13 @@ async def init_pool(database_url: str):
     """Initialize the connection pool."""
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(database_url, min_size=2, max_size=10)
+        _pool = await asyncpg.create_pool(
+            database_url,
+            min_size=2,
+            max_size=10,
+            max_inactive_connection_lifetime=60,
+            command_timeout=30,
+        )
     return _pool
 
 
@@ -42,6 +48,15 @@ async def get_connection():
 async def init_db():
     """Create tables if they don't exist."""
     async with get_connection() as conn:
+        # Fast path: skip the expensive setup when the DB is already initialized.
+        # New schema changes should go through Alembic migrations, not this function.
+        already_initialized = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema='public' AND table_name='users')"
+        )
+        if already_initialized:
+            return
+
         # Users table (auth)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
