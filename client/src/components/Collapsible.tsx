@@ -15,16 +15,16 @@ export function Collapsible({ title, children, defaultOpen = true, icon: Icon }:
     <div className="border border-white/10 bg-zinc-900/30 overflow-hidden">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full p-6 flex justify-between items-center hover:bg-white/5 transition-colors text-left"
+        className="w-full p-3 flex justify-between items-center hover:bg-white/5 transition-colors text-left"
       >
         <div className="flex items-center gap-3">
-          {Icon && <Icon className="w-4 h-4 text-zinc-500" />}
-          <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">{title}</h2>
+          {Icon && <Icon className="w-3.5 h-3.5 text-zinc-500" />}
+          <h2 className="text-[10px] font-bold text-white uppercase tracking-[0.2em]">{title}</h2>
         </div>
         {isOpen ? (
-          <ChevronUp className="w-4 h-4 text-zinc-500" />
+          <ChevronUp className="w-3.5 h-3.5 text-zinc-500" />
         ) : (
-          <ChevronDown className="w-4 h-4 text-zinc-500" />
+          <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
         )}
       </button>
       {isOpen && (

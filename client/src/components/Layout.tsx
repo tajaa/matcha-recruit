@@ -953,7 +953,7 @@ export function Layout() {
       </nav>
 
       {/* Main content - offset for sidebar on desktop, header on mobile */}
-      <main className={`relative z-10 md:ml-56 pt-20 md:pt-8 pb-12 px-4 sm:px-8 lg:px-12 overflow-x-hidden ${themeMode === 'lightPages' ? 'invert brightness-90 hue-rotate-180 bg-zinc-950 min-h-screen' : ''}`}>
+      <main className={`relative z-10 md:ml-56 pt-20 md:pt-6 pb-12 px-4 sm:px-6 lg:px-8 overflow-x-hidden ${themeMode === 'lightPages' ? 'invert brightness-90 hue-rotate-180 bg-zinc-950 min-h-screen' : ''}`}>
         <div className="max-w-[1600px] mx-auto">
           <Outlet />
         </div>

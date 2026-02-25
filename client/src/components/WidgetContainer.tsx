@@ -43,26 +43,26 @@ export function WidgetContainer({ widgets, children }: WidgetContainerProps) {
   };
 
   return (
-    <div className="space-y-12">
-      <div className="flex justify-between items-center bg-zinc-950 p-4 border border-white/5 rounded-lg shadow-2xl">
-        <div className="flex items-center gap-3">
-          <div className="p-1.5 bg-emerald-500/10 rounded">
+    <div className="space-y-6">
+      <div className="flex justify-between items-center bg-zinc-950 p-3 border border-white/5 rounded-lg shadow-2xl">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1 bg-emerald-500/10 rounded">
              <Settings className="w-3 h-3 text-emerald-500" />
           </div>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-400 font-bold">Customize Dashboard</span>
+          <span className="text-[9px] uppercase tracking-[0.2em] text-zinc-400 font-bold">Dashboard Layout</span>
         </div>
         <button
           onClick={() => setIsConfiguring(!isConfiguring)}
-          className={`px-4 py-1.5 text-[9px] uppercase tracking-[0.2em] font-mono border transition-all ${
+          className={`px-3 py-1.5 text-[8px] uppercase tracking-[0.2em] font-mono border transition-all ${
             isConfiguring ? 'bg-white text-black border-white' : 'text-zinc-500 border-white/10 hover:border-white/30'
           }`}
         >
-          {isConfiguring ? 'Done' : 'Edit Layout'}
+          {isConfiguring ? 'Done' : 'Edit'}
         </button>
       </div>
 
       {isConfiguring && (
-        <div className="p-8 bg-zinc-900/50 border border-white/10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-2 duration-300">
+        <div className="p-4 bg-zinc-900/50 border border-white/10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 animate-in slide-in-from-top-2 duration-300">
           {widgets.map((w) => {
             const isVisible = visibleWidgets.has(w.id);
             const Icon = w.icon;

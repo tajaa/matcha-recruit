@@ -15,8 +15,8 @@ export function Tabs({ tabs, children }: TabsProps) {
   const [activeTabId, setActiveTabId] = useState(tabs[0].id);
 
   return (
-    <div className="space-y-8">
-      <div className="flex border-b border-white/10 gap-8">
+    <div className="space-y-4">
+      <div className="flex border-b border-white/10 gap-4">
         {tabs.map((tab) => {
           const isActive = activeTabId === tab.id;
           const Icon = tab.icon;
@@ -24,7 +24,7 @@ export function Tabs({ tabs, children }: TabsProps) {
             <button
               key={tab.id}
               onClick={() => setActiveTabId(tab.id)}
-              className={`pb-4 text-[10px] uppercase tracking-[0.2em] transition-all relative ${
+              className={`pb-2.5 text-[9px] uppercase tracking-[0.2em] transition-all relative ${
                 isActive ? 'text-white' : 'text-zinc-500 hover:text-zinc-400'
               }`}
             >
