@@ -84,7 +84,7 @@ export default function MatchaWorkElements() {
           </div>
           <h1 className="text-xl font-semibold text-zinc-100">Matcha Elements</h1>
           <p className="text-sm text-zinc-400 mt-0.5">
-            Every item created in Matcha Work is tracked here.
+            Finalized or saved artifacts live here. Use Chats for full conversation history.
           </p>
         </div>
 
@@ -136,7 +136,7 @@ export default function MatchaWorkElements() {
         </div>
       ) : elements.length === 0 ? (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-8 text-center">
-          <p className="text-sm text-zinc-400">No elements found for this filter.</p>
+          <p className="text-sm text-zinc-400">No saved or finalized elements found for this filter.</p>
           <button
             onClick={() => handleCreateElement('review')}
             disabled={creatingType !== null}

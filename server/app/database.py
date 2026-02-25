@@ -3493,6 +3493,7 @@ async def init_db():
                 state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
                 version INTEGER NOT NULL DEFAULT 0,
                 linked_offer_letter_id UUID REFERENCES offer_letters(id) ON DELETE SET NULL,
+                is_materialized BOOLEAN NOT NULL DEFAULT false,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -3506,6 +3507,30 @@ async def init_db():
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mw_elements_thread_id ON mw_elements(thread_id)"
         )
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'mw_elements' AND column_name = 'is_materialized'
+                ) THEN
+                    ALTER TABLE mw_elements ADD COLUMN is_materialized BOOLEAN NOT NULL DEFAULT false;
+                END IF;
+            END $$;
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_elements_company_materialized ON mw_elements(company_id, is_materialized)"
+        )
+        await conn.execute(
+            """
+            UPDATE mw_elements
+            SET is_materialized = (
+                linked_offer_letter_id IS NOT NULL
+                OR status = 'finalized'
+            )
+            WHERE is_materialized = false
+            """
+        )
         await conn.execute(
             """
             INSERT INTO mw_elements (
@@ -3518,6 +3543,7 @@ async def init_db():
                 state_json,
                 version,
                 linked_offer_letter_id,
+                is_materialized,
                 created_at,
                 updated_at
             )
@@ -3531,6 +3557,7 @@ async def init_db():
                 t.current_state,
                 t.version,
                 t.linked_offer_letter_id,
+                (t.linked_offer_letter_id IS NOT NULL OR t.status = 'finalized'),
                 t.created_at,
                 t.updated_at
             FROM mw_threads t
@@ -3544,6 +3571,7 @@ async def init_db():
                 state_json = EXCLUDED.state_json,
                 version = EXCLUDED.version,
                 linked_offer_letter_id = EXCLUDED.linked_offer_letter_id,
+                is_materialized = EXCLUDED.is_materialized,
                 updated_at = EXCLUDED.updated_at
             """
         )

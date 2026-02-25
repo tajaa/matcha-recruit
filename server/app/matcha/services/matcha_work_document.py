@@ -215,7 +215,7 @@ async def list_elements(
                 SELECT id, thread_id, element_type, title, status, version,
                        linked_offer_letter_id, created_at, updated_at
                 FROM mw_elements
-                WHERE company_id=$1 AND status=$2
+                WHERE company_id=$1 AND status=$2 AND is_materialized=true
                 ORDER BY updated_at DESC
                 LIMIT $3 OFFSET $4
                 """,
@@ -230,7 +230,7 @@ async def list_elements(
                 SELECT id, thread_id, element_type, title, status, version,
                        linked_offer_letter_id, created_at, updated_at
                 FROM mw_elements
-                WHERE company_id=$1
+                WHERE company_id=$1 AND is_materialized=true
                 ORDER BY updated_at DESC
                 LIMIT $2 OFFSET $3
                 """,
@@ -244,6 +244,14 @@ async def list_elements(
 async def _upsert_element_from_thread_row(conn, thread_row: dict) -> None:
     try:
         state_json = _parse_jsonb(thread_row.get("current_state"))
+        existing_is_materialized = await conn.fetchval(
+            "SELECT is_materialized FROM mw_elements WHERE thread_id=$1",
+            thread_row["id"],
+        )
+        is_materialized = bool(thread_row.get("linked_offer_letter_id")) or thread_row["status"] == "finalized"
+        if thread_row["status"] == "archived" and bool(existing_is_materialized):
+            # Keep archived items visible when they were previously materialized.
+            is_materialized = True
         await conn.execute(
             """
             INSERT INTO mw_elements(
@@ -256,10 +264,11 @@ async def _upsert_element_from_thread_row(conn, thread_row: dict) -> None:
                 state_json,
                 version,
                 linked_offer_letter_id,
+                is_materialized,
                 created_at,
                 updated_at
             )
-            VALUES($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
+            VALUES($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12)
             ON CONFLICT(thread_id) DO UPDATE
             SET
                 company_id=EXCLUDED.company_id,
@@ -270,6 +279,7 @@ async def _upsert_element_from_thread_row(conn, thread_row: dict) -> None:
                 state_json=EXCLUDED.state_json,
                 version=EXCLUDED.version,
                 linked_offer_letter_id=EXCLUDED.linked_offer_letter_id,
+                is_materialized=EXCLUDED.is_materialized,
                 updated_at=EXCLUDED.updated_at
             """,
             thread_row["id"],
@@ -281,6 +291,7 @@ async def _upsert_element_from_thread_row(conn, thread_row: dict) -> None:
             json.dumps(state_json),
             thread_row.get("version") or 0,
             thread_row.get("linked_offer_letter_id"),
+            is_materialized,
             thread_row.get("created_at"),
             thread_row.get("updated_at") or datetime.now(timezone.utc),
         )
