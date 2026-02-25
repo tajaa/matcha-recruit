@@ -217,6 +217,55 @@ The letter should be suitable for delivery to the employee and potential inclusi
 
 Return the letter as plain text, professionally formatted."""
 
+SUGGESTED_GUIDANCE_PROMPT = """You are an Employee Relations investigation assistant generating interactive next-step guidance for an active case.
+
+CASE INFORMATION:
+{case_info}
+
+INTAKE CONTEXT:
+{intake_context}
+
+EVIDENCE OVERVIEW:
+{evidence_overview}
+
+ANALYSIS RESULTS:
+{analysis_results}
+
+Generate practical, concrete recommendations for an investigator. Recommendations must be realistic for the current evidence.
+
+Return ONLY a JSON object with this structure:
+{{
+  "summary": "2-3 sentence executive guidance summary",
+  "cards": [
+    {{
+      "id": "timeline-gap-1",
+      "title": "Resolve missing timeline window",
+      "recommendation": "Interview X and collect email thread Y to close the gap between ...",
+      "rationale": "Timeline has unresolved period that blocks confidence in final determination",
+      "priority": "high",
+      "blockers": ["Need one additional witness interview"],
+      "action": {{
+        "type": "run_analysis",
+        "label": "Regenerate Timeline",
+        "tab": "timeline",
+        "analysis_type": "timeline",
+        "search_query": null
+      }}
+    }}
+  ]
+}}
+
+Constraints:
+1. Provide 3 to 4 cards, sorted by urgency.
+2. Allowed action.type values: "run_analysis", "open_tab", "search_evidence", "upload_document".
+3. Allowed action.tab values: "timeline", "discrepancies", "policy", "search".
+4. If action.type is "run_analysis", action.analysis_type must be "timeline", "discrepancies", or "policy".
+5. If action.type is "search_evidence", include a concise action.search_query.
+6. Keep recommendation and rationale concise (1-2 sentences each).
+7. Keep tone neutral and investigation-focused.
+8. Never include legal conclusions; focus on next investigative steps.
+"""
+
 
 class ERAnalyzer:
     """AI-powered analysis for ER investigations."""
@@ -481,6 +530,37 @@ class ERAnalyzer:
         )
 
         return await self._generate_content_async(prompt)
+
+    async def generate_suggested_guidance(
+        self,
+        case_info: dict[str, Any],
+        intake_context: Optional[dict[str, Any]],
+        evidence_overview: dict[str, Any],
+        analysis_results: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Generate structured interactive suggested guidance cards.
+
+        Args:
+            case_info: Case metadata (number, title, description, status).
+            intake_context: Intake answers and assistance metadata.
+            evidence_overview: Evidence/doc readiness summary.
+            analysis_results: Timeline/discrepancy/policy outputs.
+
+        Returns:
+            Dict with summary + cards payload.
+        """
+        prompt = SUGGESTED_GUIDANCE_PROMPT.format(
+            case_info=json.dumps(case_info, indent=2),
+            intake_context=json.dumps(intake_context or {}, indent=2),
+            evidence_overview=json.dumps(evidence_overview, indent=2),
+            analysis_results=json.dumps(analysis_results, indent=2),
+        )
+
+        text = await self._generate_content_async(prompt)
+        result = self._parse_json_response(text)
+        result["generated_at"] = datetime.now(timezone.utc).isoformat()
+        return result
 
     # Synchronous versions for Celery tasks
 

@@ -10,6 +10,7 @@ Employee Relations Investigation management:
 
 import json
 import logging
+import os
 import secrets
 from datetime import datetime, timezone
 
@@ -23,6 +24,11 @@ from ..dependencies import require_admin_or_client, get_client_company_id
 from ...core.models.auth import CurrentUser
 from ...config import get_settings
 from ...core.services.storage import get_storage
+from ..services.er_guidance import (
+    _build_fallback_guidance_payload,
+    _normalize_analysis_payload,
+    _normalize_suggested_guidance_payload,
+)
 from ..models.er_case import (
     ERCaseCreate,
     ERCaseUpdate,
@@ -36,6 +42,7 @@ from ..models.er_case import (
     TimelineAnalysis,
     DiscrepancyAnalysis,
     PolicyCheckAnalysis,
+    SuggestedGuidanceResponse,
     EvidenceSearchRequest,
     EvidenceSearchResponse,
     EvidenceSearchResult,
@@ -149,6 +156,26 @@ def _normalize_document_type(raw_value: Any) -> str:
 def _normalize_intake_context(raw_value: Any) -> Optional[dict]:
     """Normalize intake_context payloads to a dict for API response compatibility."""
     return _normalize_json_dict(raw_value)
+
+
+def _build_er_analyzer():
+    """Create ERAnalyzer using shared Gemini credential cascade."""
+    from ..services.er_analyzer import ERAnalyzer
+
+    settings = get_settings()
+    explicit_api_key = os.getenv("GEMINI_API_KEY")
+
+    if explicit_api_key:
+        return ERAnalyzer(api_key=explicit_api_key, model=settings.analysis_model)
+    if settings.use_vertex:
+        return ERAnalyzer(
+            vertex_project=settings.vertex_project,
+            vertex_location=settings.vertex_location,
+            model=settings.analysis_model,
+        )
+    if settings.gemini_api_key:
+        return ERAnalyzer(api_key=settings.gemini_api_key, model=settings.analysis_model)
+    raise ValueError("ER analysis requires GEMINI_API_KEY, LIVE_API, or VERTEX_PROJECT configuration")
 
 
 # ===========================================
@@ -1394,6 +1421,132 @@ async def get_policy_check(
             "source_documents": source_docs,
             "generated_at": row["generated_at"],
         }
+
+
+@router.post("/{case_id}/guidance/suggested", response_model=SuggestedGuidanceResponse)
+async def generate_suggested_guidance(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Generate Gemini-backed interactive suggested guidance from current case analyses."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+
+        case_row = await conn.fetchrow(
+            """
+            SELECT case_number, title, description, status, intake_context, created_at, updated_at
+            FROM er_cases
+            WHERE id = $1
+            """,
+            case_id,
+        )
+        if not case_row:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        evidence_rows = await conn.fetch(
+            """
+            SELECT id, filename
+            FROM er_case_documents
+            WHERE case_id = $1
+              AND processing_status = 'completed'
+              AND document_type != 'policy'
+            ORDER BY created_at DESC
+            """,
+            case_id,
+        )
+
+        analysis_rows = await conn.fetch(
+            """
+            SELECT analysis_type, analysis_data
+            FROM er_case_analysis
+            WHERE case_id = $1 AND analysis_type = ANY($2::text[])
+            """,
+            case_id,
+            ["timeline", "discrepancies", "policy_check"],
+        )
+
+    analysis_map: dict[str, dict[str, Any]] = {}
+    for row in analysis_rows:
+        analysis_type = str(row["analysis_type"])
+        analysis_map[analysis_type] = _normalize_analysis_payload(row["analysis_data"], {})
+
+    timeline_data = _normalize_analysis_payload(
+        analysis_map.get("timeline"),
+        {"events": [], "gaps_identified": [], "timeline_summary": ""},
+    )
+    discrepancies_data = _normalize_analysis_payload(
+        analysis_map.get("discrepancies"),
+        {"discrepancies": [], "credibility_notes": [], "summary": ""},
+    )
+    policy_data = _normalize_analysis_payload(
+        analysis_map.get("policy_check"),
+        {"violations": [], "policies_potentially_applicable": [], "summary": ""},
+    )
+
+    intake_context = _normalize_intake_context(case_row["intake_context"]) or {}
+    assistance_answers = intake_context.get("answers", {}) if isinstance(intake_context, dict) else {}
+    objective = assistance_answers.get("objective") if isinstance(assistance_answers, dict) else None
+    immediate_risk = assistance_answers.get("immediate_risk") if isinstance(assistance_answers, dict) else None
+
+    completed_non_policy_docs = [
+        {
+            "id": str(row["id"]),
+            "filename": row["filename"] or f"Document {idx + 1}",
+        }
+        for idx, row in enumerate(evidence_rows)
+    ]
+    can_run_discrepancies = len(completed_non_policy_docs) >= 2
+
+    fallback_payload = _build_fallback_guidance_payload(
+        timeline_data=timeline_data,
+        discrepancies_data=discrepancies_data,
+        policy_data=policy_data,
+        completed_non_policy_docs=completed_non_policy_docs,
+        objective=objective if isinstance(objective, str) else None,
+        immediate_risk=immediate_risk if isinstance(immediate_risk, str) else None,
+    )
+
+    case_info = {
+        "case_number": case_row["case_number"],
+        "title": case_row["title"],
+        "description": case_row["description"],
+        "status": case_row["status"],
+        "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
+        "updated_at": case_row["updated_at"].isoformat() if case_row["updated_at"] else None,
+    }
+    evidence_overview = {
+        "completed_non_policy_doc_count": len(completed_non_policy_docs),
+        "completed_non_policy_doc_names": [doc["filename"] for doc in completed_non_policy_docs[:12]],
+        "can_run_discrepancies": can_run_discrepancies,
+    }
+    analysis_results = {
+        "timeline": timeline_data,
+        "discrepancies": discrepancies_data,
+        "policy_check": policy_data,
+    }
+
+    try:
+        analyzer = _build_er_analyzer()
+        raw_payload = await analyzer.generate_suggested_guidance(
+            case_info=case_info,
+            intake_context=intake_context if isinstance(intake_context, dict) else {},
+            evidence_overview=evidence_overview,
+            analysis_results=analysis_results,
+        )
+        payload = _normalize_suggested_guidance_payload(
+            raw_payload,
+            fallback_payload=fallback_payload,
+            can_run_discrepancies=can_run_discrepancies,
+            model_name=analyzer.model,
+        )
+        return SuggestedGuidanceResponse(**payload)
+    except Exception as exc:
+        logger.warning("Suggested guidance generation failed for case %s: %s", case_id, exc)
+        return SuggestedGuidanceResponse(**fallback_payload)
 
 
 # ===========================================

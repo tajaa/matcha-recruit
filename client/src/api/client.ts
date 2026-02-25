@@ -93,6 +93,7 @@ import type {
   DiscrepancyAnalysis,
   PolicyCheckAnalysis,
   EvidenceSearchResponse,
+  ERSuggestedGuidanceResponse,
   ERTaskStatus,
   ERAuditLogResponse,
   // IR (Incident Report) types
@@ -1563,6 +1564,11 @@ export const erCopilot = {
 
   getPolicyCheck: (caseId: string): Promise<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string | null }> =>
     request<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string | null }>(`/er/cases/${caseId}/analysis/policy-check`),
+
+  generateSuggestedGuidance: (caseId: string): Promise<ERSuggestedGuidanceResponse> =>
+    request<ERSuggestedGuidanceResponse>(`/er/cases/${caseId}/guidance/suggested`, {
+      method: 'POST',
+    }),
 
   searchEvidence: (caseId: string, query: string, topK: number = 5): Promise<EvidenceSearchResponse> =>
     request<EvidenceSearchResponse>(`/er/cases/${caseId}/search`, {

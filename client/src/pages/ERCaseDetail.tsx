@@ -9,6 +9,9 @@ import type {
   ERDocument,
   ERDocumentType,
   ERCaseIntakeContext,
+  ERGuidanceCard,
+  ERGuidancePriority,
+  ERSuggestedGuidanceResponse,
   TimelineEvent,
   Discrepancy,
   PolicyViolation,
@@ -166,153 +169,115 @@ function formatCaseNoteType(value: ERCaseNote['note_type']): string {
   return 'General';
 }
 
-function normalizeGuidanceFragment(value: string, maxLength: number): string {
-  const cleaned = value.replace(/\s+/g, ' ').trim();
-  if (!cleaned) return '';
-  if (cleaned.length <= maxLength) return cleaned.replace(/[.]+$/, '');
-  return `${cleaned.slice(0, maxLength).replace(/[.]+$/, '')}...`;
+function normalizeGuidancePriority(value: unknown): ERGuidancePriority {
+  if (value === 'high' || value === 'medium' || value === 'low') return value;
+  return 'medium';
 }
 
-function formatGapQuestion(value: string): string {
-  const cleaned = normalizeGuidanceFragment(value, 160);
-  if (!cleaned) return '';
-  if (cleaned.includes('?')) return cleaned;
-  return `${cleaned}?`;
+function normalizeGuidanceAction(value: unknown): ERGuidanceCard['action'] {
+  if (!value || typeof value !== 'object') {
+    return {
+      type: 'open_tab',
+      label: 'Open Timeline',
+      tab: 'timeline',
+      analysis_type: null,
+      search_query: null,
+    };
+  }
+
+  const action = value as Record<string, unknown>;
+  const type = action.type;
+  const tab = action.tab;
+  const analysisType = action.analysis_type;
+  const searchQuery = action.search_query;
+
+  return {
+    type:
+      type === 'run_analysis' || type === 'open_tab' || type === 'search_evidence' || type === 'upload_document'
+        ? type
+        : 'open_tab',
+    label: typeof action.label === 'string' && action.label.trim() ? action.label : 'Open Guidance',
+    tab: tab === 'timeline' || tab === 'discrepancies' || tab === 'policy' || tab === 'search' ? tab : null,
+    analysis_type: analysisType === 'timeline' || analysisType === 'discrepancies' || analysisType === 'policy'
+      ? analysisType
+      : null,
+    search_query: typeof searchQuery === 'string' && searchQuery.trim() ? searchQuery : null,
+  };
 }
 
-type SuggestedGuidanceInput = {
-  reviewedDocCount: number;
-  reviewedDocNames: string[];
-  shouldRunDiscrepancies: boolean;
-  timelineSummary: string;
-  timelineGaps: string[];
-  discrepancies: Discrepancy[];
-  discrepancySummary: string;
-  violations: PolicyViolation[];
-  policySummary: string;
-  reviewSucceeded: boolean;
-  objective?: ERCaseIntakeContext['answers'] extends infer Answers
-    ? Answers extends { objective?: infer Objective }
-      ? Objective
-      : never
-    : never;
-  immediateRisk?: ERCaseIntakeContext['answers'] extends infer Answers
-    ? Answers extends { immediate_risk?: infer ImmediateRisk }
-      ? ImmediateRisk
-      : never
-    : never;
-};
+function normalizeGuidanceCards(value: unknown): ERGuidanceCard[] {
+  if (!Array.isArray(value)) return [];
 
-function buildSuggestedGuidance(input: SuggestedGuidanceInput): string {
-  const discrepancyRank = { high: 3, medium: 2, low: 1 } as const;
-  const sortedDiscrepancies = [...input.discrepancies].sort(
-    (a, b) => discrepancyRank[b.severity] - discrepancyRank[a.severity]
-  );
-  const topDiscrepancy = sortedDiscrepancies[0];
-  const topViolation = input.violations.find((v) => v.severity === 'major') || input.violations[0];
-  const timelineGaps = input.timelineGaps.filter(Boolean);
-  const docPreview = input.reviewedDocNames.slice(0, 2).join(', ');
+  return value
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item, idx) => {
+      const title = typeof item.title === 'string' && item.title.trim()
+        ? item.title.trim()
+        : `Suggested Action ${idx + 1}`;
 
-  const lines: string[] = ['Suggested Guidance'];
+      const recommendation = typeof item.recommendation === 'string' && item.recommendation.trim()
+        ? item.recommendation.trim()
+        : 'Review available evidence and proceed with the next analysis step.';
 
-  if (topViolation) {
-    const section = normalizeGuidanceFragment(topViolation.policy_section || 'high-risk policy sections', 90);
-    lines.push(
-      `1. Prioritize follow-ups for policy risk in ${section} and collect source evidence before interviews conclude.`
-    );
-  } else if (topDiscrepancy) {
-    lines.push(
-      `1. Run discrepancy-focused follow-up interviews on: ${normalizeGuidanceFragment(topDiscrepancy.description, 150)}.`
-    );
-  } else {
-    lines.push(
-      '1. Continue neutral fact-finding interviews and confirm each witness account in writing.'
-    );
-  }
+      const rationale = typeof item.rationale === 'string' && item.rationale.trim()
+        ? item.rationale.trim()
+        : 'This action helps improve investigation confidence.';
 
-  const followUpQuestions: string[] = [];
-  if (topDiscrepancy) {
-    const speaker1 = topDiscrepancy.statement_1?.speaker || 'Witness 1';
-    const speaker2 = topDiscrepancy.statement_2?.speaker || 'Witness 2';
-    followUpQuestions.push(
-      `What specific evidence supports the conflicting accounts from ${speaker1} and ${speaker2}?`
-    );
-  }
-  timelineGaps.slice(0, 2).forEach((gap) => {
-    const question = formatGapQuestion(gap);
-    if (question) followUpQuestions.push(question);
+      const blockers = Array.isArray(item.blockers)
+        ? item.blockers
+            .filter((blocker): blocker is string => typeof blocker === 'string' && blocker.trim().length > 0)
+            .map((blocker) => blocker.trim())
+        : [];
+
+      return {
+        id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `guidance-${idx + 1}`,
+        title,
+        recommendation,
+        rationale,
+        priority: normalizeGuidancePriority(item.priority),
+        blockers,
+        action: normalizeGuidanceAction(item.action),
+      };
+    });
+}
+
+function getSuggestedGuidancePayload(note: ERCaseNote | null): ERSuggestedGuidanceResponse | null {
+  if (!note?.metadata || typeof note.metadata !== 'object') return null;
+  const metadata = note.metadata as Record<string, unknown>;
+  const payload = metadata.guidance_payload;
+  if (!payload || typeof payload !== 'object') return null;
+
+  const raw = payload as Record<string, unknown>;
+  return {
+    summary:
+      typeof raw.summary === 'string' && raw.summary.trim()
+        ? raw.summary.trim()
+        : 'Suggested guidance is available.',
+    cards: normalizeGuidanceCards(raw.cards),
+    generated_at:
+      typeof raw.generated_at === 'string' && raw.generated_at.trim()
+        ? raw.generated_at
+        : note.created_at,
+    model:
+      typeof raw.model === 'string' && raw.model.trim()
+        ? raw.model
+        : 'unknown',
+    fallback_used: raw.fallback_used === true,
+  };
+}
+
+function buildSuggestedGuidanceNoteContent(payload: ERSuggestedGuidanceResponse): string {
+  const lines = [payload.summary];
+  payload.cards.forEach((card, idx) => {
+    lines.push(`${idx + 1}. ${card.title}: ${card.recommendation}`);
   });
-  if (input.immediateRisk === 'yes') {
-    followUpQuestions.push('Has any retaliation or immediate safety risk occurred since the last interview?');
-  }
-  if (followUpQuestions.length === 0) {
-    followUpQuestions.push('What unresolved fact still prevents a final determination?');
-  }
-  lines.push(`2. Ask these follow-up questions next: ${followUpQuestions.slice(0, 3).join(' ')}`);
-
-  if (timelineGaps.length > 0) {
-    const gapSummary = timelineGaps
-      .slice(0, 2)
-      .map((gap) => normalizeGuidanceFragment(gap, 90))
-      .join('; ');
-    lines.push(`3. Close timeline gaps before concluding: ${gapSummary}.`);
-  } else {
-    lines.push('3. Timeline coverage is currently complete; validate critical event times against documentary evidence.');
-  }
-
-  if (topViolation) {
-    lines.push(
-      '4. Document policy-by-policy findings with linked quotes so legal and HR can verify conclusion quality.'
-    );
-  } else if (topDiscrepancy) {
-    lines.push(
-      '4. Reconcile conflicting testimony against objective artifacts (emails, logs, messages) and capture credibility impacts.'
-    );
-  } else {
-    lines.push(
-      '4. Preserve a neutral interview record and document corroboration for each material fact.'
-    );
-  }
-
-  const readyForDetermination = input.reviewSucceeded
-    && input.shouldRunDiscrepancies
-    && timelineGaps.length === 0
-    && input.discrepancies.length === 0
-    && input.violations.length === 0;
-
-  if (readyForDetermination) {
-    lines.push(
-      '5. Determination readiness: evidence is currently consistent. If final interviews add no new facts, draft a preliminary determination recommendation.'
-    );
-  } else {
-    const blockers: string[] = [];
-    if (timelineGaps.length > 0) blockers.push(`${timelineGaps.length} timeline gap${timelineGaps.length === 1 ? '' : 's'}`);
-    if (input.discrepancies.length > 0) blockers.push(`${input.discrepancies.length} discrepancy flag${input.discrepancies.length === 1 ? '' : 's'}`);
-    if (input.violations.length > 0) blockers.push(`${input.violations.length} policy risk finding${input.violations.length === 1 ? '' : 's'}`);
-    if (!input.shouldRunDiscrepancies) blockers.push('one more completed witness/evidence document for discrepancy analysis');
-    lines.push(`5. Determination gate: hold final determination until ${blockers.join(', ')} ${blockers.length === 1 ? 'is' : 'are'} resolved.`);
-  }
-
-  const contextFragments: string[] = [];
-  contextFragments.push(`Review basis: ${input.reviewedDocCount} completed evidence document(s)`);
-  if (docPreview) {
-    contextFragments.push(`latest docs include ${docPreview}${input.reviewedDocNames.length > 2 ? ', ...' : ''}`);
-  }
-  if (input.objective && input.objective !== 'general') {
-    contextFragments.push(`intake objective is ${formatIntakeObjective(input.objective)}`);
-  }
-  if (input.timelineSummary) {
-    contextFragments.push(`timeline: ${normalizeGuidanceFragment(input.timelineSummary, 120)}`);
-  }
-  if (input.discrepancySummary && input.discrepancies.length > 0) {
-    contextFragments.push(`discrepancies: ${normalizeGuidanceFragment(input.discrepancySummary, 120)}`);
-  }
-  if (input.policySummary && input.violations.length > 0) {
-    contextFragments.push(`policy: ${normalizeGuidanceFragment(input.policySummary, 120)}`);
-  }
-  lines.push(`6. ${contextFragments.join('; ')}.`);
-
   return lines.join('\n');
+}
+
+function guidancePriorityStyle(priority: ERGuidancePriority): string {
+  if (priority === 'high') return 'text-red-700 bg-red-100';
+  if (priority === 'low') return 'text-zinc-600 bg-zinc-100';
+  return 'text-amber-700 bg-amber-100';
 }
 
 function getCaseNotePurpose(note: ERCaseNote): string | null {
@@ -373,6 +338,7 @@ const DOC_TYPE_COLORS: Record<ERDocumentType, string> = {
 };
 
 type AnalysisTab = 'timeline' | 'discrepancies' | 'policy' | 'search';
+type GuidanceCardState = 'pending' | 'done' | 'dismissed';
 
 export function ERCaseDetail() {
   const { id } = useParams<{ id: string }>();
@@ -412,6 +378,7 @@ export function ERCaseDetail() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<EvidenceSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [guidanceActionBusyId, setGuidanceActionBusyId] = useState<string | null>(null);
 
   const fetchCase = useCallback(async () => {
     if (!id) return;
@@ -770,21 +737,27 @@ export function ERCaseDetail() {
     }
   }, [id, pollForAnalysis]);
 
-  const handleSearch = async () => {
-    if (!id || !searchQuery.trim()) return;
+  const runEvidenceSearch = useCallback(async (query: string): Promise<boolean> => {
+    if (!id || !query.trim()) return false;
     setSearching(true);
     setAnalysisError(null);
     try {
-      const data = await erCopilot.searchEvidence(id, searchQuery);
+      const data = await erCopilot.searchEvidence(id, query.trim());
       setSearchResults(data.results);
+      return true;
     } catch (err: unknown) {
       console.error('Search failed:', err);
       setAnalysisError(getErrorMessage(err, 'Search failed. Please try again.'));
       setSearchResults([]);
+      return false;
     } finally {
       setSearching(false);
     }
-  };
+  }, [id]);
+
+  const handleSearch = useCallback(async () => {
+    await runEvidenceSearch(searchQuery);
+  }, [runEvidenceSearch, searchQuery]);
 
   const handleStatusChange = async (newStatus: ERCaseStatus) => {
     if (!id || !erCase) return;
@@ -800,6 +773,80 @@ export function ERCaseDetail() {
       setStatusUpdating(false);
     }
   };
+
+  const updateGuidanceCardState = useCallback(async (cardId: string, status: GuidanceCardState) => {
+    if (!id || !erCase) return;
+
+    const intakeContext = normalizeIntakeContext(erCase.intake_context) || {};
+    const existingAssistance = intakeContext.assistance || {};
+    const guidanceState = existingAssistance.guidance_state || {};
+    const now = new Date().toISOString();
+
+    const nextIntakeContext: ERCaseIntakeContext = {
+      ...intakeContext,
+      assistance: {
+        ...existingAssistance,
+        guidance_state: {
+          ...guidanceState,
+          [cardId]: { status, updated_at: now },
+        },
+      },
+    };
+
+    try {
+      const updatedCase = await erCopilot.updateCase(id, { intake_context: nextIntakeContext });
+      setCase(updatedCase);
+    } catch (err) {
+      console.error('Failed to update guidance state:', err);
+    }
+  }, [id, erCase]);
+
+  const handleGuidanceAction = useCallback(async (card: ERGuidanceCard) => {
+    if (!id) return;
+    const action = card.action;
+    setGuidanceActionBusyId(card.id);
+    setAnalysisError(null);
+
+    try {
+      if (action.type === 'upload_document') {
+        setShowUploadModal(true);
+        return;
+      }
+
+      if (action.type === 'search_evidence') {
+        const query = action.search_query || card.title;
+        setActiveTab('search');
+        setSearchQuery(query);
+        await runEvidenceSearch(query);
+        return;
+      }
+
+      if (action.type === 'run_analysis') {
+        const analysisType = action.analysis_type
+          || (action.tab === 'timeline' || action.tab === 'discrepancies' || action.tab === 'policy'
+            ? action.tab
+            : 'timeline');
+        setActiveTab(analysisType);
+        if (analysisType === 'timeline') {
+          await handleGenerateTimeline();
+        } else if (analysisType === 'discrepancies') {
+          await handleGenerateDiscrepancies();
+        } else {
+          await handleRunPolicyCheck();
+        }
+        return;
+      }
+
+      if (action.type === 'open_tab' && action.tab) {
+        setActiveTab(action.tab);
+        return;
+      }
+
+      setActiveTab('timeline');
+    } finally {
+      setGuidanceActionBusyId(null);
+    }
+  }, [id, runEvidenceSearch, handleGenerateTimeline, handleGenerateDiscrepancies, handleRunPolicyCheck]);
 
   const runAssistanceReview = useCallback(async (
     intakeContext: ERCaseIntakeContext | null,
@@ -854,22 +901,23 @@ export function ERCaseDetail() {
         reviewSummaryLines.push(`Policy review: ${policyResult.analysis.summary}`);
       }
 
-      const normalizedDiscrepancies = normalizeDiscrepancies(discrepancyResult?.analysis?.discrepancies);
-      const timelineGaps = normalizeTimelineGaps(timelineResult?.analysis?.gaps_identified);
-      const suggestedGuidance = buildSuggestedGuidance({
-        reviewedDocCount: completedNonPolicyDocs.length,
-        reviewedDocNames: completedNonPolicyDocs.map((doc) => doc.filename).filter(Boolean),
-        shouldRunDiscrepancies,
-        timelineSummary: timelineResult?.analysis?.timeline_summary || '',
-        timelineGaps,
-        discrepancies: normalizedDiscrepancies,
-        discrepancySummary: discrepancyResult?.analysis?.summary || '',
-        violations: normalizedViolations,
-        policySummary: policyResult?.analysis?.summary || '',
-        reviewSucceeded,
-        objective: intakeContext?.answers?.objective,
-        immediateRisk: intakeContext?.answers?.immediate_risk,
-      });
+      let suggestedGuidancePayload: ERSuggestedGuidanceResponse | null = null;
+      try {
+        suggestedGuidancePayload = await erCopilot.generateSuggestedGuidance(id);
+      } catch (guidanceErr) {
+        console.error('Failed to generate Gemini suggested guidance:', guidanceErr);
+      }
+
+      if (!suggestedGuidancePayload) {
+        suggestedGuidancePayload = {
+          summary: reviewSummaryLines.join(' '),
+          cards: [],
+          generated_at: new Date().toISOString(),
+          model: 'client-fallback',
+          fallback_used: true,
+        };
+      }
+      const guidanceNoteContent = buildSuggestedGuidanceNoteContent(suggestedGuidancePayload);
 
       await erCopilot.createCaseNote(id, {
         note_type: 'general',
@@ -888,11 +936,14 @@ export function ERCaseDetail() {
 
       await erCopilot.createCaseNote(id, {
         note_type: 'guidance',
-        content: suggestedGuidance,
+        content: guidanceNoteContent,
         metadata: {
           source: 'assistance_auto_review',
           note_purpose: 'next_steps',
-          guidance_version: 2,
+          guidance_version: 3,
+          guidance_payload: suggestedGuidancePayload,
+          guidance_model: suggestedGuidancePayload.model,
+          guidance_fallback_used: suggestedGuidancePayload.fallback_used,
           reviewed_doc_ids: reviewedDocIds,
           timeline_ok: timelineOk,
           discrepancies_ok: shouldRunDiscrepancies ? discrepanciesOk : null,
@@ -901,6 +952,13 @@ export function ERCaseDetail() {
           discrepancy_count: discrepancyCount,
         },
       });
+
+      const existingGuidanceState = intakeContext?.assistance?.guidance_state || {};
+      const nextGuidanceState = { ...existingGuidanceState };
+      const guidanceTimestamp = new Date().toISOString();
+      for (const card of suggestedGuidancePayload.cards) {
+        nextGuidanceState[card.id] = { status: 'pending', updated_at: guidanceTimestamp };
+      }
 
       const nextIntakeContext: ERCaseIntakeContext = {
         ...(intakeContext || {}),
@@ -912,6 +970,7 @@ export function ERCaseDetail() {
           last_reviewed_doc_ids: reviewedDocIds,
           last_reviewed_at: new Date().toISOString(),
           last_run_status: reviewSucceeded ? 'completed' : 'partial',
+          guidance_state: nextGuidanceState,
         },
       };
 
@@ -1009,6 +1068,13 @@ export function ERCaseDetail() {
   const latestGuidanceNote = [...notes].reverse().find(
     (note) => note.note_type === 'guidance' && getCaseNotePurpose(note) === 'next_steps'
   ) || null;
+  const latestGuidancePayload = getSuggestedGuidancePayload(latestGuidanceNote);
+  const guidanceState = intakeContext?.assistance?.guidance_state || {};
+  const getCardState = (cardId: string): GuidanceCardState => {
+    const status = guidanceState[cardId]?.status;
+    if (status === 'done' || status === 'dismissed' || status === 'pending') return status;
+    return 'pending';
+  };
   const caseNotes = notes.filter(
     (note) => !(note.note_type === 'guidance' && getCaseNotePurpose(note) === 'next_steps')
   );
@@ -1175,19 +1241,78 @@ export function ERCaseDetail() {
             <div className="pt-4 border-t border-zinc-200">
               <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Suggested Guidance</h3>
               {latestGuidanceNote ? (
-                <div className="border border-emerald-200 bg-emerald-50 p-2.5 rounded-sm">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] uppercase tracking-wide text-emerald-700">Next Steps</span>
-                    <span className="text-[10px] text-zinc-400">
-                      {new Date(latestGuidanceNote.created_at).toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                      })}
-                    </span>
+                <div className="space-y-2">
+                  <div className="border border-emerald-200 bg-emerald-50 p-2.5 rounded-sm">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] uppercase tracking-wide text-emerald-700">Next Steps</span>
+                      <span className="text-[10px] text-zinc-400">
+                        {new Date(latestGuidancePayload?.generated_at || latestGuidanceNote.created_at).toLocaleString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-700 whitespace-pre-wrap leading-relaxed">
+                      {latestGuidancePayload?.summary || latestGuidanceNote.content}
+                    </p>
+                    {latestGuidancePayload && (
+                      <p className="mt-1 text-[10px] text-zinc-500">
+                        Model: {latestGuidancePayload.model}{latestGuidancePayload.fallback_used ? ' (fallback)' : ''}
+                      </p>
+                    )}
                   </div>
-                  <p className="text-xs text-zinc-700 whitespace-pre-wrap leading-relaxed">{latestGuidanceNote.content}</p>
+
+                  {latestGuidancePayload?.cards.length ? (
+                    <div className="space-y-2">
+                      {latestGuidancePayload.cards.map((card) => {
+                        const state = getCardState(card.id);
+                        const stateLabel = state === 'done' ? 'Completed' : state === 'dismissed' ? 'Dismissed' : 'Pending';
+                        return (
+                          <div key={card.id} className="border border-zinc-200 bg-white p-2.5 rounded-sm space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-medium text-zinc-800">{card.title}</p>
+                              <span className={`px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded ${guidancePriorityStyle(card.priority)}`}>
+                                {card.priority}
+                              </span>
+                            </div>
+                            <p className="text-xs text-zinc-700">{card.recommendation}</p>
+                            <p className="text-[11px] text-zinc-500">{card.rationale}</p>
+                            {card.blockers.length > 0 && (
+                              <p className="text-[11px] text-zinc-500">Blockers: {card.blockers.join('; ')}</p>
+                            )}
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">{stateLabel}</span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => void updateGuidanceCardState(card.id, 'done')}
+                                  className="text-[10px] uppercase tracking-wide text-emerald-700 hover:text-emerald-600 disabled:opacity-40"
+                                  disabled={state === 'done'}
+                                >
+                                  Mark Done
+                                </button>
+                                <button
+                                  onClick={() => void updateGuidanceCardState(card.id, 'dismissed')}
+                                  className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-700 disabled:opacity-40"
+                                  disabled={state === 'dismissed'}
+                                >
+                                  Dismiss
+                                </button>
+                                <button
+                                  onClick={() => void handleGuidanceAction(card)}
+                                  className="text-[10px] uppercase tracking-wide text-blue-700 hover:text-blue-600 disabled:opacity-50"
+                                  disabled={guidanceActionBusyId === card.id}
+                                >
+                                  {guidanceActionBusyId === card.id ? 'Working...' : card.action.label}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <p className="text-xs text-zinc-400">No guidance yet. Complete assistance intake and analysis to generate next steps.</p>

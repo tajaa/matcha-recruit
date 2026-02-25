@@ -15,6 +15,8 @@ ERCaseNoteType = Literal["general", "question", "answer", "guidance", "system"]
 ConfidenceLevel = Literal["high", "medium", "low"]
 SeverityLevel = Literal["high", "medium", "low"]
 ViolationSeverity = Literal["major", "minor"]
+GuidancePriority = Literal["high", "medium", "low"]
+GuidanceActionType = Literal["run_analysis", "open_tab", "search_evidence", "upload_document"]
 
 
 # ===========================================
@@ -193,6 +195,39 @@ class PolicyCheckAnalysis(BaseModel):
     policies_potentially_applicable: list[str] = []
     summary: str
     generated_at: datetime
+
+
+# ===========================================
+# Suggested Guidance Models
+# ===========================================
+
+class SuggestedGuidanceAction(BaseModel):
+    """Interactive action attached to a guidance card."""
+    type: GuidanceActionType
+    label: str
+    tab: Optional[Literal["timeline", "discrepancies", "policy", "search"]] = None
+    analysis_type: Optional[Literal["timeline", "discrepancies", "policy"]] = None
+    search_query: Optional[str] = None
+
+
+class SuggestedGuidanceCard(BaseModel):
+    """A single suggested guidance recommendation."""
+    id: str
+    title: str
+    recommendation: str
+    rationale: str
+    priority: GuidancePriority = "medium"
+    blockers: list[str] = []
+    action: SuggestedGuidanceAction
+
+
+class SuggestedGuidanceResponse(BaseModel):
+    """Gemini-generated guidance payload for interactive next steps."""
+    summary: str
+    cards: list[SuggestedGuidanceCard] = []
+    generated_at: datetime
+    model: str
+    fallback_used: bool = False
 
 
 # ===========================================

@@ -1491,6 +1491,9 @@ export type ERCaseNoteType = 'general' | 'question' | 'answer' | 'guidance' | 's
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 export type SeverityLevel = 'high' | 'medium' | 'low';
 export type ViolationSeverity = 'major' | 'minor';
+export type ERGuidancePriority = 'high' | 'medium' | 'low';
+export type ERGuidanceActionType = 'run_analysis' | 'open_tab' | 'search_evidence' | 'upload_document';
+export type ERGuidanceTab = 'timeline' | 'discrepancies' | 'policy' | 'search';
 export type ERIntakeObjective = 'timeline' | 'discrepancies' | 'policy' | 'general';
 export type ERIntakeImmediateRisk = 'yes' | 'no' | 'unsure';
 
@@ -1504,6 +1507,7 @@ export interface ERCaseIntakeContext {
     last_reviewed_doc_ids?: string[];
     last_reviewed_at?: string;
     last_run_status?: 'completed' | 'partial' | 'failed';
+    guidance_state?: Record<string, { status: 'pending' | 'done' | 'dismissed'; updated_at: string }>;
   };
   answers?: {
     immediate_risk?: ERIntakeImmediateRisk;
@@ -1563,6 +1567,32 @@ export interface ERCaseNoteCreate {
   note_type?: ERCaseNoteType;
   content: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface ERGuidanceAction {
+  type: ERGuidanceActionType;
+  label: string;
+  tab: ERGuidanceTab | null;
+  analysis_type: 'timeline' | 'discrepancies' | 'policy' | null;
+  search_query: string | null;
+}
+
+export interface ERGuidanceCard {
+  id: string;
+  title: string;
+  recommendation: string;
+  rationale: string;
+  priority: ERGuidancePriority;
+  blockers: string[];
+  action: ERGuidanceAction;
+}
+
+export interface ERSuggestedGuidanceResponse {
+  summary: string;
+  cards: ERGuidanceCard[];
+  generated_at: string;
+  model: string;
+  fallback_used: boolean;
 }
 
 // Document types
