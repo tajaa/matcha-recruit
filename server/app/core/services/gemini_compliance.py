@@ -611,9 +611,21 @@ class GeminiComplianceService:
                 print(f"[Gemini Compliance] {category} error: {e}")
                 return []
 
-        # Run all categories in parallel
-        print(f"[Gemini Compliance] Researching {location_str} ({len(selected_categories)} parallel calls)...")
-        results = await asyncio.gather(*[research_category(c) for c in selected_categories])
+        # Run categories in parallel, but throttle concurrency for heavy (pro) model to
+        # avoid hammering Google's quota with all requests at the exact same millisecond.
+        mode = await get_jurisdiction_research_model_mode()
+        concurrency = 2 if mode == "heavy" else len(selected_categories)
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def research_category_throttled(category: str) -> List[Dict]:
+            async with semaphore:
+                return await research_category(category)
+
+        print(
+            f"[Gemini Compliance] Researching {location_str} "
+            f"({len(selected_categories)} categories, concurrency={concurrency})..."
+        )
+        results = await asyncio.gather(*[research_category_throttled(c) for c in selected_categories])
 
         # Flatten and validate
         all_requirements = []
