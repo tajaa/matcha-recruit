@@ -752,8 +752,8 @@ function HandbookDetailPage() {
 
                 <div className="space-y-3">
                   {activeSection ? (
-                    <div className="relative pr-12">
-                      <div className="space-y-3">
+                    <div className="flex gap-2">
+                      <div className="flex-1 space-y-3">
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <h3 className="text-sm text-white">{activeSection.title}</h3>
@@ -811,26 +811,27 @@ function HandbookDetailPage() {
                           className="w-full min-h-[420px] px-3 py-3 bg-zinc-900 border border-white/10 text-sm text-zinc-100 focus:outline-none focus:border-white/30 resize-y"
                         />
                       </div>
-
-                      <div className="absolute top-0 -right-10 max-h-[520px] overflow-y-auto pr-1">
-                        <div className="flex flex-col items-end gap-1">
+                      <div className="max-h-[520px] overflow-y-auto flex-shrink-0 w-16">
+                        <div className="flex flex-col gap-0.5 items-end">
                           {notebookEdgeTabs.map((tab) => (
                             <button
                               key={tab.tabId}
                               type="button"
                               onClick={() => setActiveSectionTabId(tab.tabId)}
-                              className={`h-[88px] w-8 border px-1 py-1 text-[9px] uppercase tracking-wider transition-colors ${
+                              className={`h-[80px] w-8 hover:w-16 border transition-all duration-150 flex items-center justify-center overflow-hidden group ${
                                 tab.isActive
                                   ? 'bg-white text-black border-white'
                                   : tab.isHighlighted
-                                  ? 'bg-amber-500/10 text-amber-200 border-amber-400/40 hover:border-amber-300'
-                                  : 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40'
+                                  ? 'bg-amber-500/15 text-amber-100 border-amber-400/50 hover:bg-amber-500/25'
+                                  : 'bg-zinc-800 text-zinc-200 border-zinc-600 hover:bg-zinc-700 hover:text-white'
                               }`}
                               style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
                               title={tab.title}
                             >
-                              <span className="truncate">{tab.title}</span>
-                              {tab.isDirty ? <span className={tab.isActive ? 'text-black/70' : 'text-amber-400'}> •</span> : null}
+                              <span className="text-[8px] group-hover:text-[10px] uppercase tracking-widest truncate leading-tight transition-all duration-150">
+                                {tab.index + 1}. {tab.title}
+                              </span>
+                              {tab.isDirty && <span className={tab.isActive ? 'text-black/60' : 'text-amber-400'}> •</span>}
                             </button>
                           ))}
                         </div>
