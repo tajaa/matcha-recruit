@@ -2705,13 +2705,16 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         _upsert_jurisdiction_requirements,
         _upsert_jurisdiction_legislation,
         _normalize_category,
-        _filter_by_jurisdiction_priority,
+        _normalize_requirement_categories,
+        _filter_city_level_requirements,
+        _filter_with_preemption,
         _sync_requirements_to_location,
         _create_alert,
         score_verification_confidence,
         _compute_requirement_key,
         _normalize_title_key,
         REQUIRED_LABOR_CATEGORIES,
+        _missing_required_categories,
         _lookup_has_local_ordinance,
         _refresh_repository_missing_categories,
     )
@@ -2732,6 +2735,23 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
     async with get_connection() as conn:
         used_repository = False
         has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
+        try:
+            preemption_rows = await conn.fetch(
+                "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+                state.upper(),
+            )
+            preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+        except asyncpg.UndefinedTableError:
+            preemption_rules = {}
+
+        async def _prepare_requirements_for_sync(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            prepared = [dict(req) for req in requirements]
+            if has_local_ordinance is False:
+                prepared = _filter_city_level_requirements(prepared, state)
+            _normalize_requirement_categories(prepared)
+            prepared = await _filter_with_preemption(conn, prepared, state)
+            return prepared
+
         city_key = _normalize_city_input(city)
         city_jurisdiction_rows = await conn.fetch(
             """
@@ -2869,7 +2889,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
             city_group_ids,
         )
         existing_requirements = [_jurisdiction_row_to_dict(dict(row)) for row in existing_jurisdiction_rows]
-        existing_requirements = _filter_by_jurisdiction_priority(existing_requirements)
+        existing_requirements = await _prepare_requirements_for_sync(existing_requirements)
         present_categories = {
             _normalize_category(req.get("category")) or req.get("category")
             for req in existing_requirements
@@ -2912,6 +2932,8 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
                     state=state,
                     county=county,
                     categories=research_categories,
+                    preemption_rules=preemption_rules,
+                    has_local_ordinance=has_local_ordinance,
                     on_retry=_on_retry,
                 )
             )
@@ -2932,9 +2954,6 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
                 yield research_queue.get_nowait()
 
             pass_requirements = research_task.result() or []
-            for req in pass_requirements:
-                req["category"] = _normalize_category(req.get("category")) or req.get("category")
-            pass_requirements = _filter_by_jurisdiction_priority(pass_requirements)
             if research_categories and existing_requirements:
                 target_set = set(research_categories)
                 preserved = [
@@ -2942,6 +2961,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
                     if (_normalize_category(req.get("category")) or req.get("category")) not in target_set
                 ]
                 pass_requirements = preserved + pass_requirements
+            pass_requirements = await _prepare_requirements_for_sync(pass_requirements)
 
             for req in pass_requirements:
                 req_key = _compute_requirement_key(req)
@@ -2965,6 +2985,80 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
                     break
 
         requirements = [req for _, req in best_requirements.values()]
+        requirements = await _prepare_requirements_for_sync(requirements)
+        missing_categories = _missing_required_categories(requirements)
+        if requirements and missing_categories:
+            yield {
+                "type": "repository_refresh",
+                "jurisdiction_id": str(canonical_jurisdiction_id),
+                "missing_categories": missing_categories,
+                "message": (
+                    "Coverage is still missing "
+                    f"{', '.join(missing_categories)}. Running source-aware repository refresh for "
+                    f"{location_label}."
+                ),
+            }
+
+            refresh_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+            def _on_partial_refresh_retry(attempt: int, _error: str):
+                refresh_queue.put_nowait(
+                    {
+                        "type": "retrying",
+                        "message": f"Retrying repository refresh (attempt {attempt + 1})...",
+                    }
+                )
+
+            partial_refresh_task = asyncio.create_task(
+                _refresh_repository_missing_categories(
+                    conn,
+                    service,
+                    jurisdiction_id=canonical_jurisdiction_id,
+                    city=city,
+                    state=state,
+                    county=county,
+                    has_local_ordinance=has_local_ordinance,
+                    current_requirements=requirements,
+                    missing_categories=missing_categories,
+                    on_retry=_on_partial_refresh_retry,
+                )
+            )
+            try:
+                while not partial_refresh_task.done():
+                    while not refresh_queue.empty():
+                        yield refresh_queue.get_nowait()
+                    done, _ = await asyncio.wait({partial_refresh_task}, timeout=8)
+                    if done:
+                        break
+                    yield {"type": "heartbeat"}
+            except asyncio.CancelledError:
+                if not partial_refresh_task.done():
+                    partial_refresh_task.cancel()
+                raise
+
+            while not refresh_queue.empty():
+                yield refresh_queue.get_nowait()
+
+            refreshed_partial = partial_refresh_task.result() or requirements
+            requirements = await _prepare_requirements_for_sync(refreshed_partial)
+            missing_after_partial = _missing_required_categories(requirements)
+            if missing_after_partial:
+                yield {
+                    "type": "repository_only",
+                    "jurisdiction_id": str(canonical_jurisdiction_id),
+                    "missing_categories": missing_after_partial,
+                    "message": (
+                        "Repository is still missing "
+                        f"{', '.join(missing_after_partial)} after refresh."
+                    ),
+                }
+            else:
+                yield {
+                    "type": "repository_refreshed",
+                    "jurisdiction_id": str(canonical_jurisdiction_id),
+                    "message": f"Repository refresh completed for {location_label}.",
+                }
+
         low_conf_requirement_count = sum(
             1 for confidence, _ in best_requirements.values() if confidence < STRICT_CONFIDENCE_THRESHOLD
         )
@@ -3023,7 +3117,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
 
             refreshed_requirements = refresh_task.result() or []
             if refreshed_requirements:
-                requirements = _filter_by_jurisdiction_priority(refreshed_requirements)
+                requirements = await _prepare_requirements_for_sync(refreshed_requirements)
                 yield {
                     "type": "repository_refreshed",
                     "jurisdiction_id": str(canonical_jurisdiction_id),
@@ -3041,7 +3135,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
             )
             if cached_rows:
                 requirements = [_jurisdiction_row_to_dict(dict(row)) for row in cached_rows]
-                requirements = _filter_by_jurisdiction_priority(requirements)
+                requirements = await _prepare_requirements_for_sync(requirements)
                 used_repository = True
                 logger.warning(
                     "Falling back to stale repository data (%d cached requirements)", len(requirements)
