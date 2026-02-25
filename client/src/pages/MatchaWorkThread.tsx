@@ -274,10 +274,25 @@ export default function MatchaWorkThread() {
           if (resp.version > 0) {
             shouldRefreshVersions = true;
           }
+          const hasWorkbookState =
+            Boolean(resp.current_state?.workbook_title) ||
+            Boolean(resp.current_state?.company_name) ||
+            Boolean(resp.current_state?.objective) ||
+            Boolean(resp.current_state?.industry) ||
+            (Array.isArray(resp.current_state?.sections) && resp.current_state.sections.length > 0);
+          const hasReviewState =
+            Boolean(resp.current_state?.review_title) ||
+            Boolean(resp.current_state?.review_subject) ||
+            Boolean(resp.current_state?.summary) ||
+            Boolean(resp.current_state?.context) ||
+            Boolean(resp.current_state?.next_steps) ||
+            toItemList(resp.current_state?.strengths).length > 0 ||
+            toItemList(resp.current_state?.growth_areas).length > 0 ||
+            (Array.isArray(resp.current_state?.review_request_statuses) && resp.current_state.review_request_statuses.length > 0);
           if (resp.pdf_url) {
             setPdfUrl(resp.pdf_url);
             setActiveTab('preview');
-          } else if (resp.current_state?.sections && resp.current_state.sections.length > 0) {
+          } else if (hasWorkbookState || hasReviewState) {
             setActiveTab('preview');
           }
           if (resp.token_usage) {
@@ -552,6 +567,8 @@ export default function MatchaWorkThread() {
   const isWorkbook = thread?.task_type === 'workbook';
   const reviewStatuses: MWReviewRequestStatus[] = (thread?.current_state.review_request_statuses || [])
     .filter((row): row is MWReviewRequestStatus => Boolean(row && typeof row === 'object' && row.email));
+  const reviewStrengths = toItemList(thread?.current_state.strengths);
+  const reviewGrowthAreas = toItemList(thread?.current_state.growth_areas);
   const reviewExpectedResponses = thread?.current_state.review_expected_responses ?? reviewStatuses.length;
   const reviewReceivedResponses = thread?.current_state.review_received_responses ?? reviewStatuses.filter((row) => row.status === 'submitted').length;
   const reviewPendingResponses = thread?.current_state.review_pending_responses ?? Math.max(reviewExpectedResponses - reviewReceivedResponses, 0);
@@ -560,9 +577,38 @@ export default function MatchaWorkThread() {
       messages.length === 0 &&
       Object.keys(thread.current_state || {}).length === 0
     : false;
+  const hasOfferLetterPreviewContent = Boolean(pdfUrl);
+  const hasWorkbookPreviewContent = Boolean(
+    thread?.current_state.workbook_title ||
+    thread?.current_state.company_name ||
+    thread?.current_state.objective ||
+    thread?.current_state.industry ||
+    (thread?.current_state.sections && thread.current_state.sections.length > 0)
+  );
+  const hasReviewPreviewContent = Boolean(
+    thread?.current_state.review_title ||
+    thread?.current_state.review_subject ||
+    thread?.current_state.summary ||
+    thread?.current_state.context ||
+    thread?.current_state.next_steps ||
+    reviewStrengths.length > 0 ||
+    reviewGrowthAreas.length > 0 ||
+    reviewStatuses.length > 0
+  );
+  const hasPreviewContent = !isUnscopedChat && (
+    (isOfferLetter && hasOfferLetterPreviewContent) ||
+    (isWorkbook && hasWorkbookPreviewContent) ||
+    (isReview && hasReviewPreviewContent)
+  );
   const inputDisabled = isFinalized || isArchived || sending;
   const formatTokenCount = (value: number | null | undefined) =>
     value == null ? '—' : value.toLocaleString();
+
+  useEffect(() => {
+    if (!hasPreviewContent && activeTab === 'preview') {
+      setActiveTab('chat');
+    }
+  }, [activeTab, hasPreviewContent]);
 
   if (loading) {
     return (
@@ -700,16 +746,18 @@ export default function MatchaWorkThread() {
             >
               Chat
             </button>
-            <button
-              onClick={() => setActiveTab('preview')}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
-                activeTab === 'preview'
-                  ? 'bg-zinc-700 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              {isOfferLetter ? 'Preview' : isWorkbook ? 'Workbook' : 'Summary'}
-            </button>
+            {hasPreviewContent && (
+              <button
+                onClick={() => setActiveTab('preview')}
+                className={`px-3 py-1 text-xs rounded transition-colors ${
+                  activeTab === 'preview'
+                    ? 'bg-zinc-700 text-zinc-100'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                {isOfferLetter ? 'Preview' : isWorkbook ? 'Workbook' : 'Summary'}
+              </button>
+            )}
             <button
               onClick={() => navigate('/app/matcha/work/elements')}
               className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
@@ -795,7 +843,9 @@ export default function MatchaWorkThread() {
       <div className="flex flex-1 min-h-0">
         {/* Chat panel */}
         <div
-          className={`flex flex-col flex-1 min-w-0 md:max-w-[50%] border-r border-zinc-800 ${
+          className={`flex flex-col flex-1 min-w-0 ${
+            hasPreviewContent ? 'md:max-w-[50%] border-r border-zinc-800' : ''
+          } ${
             activeTab !== 'chat' ? 'hidden md:flex' : 'flex'
           }`}
         >
@@ -908,7 +958,11 @@ export default function MatchaWorkThread() {
         {/* PDF preview panel */}
         <div
           className={`flex flex-col flex-1 min-w-0 ${
-            activeTab !== 'preview' ? 'hidden md:flex' : 'flex'
+            !hasPreviewContent
+              ? 'hidden'
+              : activeTab !== 'preview'
+              ? 'hidden md:flex'
+              : 'flex'
           }`}
         >
           {/* PDF toolbar */}
@@ -1031,11 +1085,11 @@ export default function MatchaWorkThread() {
                     </div>
                   )}
 
-                  {toItemList(thread.current_state.strengths).length > 0 && (
+                  {reviewStrengths.length > 0 && (
                     <div>
                       <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Strengths</p>
                       <ul className="space-y-1">
-                        {toItemList(thread.current_state.strengths).map((item, idx) => (
+                        {reviewStrengths.map((item, idx) => (
                           <li key={`${item}-${idx}`} className="text-sm text-zinc-200">
                             • {item}
                           </li>
@@ -1044,11 +1098,11 @@ export default function MatchaWorkThread() {
                     </div>
                   )}
 
-                  {toItemList(thread.current_state.growth_areas).length > 0 && (
+                  {reviewGrowthAreas.length > 0 && (
                     <div>
                       <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Growth Areas</p>
                       <ul className="space-y-1">
-                        {toItemList(thread.current_state.growth_areas).map((item, idx) => (
+                        {reviewGrowthAreas.map((item, idx) => (
                           <li key={`${item}-${idx}`} className="text-sm text-zinc-200">
                             • {item}
                           </li>
@@ -1130,8 +1184,8 @@ export default function MatchaWorkThread() {
 
                   {!thread.current_state.summary &&
                     !thread.current_state.context &&
-                    toItemList(thread.current_state.strengths).length === 0 &&
-                    toItemList(thread.current_state.growth_areas).length === 0 &&
+                    reviewStrengths.length === 0 &&
+                    reviewGrowthAreas.length === 0 &&
                     !thread.current_state.next_steps && (
                       <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/40 p-3">
                         <p className="text-xs uppercase tracking-wider text-zinc-500 mb-2">
