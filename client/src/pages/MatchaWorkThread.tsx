@@ -11,7 +11,8 @@ import type {
   MWReviewRequestStatus,
 } from '../types/matcha-work';
 import type { HandbookListItem } from '../types';
-import { handbooks, matchaWork } from '../api/client';
+import { handbooks, matchaWork, adminPlatformSettings } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { LogoUpload } from '../components/matcha-work/LogoUpload';
 import HandbookDistributeModal from '../components/HandbookDistributeModal';
 
@@ -179,6 +180,10 @@ export default function MatchaWorkThread() {
   const [activeHandbooks, setActiveHandbooks] = useState<HandbookListItem[]>([]);
   const [selectedHandbook, setSelectedHandbook] = useState<{ id: string; title: string } | null>(null);
 
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [matchaWorkModelMode, setMatchaWorkModelMode] = useState<'light' | 'heavy'>('light');
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -219,8 +224,25 @@ export default function MatchaWorkThread() {
   }, [loadThread]);
 
   useEffect(() => {
+    if (!isAdmin) return;
+    adminPlatformSettings.get().then(s => {
+      setMatchaWorkModelMode(s.matcha_work_model_mode as 'light' | 'heavy');
+    }).catch(() => {});
+  }, [isAdmin]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  const handleToggleModel = async () => {
+    const next = matchaWorkModelMode === 'light' ? 'heavy' : 'light';
+    setMatchaWorkModelMode(next);
+    try {
+      await adminPlatformSettings.updateMatchaWorkModelMode(next);
+    } catch {
+      setMatchaWorkModelMode(matchaWorkModelMode);
+    }
+  };
 
   const handleSend = async () => {
     if (!input.trim() || !threadId || sending) return;
@@ -630,6 +652,24 @@ export default function MatchaWorkThread() {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          {isAdmin && (
+            <button
+              onClick={handleToggleModel}
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono transition-colors ${
+                matchaWorkModelMode === 'heavy'
+                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20'
+                  : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:bg-zinc-700'
+              }`}
+              title={matchaWorkModelMode === 'heavy' ? 'Switch to light (flash)' : 'Switch to heavy (3.1 pro)'}
+            >
+              <span>{matchaWorkModelMode === 'heavy' ? '3.1 pro' : 'flash'}</span>
+              <span className={`px-1 py-px text-[9px] uppercase tracking-widest rounded ${
+                matchaWorkModelMode === 'heavy' ? 'bg-amber-500/20 text-amber-500' : 'bg-zinc-700 text-zinc-500'
+              }`}>
+                {matchaWorkModelMode}
+              </span>
+            </button>
+          )}
           <div className="hidden sm:flex items-center bg-zinc-800 rounded-lg p-0.5">
             <button className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-100">
               Chat
