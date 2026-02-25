@@ -8,6 +8,7 @@ from uuid import UUID
 
 from ...matcha.dependencies import require_admin_or_client, get_client_company_id
 from ...database import get_connection
+from ..services.redis_cache import get_redis_cache, cache_get, cache_set, jurisdictions_key
 from ..models.auth import CurrentUser
 from ..models.compliance import (
     LocationCreate,
@@ -61,6 +62,12 @@ async def list_jurisdictions(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List jurisdictions that have requirement data in the repository."""
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, jurisdictions_key())
+        if cached is not None:
+            return cached
+
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
@@ -75,7 +82,7 @@ async def list_jurisdictions(
             ORDER BY j.state, j.city
             """
         )
-    return [
+    result = [
         {
             "city": row["city"],
             "state": row["state"],
@@ -84,6 +91,11 @@ async def list_jurisdictions(
         }
         for row in rows
     ]
+
+    if redis:
+        await cache_set(redis, jurisdictions_key(), result, ttl=3600)
+
+    return result
 
 
 @router.post("/locations", response_model=dict)

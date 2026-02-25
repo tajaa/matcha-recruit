@@ -50,3 +50,6 @@ async def cache_delete(redis: aioredis.Redis, key: str) -> None:
 # --- Key builders (add more as other pages adopt caching) ---
 def offer_letters_key(company_id) -> str:
     return f"offer_letters:{company_id}"
+
+def jurisdictions_key() -> str:
+    return "jurisdictions"
