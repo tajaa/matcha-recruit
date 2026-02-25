@@ -120,19 +120,23 @@ def _build_offer_letter_payload(state: dict, fallback_company_name: str) -> dict
 async def create_thread(
     company_id: UUID,
     user_id: UUID,
-    title: str = "Untitled Offer Letter",
+    title: str = "Untitled Chat",
 ) -> dict:
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO mw_threads(company_id, created_by, title)
-            VALUES($1, $2, $3)
-            RETURNING id, title, status, current_state, version, created_at, updated_at
-            """,
-            company_id,
-            user_id,
-            title,
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_threads(company_id, created_by, title)
+                VALUES($1, $2, $3)
+                RETURNING id, company_id, created_by, title, task_type, status,
+                          current_state, version, linked_offer_letter_id,
+                          created_at, updated_at
+                """,
+                company_id,
+                user_id,
+                title,
+            )
+            await _upsert_element_from_thread_row(conn, dict(row))
         d = dict(row)
         d["current_state"] = _parse_jsonb(d["current_state"])
         return d
@@ -193,6 +197,120 @@ async def list_threads(
                 offset,
             )
         return [dict(r) for r in rows]
+
+
+async def list_elements(
+    company_id: UUID,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    async with get_connection() as conn:
+        if status:
+            rows = await conn.fetch(
+                """
+                SELECT id, thread_id, element_type, title, status, version,
+                       linked_offer_letter_id, created_at, updated_at
+                FROM mw_elements
+                WHERE company_id=$1 AND status=$2
+                ORDER BY updated_at DESC
+                LIMIT $3 OFFSET $4
+                """,
+                company_id,
+                status,
+                limit,
+                offset,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, thread_id, element_type, title, status, version,
+                       linked_offer_letter_id, created_at, updated_at
+                FROM mw_elements
+                WHERE company_id=$1
+                ORDER BY updated_at DESC
+                LIMIT $2 OFFSET $3
+                """,
+                company_id,
+                limit,
+                offset,
+            )
+        return [dict(r) for r in rows]
+
+
+async def _upsert_element_from_thread_row(conn, thread_row: dict) -> None:
+    try:
+        state_json = _parse_jsonb(thread_row.get("current_state"))
+        await conn.execute(
+            """
+            INSERT INTO mw_elements(
+                thread_id,
+                company_id,
+                created_by,
+                element_type,
+                title,
+                status,
+                state_json,
+                version,
+                linked_offer_letter_id,
+                created_at,
+                updated_at
+            )
+            VALUES($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
+            ON CONFLICT(thread_id) DO UPDATE
+            SET
+                company_id=EXCLUDED.company_id,
+                created_by=EXCLUDED.created_by,
+                element_type=EXCLUDED.element_type,
+                title=EXCLUDED.title,
+                status=EXCLUDED.status,
+                state_json=EXCLUDED.state_json,
+                version=EXCLUDED.version,
+                linked_offer_letter_id=EXCLUDED.linked_offer_letter_id,
+                updated_at=EXCLUDED.updated_at
+            """,
+            thread_row["id"],
+            thread_row["company_id"],
+            thread_row["created_by"],
+            thread_row.get("task_type") or "offer_letter",
+            thread_row["title"],
+            thread_row["status"],
+            json.dumps(state_json),
+            thread_row.get("version") or 0,
+            thread_row.get("linked_offer_letter_id"),
+            thread_row.get("created_at"),
+            thread_row.get("updated_at") or datetime.now(timezone.utc),
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to upsert mw_elements record for thread %s: %s",
+            thread_row.get("id"),
+            e,
+        )
+
+
+async def _sync_element_for_thread(conn, thread_id: UUID) -> None:
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT id, company_id, created_by, task_type, title, status,
+                   current_state, version, linked_offer_letter_id,
+                   created_at, updated_at
+            FROM mw_threads
+            WHERE id=$1
+            """,
+            thread_id,
+        )
+        if row is None:
+            return
+        await _upsert_element_from_thread_row(conn, dict(row))
+    except Exception as e:
+        logger.warning("Failed to sync mw_elements for thread %s: %s", thread_id, e)
+
+
+async def sync_element_record(thread_id: UUID) -> None:
+    async with get_connection() as conn:
+        await _sync_element_for_thread(conn, thread_id)
 
 
 async def get_thread_messages(thread_id: UUID) -> list[dict]:
@@ -385,6 +503,7 @@ async def apply_update(
                 json.dumps(merged_state),
                 diff_summary,
             )
+            await _sync_element_for_thread(conn, thread_id)
         return {"version": new_version, "current_state": merged_state}
 
 
@@ -429,6 +548,7 @@ async def revert_to_version(thread_id: UUID, target_version: int) -> dict:
                 json.dumps(old_state),
                 f"Reverted to version {target_version}",
             )
+            await _sync_element_for_thread(conn, thread_id)
         return {"version": new_version, "current_state": old_state}
 
 
@@ -734,6 +854,7 @@ async def save_offer_letter_draft(thread_id: UUID, company_id: UUID) -> dict:
                 thread_id,
                 company_id,
             )
+            await _sync_element_for_thread(conn, thread_id)
 
             return {
                 "thread_id": thread_id,
@@ -768,6 +889,7 @@ async def finalize_thread(thread_id: UUID, company_id: UUID) -> dict:
                 "UPDATE mw_threads SET status='finalized', updated_at=NOW() WHERE id=$1",
                 thread_id,
             )
+            await _sync_element_for_thread(conn, thread_id)
             current_state = _parse_jsonb(row["current_state"])
             version = row["version"]
 

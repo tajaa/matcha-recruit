@@ -11,6 +11,18 @@ export interface MWThread {
   updated_at: string;
 }
 
+export interface MWElement {
+  id: string;
+  thread_id: string;
+  element_type: string;
+  title: string;
+  status: MWThreadStatus;
+  version: number;
+  linked_offer_letter_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MWMessage {
   id: string;
   thread_id: string;

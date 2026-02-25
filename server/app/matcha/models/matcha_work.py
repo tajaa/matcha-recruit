@@ -102,6 +102,18 @@ class ThreadListItem(BaseModel):
     updated_at: datetime
 
 
+class ElementListItem(BaseModel):
+    id: UUID
+    thread_id: UUID
+    element_type: str
+    title: str
+    status: str
+    version: int
+    linked_offer_letter_id: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ThreadDetailResponse(BaseModel):
     id: UUID
     title: str

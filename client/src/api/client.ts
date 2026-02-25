@@ -2960,6 +2960,7 @@ export const adminNews = {
 
 // Matcha Work API (chat-driven offer letter generation)
 import type {
+  MWElement,
   MWThread,
   MWThreadDetail,
   MWCreateThreadResponse,
@@ -2985,6 +2986,15 @@ export const matchaWork = {
     if (params?.offset) searchParams.append('offset', String(params.offset));
     const query = searchParams.toString();
     return request<MWThread[]>(`/matcha-work/threads${query ? `?${query}` : ''}`);
+  },
+
+  listElements: (params?: { status?: string; limit?: number; offset?: number }): Promise<MWElement[]> => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.append('status', params.status);
+    if (params?.limit) searchParams.append('limit', String(params.limit));
+    if (params?.offset) searchParams.append('offset', String(params.offset));
+    const query = searchParams.toString();
+    return request<MWElement[]>(`/matcha-work/elements${query ? `?${query}` : ''}`);
   },
 
   getThread: (threadId: string): Promise<MWThreadDetail> =>

@@ -15,6 +15,7 @@ from ..models.matcha_work import (
     CreateThreadRequest,
     CreateThreadResponse,
     DocumentVersionResponse,
+    ElementListItem,
     FinalizeResponse,
     MWMessageOut,
     RevertRequest,
@@ -67,7 +68,7 @@ async def create_thread(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with this account")
 
-    title = body.title or "Untitled Offer Letter"
+    title = body.title or "Untitled Chat"
     thread = await doc_svc.create_thread(company_id, current_user.id, title)
     thread_id = thread["id"]
 
@@ -142,6 +143,22 @@ async def list_threads(
 
     threads = await doc_svc.list_threads(company_id, status=status, limit=limit, offset=offset)
     return [ThreadListItem(**t) for t in threads]
+
+
+@router.get("/elements", response_model=list[ElementListItem])
+async def list_elements(
+    status: Optional[str] = Query(None, pattern="^(active|finalized|archived)$"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List Matcha Work elements for the current company."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
+
+    elements = await doc_svc.list_elements(company_id, status=status, limit=limit, offset=offset)
+    return [ElementListItem(**e) for e in elements]
 
 
 @router.get("/threads/{thread_id}", response_model=ThreadDetailResponse)
@@ -565,6 +582,7 @@ async def archive_thread(
         )
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Thread not found")
+    await doc_svc.sync_element_record(thread_id)
 
 
 @router.patch("/threads/{thread_id}", response_model=ThreadListItem)
@@ -594,5 +612,6 @@ async def update_thread_title(
         )
     if row is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+    await doc_svc.sync_element_record(thread_id)
 
     return ThreadListItem(**dict(row))
