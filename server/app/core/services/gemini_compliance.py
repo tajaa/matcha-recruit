@@ -96,6 +96,14 @@ _MODEL_UNAVAILABLE_SNIPPETS = (
     "unsupported model",
 )
 
+_MODEL_ACCESS_SNIPPETS = (
+    "permission denied",
+    "forbidden",
+    "not authorized",
+    "unauthorized",
+    "access denied",
+)
+
 # Structured correction hints for retry prompts
 CORRECTION_HINTS = {
     "json_parse": "Return ONLY valid JSON. No markdown fences, no explanation text, no trailing commas.",
@@ -197,6 +205,13 @@ def _is_model_unavailable_error(error_message: str) -> bool:
     if "models/" in text and "not found" in text:
         return True
     return any(snippet in text for snippet in _MODEL_UNAVAILABLE_SNIPPETS)
+
+
+def _is_model_access_error(error_message: str) -> bool:
+    text = (error_message or "").lower()
+    if "model" not in text and "models/" not in text:
+        return False
+    return any(snippet in text for snippet in _MODEL_ACCESS_SNIPPETS)
 
 
 class GeminiExhaustedError(Exception):
@@ -447,7 +462,10 @@ class GeminiComplianceService:
                 return response, model
             except Exception as exc:
                 message = str(exc)
-                if _is_model_unavailable_error(message) and idx < len(model_candidates) - 1:
+                if (
+                    (_is_model_unavailable_error(message) or _is_model_access_error(message))
+                    and idx < len(model_candidates) - 1
+                ):
                     next_model = model_candidates[idx + 1]
                     print(
                         f"[Gemini Compliance] Model '{model}' unavailable for this call; "

@@ -155,6 +155,8 @@ def load_settings() -> Settings:
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         celery_broker_url=os.getenv("CELERY_BROKER_URL"),
         celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),
+        gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "50")),
+        gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "50")),
     )
     return _settings
 

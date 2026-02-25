@@ -72,6 +72,66 @@ function normalizeDiscrepancies(payload: unknown): Discrepancy[] {
     }));
 }
 
+function normalizeTimelineEvents(payload: unknown): TimelineEvent[] {
+  if (!Array.isArray(payload)) return [];
+
+  return payload
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => {
+      const participants = Array.isArray(item.participants)
+        ? item.participants.filter((participant): participant is string => typeof participant === 'string')
+        : [];
+      const confidence =
+        item.confidence === 'high' || item.confidence === 'medium' || item.confidence === 'low'
+          ? item.confidence
+          : 'low';
+
+      return {
+        date: typeof item.date === 'string' ? item.date : '',
+        time: typeof item.time === 'string' ? item.time : null,
+        description: typeof item.description === 'string' ? item.description : '',
+        participants,
+        source_document_id: typeof item.source_document_id === 'string' ? item.source_document_id : '',
+        source_location: typeof item.source_location === 'string' ? item.source_location : '',
+        confidence,
+        evidence_quote: typeof item.evidence_quote === 'string' ? item.evidence_quote : '',
+      };
+    });
+}
+
+function normalizePolicyViolations(payload: unknown): PolicyViolation[] {
+  if (!Array.isArray(payload)) return [];
+
+  return payload
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => {
+      const evidence = Array.isArray(item.evidence)
+        ? item.evidence
+            .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object')
+            .map((entry) => ({
+              source_document_id:
+                typeof entry.source_document_id === 'string' ? entry.source_document_id : '',
+              quote: typeof entry.quote === 'string' ? entry.quote : '',
+              location: typeof entry.location === 'string' ? entry.location : '',
+              how_it_violates: typeof entry.how_it_violates === 'string' ? entry.how_it_violates : '',
+            }))
+        : [];
+
+      return {
+        policy_section: typeof item.policy_section === 'string' ? item.policy_section : '',
+        policy_text: typeof item.policy_text === 'string' ? item.policy_text : '',
+        severity: item.severity === 'major' || item.severity === 'minor' ? item.severity : 'minor',
+        evidence,
+        analysis: typeof item.analysis === 'string' ? item.analysis : '',
+      };
+    });
+}
+
+function normalizeTimelineGaps(payload: unknown): string[] {
+  if (!Array.isArray(payload)) return [];
+  return payload.filter((gap): gap is string => typeof gap === 'string');
+}
+
 function normalizeIntakeContext(payload: unknown): ERCaseIntakeContext | null {
   if (!payload) return null;
   if (typeof payload === 'string') {
@@ -269,6 +329,21 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function buildNotificationsWsUrl(apiBase: string): string {
+  if (typeof window === 'undefined') {
+    return 'ws://localhost/ws/notifications';
+  }
+
+  if (/^https?:\/\//i.test(apiBase)) {
+    const base = new URL(apiBase);
+    const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${base.host}/ws/notifications`;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws/notifications`;
+}
+
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
   open: 'text-zinc-900',
   in_review: 'text-amber-600',
@@ -379,9 +454,9 @@ export function ERCaseDetail() {
           setTimelineGaps([]);
           return;
         }
-        setTimeline(data.analysis.events || []);
+        setTimeline(normalizeTimelineEvents(data.analysis.events));
         setTimelineSummary(data.analysis.timeline_summary || '');
-        setTimelineGaps(data.analysis.gaps_identified || []);
+        setTimelineGaps(normalizeTimelineGaps(data.analysis.gaps_identified));
       } else if (type === 'discrepancies') {
         const data = await erCopilot.getDiscrepancies(id);
         if (!data.generated_at) {
@@ -398,7 +473,7 @@ export function ERCaseDetail() {
           setPoliciesChecked(0);
           return;
         }
-        setViolations(data.analysis.violations || []);
+        setViolations(normalizePolicyViolations(data.analysis.violations));
         setPoliciesChecked(data.analysis.policies_potentially_applicable?.length || 0);
       }
     } catch {
@@ -431,11 +506,15 @@ export function ERCaseDetail() {
     if (!id) return;
 
     const apiBase = import.meta.env.VITE_API_URL || '/api';
-    const wsHost = apiBase.replace(/^https?:\/\//, '').replace(/\/api$/, '');
-    const wsProtocol = apiBase.startsWith('https') ? 'wss' : 'ws';
-    const wsUrl = `${wsProtocol}://${wsHost}/ws/notifications`;
+    const wsUrl = buildNotificationsWsUrl(apiBase);
     console.log('[ERCaseDetail] Connecting to WebSocket:', wsUrl);
-    const ws = new WebSocket(wsUrl);
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (err) {
+      console.error('[ERCaseDetail] Failed to initialize WebSocket:', err);
+      return;
+    }
 
     ws.onopen = () => {
       console.log('[ERCaseDetail] WebSocket connected, subscribing to channel:', `er_case:${id}`);
@@ -585,9 +664,9 @@ export function ERCaseDetail() {
           if (!data.generated_at) {
             continue;
           }
-          setTimeline(data.analysis.events || []);
+          setTimeline(normalizeTimelineEvents(data.analysis.events));
           setTimelineSummary(data.analysis.timeline_summary || '');
-          setTimelineGaps(data.analysis.gaps_identified || []);
+          setTimelineGaps(normalizeTimelineGaps(data.analysis.gaps_identified));
           return true;
         } else if (type === 'discrepancies') {
           const data = await erCopilot.getDiscrepancies(id!);
@@ -602,7 +681,7 @@ export function ERCaseDetail() {
           if (!data.generated_at) {
             continue;
           }
-          setViolations(data.analysis.violations || []);
+          setViolations(normalizePolicyViolations(data.analysis.violations));
           setPoliciesChecked(data.analysis.policies_potentially_applicable?.length || 0);
           return true;
         }
@@ -749,7 +828,8 @@ export function ERCaseDetail() {
       const policyResult = policyOk ? await erCopilot.getPolicyCheck(id).catch(() => null) : null;
 
       const discrepancyCount = discrepancyResult?.analysis?.discrepancies?.length ?? 0;
-      const violationCount = policyResult?.analysis?.violations?.length ?? 0;
+      const normalizedViolations = normalizePolicyViolations(policyResult?.analysis?.violations);
+      const violationCount = normalizedViolations.length;
       const reviewSucceeded = timelineOk && policyOk && (!shouldRunDiscrepancies || discrepanciesOk);
 
       const reviewSummaryLines = [
@@ -775,9 +855,7 @@ export function ERCaseDetail() {
       }
 
       const normalizedDiscrepancies = normalizeDiscrepancies(discrepancyResult?.analysis?.discrepancies);
-      const timelineGaps = Array.isArray(timelineResult?.analysis?.gaps_identified)
-        ? timelineResult?.analysis?.gaps_identified
-        : [];
+      const timelineGaps = normalizeTimelineGaps(timelineResult?.analysis?.gaps_identified);
       const suggestedGuidance = buildSuggestedGuidance({
         reviewedDocCount: completedNonPolicyDocs.length,
         reviewedDocNames: completedNonPolicyDocs.map((doc) => doc.filename).filter(Boolean),
@@ -786,7 +864,7 @@ export function ERCaseDetail() {
         timelineGaps,
         discrepancies: normalizedDiscrepancies,
         discrepancySummary: discrepancyResult?.analysis?.summary || '',
-        violations: policyResult?.analysis?.violations || [],
+        violations: normalizedViolations,
         policySummary: policyResult?.analysis?.summary || '',
         reviewSucceeded,
         objective: intakeContext?.answers?.objective,

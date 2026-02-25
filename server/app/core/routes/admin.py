@@ -2939,9 +2939,16 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
 
             research_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
-            def _on_retry(attempt: int, _error: str):
+            def _on_retry(attempt: int, error_text: str):
+                reason = f" Reason: {error_text}" if error_text else ""
                 research_queue.put_nowait(
-                    {"type": "retrying", "message": f"Retrying research (attempt {attempt + 1})..."}
+                    {
+                        "type": "retrying",
+                        "message": (
+                            f"Retrying research (attempt {attempt + 1})..."
+                            f"{reason[:220]}"
+                        ),
+                    }
                 )
 
             research_task = asyncio.create_task(
@@ -3019,11 +3026,15 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
 
             refresh_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
-            def _on_partial_refresh_retry(attempt: int, _error: str):
+            def _on_partial_refresh_retry(attempt: int, error_text: str):
+                reason = f" Reason: {error_text}" if error_text else ""
                 refresh_queue.put_nowait(
                     {
                         "type": "retrying",
-                        "message": f"Retrying repository refresh (attempt {attempt + 1})...",
+                        "message": (
+                            f"Retrying repository refresh (attempt {attempt + 1})..."
+                            f"{reason[:220]}"
+                        ),
                     }
                 )
 
@@ -3095,11 +3106,15 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
 
             refresh_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
-            def _on_refresh_retry(attempt: int, _error: str):
+            def _on_refresh_retry(attempt: int, error_text: str):
+                reason = f" Reason: {error_text}" if error_text else ""
                 refresh_queue.put_nowait(
                     {
                         "type": "retrying",
-                        "message": f"Retrying repository refresh (attempt {attempt + 1})...",
+                        "message": (
+                            f"Retrying repository refresh (attempt {attempt + 1})..."
+                            f"{reason[:220]}"
+                        ),
                     }
                 )
 

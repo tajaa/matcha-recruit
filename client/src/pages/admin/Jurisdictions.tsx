@@ -912,7 +912,7 @@ export function Jurisdictions() {
         <span className="uppercase">Jurisdiction Research</span>
         <span className="text-zinc-600">·</span>
         <span className={jurisdictionModelMode === 'heavy' ? 'text-amber-400 font-bold' : 'text-zinc-400'}>
-          {jurisdictionModelMode === 'heavy' ? 'gemini-3.1-pro-preview' : 'gemini-3-flash-preview'}
+          {jurisdictionModelMode === 'heavy' ? 'gemini-3.1-pro-preview (auto-fallback)' : 'gemini-3-flash-preview'}
         </span>
         <span className={`ml-1 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-widest ${
           jurisdictionModelMode === 'heavy'
