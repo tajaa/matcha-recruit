@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { adminJurisdictions, adminSchedulers, adminPlatformSettings } from '../../api/client';
+import { CityCombobox } from '../../components/CityCombobox';
 import type {
   Jurisdiction, JurisdictionTotals, JurisdictionDetail, JurisdictionCreate,
   JurisdictionRequirement, JurisdictionLegislation, JurisdictionLocation,
@@ -994,65 +995,32 @@ export function Jurisdictions() {
 
       {/* Create form */}
       {showCreateForm && (
-        <div className="border border-white/10 bg-zinc-900/60 p-6 space-y-4">
-          <div className="text-[9px] uppercase tracking-[0.2em] font-mono font-bold text-zinc-400">New Jurisdiction</div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-1.5">City *</label>
-              <input
-                type="text"
-                value={createForm.city}
-                onChange={e => setCreateForm(f => ({ ...f, city: e.target.value }))}
-                placeholder="e.g. manhattan"
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-1.5">State *</label>
-              <select
-                value={createForm.state}
-                onChange={e => setCreateForm(f => ({ ...f, state: e.target.value }))}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono focus:outline-none focus:border-zinc-500 transition-colors"
-              >
-                <option value="">Select state</option>
-                {US_STATES.map(s => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-1.5">County</label>
-              <input
-                type="text"
-                value={createForm.county || ''}
-                onChange={e => setCreateForm(f => ({ ...f, county: e.target.value }))}
-                placeholder="optional"
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-[9px] text-zinc-500 uppercase tracking-widest font-mono mb-1.5">Parent</label>
-              <select
-                value={createForm.parent_id || ''}
-                onChange={e => setCreateForm(f => ({ ...f, parent_id: e.target.value || undefined }))}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-sm text-white font-mono focus:outline-none focus:border-zinc-500 transition-colors"
-              >
-                <option value="">None (top-level)</option>
-                {jurisdictions.map(j => (
-                  <option key={j.id} value={j.id}>{j.city}, {j.state}</option>
-                ))}
-              </select>
-            </div>
+        <div className="border border-white/10 bg-zinc-900/60 px-4 py-3 flex items-center gap-3 flex-wrap">
+          <div className="flex-1 min-w-[200px]">
+            <CityCombobox
+              city={createForm.city}
+              state={createForm.state}
+              onChange={(city, state) => setCreateForm(f => ({ ...f, city, state }))}
+              required
+            />
           </div>
-          <div className="flex justify-end">
-            <button
-              onClick={handleCreate}
-              disabled={creating || !createForm.city.trim() || !createForm.state}
-              className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-white bg-white/10 border border-zinc-600 hover:bg-white/20 transition-colors disabled:opacity-50"
-            >
-              {creating ? 'Creating...' : 'Create Jurisdiction'}
-            </button>
-          </div>
+          <select
+            value={createForm.parent_id || ''}
+            onChange={e => setCreateForm(f => ({ ...f, parent_id: e.target.value || undefined }))}
+            className="px-3 py-2 bg-zinc-800 border border-zinc-700 text-xs text-zinc-400 font-mono focus:outline-none focus:border-zinc-500 transition-colors"
+          >
+            <option value="">No parent</option>
+            {jurisdictions.map(j => (
+              <option key={j.id} value={j.id}>{j.city}, {j.state}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleCreate}
+            disabled={creating || !createForm.city.trim() || !createForm.state}
+            className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-white bg-white/10 border border-zinc-600 hover:bg-white/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            {creating ? 'Creating...' : 'Create'}
+          </button>
         </div>
       )}
 
