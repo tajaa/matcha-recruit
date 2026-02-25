@@ -811,28 +811,40 @@ function HandbookDetailPage() {
                           className="w-full min-h-[420px] px-3 py-3 bg-zinc-900 border border-white/10 text-sm text-zinc-100 focus:outline-none focus:border-white/30 resize-y"
                         />
                       </div>
-                      <div className="max-h-[520px] overflow-y-auto flex-shrink-0 w-16">
-                        <div className="flex flex-col gap-0.5 items-end">
+                      <div className="flex-shrink-0 w-8">
+                        <div className="flex flex-col gap-0.5">
                           {notebookEdgeTabs.map((tab) => (
-                            <button
-                              key={tab.tabId}
-                              type="button"
-                              onClick={() => setActiveSectionTabId(tab.tabId)}
-                              className={`h-[80px] w-8 hover:w-16 border transition-all duration-150 flex items-center justify-center overflow-hidden group ${
-                                tab.isActive
-                                  ? 'bg-white text-black border-white'
-                                  : tab.isHighlighted
-                                  ? 'bg-amber-500/15 text-amber-100 border-amber-400/50 hover:bg-amber-500/25'
-                                  : 'bg-zinc-800 text-zinc-200 border-zinc-600 hover:bg-zinc-700 hover:text-white'
-                              }`}
-                              style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
-                              title={tab.title}
-                            >
-                              <span className="text-[8px] group-hover:text-[10px] uppercase tracking-widest truncate leading-tight transition-all duration-150">
-                                {tab.index + 1}. {tab.title}
-                              </span>
-                              {tab.isDirty && <span className={tab.isActive ? 'text-black/60' : 'text-amber-400'}> •</span>}
-                            </button>
+                            <div key={tab.tabId} className="relative group">
+                              <button
+                                type="button"
+                                onClick={() => setActiveSectionTabId(tab.tabId)}
+                                className={`h-[80px] w-8 border flex items-center justify-center transition-colors ${
+                                  tab.isActive
+                                    ? 'bg-white text-black border-white'
+                                    : tab.isHighlighted
+                                    ? 'bg-amber-500/15 text-amber-100 border-amber-400/50 hover:bg-amber-500/25'
+                                    : 'bg-zinc-800 text-zinc-200 border-zinc-600 hover:bg-zinc-700 hover:text-white'
+                                }`}
+                                style={{ writingMode: 'vertical-rl' }}
+                              >
+                                <span className="text-[8px] uppercase tracking-widest truncate">
+                                  {tab.index + 1}. {tab.title}
+                                </span>
+                                {tab.isDirty && <span className={tab.isActive ? 'text-black/60' : 'text-amber-400'}> •</span>}
+                              </button>
+                              {/* Hover label floats to the left */}
+                              <div className="absolute right-full top-1/2 -translate-y-1/2 pr-1.5 hidden group-hover:block z-50 pointer-events-none">
+                                <div className={`px-2.5 py-1.5 text-[10px] uppercase tracking-widest whitespace-nowrap border ${
+                                  tab.isActive
+                                    ? 'bg-white text-black border-white'
+                                    : tab.isHighlighted
+                                    ? 'bg-zinc-900 text-amber-200 border-amber-400/50'
+                                    : 'bg-zinc-900 text-zinc-100 border-zinc-600'
+                                }`}>
+                                  {tab.index + 1}. {tab.title}
+                                </div>
+                              </div>
+                            </div>
                           ))}
                         </div>
                       </div>
