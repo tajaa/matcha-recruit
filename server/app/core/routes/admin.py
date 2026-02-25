@@ -53,9 +53,14 @@ class MatchaWorkModelModeUpdate(BaseModel):
     mode: str = Field(..., pattern="^(light|heavy)$")
 
 
+class JurisdictionResearchModelModeUpdate(BaseModel):
+    mode: str = Field(..., pattern="^(light|heavy)$")
+
+
 class PlatformSettingsResponse(BaseModel):
     visible_features: list[str]
     matcha_work_model_mode: str
+    jurisdiction_research_model_mode: str
 
 
 STRICT_CONFIDENCE_THRESHOLD = 0.95
@@ -4274,10 +4279,12 @@ async def update_poster_order(order_id: UUID, request: PosterOrderUpdateRequest)
 @router.get("/platform-settings", response_model=PlatformSettingsResponse, dependencies=[Depends(require_admin)])
 async def get_all_platform_settings():
     visible = await get_visible_features()
-    mode = await get_matcha_work_model_mode()
+    mw_mode = await get_matcha_work_model_mode()
+    jr_mode = await get_jurisdiction_research_model_mode()
     return {
         "visible_features": visible,
-        "matcha_work_model_mode": mode
+        "matcha_work_model_mode": mw_mode,
+        "jurisdiction_research_model_mode": jr_mode
     }
 
 
@@ -4324,3 +4331,21 @@ async def update_matcha_work_model_mode(
         )
     mode = prime_matcha_work_model_mode_cache(body.mode)
     return {"matcha_work_model_mode": mode}
+
+
+@router.put("/platform-settings/jurisdiction-research-model-mode", dependencies=[Depends(require_admin)])
+async def update_jurisdiction_research_model_mode(
+    body: JurisdictionResearchModelModeUpdate,
+    admin=Depends(require_admin)
+):
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value, updated_at)
+            VALUES ('jurisdiction_research_model_mode', $1::jsonb, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            json.dumps(body.mode)
+        )
+    mode = prime_jurisdiction_research_model_mode_cache(body.mode)
+    return {"jurisdiction_research_model_mode": mode}

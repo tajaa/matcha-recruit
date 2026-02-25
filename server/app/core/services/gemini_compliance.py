@@ -12,6 +12,7 @@ from ...config import get_settings
 from ..models.compliance import ComplianceCategory, JurisdictionLevel, VerificationResult
 from .rate_limiter import get_rate_limiter, RateLimitExceeded
 from .search_strategy import build_search_strategy_prompt
+from .platform_settings import get_jurisdiction_research_model_mode
 
 # Timeout for individual Gemini API calls (seconds)
 GEMINI_CALL_TIMEOUT = 45
@@ -378,6 +379,12 @@ class GeminiComplianceService:
         api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
         return bool(api_key) or self.settings.use_vertex
 
+    async def _resolve_model(self) -> str:
+        mode = await get_jurisdiction_research_model_mode()
+        if mode == "heavy":
+            return "gemini-3.1-pro-preview"
+        return self.settings.analysis_model
+
     async def _call_with_retry(
         self,
         prompt: str,
@@ -417,9 +424,10 @@ class GeminiComplianceService:
                     if on_retry is not None:
                         on_retry(attempt, last_error)
 
+                model = await self._resolve_model()
                 response = await asyncio.wait_for(
                     self.client.aio.models.generate_content(
-                        model=self.settings.analysis_model,
+                        model=model,
                         contents=current_prompt,
                         config=types.GenerateContentConfig(
                             temperature=0.0,
@@ -857,10 +865,11 @@ Be conservative with confidence scores:
                 print(f"[Gemini Compliance] Rate limit hit during adaptive retry, returning first result")
                 return first
 
+            model = await self._resolve_model()
             tools = [types.Tool(google_search=types.GoogleSearch())]
             response = await asyncio.wait_for(
                 self.client.aio.models.generate_content(
-                    model=self.settings.analysis_model,
+                    model=model,
                     contents=refined_prompt,
                     config=types.GenerateContentConfig(
                         temperature=0.0,
@@ -989,10 +998,11 @@ You MUST return exactly {len(changes)} results, one for each change listed above
                 print(f"[Gemini Compliance] Rate limit hit during batch verification")
                 return [VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Rate limit exceeded")] * len(changes)
 
+            model = await self._resolve_model()
             tools = [types.Tool(google_search=types.GoogleSearch())]
             response = await asyncio.wait_for(
                 self.client.aio.models.generate_content(
-                    model=self.settings.analysis_model,
+                    model=model,
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         temperature=0.0,

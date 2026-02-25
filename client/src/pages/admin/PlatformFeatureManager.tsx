@@ -111,6 +111,7 @@ export function PlatformFeatureManager({ onClose }: Props) {
   const { platformFeatures, setPlatformFeatures } = useAuth();
   const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set(platformFeatures));
   const [modelMode, setModelMode] = useState<'light' | 'heavy'>('light');
+  const [jurisdictionModelMode, setJurisdictionModelMode] = useState<'light' | 'heavy'>('light');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -122,10 +123,12 @@ export function PlatformFeatureManager({ onClose }: Props) {
     adminPlatformSettings.get()
       .then(data => {
         setModelMode(data.matcha_work_model_mode as 'light' | 'heavy');
+        setJurisdictionModelMode(data.jurisdiction_research_model_mode as 'light' | 'heavy');
       })
       .catch(() => {
         // Fallback if settings don't exist yet
         setModelMode('light');
+        setJurisdictionModelMode('light');
       })
       .finally(() => setLoading(false));
   });
@@ -175,6 +178,7 @@ export function PlatformFeatureManager({ onClose }: Props) {
       const [featuresResult] = await Promise.all([
         adminPlatformSettings.update(Array.from(activeKeys)),
         adminPlatformSettings.updateMatchaWorkModelMode(modelMode),
+        adminPlatformSettings.updateJurisdictionResearchModelMode(jurisdictionModelMode),
       ]);
       setPlatformFeatures(new Set(featuresResult.visible_features));
       onClose();
@@ -264,31 +268,53 @@ export function PlatformFeatureManager({ onClose }: Props) {
 
           {/* Footer */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 shrink-0">
-            <div className="flex items-center gap-8">
-              <div className="text-[10px] text-zinc-600">
-                {activeKeys.size} of {ALL_FEATURES.length} features active
-              </div>
-              
-              <div className="flex items-center gap-3">
-                <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold">Matcha Work AI:</span>
-                <div className="flex bg-zinc-900 border border-white/5 p-0.5 rounded">
-                  <button
-                    onClick={() => setModelMode('light')}
-                    className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${modelMode === 'light' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    Light
-                  </button>
-                  <button
-                    onClick={() => setModelMode('heavy')}
-                    className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${modelMode === 'heavy' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    Heavy
-                  </button>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-8">
+                <div className="text-[10px] text-zinc-600">
+                  {activeKeys.size} of {ALL_FEATURES.length} features active
+                </div>
+                
+                <div className="flex items-center gap-3">
+                  <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold">Matcha Work AI:</span>
+                  <div className="flex bg-zinc-900 border border-white/5 p-0.5 rounded">
+                    <button
+                      onClick={() => setModelMode('light')}
+                      className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${modelMode === 'light' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      Light
+                    </button>
+                    <button
+                      onClick={() => setModelMode('heavy')}
+                      className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${modelMode === 'heavy' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      Heavy
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold">Compliance Research AI:</span>
+                  <div className="flex bg-zinc-900 border border-white/5 p-0.5 rounded">
+                    <button
+                      onClick={() => setJurisdictionModelMode('light')}
+                      className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${jurisdictionModelMode === 'light' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      Light
+                    </button>
+                    <button
+                      onClick={() => setJurisdictionModelMode('heavy')}
+                      className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${jurisdictionModelMode === 'heavy' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      Heavy
+                    </button>
+                  </div>
                 </div>
               </div>
               
-              {error && <span className="text-red-400 text-[10px] font-mono">{error}</span>}
-              {loading && <span className="text-zinc-600 text-[10px] font-mono animate-pulse">Loading settings...</span>}
+              <div className="flex items-center gap-4">
+                {error && <span className="text-red-400 text-[10px] font-mono">{error}</span>}
+                {loading && <span className="text-zinc-600 text-[10px] font-mono animate-pulse">Loading settings...</span>}
+              </div>
             </div>
             <div className="flex gap-3">
               <button

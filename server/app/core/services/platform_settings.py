@@ -20,6 +20,7 @@ DEFAULT_VISIBLE_FEATURES = [
     "employees",
 ]
 DEFAULT_MATCHA_WORK_MODEL_MODE = "light"
+DEFAULT_JURISDICTION_RESEARCH_MODEL_MODE = "light"
 VISIBLE_FEATURES_CACHE_TTL_SECONDS = 30
 
 _visible_features_cache: list[str] | None = None
@@ -27,6 +28,9 @@ _visible_features_cached_at: float = 0.0
 
 _matcha_work_model_mode_cache: str | None = None
 _matcha_work_model_mode_cached_at: float = 0.0
+
+_jurisdiction_research_model_mode_cache: str | None = None
+_jurisdiction_research_model_mode_cached_at: float = 0.0
 
 
 def _normalize_visible_features(value: object) -> list[str]:
@@ -66,6 +70,13 @@ def prime_matcha_work_model_mode_cache(mode: str) -> str:
     global _matcha_work_model_mode_cache, _matcha_work_model_mode_cached_at
     _matcha_work_model_mode_cache = mode
     _matcha_work_model_mode_cached_at = time.monotonic()
+    return mode
+
+
+def prime_jurisdiction_research_model_mode_cache(mode: str) -> str:
+    global _jurisdiction_research_model_mode_cache, _jurisdiction_research_model_mode_cached_at
+    _jurisdiction_research_model_mode_cache = mode
+    _jurisdiction_research_model_mode_cached_at = time.monotonic()
     return mode
 
 
@@ -132,4 +143,43 @@ async def get_matcha_work_model_mode(*, conn=None) -> str:
 
     _matcha_work_model_mode_cache = mode
     _matcha_work_model_mode_cached_at = now
+    return mode
+
+
+async def get_jurisdiction_research_model_mode(*, conn=None) -> str:
+    global _jurisdiction_research_model_mode_cache, _jurisdiction_research_model_mode_cached_at
+
+    now = time.monotonic()
+    if (
+        _jurisdiction_research_model_mode_cache is not None
+        and now - _jurisdiction_research_model_mode_cached_at < VISIBLE_FEATURES_CACHE_TTL_SECONDS
+    ):
+        return _jurisdiction_research_model_mode_cache
+
+    if conn is None:
+        async with get_connection() as managed_conn:
+            raw = await managed_conn.fetchval(
+                "SELECT value FROM platform_settings WHERE key = 'jurisdiction_research_model_mode'"
+            )
+    else:
+        raw = await conn.fetchval(
+            "SELECT value FROM platform_settings WHERE key = 'jurisdiction_research_model_mode'"
+        )
+
+    if raw is None:
+        return DEFAULT_JURISDICTION_RESEARCH_MODEL_MODE
+
+    if isinstance(raw, str):
+        try:
+            mode = json.loads(raw)
+        except json.JSONDecodeError:
+            mode = raw
+    else:
+        mode = str(raw)
+
+    if mode not in ["light", "heavy"]:
+        mode = DEFAULT_JURISDICTION_RESEARCH_MODEL_MODE
+
+    _jurisdiction_research_model_mode_cache = mode
+    _jurisdiction_research_model_mode_cached_at = now
     return mode
