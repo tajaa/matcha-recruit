@@ -31,6 +31,7 @@ from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
 from ...core.services.email import EmailService
 from ...config import get_settings
+from ...core.services.redis_cache import get_redis_cache, cache_get, cache_set, cache_delete, offer_letters_key
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,13 @@ async def list_offer_letters(
     if company_id is None:
         return []
     is_admin = current_user.role == "admin"
+
+    redis = get_redis_cache()
+    if redis and not is_admin:
+        cached = await cache_get(redis, offer_letters_key(company_id))
+        if cached is not None:
+            return [OfferLetter(**r) for r in cached]
+
     async with get_connection() as conn:
         if is_admin:
             rows = await conn.fetch(
@@ -217,7 +225,12 @@ async def list_offer_letters(
                 """,
                 company_id,
             )
-        return [OfferLetter(**dict(row)) for row in rows]
+        result = [OfferLetter(**dict(row)) for row in rows]
+
+    if redis and not is_admin:
+        await cache_set(redis, offer_letters_key(company_id), [r.model_dump() for r in result])
+
+    return result
 
 
 @router.post("", response_model=OfferLetter)
@@ -290,7 +303,13 @@ async def create_offer_letter(
             offer.candidate_email,
             offer.max_negotiation_rounds,
         )
-        return OfferLetter(**dict(row))
+        new_offer = OfferLetter(**dict(row))
+
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, offer_letters_key(new_offer.company_id))
+
+    return new_offer
 
 
 @router.post(
@@ -506,6 +525,10 @@ async def send_range_offer(
             payload.salary_range_min, payload.salary_range_max,
             payload.candidate_email, token, expires_at, offer_id,
         )
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, offer_letters_key(updated["company_id"]))
+
     # Send email (non-blocking)
     try:
         await _send_candidate_range_email(
@@ -680,6 +703,10 @@ async def re_negotiate_offer(
             """,
             new_min, new_max, new_token, expires_at, current_round + 1, offer_id,
         )
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, offer_letters_key(updated["company_id"]))
+
     candidate_email = offer.get("candidate_email")
     if candidate_email:
         try:
@@ -778,7 +805,13 @@ async def update_offer_letter(
         """
 
         row = await conn.fetchrow(query, *values)
-        return OfferLetter(**dict(row))
+        updated_offer = OfferLetter(**dict(row))
+
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, offer_letters_key(updated_offer.company_id))
+
+    return updated_offer
 
 
 def _generate_benefits_text(offer: dict) -> str:
@@ -1248,4 +1281,8 @@ async def upload_offer_logo(
             company_id,
         )
 
-        return {"url": url}
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, offer_letters_key(company_id))
+
+    return {"url": url}

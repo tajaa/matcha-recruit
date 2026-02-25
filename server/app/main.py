@@ -12,6 +12,7 @@ from .core.services.notification_manager import (
     get_notification_manager,
     init_notification_manager,
 )
+from .core.services.redis_cache import close_redis_cache, init_redis_cache
 
 
 @asynccontextmanager
@@ -33,9 +34,14 @@ async def lifespan(app: FastAPI):
     await init_notification_manager(settings.redis_url)
     print(f"[Matcha] Redis notification manager connected to {settings.redis_url}")
 
+    # Initialize Redis cache
+    await init_redis_cache(settings.redis_url)
+    print("[Matcha] Redis cache initialized")
+
     yield
 
     # Cleanup
+    await close_redis_cache()
     await close_notification_manager()
     await close_pool()
     print("[Matcha] Server shutdown complete")
