@@ -265,6 +265,21 @@ class GoogleWorkspaceService:
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             create_resp = await client.post(f"{self.BASE_URL}/users", headers=headers, json=user_payload)
+            warnings: list[str] = []
+
+            if create_resp.status_code == 400 and org_unit:
+                error_msg = _extract_response_error(create_resp)
+                if "INVALID_OU_ID" in error_msg.upper():
+                    # Fallback to root org unit when configured OU path is stale/invalid.
+                    fallback_payload = dict(user_payload)
+                    fallback_payload.pop("orgUnitPath", None)
+                    create_resp = await client.post(
+                        f"{self.BASE_URL}/users",
+                        headers=headers,
+                        json=fallback_payload,
+                    )
+                    if create_resp.status_code in (200, 201, 409):
+                        warnings.append(f"org_unit_fallback:{org_unit}:INVALID_OU_ID")
 
             if create_resp.status_code in (200, 201):
                 user_json = create_resp.json()
@@ -290,7 +305,6 @@ class GoogleWorkspaceService:
                 )
 
             groups_added: list[str] = []
-            warnings: list[str] = []
             for group in groups:
                 group_key = str(group).strip()
                 if not group_key:

@@ -116,3 +116,51 @@ def test_google_workspace_api_token_sets_temporary_password(monkeypatch: pytest.
     assert len(captured_payload["password"]) >= 12
     assert captured_payload["changePasswordAtNextLogin"] is True
     assert result["external_email"] == "jane@example.com"
+
+
+def test_google_workspace_api_token_falls_back_when_org_unit_invalid(monkeypatch: pytest.MonkeyPatch):
+    payloads = []
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+            self.text = ""
+            self.content = b"{}"
+
+        def json(self):
+            return self._payload
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url: str, headers=None, json=None):
+            if not url.endswith("/users"):
+                raise AssertionError(f"Unexpected POST URL {url}")
+            payloads.append(dict(json or {}))
+            if len(payloads) == 1:
+                return _FakeResponse(400, {"error": {"message": "Invalid Input: INVALID_OU_ID"}})
+            return _FakeResponse(201, {"id": "google-user-2", "primaryEmail": "jane@example.com"})
+
+    monkeypatch.setattr("app.matcha.services.google_workspace_service.httpx.AsyncClient", _FakeAsyncClient)
+
+    service = GoogleWorkspaceService()
+    result = asyncio.run(
+        service.provision_user(
+            {"mode": "api_token", "default_org_unit": "/Employees"},
+            {"access_token": "token-123"},
+            {"email": "jane@example.com", "first_name": "Jane", "last_name": "Doe"},
+        )
+    )
+
+    assert len(payloads) == 2
+    assert payloads[0].get("orgUnitPath") == "/Employees"
+    assert "orgUnitPath" not in payloads[1]
+    assert "org_unit_fallback:/Employees:INVALID_OU_ID" in (result.get("warnings") or [])
