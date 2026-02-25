@@ -83,6 +83,7 @@ export default function MatchaWorkThread() {
   const [showVersions, setShowVersions] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [creatingChat, setCreatingChat] = useState(false);
   const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<(MWTokenUsage & { stage: 'estimate' | 'final' }) | null>(null);
   const [usageSummary, setUsageSummary] = useState<MWUsageSummaryResponse | null>(null);
@@ -303,6 +304,22 @@ export default function MatchaWorkThread() {
     }
   };
 
+  const handleCreateChat = async () => {
+    if (creatingChat || !thread) return;
+    try {
+      setCreatingChat(true);
+      setError(null);
+      const taskType = thread.task_type;
+      const title = taskType === 'review' ? 'Untitled Review' : 'Untitled Chat';
+      const created = await matchaWork.createThread({ title, task_type: taskType });
+      navigate(`/app/matcha/work/${created.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create chat');
+    } finally {
+      setCreatingChat(false);
+    }
+  };
+
   const isFinalized = thread?.status === 'finalized';
   const isArchived = thread?.status === 'archived';
   const isOfferLetter = thread?.task_type === 'offer_letter';
@@ -452,6 +469,17 @@ export default function MatchaWorkThread() {
               Chats
             </button>
           </div>
+
+          <button
+            onClick={handleCreateChat}
+            disabled={creatingChat}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-matcha-600 hover:bg-matcha-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+            </svg>
+            <span>{creatingChat ? 'Creating...' : 'New Chat'}</span>
+          </button>
 
           {isOfferLetter && !isArchived && (
             <button
