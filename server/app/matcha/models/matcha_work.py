@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
-MatchaWorkTaskType = Literal["offer_letter", "review"]
+MatchaWorkTaskType = Literal["offer_letter", "review", "workbook"]
 
 
 class OfferLetterDocument(BaseModel):
@@ -68,6 +68,21 @@ class ReviewDocument(BaseModel):
     review_received_responses: Optional[int] = None
     review_pending_responses: Optional[int] = None
     review_last_sent_at: Optional[str] = None
+
+
+class WorkbookSection(BaseModel):
+    title: str
+    content: str
+
+
+class WorkbookDocument(BaseModel):
+    """Incremental workbook/handbook state."""
+
+    workbook_title: Optional[str] = None
+    company_name: Optional[str] = None
+    industry: Optional[str] = None
+    objective: Optional[str] = None
+    sections: Optional[list[WorkbookSection]] = None
 
 
 class CreateThreadRequest(BaseModel):

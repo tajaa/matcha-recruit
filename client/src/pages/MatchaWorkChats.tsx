@@ -107,7 +107,7 @@ export default function MatchaWorkChats() {
             Stored chats for your company. Pin important threads to keep them at the top.
           </p>
           <p className="text-xs text-zinc-500 mt-2">
-            Skills: offer letters, anonymized reviews. Ask naturally. Unsupported requests return: "I can't do that."
+            Skills: offer letters, anonymized reviews, HR workbooks. Ask naturally. Unsupported requests return: "I can't do that."
           </p>
         </div>
 
@@ -175,7 +175,7 @@ export default function MatchaWorkChats() {
                   {thread.title}
                 </p>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  {thread.task_type === 'review' ? 'anonymized review' : 'offer letter'} · v{thread.version} · Updated{' '}
+                  {thread.task_type === 'review' ? 'anonymized review' : thread.task_type === 'workbook' ? 'HR workbook' : 'offer letter'} · v{thread.version} · Updated{' '}
                   {formatDate(thread.updated_at)}
                 </p>
               </div>

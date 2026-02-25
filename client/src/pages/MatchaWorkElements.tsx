@@ -151,7 +151,7 @@ export default function MatchaWorkElements() {
                   {element.title}
                 </p>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  {element.element_type === 'review' ? 'anonymized review' : 'offer letter'} · v{element.version} · Updated{' '}
+                  {element.element_type === 'review' ? 'anonymized review' : element.element_type === 'workbook' ? 'HR workbook' : 'offer letter'} · v{element.version} · Updated{' '}
                   {formatDate(element.updated_at)}
                 </p>
               </div>

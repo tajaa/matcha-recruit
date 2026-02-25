@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import type {
   MWMessage,
   MWThreadDetail,
+  MWDocumentState,
   MWDocumentVersion,
   MWTokenUsage,
   MWUsageSummaryResponse,
@@ -25,6 +27,65 @@ function toItemList(value: unknown): string[] {
       .filter((item) => item.length > 0);
   }
   return [];
+}
+
+function WorkbookPreview({ state }: { state: MWDocumentState }) {
+  const sections = state.sections || [];
+
+  return (
+    <div className="h-full overflow-y-auto p-4">
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div className="bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-6">
+          <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-1">HR Workbook</p>
+          <h2 className="text-2xl font-bold text-white tracking-tight">
+            {state.workbook_title || 'Untitled Workbook'}
+          </h2>
+          {(state.industry || state.objective) && (
+            <div className="flex flex-wrap gap-2 mt-4">
+              {state.industry && (
+                <span className="px-2 py-0.5 rounded bg-zinc-700 text-zinc-300 text-[10px] uppercase tracking-wider">
+                  {state.industry}
+                </span>
+              )}
+              {state.objective && (
+                <span className="px-2 py-0.5 rounded bg-matcha-500/10 text-matcha-400 text-[10px] uppercase tracking-wider border border-matcha-500/20">
+                  {state.objective}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          {sections.length === 0 ? (
+            <div className="bg-zinc-900/40 border border-zinc-800 border-dashed rounded-xl p-12 text-center">
+              <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center mx-auto mb-4 text-zinc-600">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <p className="text-zinc-500 text-sm italic font-mono">
+                Waiting for sections to be generated...
+              </p>
+            </div>
+          ) : (
+            sections.map((section, idx) => (
+              <div key={idx} className="bg-zinc-900/60 border border-zinc-800 rounded-xl overflow-hidden">
+                <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-800/30">
+                  <h3 className="text-sm font-bold text-zinc-200 tracking-wide uppercase">
+                    {section.title}
+                  </h3>
+                </div>
+                <div className="px-5 py-4 prose prose-invert prose-sm max-w-none text-zinc-300 leading-relaxed font-sans">
+                  <ReactMarkdown>{section.content}</ReactMarkdown>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function parseEmailList(input: string): string[] {
@@ -373,6 +434,7 @@ export default function MatchaWorkThread() {
   const isArchived = thread?.status === 'archived';
   const isOfferLetter = thread?.task_type === 'offer_letter';
   const isReview = thread?.task_type === 'review';
+  const isWorkbook = thread?.task_type === 'workbook';
   const reviewStatuses: MWReviewRequestStatus[] = (thread?.current_state.review_request_statuses || [])
     .filter((row): row is MWReviewRequestStatus => Boolean(row && typeof row === 'object' && row.email));
   const reviewExpectedResponses = thread?.current_state.review_expected_responses ?? reviewStatuses.length;
@@ -432,7 +494,7 @@ export default function MatchaWorkThread() {
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-xs text-zinc-500">v{thread.version}</span>
               <span className="text-xs bg-zinc-700/60 text-zinc-300 px-1.5 py-0.5 rounded capitalize">
-                {isUnscopedChat ? 'Intent-driven chat' : thread.task_type === 'review' ? 'Anonymous Review' : 'Offer Letter'}
+                {isUnscopedChat ? 'Intent-driven chat' : thread.task_type === 'review' ? 'Anonymous Review' : thread.task_type === 'workbook' ? 'HR Workbook' : 'Offer Letter'}
               </span>
               {isFinalized && (
                 <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
@@ -513,7 +575,7 @@ export default function MatchaWorkThread() {
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              {isOfferLetter ? 'Preview' : 'Summary'}
+              {isOfferLetter ? 'Preview' : isWorkbook ? 'Workbook' : 'Summary'}
             </button>
             <button
               onClick={() => navigate('/app/matcha/work/elements')}
@@ -608,7 +670,7 @@ export default function MatchaWorkThread() {
                   Tell me what you need in natural language.
                 </p>
                 <div className="mt-3 text-[11px] text-zinc-500 max-w-sm">
-                  Skills: offer letters, anonymized reviews. Unsupported requests will return: "I can't do that."
+                  Skills: offer letters, anonymized reviews, HR workbooks. Unsupported requests will return: "I can't do that."
                 </div>
                 <div className="mt-1 text-[11px] text-zinc-600 max-w-sm">
                   For review workflows, include recipient emails and use Send Requests to distribute links.
@@ -652,9 +714,11 @@ export default function MatchaWorkThread() {
                   disabled={inputDisabled}
                   placeholder={
                     isUnscopedChat
-                      ? 'Ask for an offer letter or anonymized review...'
+                      ? 'Ask for an offer letter, review, or workbook...'
                       : isReview
                       ? 'Add anonymized review details...'
+                      : isWorkbook
+                      ? 'Describe workbook sections or objective...'
                       : 'Describe changes or add details...'
                   }
                   rows={1}
@@ -775,6 +839,8 @@ export default function MatchaWorkThread() {
                   </p>
                 </div>
               )
+            ) : isWorkbook ? (
+              <WorkbookPreview state={thread.current_state} />
             ) : (
               <div className="h-full overflow-y-auto p-4">
                 <div className="max-w-2xl mx-auto bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-4 space-y-4">
@@ -980,11 +1046,13 @@ export default function MatchaWorkThread() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl">
             <h2 className="text-base font-semibold text-zinc-100 mb-2">
-              {isOfferLetter ? 'Finalize offer letter?' : 'Finalize anonymous review?'}
+              {isOfferLetter ? 'Finalize offer letter?' : isWorkbook ? 'Finalize workbook?' : 'Finalize anonymous review?'}
             </h2>
             <p className="text-sm text-zinc-400 mb-5">
               {isOfferLetter
                 ? "This will lock the document and generate a final PDF without a watermark. You won't be able to make further edits."
+                : isWorkbook
+                ? "This will lock the workbook and prevent further edits. You can still view the content here."
                 : "This will lock the review and prevent further edits. You can still view the final thread content."}
             </p>
             <div className="flex gap-2">

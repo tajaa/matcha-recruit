@@ -10,7 +10,7 @@ from google import genai
 from google.genai import types
 
 from ...config import get_settings
-from ..models.matcha_work import OfferLetterDocument, ReviewDocument
+from ..models.matcha_work import OfferLetterDocument, ReviewDocument, WorkbookDocument
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ GEMINI_CALL_TIMEOUT = 60
 
 OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
 REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())
+WORKBOOK_FIELDS = list(WorkbookDocument.model_fields.keys())
 
 OFFER_LETTER_SYSTEM_PROMPT_TEMPLATE = """You are an offer letter assistant. Help the user create and refine a professional job offer letter.
 
@@ -78,6 +79,34 @@ Rules:
 - Return only the JSON object — no markdown fences, no extra text
 """
 
+WORKBOOK_SYSTEM_PROMPT_TEMPLATE = """You are an HR workbook assistant. Help the user create and refine a structured HR document, manual, or workbook.
+
+Current workbook state (JSON):
+{current_state}
+
+Your job:
+1. Understand the user's objective for this workbook (e.g., orientation guide, manager playbook, culture memo).
+2. Extract structured updates, including the title, industry, objective, and a list of sections.
+3. Reply conversationally, confirming changes and suggesting new sections or refinements based on best practices.
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "reply": "Your conversational response to the user",
+  "updates": {{
+    "field_name": "value"
+  }}
+}}
+
+Rules:
+- Only include fields in "updates" that should actually be changed
+- If no fields should be updated, use an empty object: "updates": {{}}
+- Always include both "reply" and "updates" keys
+- Valid field names: {valid_fields}
+- For "sections", provide a list of objects with "title" and "content" (Markdown allowed in content)
+- Suggest sections that align with the user's industry and objective
+- Return only the JSON object — no markdown fences, no extra text
+"""
+
 
 def _clean_json_text(text: str) -> str:
     """Strip markdown code fences from model output."""
@@ -85,6 +114,14 @@ def _clean_json_text(text: str) -> str:
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
+
+
+def _normalize_task_type(task_type: Optional[str]) -> str:
+    if task_type == "review":
+        return "review"
+    if task_type == "workbook":
+        return "workbook"
+    return "offer_letter"
 
 
 @dataclass
@@ -223,10 +260,16 @@ class GeminiProvider(MatchaWorkAIProvider):
         task_type: str = "offer_letter",
     ) -> tuple[str, list, list[str]]:
         windowed = messages[-20:]
-        normalized_task_type = "review" if task_type == "review" else "offer_letter"
+        normalized_task_type = _normalize_task_type(task_type)
         if normalized_task_type == "review":
             valid_fields = REVIEW_FIELDS
             system_prompt = REVIEW_SYSTEM_PROMPT_TEMPLATE.format(
+                current_state=json.dumps(current_state, indent=2, default=str),
+                valid_fields=", ".join(valid_fields),
+            )
+        elif normalized_task_type == "workbook":
+            valid_fields = WORKBOOK_FIELDS
+            system_prompt = WORKBOOK_SYSTEM_PROMPT_TEMPLATE.format(
                 current_state=json.dumps(current_state, indent=2, default=str),
                 valid_fields=", ".join(valid_fields),
             )

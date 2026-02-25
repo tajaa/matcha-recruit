@@ -1,6 +1,6 @@
 export type MWThreadStatus = 'active' | 'finalized' | 'archived';
 export type MWMessageRole = 'user' | 'assistant' | 'system';
-export type MWTaskType = 'offer_letter' | 'review';
+export type MWTaskType = 'offer_letter' | 'review' | 'workbook';
 
 export interface MWThread {
   id: string;
@@ -83,6 +83,10 @@ export interface MWDocumentState {
   review_received_responses?: number | null;
   review_pending_responses?: number | null;
   review_last_sent_at?: string | null;
+  workbook_title?: string | null;
+  industry?: string | null;
+  objective?: string | null;
+  sections?: { title: string; content: string }[] | null;
 }
 
 export interface MWThreadDetail {

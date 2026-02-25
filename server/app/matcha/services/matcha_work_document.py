@@ -29,8 +29,7 @@ def _parse_jsonb(value) -> dict:
 
 
 def _default_state_for_task_type(task_type: str) -> dict:
-    normalized_task_type = "review" if task_type == "review" else "offer_letter"
-    if normalized_task_type == "review":
+    if task_type == "review":
         return {
             "review_title": "Anonymous Performance Review",
             "anonymized": True,
@@ -39,6 +38,11 @@ def _default_state_for_task_type(task_type: str) -> dict:
             "review_expected_responses": 0,
             "review_received_responses": 0,
             "review_pending_responses": 0,
+        }
+    if task_type == "workbook":
+        return {
+            "workbook_title": "HR Workbook",
+            "sections": [],
         }
     return {}
 
@@ -262,7 +266,13 @@ async def create_thread(
     title: str = "Untitled Chat",
     task_type: str = "offer_letter",
 ) -> dict:
-    normalized_task_type = "review" if task_type == "review" else "offer_letter"
+    if task_type == "review":
+        normalized_task_type = "review"
+    elif task_type == "workbook":
+        normalized_task_type = "workbook"
+    else:
+        normalized_task_type = "offer_letter"
+
     default_state = _default_state_for_task_type(normalized_task_type)
     async with get_connection() as conn:
         async with conn.transaction():
@@ -496,7 +506,13 @@ async def set_thread_task_type(
     company_id: UUID,
     task_type: str,
 ) -> Optional[dict]:
-    normalized_task_type = "review" if task_type == "review" else "offer_letter"
+    if task_type == "review":
+        normalized_task_type = "review"
+    elif task_type == "workbook":
+        normalized_task_type = "workbook"
+    else:
+        normalized_task_type = "offer_letter"
+
     default_state = _default_state_for_task_type(normalized_task_type)
     async with get_connection() as conn:
         row = await conn.fetchrow(

@@ -36,6 +36,7 @@ from ..models.matcha_work import (
     PublicReviewRequestResponse,
     PublicReviewSubmitRequest,
     PublicReviewSubmitResponse,
+    WorkbookDocument,
 )
 from ..services import matcha_work_document as doc_svc
 from ..services.matcha_work_ai import get_ai_provider
@@ -47,7 +48,8 @@ public_router = APIRouter()
 
 VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys())
 VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
-UNSUPPORTED_SKILL_REPLY = "I can't do that. I can help with offer letters and anonymized reviews."
+VALID_WORKBOOK_FIELDS = set(WorkbookDocument.model_fields.keys())
+UNSUPPORTED_SKILL_REPLY = "I can't do that. I can help with offer letters, anonymized reviews, and HR workbooks."
 
 OFFER_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
     (r"\boffer letter\b", 4),
@@ -72,9 +74,22 @@ REVIEW_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
     (r"\bevaluation\b", 1),
 )
 
+WORKBOOK_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
+    (r"\bworkbook\b", 4),
+    (r"\bhandbook\b", 4),
+    (r"\bmanual\b", 4),
+    (r"\bplaybook\b", 4),
+    (r"\bguide\b", 1),
+    (r"\bpolicy collection\b", 4),
+)
+
 
 def _normalize_task_type(task_type: Optional[str]) -> str:
-    return "review" if task_type == "review" else "offer_letter"
+    if task_type == "review":
+        return "review"
+    if task_type == "workbook":
+        return "workbook"
+    return "offer_letter"
 
 
 def _is_offer_letter_task(task_type: Optional[str]) -> bool:
@@ -83,7 +98,13 @@ def _is_offer_letter_task(task_type: Optional[str]) -> bool:
 
 def _validate_updates(task_type: Optional[str], updates: dict) -> dict:
     """Filter AI updates to known fields for the thread task type."""
-    valid_fields = VALID_OFFER_LETTER_FIELDS if _is_offer_letter_task(task_type) else VALID_REVIEW_FIELDS
+    ntype = _normalize_task_type(task_type)
+    if ntype == "offer_letter":
+        valid_fields = VALID_OFFER_LETTER_FIELDS
+    elif ntype == "review":
+        valid_fields = VALID_REVIEW_FIELDS
+    else:
+        valid_fields = VALID_WORKBOOK_FIELDS
     return {k: v for k, v in updates.items() if k in valid_fields}
 
 
@@ -101,17 +122,31 @@ def _detect_requested_task_type(content: str) -> Optional[str]:
         return None
     offer_score = _intent_score(text, OFFER_INTENT_PATTERNS)
     review_score = _intent_score(text, REVIEW_INTENT_PATTERNS)
-    if offer_score == 0 and review_score == 0:
+    workbook_score = _intent_score(text, WORKBOOK_INTENT_PATTERNS)
+
+    if offer_score == 0 and review_score == 0 and workbook_score == 0:
         return None
-    if offer_score > review_score:
-        return "offer_letter"
-    if review_score > offer_score:
-        return "review"
+
+    scores = [
+        ("offer_letter", offer_score),
+        ("review", review_score),
+        ("workbook", workbook_score),
+    ]
+    scores.sort(key=lambda x: x[1], reverse=True)
+
+    # Return the winner if it's clear
+    if scores[0][1] > scores[1][1]:
+        return scores[0][0]
+
+    # Tie-breaking / explicit keywords
     if re.search(r"\boffer letter\b|\bjob offer\b|\bemployment offer\b", text):
         return "offer_letter"
     if re.search(r"\bperformance review\b|\banonym(?:ous|ized)\s+review\b", text):
         return "review"
-    return None
+    if re.search(r"\bworkbook\b|\bhandbook\b|\bplaybook\b", text):
+        return "workbook"
+
+    return scores[0][0]
 
 
 def _thread_has_existing_work(thread: dict, prior_message_count: int = 0) -> bool:
@@ -170,7 +205,13 @@ async def create_thread(
         raise HTTPException(status_code=400, detail="No company associated with this account")
 
     task_type = _normalize_task_type(body.task_type)
-    default_title = "Untitled Review" if task_type == "review" else "Untitled Chat"
+    if task_type == "review":
+        default_title = "Untitled Review"
+    elif task_type == "workbook":
+        default_title = "Untitled Workbook"
+    else:
+        default_title = "Untitled Chat"
+
     title = body.title or default_title
     thread = await doc_svc.create_thread(company_id, current_user.id, title, task_type=task_type)
     thread_id = thread["id"]
