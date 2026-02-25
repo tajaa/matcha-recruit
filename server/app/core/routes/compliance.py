@@ -35,6 +35,7 @@ from ..services.compliance_service import (
     get_upcoming_legislation,
     record_verification_feedback,
     get_calibration_stats,
+    _missing_required_categories,
 )
 
 router = APIRouter()
@@ -96,10 +97,10 @@ async def create_location_endpoint(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
 
-    location, has_repository_data = await create_location(company_id, data)
+    location, has_complete_repository_coverage = await create_location(company_id, data)
 
-    # Only trigger background Gemini check if no repository data was found
-    if not has_repository_data:
+    # Trigger background research when repository coverage is missing/partial.
+    if not has_complete_repository_coverage:
         background_tasks.add_task(run_compliance_check_background, location.id, company_id)
 
     return {
@@ -135,18 +136,24 @@ async def check_location_compliance_endpoint(
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
 
-    # Enable Gemini research on first sync (no existing data in repository)
+    # Enable live research when repository coverage is missing/partial.
     async with get_connection() as conn:
-        req_count = await conn.fetchval(
+        rows = await conn.fetch(
             """
-            SELECT COALESCE(j.requirement_count, 0)
+            SELECT r.category
             FROM business_locations bl
-            LEFT JOIN jurisdictions j ON j.id = bl.jurisdiction_id
+            LEFT JOIN jurisdiction_requirements r ON r.jurisdiction_id = bl.jurisdiction_id
             WHERE bl.id = $1
             """,
             loc_uuid,
         )
-    allow_live = req_count == 0
+    repository_requirements = [
+        {"category": row["category"]}
+        for row in rows
+        if row["category"]
+    ]
+    missing_categories = _missing_required_categories(repository_requirements)
+    allow_live = len(missing_categories) > 0
 
     async def event_stream():
         try:

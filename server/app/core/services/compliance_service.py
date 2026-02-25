@@ -1991,8 +1991,8 @@ async def _filter_with_preemption(conn, requirements, state: str):
 async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
     """Create a location, map it to a jurisdiction, and clone repository data if available.
 
-    Returns (location, has_repository_data) — the route can skip the background
-    Gemini check when has_repository_data is True.
+    Returns (location, has_complete_repository_coverage) — callers should skip
+    initial background research only when required labor categories are fully covered.
     """
     from ...database import get_connection
     async with get_connection() as conn:
@@ -2022,18 +2022,18 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
 
         # Check if jurisdiction already has requirements in the repository
         j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
-        has_repository_data = len(j_reqs) > 0
+        has_repository_rows = len(j_reqs) > 0
+        has_complete_repository_coverage = False
 
         # Try county data for cities without local ordinance
         req_dicts = None
-        if has_repository_data:
+        if has_repository_rows:
             req_dicts = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
         else:
             if has_local_ordinance is False:
                 county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, 7)
                 if county_reqs:
                     req_dicts = county_reqs
-                    has_repository_data = True
 
         if req_dicts:
             # Normalize and filter (with preemption awareness) before cloning.
@@ -2045,8 +2045,15 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             req_dicts = await _filter_with_preemption(conn, req_dicts, data.state)
             for req in req_dicts:
                 _clamp_varchar_fields(req)
+            missing_categories = _missing_required_categories(req_dicts)
+            has_complete_repository_coverage = len(missing_categories) == 0
+            if missing_categories:
+                print(
+                    "[Compliance] create_location: repository has partial coverage "
+                    f"for {data.city}, {data.state}: {', '.join(missing_categories)}"
+                )
 
-        if has_repository_data and req_dicts:
+        if req_dicts:
 
             # Clone requirements to location — no alerts for initial clone
             await _sync_requirements_to_location(
@@ -2076,19 +2083,16 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
                     confidence, leg_key,
                 )
 
-            # Mark as already checked so scheduler doesn't immediately re-check
-            await conn.execute(
-                "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
-                location_id,
-            )
-        else:
-            # No usable cached requirements after filtering; ensure the caller
-            # triggers an initial Gemini check.
-            has_repository_data = False
+            if has_complete_repository_coverage:
+                # Mark as already checked only when core categories are fully covered.
+                await conn.execute(
+                    "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+                    location_id,
+                )
 
         row = await conn.fetchrow("SELECT * FROM business_locations WHERE id = $1", location_id)
         location = BusinessLocation(**dict(row))
-        return location, has_repository_data
+        return location, has_complete_repository_coverage
 
 async def run_compliance_check_stream(
     location_id: UUID,

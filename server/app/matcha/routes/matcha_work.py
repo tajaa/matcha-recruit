@@ -7,10 +7,12 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 
 from ...core.models.auth import CurrentUser
+from ...core.services.storage import get_storage
+from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ..models.matcha_work import (
     CreateThreadRequest,
@@ -293,6 +295,65 @@ async def create_thread(
         assistant_reply=assistant_reply,
         pdf_url=pdf_url,
     )
+
+
+@router.post("/threads/{thread_id}/logo")
+async def upload_thread_logo(
+    thread_id: UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload a company logo for an offer-letter thread and save it for the company."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if thread["task_type"] != "offer_letter":
+        raise HTTPException(status_code=400, detail="Logo upload is only available for offer letters")
+
+    # Validate file type
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+
+    try:
+        content = await file.read()
+        if len(content) > 5 * 1024 * 1024:  # 5MB limit
+            raise HTTPException(status_code=400, detail="File size exceeds 5MB limit")
+
+        # Upload to storage
+        logo_url = await get_storage().upload_file(
+            content,
+            file.filename or "logo.png",
+            prefix=f"company-logos/{company_id}",
+            content_type=file.content_type,
+        )
+
+        # Update thread state
+        await doc_svc.apply_update(
+            thread_id,
+            {"company_logo_url": logo_url},
+            diff_summary="Uploaded company logo",
+        )
+
+        # Also update company logo for future use
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE companies SET logo_url = $1 WHERE id = $2",
+                logo_url,
+                company_id,
+            )
+
+        return {"logo_url": logo_url}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to upload logo for thread %s: %s", thread_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to upload logo. Please try again.")
 
 
 @router.get("/threads", response_model=list[ThreadListItem])

@@ -11,6 +11,7 @@ import type {
   MWReviewRequestStatus,
 } from '../types/matcha-work';
 import { matchaWork } from '../api/client';
+import { LogoUpload } from '../components/matcha-work/LogoUpload';
 
 type Tab = 'chat' | 'preview';
 
@@ -322,6 +323,30 @@ export default function MatchaWorkThread() {
     } finally {
       setSending(false);
       inputRef.current?.focus();
+    }
+  };
+
+  const handleLogoUpload = async (file: File) => {
+    if (!threadId) return;
+    try {
+      setError(null);
+      const resp = await matchaWork.uploadLogo(threadId, file);
+      // Update thread state immediately
+      setThread((prev) =>
+        prev
+          ? {
+              ...prev,
+              current_state: { ...prev.current_state, company_logo_url: resp.logo_url },
+            }
+          : prev
+      );
+      // Refresh PDF if in offer letter mode
+      if (isOfferLetter) {
+        const pdfData = await matchaWork.getPdf(threadId);
+        setPdfUrl(pdfData.pdf_url);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload logo');
     }
   };
 
@@ -675,9 +700,27 @@ export default function MatchaWorkThread() {
                 <div className="mt-1 text-[11px] text-zinc-600 max-w-sm">
                   For review workflows, include recipient emails and use Send Requests to distribute links.
                 </div>
+                {isOfferLetter && !isFinalized && !isArchived && (
+                  <LogoUpload
+                    onUpload={handleLogoUpload}
+                    currentLogoUrl={thread.current_state.company_logo_url}
+                  />
+                )}
               </div>
             ) : (
-              messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
+              <div className="space-y-1">
+                {messages.map((msg) => (
+                  <MessageBubble key={msg.id} msg={msg} />
+                ))}
+                {isOfferLetter && !isFinalized && !isArchived && (
+                  <div className="mx-4 pb-4">
+                    <LogoUpload
+                      onUpload={handleLogoUpload}
+                      currentLogoUrl={thread.current_state.company_logo_url}
+                    />
+                  </div>
+                )}
+              </div>
             )}
             {sending && (
               <div className="flex justify-start mb-3">
