@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Download,
   Pencil,
   CheckCircle,
@@ -59,6 +60,7 @@ function HandbookDetailPage() {
   const [activeSectionTabId, setActiveSectionTabId] = useState<string | null>(null);
   const [sectionSearch, setSectionSearch] = useState('');
   const [highlightedSectionTabIds, setHighlightedSectionTabIds] = useState<string[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<Record<string, boolean>>({});
 
   const highlightStorageKey = useMemo(
     () => (id ? `handbook:highlighted-sections:${id}` : null),
@@ -447,8 +449,11 @@ function HandbookDetailPage() {
     );
   }
 
+  const toggleSidebarPanel = (key: string) =>
+    setSidebarCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+
   return (
-    <div className="max-w-6xl mx-auto space-y-10">
+    <div className="space-y-8">
       <div className="flex items-start justify-between">
         <div className="space-y-3">
           <button
@@ -536,8 +541,134 @@ function HandbookDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-8">
+      {/* Info panels — compact row above the editor */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Highlighted Sections */}
+        <div className="border border-white/10 bg-zinc-950">
+          <button
+            type="button"
+            onClick={() => toggleSidebarPanel('highlights')}
+            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-zinc-900 transition-colors"
+          >
+            <span className="text-[9px] uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
+              <Star size={9} className={highlightedSectionEntries.length ? 'text-amber-300 fill-current' : ''} />
+              Highlights
+              {highlightedSectionEntries.length > 0 && (
+                <span className="bg-amber-500/20 text-amber-300 px-1 rounded text-[9px]">{highlightedSectionEntries.length}</span>
+              )}
+            </span>
+            <ChevronDown size={10} className={`text-zinc-500 transition-transform ${sidebarCollapsed['highlights'] ? '-rotate-90' : ''}`} />
+          </button>
+          {!sidebarCollapsed['highlights'] && (
+            <div className="px-2 pb-2 space-y-1 border-t border-white/10">
+              {highlightedSectionEntries.length === 0 ? (
+                <p className="text-[10px] text-zinc-600 px-1 py-2">None yet. Highlight sections from the editor.</p>
+              ) : (
+                <>
+                  {highlightedSectionEntries.map((entry) => (
+                    <button
+                      key={entry.tabId}
+                      type="button"
+                      onClick={() => setActiveSectionTabId(entry.tabId)}
+                      className="w-full text-left px-2 py-1.5 border border-amber-400/30 bg-amber-500/10 hover:border-amber-300 transition-colors"
+                    >
+                      <span className="text-[10px] font-mono text-amber-100 truncate block">{entry.index + 1}. {entry.section.title}</span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setHighlightedSectionTabIds([])}
+                    className="w-full px-2 py-1 border border-white/10 text-zinc-500 hover:text-white text-[9px] uppercase tracking-wider transition-colors"
+                  >
+                    Clear
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Freshness Check */}
+        <div className="border border-white/10 bg-zinc-950">
+          <button
+            type="button"
+            onClick={() => toggleSidebarPanel('freshness')}
+            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-zinc-900 transition-colors"
+          >
+            <span className="text-[9px] uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
+              <RefreshCw size={9} className={freshnessCheck?.is_outdated ? 'text-amber-300' : ''} />
+              Freshness
+            </span>
+            <ChevronDown size={10} className={`text-zinc-500 transition-transform ${sidebarCollapsed['freshness'] ? '-rotate-90' : ''}`} />
+          </button>
+          {!sidebarCollapsed['freshness'] && (
+            <div className="px-3 pb-3 space-y-1.5 border-t border-white/10 pt-2">
+              {!freshnessCheck ? (
+                <p className="text-[10px] text-zinc-600">No checks run yet.</p>
+              ) : (
+                <>
+                  <div className={`text-[10px] font-medium ${
+                    freshnessCheck.status === 'running' ? 'text-sky-300'
+                    : freshnessCheck.status === 'failed' ? 'text-red-400'
+                    : freshnessCheck.is_outdated ? 'text-amber-300'
+                    : 'text-emerald-300'
+                  }`}>
+                    {freshnessCheck.status === 'running' ? 'In progress'
+                      : freshnessCheck.status === 'failed' ? 'Failed'
+                      : freshnessCheck.is_outdated ? 'Updates detected'
+                      : 'Up to date'}
+                  </div>
+                  <div className="text-[10px] text-zinc-500">{new Date(freshnessCheck.checked_at).toLocaleDateString()}</div>
+                  <div className="text-[10px] text-zinc-400">{freshnessCheck.impacted_sections} impacted</div>
+                  <div className="text-[10px] text-zinc-400">{freshnessCheck.new_change_requests_count} new requests</div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Employer Profile */}
+        <div className="border border-white/10 bg-zinc-950">
+          <button
+            type="button"
+            onClick={() => toggleSidebarPanel('profile')}
+            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-zinc-900 transition-colors"
+          >
+            <span className="text-[9px] uppercase tracking-widest text-zinc-400">Employer</span>
+            <ChevronDown size={10} className={`text-zinc-500 transition-transform ${sidebarCollapsed['profile'] ? '-rotate-90' : ''}`} />
+          </button>
+          {!sidebarCollapsed['profile'] && (
+            <div className="px-3 pb-3 space-y-1 border-t border-white/10 pt-2">
+              <div className="text-[11px] text-zinc-200 font-medium">{handbook.profile.legal_name}</div>
+              <div className="text-[10px] text-zinc-500">DBA: {handbook.profile.dba || 'N/A'}</div>
+              <div className="text-[10px] text-zinc-500">CEO: {handbook.profile.ceo_or_president}</div>
+              <div className="text-[10px] text-zinc-500">Headcount: {handbook.profile.headcount ?? 'N/A'}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Acknowledgements */}
+        <div className="border border-white/10 bg-zinc-950">
+          <button
+            type="button"
+            onClick={() => toggleSidebarPanel('acks')}
+            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-zinc-900 transition-colors"
+          >
+            <span className="text-[9px] uppercase tracking-widest text-zinc-400">Acknowledgements</span>
+            <ChevronDown size={10} className={`text-zinc-500 transition-transform ${sidebarCollapsed['acks'] ? '-rotate-90' : ''}`} />
+          </button>
+          {!sidebarCollapsed['acks'] && (
+            <div className="px-3 pb-3 space-y-1 border-t border-white/10 pt-2">
+              <div className="text-[10px] text-zinc-400">Assigned: {ackSummary?.assigned_count ?? 0}</div>
+              <div className="text-[10px] text-emerald-400">Signed: {ackSummary?.signed_count ?? 0}</div>
+              <div className="text-[10px] text-amber-400">Pending: {ackSummary?.pending_count ?? 0}</div>
+              <div className="text-[10px] text-zinc-500">Expired: {ackSummary?.expired_count ?? 0}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-8">
           <div className="border border-white/10 bg-zinc-950 p-5">
             <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
               <h2 className="text-[10px] uppercase tracking-widest text-zinc-400">Handbook Sections</h2>
@@ -765,110 +896,6 @@ function HandbookDetailPage() {
             )}
           </div>
         </div>
-
-        <div className="space-y-6">
-          <div className="border border-white/10 bg-zinc-950 p-5 space-y-3">
-            <h2 className="text-[10px] uppercase tracking-widest text-zinc-400 border-b border-white/10 pb-2">Highlighted Sections</h2>
-            {highlightedSectionEntries.length === 0 ? (
-              <p className="text-xs text-zinc-500">
-                No highlighted sections yet. Highlight sections from the editor to review later with your team.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {highlightedSectionEntries.map((entry) => (
-                  <button
-                    key={entry.tabId}
-                    type="button"
-                    onClick={() => setActiveSectionTabId(entry.tabId)}
-                    className="w-full text-left px-2.5 py-2 border border-amber-400/30 bg-amber-500/10 hover:border-amber-300"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] uppercase tracking-wider font-mono text-amber-100 truncate">
-                        {entry.index + 1}. {entry.section.title}
-                      </span>
-                      <Star size={10} className="text-amber-300 fill-current" />
-                    </div>
-                    <p className="text-[10px] uppercase tracking-wider text-amber-200/80 mt-1">
-                      {entry.section.section_type}
-                    </p>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setHighlightedSectionTabIds([])}
-                  className="w-full px-2.5 py-1.5 border border-white/15 text-zinc-300 hover:text-white text-[10px] uppercase tracking-wider"
-                >
-                  Clear Highlights
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="border border-white/10 bg-zinc-950 p-5 space-y-3">
-            <h2 className="text-[10px] uppercase tracking-widest text-zinc-400 border-b border-white/10 pb-2">Freshness Check</h2>
-            {!freshnessCheck ? (
-              <p className="text-xs text-zinc-500">
-                No freshness checks have been run for this handbook yet.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                <div className={`text-xs ${
-                  freshnessCheck.status === 'running'
-                    ? 'text-sky-300'
-                    : freshnessCheck.status === 'failed'
-                    ? 'text-red-400'
-                    : freshnessCheck.is_outdated
-                    ? 'text-amber-300'
-                    : 'text-emerald-300'
-                }`}>
-                  {freshnessCheck.status === 'running'
-                    ? 'Check in progress'
-                    : freshnessCheck.status === 'failed'
-                    ? 'Last check failed'
-                    : freshnessCheck.is_outdated
-                    ? 'Potential updates detected'
-                    : 'Up to date'}
-                </div>
-                <div className="text-xs text-zinc-500">
-                  Checked: {new Date(freshnessCheck.checked_at).toLocaleString()}
-                </div>
-                <div className="text-xs text-zinc-400">
-                  Impacted sections: {freshnessCheck.impacted_sections}
-                </div>
-                <div className="text-xs text-zinc-400">
-                  New change requests: {freshnessCheck.new_change_requests_count}
-                </div>
-                {freshnessCheck.requirements_last_updated_at && (
-                  <div className="text-xs text-zinc-500">
-                    Requirement data updated: {new Date(freshnessCheck.requirements_last_updated_at).toLocaleString()}
-                  </div>
-                )}
-                {freshnessCheck.data_staleness_days != null && (
-                  <div className="text-xs text-zinc-500">
-                    Requirement data staleness: {freshnessCheck.data_staleness_days} day{freshnessCheck.data_staleness_days === 1 ? '' : 's'}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="border border-white/10 bg-zinc-950 p-5 space-y-3">
-            <h2 className="text-[10px] uppercase tracking-widest text-zinc-400 border-b border-white/10 pb-2">Employer Profile</h2>
-            <div className="text-sm text-zinc-200">{handbook.profile.legal_name}</div>
-            <div className="text-xs text-zinc-500">DBA: {handbook.profile.dba || 'N/A'}</div>
-            <div className="text-xs text-zinc-500">CEO/President: {handbook.profile.ceo_or_president}</div>
-            <div className="text-xs text-zinc-500">Headcount: {handbook.profile.headcount ?? 'N/A'}</div>
-          </div>
-
-          <div className="border border-white/10 bg-zinc-950 p-5 space-y-3">
-            <h2 className="text-[10px] uppercase tracking-widest text-zinc-400 border-b border-white/10 pb-2">Acknowledgements</h2>
-            <div className="text-xs text-zinc-400">Assigned: {ackSummary?.assigned_count ?? 0}</div>
-            <div className="text-xs text-emerald-400">Signed: {ackSummary?.signed_count ?? 0}</div>
-            <div className="text-xs text-amber-400">Pending: {ackSummary?.pending_count ?? 0}</div>
-            <div className="text-xs text-zinc-500">Expired: {ackSummary?.expired_count ?? 0}</div>
-          </div>
-        </div>
-      </div>
 
       <HandbookDistributeModal
         open={showDistributeModal}
