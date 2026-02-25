@@ -30,6 +30,12 @@ from ..models.matcha_work import (
     OfferLetterDocument,
     UsageSummaryResponse,
     UpdateTitleRequest,
+    SendReviewRequestsRequest,
+    SendReviewRequestsResponse,
+    ReviewRequestStatus,
+    PublicReviewRequestResponse,
+    PublicReviewSubmitRequest,
+    PublicReviewSubmitResponse,
 )
 from ..services import matcha_work_document as doc_svc
 from ..services.matcha_work_ai import get_ai_provider
@@ -37,6 +43,7 @@ from ..services.matcha_work_ai import get_ai_provider
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+public_router = APIRouter()
 
 VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys())
 VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
@@ -780,6 +787,62 @@ async def archive_thread(
     await doc_svc.sync_element_record(thread_id)
 
 
+@router.get(
+    "/threads/{thread_id}/review-requests",
+    response_model=list[ReviewRequestStatus],
+)
+async def list_review_requests(
+    thread_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List review request status rows for a review thread."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    try:
+        rows = await doc_svc.list_review_requests(thread_id, company_id)
+    except ValueError as e:
+        detail = str(e)
+        if detail == "Thread not found":
+            raise HTTPException(status_code=404, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+    return [ReviewRequestStatus(**row) for row in rows]
+
+
+@router.post(
+    "/threads/{thread_id}/review-requests/send",
+    response_model=SendReviewRequestsResponse,
+)
+async def send_review_requests(
+    thread_id: UUID,
+    body: SendReviewRequestsRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """
+    Send anonymous review request links to recipient emails and track expected responses.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    try:
+        result = await doc_svc.send_review_requests(
+            thread_id=thread_id,
+            company_id=company_id,
+            recipient_emails=body.recipient_emails,
+            custom_message=body.custom_message,
+        )
+    except ValueError as e:
+        detail = str(e)
+        if detail == "Thread not found":
+            raise HTTPException(status_code=404, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+    return SendReviewRequestsResponse(**result)
+
+
 @router.patch("/threads/{thread_id}", response_model=ThreadListItem)
 async def update_thread_title(
     thread_id: UUID,
@@ -828,3 +891,38 @@ async def set_thread_pin(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     return ThreadListItem(**row)
+
+
+@public_router.get("/review-requests/{token}", response_model=PublicReviewRequestResponse)
+async def get_public_review_request(token: str):
+    """Get a public review-request payload by one-time token."""
+    row = await doc_svc.get_public_review_request(token)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Review request not found")
+    return PublicReviewRequestResponse(**row)
+
+
+@public_router.post(
+    "/review-requests/{token}/submit",
+    response_model=PublicReviewSubmitResponse,
+)
+async def submit_public_review_request(
+    token: str,
+    body: PublicReviewSubmitRequest,
+):
+    """Submit an anonymous review response via public token link."""
+    try:
+        result = await doc_svc.submit_public_review_request(
+            token=token,
+            feedback=body.feedback,
+            rating=body.rating,
+        )
+    except ValueError as e:
+        detail = str(e)
+        if detail == "Review request not found":
+            raise HTTPException(status_code=404, detail=detail)
+        if detail == "Review response already submitted":
+            raise HTTPException(status_code=409, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+    return PublicReviewSubmitResponse(**result)

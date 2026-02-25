@@ -70,6 +70,7 @@ const MatchaWork = lazy(() => import('./pages/MatchaWork'));
 const MatchaWorkChats = lazy(() => import('./pages/MatchaWorkChats'));
 const MatchaWorkElements = lazy(() => import('./pages/MatchaWorkElements'));
 const MatchaWorkThread = lazy(() => import('./pages/MatchaWorkThread'));
+const MatchaWorkReviewRequest = lazy(() => import('./pages/MatchaWorkReviewRequest'));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -214,6 +215,7 @@ function App() {
 
             {/* Policy signature (public, token-based) */}
             <Route path="/sign/:token" element={<PolicySign />} />
+            <Route path="/review-request/:token" element={<MatchaWorkReviewRequest />} />
 
             {/* Public job board */}
             <Route path="/careers" element={<PublicJobs />} />

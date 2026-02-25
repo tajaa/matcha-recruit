@@ -72,6 +72,9 @@ Rules:
 - Valid field names: {valid_fields}
 - Keep all output professional and anonymized by default
 - For overall_rating use an integer from 1-5
+- If recipient_emails is empty or missing, ask the user to provide the email addresses to request feedback from
+- When the user provides one or more emails, set recipient_emails as a JSON array of normalized email strings
+- Do not invent or infer recipient emails that the user did not provide
 - Return only the JSON object — no markdown fences, no extra text
 """
 

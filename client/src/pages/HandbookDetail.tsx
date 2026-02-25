@@ -20,6 +20,7 @@ import type {
   HandbookDetail as HandbookDetailData,
   HandbookSection,
 } from '../types';
+import HandbookDistributeModal from '../components/HandbookDistributeModal';
 
 const getSectionTabId = (section: HandbookSection, index: number) =>
   section.id || `${section.section_key}-${index}`;
@@ -50,6 +51,7 @@ function HandbookDetailPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [distributionLoading, setDistributionLoading] = useState(false);
+  const [showDistributeModal, setShowDistributeModal] = useState(false);
   const [activeSectionTabId, setActiveSectionTabId] = useState<string | null>(null);
   const [sectionSearch, setSectionSearch] = useState('');
   const [highlightedSectionTabIds, setHighlightedSectionTabIds] = useState<string[]>([]);
@@ -339,13 +341,18 @@ function HandbookDetailPage() {
     }
   };
 
-  const handleDistribute = async () => {
-    if (!id) return;
-    if (!confirm('Send this handbook to all active employees for e-signature?')) return;
+  const handleDistribute = () => {
+    if (!id || distributionLoading) return;
+    setShowDistributeModal(true);
+  };
+
+  const handleConfirmDistribution = async (employeeIds?: string[]) => {
+    if (!id || distributionLoading) return;
     try {
       setDistributionLoading(true);
-      const result = await handbooks.distribute(id);
+      const result = await handbooks.distribute(id, employeeIds);
       alert(`Distributed to ${result.assigned_count} employees (${result.skipped_existing_count} already assigned).`);
+      setShowDistributeModal(false);
       await loadData();
     } catch (error) {
       console.error('Failed to distribute handbook:', error);
@@ -772,6 +779,17 @@ function HandbookDetailPage() {
           </div>
         </div>
       </div>
+
+      <HandbookDistributeModal
+        open={showDistributeModal}
+        handbookId={id ?? null}
+        handbookTitle={handbook.title}
+        submitting={distributionLoading}
+        onClose={() => {
+          if (!distributionLoading) setShowDistributeModal(false);
+        }}
+        onSubmit={handleConfirmDistribution}
+      />
     </div>
   );
 }

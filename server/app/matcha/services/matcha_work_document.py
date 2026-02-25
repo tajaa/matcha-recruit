@@ -1,14 +1,22 @@
 import asyncio
+import html
 import json
 import logging
+import re
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
 from ...database import get_connection
+from ...config import get_settings
+from ...core.services.email import EmailService
 from ...core.services.storage import get_storage
 
 logger = logging.getLogger(__name__)
+
+EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
+VALID_REVIEW_REQUEST_STATUSES = {"pending", "sent", "failed", "submitted"}
 
 
 def _parse_jsonb(value) -> dict:
@@ -26,6 +34,11 @@ def _default_state_for_task_type(task_type: str) -> dict:
         return {
             "review_title": "Anonymous Performance Review",
             "anonymized": True,
+            "recipient_emails": [],
+            "review_request_statuses": [],
+            "review_expected_responses": 0,
+            "review_received_responses": 0,
+            "review_pending_responses": 0,
         }
     return {}
 
@@ -87,6 +100,122 @@ def _coerce_datetime(value) -> Optional[datetime]:
     if isinstance(value, str):
         return _parse_date_str(value)
     return None
+
+
+def _normalize_email(email: str) -> Optional[str]:
+    normalized = (email or "").strip().lower()
+    if not normalized:
+        return None
+    if not EMAIL_REGEX.fullmatch(normalized):
+        return None
+    return normalized
+
+
+def normalize_recipient_emails(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        email = _normalize_email(raw)
+        if not email or email in seen:
+            continue
+        seen.add(email)
+        deduped.append(email)
+    return deduped
+
+
+def _coerce_state_recipient_emails(state: dict) -> list[str]:
+    raw = state.get("recipient_emails")
+    if not isinstance(raw, list):
+        return []
+    return normalize_recipient_emails([str(item) for item in raw])
+
+
+def _row_to_review_request_status(row: dict) -> dict:
+    status = str(row.get("status") or "pending")
+    if status not in VALID_REVIEW_REQUEST_STATUSES:
+        status = "pending"
+    return {
+        "email": str(row.get("recipient_email") or "").strip().lower(),
+        "status": status,
+        "sent_at": row.get("sent_at"),
+        "submitted_at": row.get("submitted_at"),
+        "last_error": row.get("last_error"),
+    }
+
+
+def _build_review_request_state_update(status_rows: list[dict]) -> dict:
+    recipient_emails = [str(row.get("email") or "").strip().lower() for row in status_rows if row.get("email")]
+    expected = len(recipient_emails)
+    received = sum(1 for row in status_rows if row.get("status") == "submitted")
+    pending = max(expected - received, 0)
+
+    latest_sent_at = None
+    for row in status_rows:
+        sent_at = row.get("sent_at")
+        if isinstance(sent_at, datetime):
+            if latest_sent_at is None or sent_at > latest_sent_at:
+                latest_sent_at = sent_at
+
+    serialized_status_rows = []
+    for row in status_rows:
+        serialized_status_rows.append(
+            {
+                "email": row.get("email"),
+                "status": row.get("status"),
+                "sent_at": row.get("sent_at").isoformat() if isinstance(row.get("sent_at"), datetime) else None,
+                "submitted_at": (
+                    row.get("submitted_at").isoformat()
+                    if isinstance(row.get("submitted_at"), datetime)
+                    else None
+                ),
+                "last_error": row.get("last_error"),
+            }
+        )
+
+    return {
+        "recipient_emails": recipient_emails,
+        "review_request_statuses": serialized_status_rows,
+        "review_expected_responses": expected,
+        "review_received_responses": received,
+        "review_pending_responses": pending,
+        "review_last_sent_at": latest_sent_at.isoformat() if latest_sent_at else None,
+    }
+
+
+def _render_review_request_email_html(
+    review_title: str,
+    company_name: str,
+    response_url: str,
+    custom_message: Optional[str],
+) -> str:
+    escaped_title = html.escape(review_title.strip() or "Anonymous Performance Review")
+    escaped_company = html.escape(company_name.strip() or "Your HR Team")
+    message_block = (
+        f"<p>{html.escape(custom_message.strip())}</p>"
+        if custom_message and custom_message.strip()
+        else ""
+    )
+    return f"""
+<!DOCTYPE html>
+<html>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #111827; line-height: 1.5;">
+    <div style="max-width: 560px; margin: 0 auto; padding: 20px;">
+      <h2 style="margin: 0 0 12px;">Anonymous Review Request</h2>
+      <p style="margin: 0 0 12px;">{escaped_company} is requesting your feedback for: <strong>{escaped_title}</strong>.</p>
+      {message_block}
+      <p style="margin: 0 0 16px;">Use the secure link below to submit your review response:</p>
+      <p style="margin: 0 0 18px;">
+        <a href="{response_url}" style="display: inline-block; background: #16a34a; color: white; padding: 10px 16px; text-decoration: none; border-radius: 6px;">
+          Submit Anonymous Review
+        </a>
+      </p>
+      <p style="margin: 0; color: #6b7280; font-size: 12px;">
+        If the button does not work, open this link directly: {response_url}
+      </p>
+    </div>
+  </body>
+</html>
+"""
 
 
 def _build_offer_letter_payload(state: dict, fallback_company_name: str) -> dict:
@@ -984,4 +1113,334 @@ async def finalize_thread(thread_id: UUID, company_id: UUID) -> dict:
         "version": version,
         "pdf_url": pdf_url,
         "linked_offer_letter_id": None,
+    }
+
+
+async def _list_review_requests_for_thread(thread_id: UUID) -> list[dict]:
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT recipient_email, status, sent_at, submitted_at, last_error
+            FROM mw_review_requests
+            WHERE thread_id=$1
+            ORDER BY recipient_email ASC
+            """,
+            thread_id,
+        )
+    return [_row_to_review_request_status(dict(row)) for row in rows]
+
+
+async def list_review_requests(thread_id: UUID, company_id: UUID) -> list[dict]:
+    async with get_connection() as conn:
+        thread_exists = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1
+                FROM mw_threads
+                WHERE id=$1 AND company_id=$2
+            )
+            """,
+            thread_id,
+            company_id,
+        )
+    if not thread_exists:
+        raise ValueError("Thread not found")
+    return await _list_review_requests_for_thread(thread_id)
+
+
+async def sync_review_request_state(thread_id: UUID) -> dict:
+    status_rows = await _list_review_requests_for_thread(thread_id)
+    updates = _build_review_request_state_update(status_rows)
+    update_keys = set(updates.keys())
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT current_state, version
+            FROM mw_threads
+            WHERE id=$1
+            """,
+            thread_id,
+        )
+    if row is None:
+        raise ValueError("Thread not found")
+
+    current_state = _parse_jsonb(row["current_state"])
+    unchanged = True
+    for key in update_keys:
+        if current_state.get(key) != updates.get(key):
+            unchanged = False
+            break
+    if unchanged:
+        return {"version": row["version"], "current_state": current_state}
+
+    return await apply_update(
+        thread_id,
+        updates,
+        diff_summary="Updated review request tracking",
+    )
+
+
+async def send_review_requests(
+    thread_id: UUID,
+    company_id: UUID,
+    recipient_emails: list[str],
+    custom_message: Optional[str] = None,
+) -> dict:
+    async with get_connection() as conn:
+        thread_row = await conn.fetchrow(
+            """
+            SELECT title, task_type, status, current_state, c.name AS company_name
+            FROM mw_threads t
+            JOIN companies c ON c.id = t.company_id
+            WHERE t.id=$1 AND t.company_id=$2
+            """,
+            thread_id,
+            company_id,
+        )
+    if thread_row is None:
+        raise ValueError("Thread not found")
+
+    if thread_row["task_type"] != "review":
+        raise ValueError("Review requests are only available for review threads")
+    if thread_row["status"] == "archived":
+        raise ValueError("Cannot send review requests for an archived thread")
+
+    state = _parse_jsonb(thread_row["current_state"])
+    normalized_recipients = normalize_recipient_emails(recipient_emails)
+    if not normalized_recipients:
+        normalized_recipients = _coerce_state_recipient_emails(state)
+    if not normalized_recipients:
+        raise ValueError("At least one valid recipient email is required")
+    if len(normalized_recipients) > 100:
+        raise ValueError("A maximum of 100 recipient emails is supported per send")
+
+    review_title = (
+        state.get("review_title")
+        or state.get("review_subject")
+        or thread_row["title"]
+        or "Anonymous Performance Review"
+    )
+    company_name = thread_row["company_name"] or "Your HR Team"
+    settings = get_settings()
+    app_base_url = (settings.app_base_url or "").rstrip("/")
+    if not app_base_url:
+        raise ValueError("APP_BASE_URL is required to send review request links")
+
+    pending_requests: list[dict] = []
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                DELETE FROM mw_review_requests
+                WHERE thread_id=$1
+                  AND NOT (recipient_email = ANY($2::text[]))
+                """,
+                thread_id,
+                normalized_recipients,
+            )
+            for email in normalized_recipients:
+                token = secrets.token_urlsafe(24)
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO mw_review_requests(
+                        thread_id, company_id, recipient_email, token, status
+                    )
+                    VALUES($1, $2, $3, $4, 'pending')
+                    ON CONFLICT(thread_id, recipient_email) DO UPDATE
+                    SET token=EXCLUDED.token,
+                        status='pending',
+                        sent_at=NULL,
+                        submitted_at=NULL,
+                        last_error=NULL,
+                        feedback=NULL,
+                        rating=NULL,
+                        updated_at=NOW()
+                    RETURNING recipient_email, token
+                    """,
+                    thread_id,
+                    company_id,
+                    email,
+                    token,
+                )
+                pending_requests.append(dict(row))
+
+    email_service = EmailService()
+    sent_count = 0
+    failed_count = 0
+
+    async with get_connection() as conn:
+        for request_row in pending_requests:
+            recipient_email = request_row["recipient_email"]
+            token = request_row["token"]
+            response_url = f"{app_base_url}/review-request/{token}"
+            subject = f"Anonymous review request: {review_title}"
+            html_content = _render_review_request_email_html(
+                review_title=review_title,
+                company_name=company_name,
+                response_url=response_url,
+                custom_message=custom_message,
+            )
+
+            status_value = "failed"
+            sent_at = None
+            last_error = None
+            if not email_service.is_configured():
+                last_error = "email_service_not_configured"
+            else:
+                try:
+                    sent = await email_service.send_email(
+                        to_email=recipient_email,
+                        to_name=None,
+                        subject=subject,
+                        html_content=html_content,
+                    )
+                    if sent:
+                        status_value = "sent"
+                        sent_at = datetime.now(timezone.utc)
+                    else:
+                        last_error = "send_failed"
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send Matcha Work review request email to %s: %s",
+                        recipient_email,
+                        e,
+                    )
+                    last_error = "send_exception"
+
+            if status_value == "sent":
+                sent_count += 1
+            else:
+                failed_count += 1
+
+            await conn.execute(
+                """
+                UPDATE mw_review_requests
+                SET status=$1,
+                    sent_at=$2,
+                    last_error=$3,
+                    updated_at=NOW()
+                WHERE thread_id=$4 AND recipient_email=$5
+                """,
+                status_value,
+                sent_at,
+                last_error,
+                thread_id,
+                recipient_email,
+            )
+
+    state_sync = await sync_review_request_state(thread_id)
+    status_rows = await _list_review_requests_for_thread(thread_id)
+    expected_responses = len(status_rows)
+    received_responses = sum(1 for row in status_rows if row["status"] == "submitted")
+    pending_responses = max(expected_responses - received_responses, 0)
+
+    await add_message(
+        thread_id,
+        "system",
+        (
+            f"Review requests sent to {expected_responses} recipient(s): "
+            f"{sent_count} sent, {failed_count} failed. "
+            f"Received {received_responses}/{expected_responses} response(s)."
+        ),
+        version_created=state_sync["version"],
+    )
+
+    return {
+        "thread_id": thread_id,
+        "expected_responses": expected_responses,
+        "received_responses": received_responses,
+        "pending_responses": pending_responses,
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "recipients": status_rows,
+    }
+
+
+async def get_public_review_request(token: str) -> Optional[dict]:
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                r.recipient_email,
+                r.status,
+                r.submitted_at,
+                t.title,
+                t.current_state
+            FROM mw_review_requests r
+            JOIN mw_threads t ON t.id = r.thread_id
+            WHERE r.token=$1
+            """,
+            token,
+        )
+    if row is None:
+        return None
+
+    state = _parse_jsonb(row["current_state"])
+    review_title = (
+        state.get("review_title")
+        or state.get("review_subject")
+        or row["title"]
+        or "Anonymous Performance Review"
+    )
+
+    return {
+        "token": token,
+        "review_title": review_title,
+        "recipient_email": row["recipient_email"],
+        "status": row["status"],
+        "submitted_at": row["submitted_at"],
+    }
+
+
+async def submit_public_review_request(
+    token: str,
+    feedback: str,
+    rating: Optional[int] = None,
+) -> dict:
+    async with get_connection() as conn:
+        async with conn.transaction():
+            existing = await conn.fetchrow(
+                """
+                SELECT id, thread_id, recipient_email, status
+                FROM mw_review_requests
+                WHERE token=$1
+                FOR UPDATE
+                """,
+                token,
+            )
+            if existing is None:
+                raise ValueError("Review request not found")
+            if existing["status"] == "submitted":
+                raise ValueError("Review response already submitted")
+
+            updated = await conn.fetchrow(
+                """
+                UPDATE mw_review_requests
+                SET status='submitted',
+                    feedback=$1,
+                    rating=$2,
+                    submitted_at=NOW(),
+                    last_error=NULL,
+                    updated_at=NOW()
+                WHERE id=$3
+                RETURNING thread_id, submitted_at
+                """,
+                feedback.strip(),
+                rating,
+                existing["id"],
+            )
+
+    thread_id = updated["thread_id"]
+    state_sync = await sync_review_request_state(thread_id)
+    await add_message(
+        thread_id,
+        "system",
+        "A review response was submitted from one of the requested recipients.",
+        version_created=state_sync["version"],
+    )
+
+    return {
+        "status": "submitted",
+        "submitted_at": updated["submitted_at"],
     }

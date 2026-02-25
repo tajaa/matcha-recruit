@@ -62,6 +62,12 @@ class ReviewDocument(BaseModel):
     summary: Optional[str] = None
     overall_rating: Optional[int] = None
     anonymized: Optional[bool] = None
+    recipient_emails: Optional[list[str]] = None
+    review_request_statuses: Optional[list[dict]] = None
+    review_expected_responses: Optional[int] = None
+    review_received_responses: Optional[int] = None
+    review_pending_responses: Optional[int] = None
+    review_last_sent_at: Optional[str] = None
 
 
 class CreateThreadRequest(BaseModel):
@@ -210,3 +216,44 @@ class UsageSummaryResponse(BaseModel):
     generated_at: datetime
     totals: UsageTotals
     by_model: list[UsageByModel]
+
+
+class SendReviewRequestsRequest(BaseModel):
+    recipient_emails: list[str] = Field(default_factory=list, max_length=100)
+    custom_message: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ReviewRequestStatus(BaseModel):
+    email: str
+    status: Literal["pending", "sent", "failed", "submitted"]
+    sent_at: Optional[datetime] = None
+    submitted_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
+
+class SendReviewRequestsResponse(BaseModel):
+    thread_id: UUID
+    expected_responses: int
+    received_responses: int
+    pending_responses: int
+    sent_count: int
+    failed_count: int
+    recipients: list[ReviewRequestStatus]
+
+
+class PublicReviewRequestResponse(BaseModel):
+    token: str
+    review_title: str
+    recipient_email: str
+    status: Literal["pending", "sent", "failed", "submitted"]
+    submitted_at: Optional[datetime] = None
+
+
+class PublicReviewSubmitRequest(BaseModel):
+    feedback: str = Field(..., min_length=1, max_length=8000)
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+
+
+class PublicReviewSubmitResponse(BaseModel):
+    status: Literal["submitted"]
+    submitted_at: datetime

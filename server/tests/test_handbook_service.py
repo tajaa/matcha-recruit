@@ -3,6 +3,7 @@ import sys
 import types
 from datetime import date
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 
@@ -579,3 +580,80 @@ def test_generate_guided_draft_ai_payload_raises_rate_limit_error(monkeypatch):
                 baseline_sections=[],
             )
         )
+
+
+class _HandbookDistributionConn:
+    def __init__(self, recipient_rows=None):
+        self.recipient_rows = recipient_rows or []
+
+    def transaction(self):
+        return _FakeTransaction()
+
+    async def fetch(self, query, *args):
+        if "FROM employees e" in query:
+            return self.recipient_rows
+        return []
+
+
+def test_distribute_to_employees_rejects_empty_specific_selection(monkeypatch):
+    async def _fake_get_handbook(*args, **kwargs):
+        return SimpleNamespace(status="active", title="Employee Handbook", active_version=2)
+
+    async def _fake_ensure_pdf(*args, **kwargs):
+        return "https://example.com/handbook.pdf", "handbook.pdf", 2
+
+    monkeypatch.setattr(HandbookService, "get_handbook_by_id", _fake_get_handbook)
+    monkeypatch.setattr(HandbookService, "_ensure_handbook_pdf", _fake_ensure_pdf)
+
+    conn = _HandbookDistributionConn()
+    monkeypatch.setattr(handbook_service_module, "get_connection", lambda: _FakeConnContext(conn))
+
+    with pytest.raises(ValueError, match="Select at least one employee"):
+        asyncio.run(
+            HandbookService.distribute_to_employees(
+                handbook_id="11111111-1111-1111-1111-111111111111",
+                company_id="22222222-2222-2222-2222-222222222222",
+                distributed_by="33333333-3333-3333-3333-333333333333",
+                employee_ids=[],
+            )
+        )
+
+
+def test_list_distribution_recipients_includes_assignment_status(monkeypatch):
+    async def _fake_get_handbook(*args, **kwargs):
+        return SimpleNamespace(status="active", active_version=4)
+
+    monkeypatch.setattr(HandbookService, "get_handbook_by_id", _fake_get_handbook)
+
+    rows = [
+        {
+            "employee_id": UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            "name": "Jane Doe",
+            "email": "jane@example.com",
+            "invitation_status": "pending",
+            "already_assigned": True,
+        },
+        {
+            "employee_id": UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            "name": "John Smith",
+            "email": "john@example.com",
+            "invitation_status": None,
+            "already_assigned": False,
+        },
+    ]
+    conn = _HandbookDistributionConn(recipient_rows=rows)
+    monkeypatch.setattr(handbook_service_module, "get_connection", lambda: _FakeConnContext(conn))
+
+    result = asyncio.run(
+        HandbookService.list_distribution_recipients(
+            handbook_id="11111111-1111-1111-1111-111111111111",
+            company_id="22222222-2222-2222-2222-222222222222",
+        )
+    )
+
+    assert result is not None
+    assert len(result) == 2
+    assert result[0].employee_id == UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    assert result[0].already_assigned is True
+    assert result[1].employee_id == UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    assert result[1].already_assigned is False

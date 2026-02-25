@@ -51,7 +51,6 @@ const INDUSTRY_CONTEXT_CARD_KINDS: ReadonlySet<WizardCardKind> = new Set([
   'sub_industry',
   'states',
   'policy_pack',
-  'guided_followup',
   'review',
 ]);
 

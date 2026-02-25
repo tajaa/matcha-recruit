@@ -129,6 +129,7 @@ import type {
   HandbookWizardDraft,
   HandbookWizardDraftState,
   HandbookDistributionResult,
+  HandbookDistributionRecipient,
   HandbookAcknowledgementSummary,
   HandbookReference,
   OfferLetter,
@@ -2356,10 +2357,14 @@ export const handbooks = {
       method: 'POST',
     }),
 
-  distribute: (id: string) =>
+  distribute: (id: string, employeeIds?: string[]) =>
     request<HandbookDistributionResult>(`/handbooks/${id}/distribute`, {
       method: 'POST',
+      body: employeeIds ? JSON.stringify({ employee_ids: employeeIds }) : undefined,
     }),
+
+  listDistributionRecipients: (id: string) =>
+    request<HandbookDistributionRecipient[]>(`/handbooks/${id}/distribution-recipients`),
 
   acknowledgements: (id: string) =>
     request<HandbookAcknowledgementSummary>(`/handbooks/${id}/acknowledgements`),
@@ -2971,6 +2976,10 @@ import type {
   MWSaveDraftResponse,
   MWMessageStreamEvent,
   MWUsageSummaryResponse,
+  MWReviewRequestStatus,
+  MWSendReviewRequestsResponse,
+  MWPublicReviewRequest,
+  MWPublicReviewSubmitResponse,
 } from '../types/matcha-work';
 
 export const matchaWork = {
@@ -3108,6 +3117,18 @@ export const matchaWork = {
   getUsageSummary: (periodDays = 30): Promise<MWUsageSummaryResponse> =>
     request<MWUsageSummaryResponse>(`/matcha-work/usage/summary?period_days=${periodDays}`),
 
+  listReviewRequests: (threadId: string): Promise<MWReviewRequestStatus[]> =>
+    request<MWReviewRequestStatus[]>(`/matcha-work/threads/${threadId}/review-requests`),
+
+  sendReviewRequests: (
+    threadId: string,
+    data: { recipient_emails?: string[]; custom_message?: string }
+  ): Promise<MWSendReviewRequestsResponse> =>
+    request<MWSendReviewRequestsResponse>(`/matcha-work/threads/${threadId}/review-requests/send`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   archiveThread: (threadId: string): Promise<void> =>
     request<void>(`/matcha-work/threads/${threadId}`, { method: 'DELETE' }),
 
@@ -3122,6 +3143,36 @@ export const matchaWork = {
       method: 'PATCH',
       body: JSON.stringify({ title }),
     }),
+};
+
+export const matchaWorkPublic = {
+  getReviewRequest: async (token: string): Promise<MWPublicReviewRequest> => {
+    const response = await fetch(`${API_BASE}/matcha-work/public/review-requests/${encodeURIComponent(token)}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Review request not found' }));
+      throw new Error(extractErrorMessage(error, 'Review request not found'));
+    }
+    return response.json();
+  },
+
+  submitReviewRequest: async (
+    token: string,
+    data: { feedback: string; rating?: number }
+  ): Promise<MWPublicReviewSubmitResponse> => {
+    const response = await fetch(
+      `${API_BASE}/matcha-work/public/review-requests/${encodeURIComponent(token)}/submit`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }
+    );
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to submit review response' }));
+      throw new Error(extractErrorMessage(error, 'Failed to submit review response'));
+    }
+    return response.json();
+  },
 };
 
 // Combined API object for convenient imports

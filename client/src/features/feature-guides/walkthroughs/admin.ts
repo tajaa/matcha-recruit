@@ -131,7 +131,7 @@ export const handbooksWalkthrough: WalkthroughConfig = {
     {
       target: 'handbooks-distribute-btn',
       title: 'Send for E-Sign',
-      content: 'Send the active handbook to all current employees for acknowledgement signatures.',
+      content: 'Send the active handbook for acknowledgement signatures to all active employees or only selected employees.',
       placement: 'left',
       ifMissing: 'Distribution appears only on active handbooks.',
     },

@@ -77,6 +77,12 @@ export interface MWDocumentState {
   summary?: string | null;
   overall_rating?: number | null;
   anonymized?: boolean | null;
+  recipient_emails?: string[] | null;
+  review_request_statuses?: MWReviewRequestStatus[] | null;
+  review_expected_responses?: number | null;
+  review_received_responses?: number | null;
+  review_pending_responses?: number | null;
+  review_last_sent_at?: string | null;
 }
 
 export interface MWThreadDetail {
@@ -186,4 +192,35 @@ export interface MWSaveDraftResponse {
   linked_offer_letter_id: string;
   offer_status: string;
   saved_at: string;
+}
+
+export interface MWReviewRequestStatus {
+  email: string;
+  status: 'pending' | 'sent' | 'failed' | 'submitted';
+  sent_at: string | null;
+  submitted_at: string | null;
+  last_error: string | null;
+}
+
+export interface MWSendReviewRequestsResponse {
+  thread_id: string;
+  expected_responses: number;
+  received_responses: number;
+  pending_responses: number;
+  sent_count: number;
+  failed_count: number;
+  recipients: MWReviewRequestStatus[];
+}
+
+export interface MWPublicReviewRequest {
+  token: string;
+  review_title: string;
+  recipient_email: string;
+  status: 'pending' | 'sent' | 'failed' | 'submitted';
+  submitted_at: string | null;
+}
+
+export interface MWPublicReviewSubmitResponse {
+  status: 'submitted';
+  submitted_at: string;
 }

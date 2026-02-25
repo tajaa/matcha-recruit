@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import type { HandbookListItem, HandbookStatus } from '../types';
 import { BookOpen, ChevronRight, Plus, Pencil, CheckCircle, Send, ExternalLink, ShieldCheck } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
+import HandbookDistributeModal from '../components/HandbookDistributeModal';
 
 export function Handbooks() {
   const navigate = useNavigate();
@@ -12,6 +13,8 @@ export function Handbooks() {
   const [items, setItems] = useState<HandbookListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState<HandbookStatus | ''>('');
+  const [distributionLoading, setDistributionLoading] = useState(false);
+  const [distributionTarget, setDistributionTarget] = useState<{ id: string; title: string } | null>(null);
 
   const loadHandbooks = useCallback(async () => {
     try {
@@ -49,17 +52,25 @@ export function Handbooks() {
     }
   };
 
-  const handleDistribute = async (e: React.MouseEvent, id: string) => {
+  const handleDistribute = (e: React.MouseEvent, id: string, title: string) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm('Send this handbook to all active employees for e-signature?')) return;
+    setDistributionTarget({ id, title });
+  };
+
+  const handleConfirmDistribution = async (employeeIds?: string[]) => {
+    if (!distributionTarget) return;
     try {
-      await handbooks.distribute(id);
-      alert('Handbook distribution started.');
+      setDistributionLoading(true);
+      const result = await handbooks.distribute(distributionTarget.id, employeeIds);
+      alert(`Distributed to ${result.assigned_count} employees (${result.skipped_existing_count} already assigned).`);
+      setDistributionTarget(null);
       await loadHandbooks();
     } catch (error) {
       console.error('Failed to distribute handbook:', error);
       alert(error instanceof Error ? error.message : 'Failed to distribute handbook');
+    } finally {
+      setDistributionLoading(false);
     }
   };
 
@@ -226,7 +237,7 @@ export function Handbooks() {
                 {item.status === 'active' && (
                   <button
                     data-tour="handbooks-distribute-btn"
-                    onClick={(e) => handleDistribute(e, item.id)}
+                    onClick={(e) => handleDistribute(e, item.id, item.title)}
                     className="p-1.5 text-sky-500 hover:text-sky-400 hover:bg-sky-500/10 transition-colors rounded"
                     title="Send for e-signature"
                   >
@@ -242,6 +253,17 @@ export function Handbooks() {
           ))}
         </div>
       )}
+
+      <HandbookDistributeModal
+        open={Boolean(distributionTarget)}
+        handbookId={distributionTarget?.id ?? null}
+        handbookTitle={distributionTarget?.title}
+        submitting={distributionLoading}
+        onClose={() => {
+          if (!distributionLoading) setDistributionTarget(null);
+        }}
+        onSubmit={handleConfirmDistribution}
+      />
     </div>
   );
 }

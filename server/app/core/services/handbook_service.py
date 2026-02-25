@@ -16,6 +16,7 @@ from ..models.handbook import (
     HandbookChangeRequestResponse,
     HandbookCreateRequest,
     HandbookDetailResponse,
+    HandbookDistributionRecipientResponse,
     HandbookDistributionResponse,
     HandbookGuidedDraftRequest,
     HandbookGuidedDraftResponse,
@@ -2533,6 +2534,7 @@ class HandbookService:
         handbook_id: str,
         company_id: str,
         distributed_by: Optional[str] = None,
+        employee_ids: Optional[list[str]] = None,
     ) -> Optional[HandbookDistributionResponse]:
         handbook = await HandbookService.get_handbook_by_id(handbook_id, company_id)
         if handbook is None:
@@ -2545,16 +2547,49 @@ class HandbookService:
 
         async with get_connection() as conn:
             async with conn.transaction():
-                employee_rows = await conn.fetch(
-                    """
-                    SELECT id
-                    FROM employees
-                    WHERE org_id = $1
-                      AND termination_date IS NULL
-                    ORDER BY created_at ASC
-                    """,
-                    company_id,
-                )
+                selected_employee_ids: list[UUID] = []
+                if employee_ids is not None:
+                    dedup: set[UUID] = set()
+                    for raw_id in employee_ids:
+                        parsed_id = UUID(str(raw_id))
+                        if parsed_id in dedup:
+                            continue
+                        dedup.add(parsed_id)
+                        selected_employee_ids.append(parsed_id)
+                    if not selected_employee_ids:
+                        raise ValueError("Select at least one employee to send this handbook.")
+
+                if selected_employee_ids:
+                    employee_rows = await conn.fetch(
+                        """
+                        SELECT id
+                        FROM employees
+                        WHERE org_id = $1
+                          AND termination_date IS NULL
+                          AND email IS NOT NULL
+                          AND id = ANY($2::uuid[])
+                        ORDER BY created_at ASC
+                        """,
+                        company_id,
+                        selected_employee_ids,
+                    )
+                    found_ids = {row["id"] for row in employee_rows}
+                    missing_ids = [employee_id for employee_id in selected_employee_ids if employee_id not in found_ids]
+                    if missing_ids:
+                        raise ValueError("Some selected employees are no longer active for this company.")
+                else:
+                    employee_rows = await conn.fetch(
+                        """
+                        SELECT id
+                        FROM employees
+                        WHERE org_id = $1
+                          AND termination_date IS NULL
+                          AND email IS NOT NULL
+                        ORDER BY created_at ASC
+                        """,
+                        company_id,
+                    )
+
                 await conn.execute(
                     "SELECT pg_advisory_xact_lock(hashtext($1))",
                     f"handbook-distribute:{company_id}:{doc_type}",
@@ -2641,6 +2676,61 @@ class HandbookService:
             skipped_existing_count=skipped,
             distributed_at=datetime.utcnow(),
         )
+
+    @staticmethod
+    async def list_distribution_recipients(
+        handbook_id: str,
+        company_id: str,
+    ) -> Optional[list[HandbookDistributionRecipientResponse]]:
+        handbook = await HandbookService.get_handbook_by_id(handbook_id, company_id)
+        if handbook is None:
+            return None
+        if handbook.status != "active":
+            raise ValueError("Only active handbooks can be distributed for acknowledgement")
+
+        doc_type = f"handbook:{handbook_id}:{handbook.active_version}"
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    e.id AS employee_id,
+                    COALESCE(NULLIF(TRIM(e.first_name || ' ' || e.last_name), ''), e.email) AS name,
+                    e.email,
+                    (
+                        SELECT status
+                        FROM employee_invitations
+                        WHERE employee_id = e.id
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    ) AS invitation_status,
+                    EXISTS (
+                        SELECT 1
+                        FROM employee_documents ed
+                        WHERE ed.org_id = $1
+                          AND ed.employee_id = e.id
+                          AND ed.doc_type = $2
+                          AND ed.status IN ('pending_signature', 'signed')
+                    ) AS already_assigned
+                FROM employees e
+                WHERE e.org_id = $1
+                  AND e.termination_date IS NULL
+                  AND e.email IS NOT NULL
+                ORDER BY e.created_at ASC
+                """,
+                company_id,
+                doc_type,
+            )
+
+        return [
+            HandbookDistributionRecipientResponse(
+                employee_id=row["employee_id"],
+                name=row["name"],
+                email=row["email"],
+                invitation_status=row["invitation_status"],
+                already_assigned=bool(row["already_assigned"]),
+            )
+            for row in rows
+        ]
 
     @staticmethod
     async def get_acknowledgement_summary(

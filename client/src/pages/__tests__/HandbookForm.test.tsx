@@ -296,6 +296,80 @@ describe('HandbookForm (create wizard)', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('keeps guided follow-up helper guidance question-specific without industry overlays', async () => {
+    handbooksMock.getWizardDraft.mockResolvedValueOnce({
+      id: 'draft-1',
+      company_id: 'co-1',
+      user_id: 'user-1',
+      state: {
+        title: 'Hospitality Handbook',
+        mode: 'single_state',
+        source_type: 'template',
+        selected_states: ['CA'],
+        profile: {
+          legal_name: 'Acme LLC',
+          dba: null,
+          ceo_or_president: 'Alex Founder',
+          headcount: 15,
+          remote_workers: false,
+          minors: false,
+          tipped_employees: false,
+          union_employees: false,
+          federal_contracts: false,
+          group_health_insurance: true,
+          background_checks: true,
+          hourly_employees: true,
+          salaried_employees: true,
+          commissioned_employees: false,
+          tip_pooling: false,
+        },
+        custom_sections: [],
+        industry: 'hospitality',
+        sub_industry: 'franchise cafe',
+        uploaded_file_url: null,
+        uploaded_filename: null,
+        guided_questions: [
+          {
+            id: 'hr_contact_email',
+            question: 'What email should employees use for HR policy questions?',
+            placeholder: 'hr@itsmatcha.net',
+            required: true,
+          },
+        ],
+        guided_answers: {},
+        guided_summary: 'Generated policy pack',
+        wizard_card_index: 21,
+      },
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T12:00:00Z',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/app/matcha/handbook/new']}>
+        <Routes>
+          <Route path="/app/matcha/handbook/new" element={<HandbookForm />} />
+          <Route path="/app/matcha/handbook/:id" element={<div>Handbook Detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+      { withRouter: false },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText('What email should employees use for HR policy questions?')).toBeInTheDocument()
+    );
+
+    expect(screen.getByText(/This answer fills a policy gap identified during guided generation/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Provide a concrete operational answer \(e.g., hr@itsmatcha\.net\)\./i)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/For hospitality, handbook logic prioritizes tipped-workforce and shift-operations controls/i)
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/CA generally requires stricter wage\/hour, break, and reimbursement handling/i)
+    ).not.toBeInTheDocument();
+  });
+
   it('shows recovery actions for missing boilerplate coverage errors', async () => {
     handbooksMock.create.mockRejectedValueOnce(
       new Error('Missing required state boilerplate coverage for hospitality handbook generation: Illinois')
@@ -348,11 +422,10 @@ describe('HandbookForm (create wizard)', () => {
     await waitFor(() =>
       expect(screen.getByText(/Missing required state boilerplate coverage/i)).toBeInTheDocument()
     );
-    expect(screen.getByRole('button', { name: 'Go To Policy Pack' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open Compliance' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sync Compliance Coverage →' })).toBeInTheDocument();
 
     handbooksMock.saveWizardDraft.mockClear();
-    await user.click(screen.getByRole('button', { name: 'Open Compliance' }));
+    await user.click(screen.getByRole('button', { name: 'Sync Compliance Coverage →' }));
     await waitFor(() => expect(handbooksMock.saveWizardDraft).toHaveBeenCalled());
     expect(screen.getByText('Compliance Page')).toBeInTheDocument();
   });

@@ -2075,6 +2075,14 @@ export interface HandbookDistributionResult {
   distributed_at: string;
 }
 
+export interface HandbookDistributionRecipient {
+  employee_id: string;
+  name: string;
+  email: string;
+  invitation_status: string | null;
+  already_assigned: boolean;
+}
+
 export interface HandbookAcknowledgementSummary {
   handbook_id: string;
   handbook_version: number;

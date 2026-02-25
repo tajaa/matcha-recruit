@@ -3693,5 +3693,33 @@ async def init_db():
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mw_token_usage_events_user_created ON mw_token_usage_events(user_id, created_at)"
         )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_review_requests (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                thread_id UUID NOT NULL REFERENCES mw_threads(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                recipient_email VARCHAR(320) NOT NULL,
+                token VARCHAR(255) NOT NULL UNIQUE,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'sent', 'failed', 'submitted')),
+                feedback TEXT,
+                rating INTEGER CHECK (rating >= 1 AND rating <= 5),
+                sent_at TIMESTAMPTZ,
+                submitted_at TIMESTAMPTZ,
+                last_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(thread_id, recipient_email)
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_review_requests_thread_id ON mw_review_requests(thread_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_review_requests_company_status ON mw_review_requests(company_id, status)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_review_requests_token ON mw_review_requests(token)"
+        )
 
         print("[DB] Tables initialized")

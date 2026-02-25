@@ -176,6 +176,18 @@ class HandbookDistributionResponse(BaseModel):
     distributed_at: datetime
 
 
+class HandbookDistributionRequest(BaseModel):
+    employee_ids: list[UUID] = Field(default_factory=list)
+
+
+class HandbookDistributionRecipientResponse(BaseModel):
+    employee_id: UUID
+    name: str
+    email: str
+    invitation_status: Optional[str] = None
+    already_assigned: bool = False
+
+
 class HandbookAcknowledgementSummary(BaseModel):
     handbook_id: UUID
     handbook_version: int

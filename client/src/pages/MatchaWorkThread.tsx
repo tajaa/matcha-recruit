@@ -6,6 +6,7 @@ import type {
   MWDocumentVersion,
   MWTokenUsage,
   MWUsageSummaryResponse,
+  MWReviewRequestStatus,
 } from '../types/matcha-work';
 import { matchaWork } from '../api/client';
 
@@ -24,6 +25,19 @@ function toItemList(value: unknown): string[] {
       .filter((item) => item.length > 0);
   }
   return [];
+}
+
+function parseEmailList(input: string): string[] {
+  const matches = input.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const raw of matches) {
+    const email = raw.trim().toLowerCase();
+    if (!email || seen.has(email)) continue;
+    seen.add(email);
+    normalized.push(email);
+  }
+  return normalized;
 }
 
 function MessageBubble({ msg }: { msg: MWMessage }) {
@@ -87,6 +101,10 @@ export default function MatchaWorkThread() {
   const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<(MWTokenUsage & { stage: 'estimate' | 'final' }) | null>(null);
   const [usageSummary, setUsageSummary] = useState<MWUsageSummaryResponse | null>(null);
+  const [showReviewRequestsModal, setShowReviewRequestsModal] = useState(false);
+  const [sendingReviewRequests, setSendingReviewRequests] = useState(false);
+  const [reviewRecipientInput, setReviewRecipientInput] = useState('');
+  const [reviewEmailMessage, setReviewEmailMessage] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -318,10 +336,48 @@ export default function MatchaWorkThread() {
     }
   };
 
+  const handleOpenReviewRequestsModal = () => {
+    if (!thread) return;
+    const existing = (thread.current_state.recipient_emails || []).join(', ');
+    setReviewRecipientInput(existing);
+    setReviewEmailMessage('');
+    setShowReviewRequestsModal(true);
+  };
+
+  const handleSendReviewRequests = async () => {
+    if (!threadId || sendingReviewRequests) return;
+
+    const recipientEmails = parseEmailList(reviewRecipientInput);
+    if (recipientEmails.length === 0) {
+      setError('Add at least one valid recipient email');
+      return;
+    }
+
+    try {
+      setSendingReviewRequests(true);
+      setError(null);
+      await matchaWork.sendReviewRequests(threadId, {
+        recipient_emails: recipientEmails,
+        custom_message: reviewEmailMessage.trim() || undefined,
+      });
+      setShowReviewRequestsModal(false);
+      await loadThread();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send review requests');
+    } finally {
+      setSendingReviewRequests(false);
+    }
+  };
+
   const isFinalized = thread?.status === 'finalized';
   const isArchived = thread?.status === 'archived';
   const isOfferLetter = thread?.task_type === 'offer_letter';
   const isReview = thread?.task_type === 'review';
+  const reviewStatuses: MWReviewRequestStatus[] = (thread?.current_state.review_request_statuses || [])
+    .filter((row): row is MWReviewRequestStatus => Boolean(row && typeof row === 'object' && row.email));
+  const reviewExpectedResponses = thread?.current_state.review_expected_responses ?? reviewStatuses.length;
+  const reviewReceivedResponses = thread?.current_state.review_received_responses ?? reviewStatuses.filter((row) => row.status === 'submitted').length;
+  const reviewPendingResponses = thread?.current_state.review_pending_responses ?? Math.max(reviewExpectedResponses - reviewReceivedResponses, 0);
   const isUnscopedChat = thread
     ? thread.version === 0 &&
       messages.length === 0 &&
@@ -494,6 +550,16 @@ export default function MatchaWorkThread() {
             </button>
           )}
 
+          {isReview && !isArchived && (
+            <button
+              onClick={handleOpenReviewRequestsModal}
+              disabled={sendingReviewRequests}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+            >
+              {sendingReviewRequests ? 'Sending...' : 'Send Requests'}
+            </button>
+          )}
+
           {!isFinalized && !isArchived && (
             <button
               onClick={() => setShowFinalizeConfirm(true)}
@@ -543,6 +609,9 @@ export default function MatchaWorkThread() {
                 </p>
                 <div className="mt-3 text-[11px] text-zinc-500 max-w-sm">
                   Skills: offer letters, anonymized reviews. Unsupported requests will return: "I can't do that."
+                </div>
+                <div className="mt-1 text-[11px] text-zinc-600 max-w-sm">
+                  For review workflows, include recipient emails and use Send Requests to distribute links.
                 </div>
               </div>
             ) : (
@@ -770,6 +839,68 @@ export default function MatchaWorkThread() {
                     </div>
                   )}
 
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-zinc-500 mb-2">Response Tracking</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-md border border-zinc-700/60 bg-zinc-900/40 p-2">
+                        <p className="text-[11px] text-zinc-500">Expected</p>
+                        <p className="text-sm text-zinc-200 mt-0.5">{reviewExpectedResponses}</p>
+                      </div>
+                      <div className="rounded-md border border-zinc-700/60 bg-zinc-900/40 p-2">
+                        <p className="text-[11px] text-zinc-500">Received</p>
+                        <p className="text-sm text-emerald-300 mt-0.5">{reviewReceivedResponses}</p>
+                      </div>
+                      <div className="rounded-md border border-zinc-700/60 bg-zinc-900/40 p-2">
+                        <p className="text-[11px] text-zinc-500">Pending</p>
+                        <p className="text-sm text-amber-300 mt-0.5">{reviewPendingResponses}</p>
+                      </div>
+                    </div>
+                    {reviewStatuses.length > 0 ? (
+                      <div className="mt-3 space-y-1.5">
+                        {reviewStatuses.map((row) => (
+                          <div
+                            key={row.email}
+                            className="flex items-center justify-between rounded-md border border-zinc-700/50 bg-zinc-900/30 px-2.5 py-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-xs text-zinc-300 truncate">{row.email}</p>
+                              {row.submitted_at && (
+                                <p className="text-[11px] text-zinc-500 mt-0.5">
+                                  Submitted {new Date(row.submitted_at).toLocaleString()}
+                                </p>
+                              )}
+                              {!row.submitted_at && row.sent_at && (
+                                <p className="text-[11px] text-zinc-500 mt-0.5">
+                                  Sent {new Date(row.sent_at).toLocaleString()}
+                                </p>
+                              )}
+                              {row.status === 'failed' && row.last_error && (
+                                <p className="text-[11px] text-red-400 mt-0.5">Error: {row.last_error}</p>
+                              )}
+                            </div>
+                            <span
+                              className={`ml-3 text-[11px] px-1.5 py-0.5 rounded ${
+                                row.status === 'submitted'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : row.status === 'sent'
+                                  ? 'bg-blue-500/20 text-blue-300'
+                                  : row.status === 'failed'
+                                  ? 'bg-red-500/20 text-red-300'
+                                  : 'bg-amber-500/20 text-amber-300'
+                              }`}
+                            >
+                              {row.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-zinc-500 mt-2">
+                        No recipients yet. Use Send Requests to distribute this review.
+                      </p>
+                    )}
+                  </div>
+
                   {!thread.current_state.summary &&
                     !thread.current_state.context &&
                     toItemList(thread.current_state.strengths).length === 0 &&
@@ -793,6 +924,56 @@ export default function MatchaWorkThread() {
           </div>
         </div>
       </div>
+
+      {/* Review requests modal */}
+      {showReviewRequestsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
+            <h2 className="text-base font-semibold text-zinc-100 mb-2">Send Anonymous Review Requests</h2>
+            <p className="text-sm text-zinc-400 mb-4">
+              Add recipient emails. Each recipient will get a unique link and tracking updates will appear in this thread.
+            </p>
+            <label className="block">
+              <span className="text-xs text-zinc-500 uppercase tracking-wide">Recipient Emails</span>
+              <textarea
+                value={reviewRecipientInput}
+                onChange={(e) => setReviewRecipientInput(e.target.value)}
+                placeholder="manager@company.com, peer@company.com"
+                rows={4}
+                className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-matcha-500/50"
+              />
+            </label>
+            <label className="block mt-3">
+              <span className="text-xs text-zinc-500 uppercase tracking-wide">Optional Message</span>
+              <textarea
+                value={reviewEmailMessage}
+                onChange={(e) => setReviewEmailMessage(e.target.value)}
+                placeholder="Add context for reviewers..."
+                rows={3}
+                className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-matcha-500/50"
+              />
+            </label>
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={() => setShowReviewRequestsModal(false)}
+                className="flex-1 px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 border border-zinc-700 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendReviewRequests}
+                disabled={sendingReviewRequests}
+                className="flex-1 px-4 py-2 text-sm bg-matcha-600 hover:bg-matcha-700 disabled:opacity-50 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {sendingReviewRequests ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : null}
+                Send Requests
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Finalize confirm modal */}
       {showFinalizeConfirm && (

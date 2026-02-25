@@ -2,7 +2,7 @@ from io import BytesIO
 import mimetypes
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ...matcha.dependencies import get_client_company_id, require_admin_or_client
@@ -14,6 +14,8 @@ from ..models.handbook import (
     HandbookChangeRequestResponse,
     HandbookCreateRequest,
     HandbookDetailResponse,
+    HandbookDistributionRecipientResponse,
+    HandbookDistributionRequest,
     HandbookDistributionResponse,
     HandbookGuidedDraftRequest,
     HandbookGuidedDraftResponse,
@@ -296,6 +298,7 @@ async def reject_handbook_change(
 @router.post("/{handbook_id}/distribute", response_model=HandbookDistributionResponse)
 async def distribute_handbook(
     handbook_id: str,
+    data: Optional[HandbookDistributionRequest] = Body(default=None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
@@ -307,6 +310,7 @@ async def distribute_handbook(
             handbook_id,
             str(company_id),
             str(current_user.id),
+            employee_ids=[str(employee_id) for employee_id in data.employee_ids] if data else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -314,6 +318,31 @@ async def distribute_handbook(
     if result is None:
         raise HTTPException(status_code=404, detail="Handbook not found")
     return result
+
+
+@router.get(
+    "/{handbook_id}/distribution-recipients",
+    response_model=List[HandbookDistributionRecipientResponse],
+)
+async def list_handbook_distribution_recipients(
+    handbook_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        recipients = await HandbookService.list_distribution_recipients(
+            handbook_id,
+            str(company_id),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if recipients is None:
+        raise HTTPException(status_code=404, detail="Handbook not found")
+    return recipients
 
 
 @router.get("/{handbook_id}/acknowledgements", response_model=HandbookAcknowledgementSummary)
