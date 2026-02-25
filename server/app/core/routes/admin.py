@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 from ...database import get_connection
 from ..dependencies import require_admin
-from ..feature_flags import default_company_features_json, merge_company_features
+from ..feature_flags import merge_company_features
 from ..services.email import get_email_service
 from ..models.compliance import AutoCheckSettings
 from ..services.compliance_service import (
@@ -566,12 +566,10 @@ async def list_company_features():
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, name as company_name, industry, size, status,
-                   COALESCE(enabled_features, $1::jsonb) as enabled_features
+            SELECT id, name as company_name, industry, size, status, enabled_features
             FROM companies
             ORDER BY name
-            """,
-            default_company_features_json(),
+            """
         )
 
         return [
@@ -597,27 +595,32 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
         )
 
     async with get_connection() as conn:
-        # Atomic JSONB update — no read-modify-write race
-        updated = await conn.fetchval(
-            """
-            UPDATE companies
-            SET enabled_features = jsonb_set(
-                COALESCE(enabled_features, $4::jsonb),
-                $1::text[],
-                $2::jsonb
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT enabled_features
+                FROM companies
+                WHERE id = $1
+                FOR UPDATE
+                """,
+                company_id,
             )
-            WHERE id = $3
-            RETURNING enabled_features
-            """,
-            [request.feature],
-            json.dumps(request.enabled),
-            company_id,
-            default_company_features_json(),
-        )
-        if updated is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+            if row is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
-        features = merge_company_features(updated)
+            features = merge_company_features(row["enabled_features"])
+            features[request.feature] = bool(request.enabled)
+
+            await conn.execute(
+                """
+                UPDATE companies
+                SET enabled_features = $1
+                WHERE id = $2
+                """,
+                json.dumps(features),
+                company_id,
+            )
+
         return {"enabled_features": features}
 
 
