@@ -103,3 +103,10 @@ export interface MWFinalizeResponse {
   pdf_url: string | null;
   linked_offer_letter_id: string | null;
 }
+
+export interface MWSaveDraftResponse {
+  thread_id: string;
+  linked_offer_letter_id: string;
+  offer_status: string;
+  saved_at: string;
+}

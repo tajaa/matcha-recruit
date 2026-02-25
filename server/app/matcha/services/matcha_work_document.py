@@ -39,6 +39,84 @@ def _parse_date_str(date_str: str) -> Optional[datetime]:
     return None
 
 
+def _coerce_bool(value, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n", ""}:
+            return False
+    return default
+
+
+def _coerce_int(value) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_datetime(value) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return _parse_date_str(value)
+    return None
+
+
+def _build_offer_letter_payload(state: dict, fallback_company_name: str) -> dict:
+    company_name = (state.get("company_name") or fallback_company_name or "").strip()
+    return {
+        "candidate_name": (state.get("candidate_name") or "").strip(),
+        "position_title": (state.get("position_title") or "").strip(),
+        "company_name": company_name,
+        "salary": state.get("salary"),
+        "bonus": state.get("bonus"),
+        "stock_options": state.get("stock_options"),
+        "start_date": _coerce_datetime(state.get("start_date")),
+        "employment_type": state.get("employment_type"),
+        "location": state.get("location"),
+        "benefits": state.get("benefits"),
+        "manager_name": state.get("manager_name"),
+        "manager_title": state.get("manager_title"),
+        "expiration_date": _coerce_datetime(state.get("expiration_date")),
+        "benefits_medical": _coerce_bool(state.get("benefits_medical"), False),
+        "benefits_medical_coverage": _coerce_int(state.get("benefits_medical_coverage")),
+        "benefits_medical_waiting_days": _coerce_int(state.get("benefits_medical_waiting_days")) or 0,
+        "benefits_dental": _coerce_bool(state.get("benefits_dental"), False),
+        "benefits_vision": _coerce_bool(state.get("benefits_vision"), False),
+        "benefits_401k": _coerce_bool(state.get("benefits_401k"), False),
+        "benefits_401k_match": state.get("benefits_401k_match"),
+        "benefits_wellness": state.get("benefits_wellness"),
+        "benefits_pto_vacation": _coerce_bool(state.get("benefits_pto_vacation"), False),
+        "benefits_pto_sick": _coerce_bool(state.get("benefits_pto_sick"), False),
+        "benefits_holidays": _coerce_bool(state.get("benefits_holidays"), False),
+        "benefits_other": state.get("benefits_other"),
+        "contingency_background_check": _coerce_bool(state.get("contingency_background_check"), False),
+        "contingency_credit_check": _coerce_bool(state.get("contingency_credit_check"), False),
+        "contingency_drug_screening": _coerce_bool(state.get("contingency_drug_screening"), False),
+        "company_logo_url": state.get("company_logo_url"),
+        "salary_range_min": _coerce_float(state.get("salary_range_min")),
+        "salary_range_max": _coerce_float(state.get("salary_range_max")),
+        "candidate_email": state.get("candidate_email"),
+    }
+
+
 async def create_thread(
     company_id: UUID,
     user_id: UUID,
@@ -363,6 +441,192 @@ async def generate_pdf(
 
     await _cache_pdf_url(thread_id, version, pdf_url, is_draft=is_draft)
     return pdf_url
+
+
+async def save_offer_letter_draft(thread_id: UUID, company_id: UUID) -> dict:
+    """Persist current thread state into offer_letters as a draft and link the thread."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            thread_row = await conn.fetchrow(
+                """
+                SELECT t.current_state, t.status, t.linked_offer_letter_id, c.name AS fallback_company_name
+                FROM mw_threads t
+                JOIN companies c ON c.id = t.company_id
+                WHERE t.id = $1 AND t.company_id = $2
+                FOR UPDATE
+                """,
+                thread_id,
+                company_id,
+            )
+            if thread_row is None:
+                raise ValueError("Thread not found")
+            if thread_row["status"] == "archived":
+                raise ValueError("Cannot save draft for an archived thread")
+
+            state = _parse_jsonb(thread_row["current_state"])
+            payload = _build_offer_letter_payload(state, thread_row["fallback_company_name"] or "")
+
+            if not payload["candidate_name"] or not payload["position_title"]:
+                raise ValueError("Candidate name and position title are required to save a draft")
+
+            existing_offer_id = thread_row["linked_offer_letter_id"]
+            saved = None
+            if existing_offer_id is not None:
+                saved = await conn.fetchrow(
+                    """
+                    UPDATE offer_letters
+                    SET candidate_name = $1,
+                        position_title = $2,
+                        company_name = $3,
+                        salary = $4,
+                        bonus = $5,
+                        stock_options = $6,
+                        start_date = $7,
+                        employment_type = $8,
+                        location = $9,
+                        benefits = $10,
+                        manager_name = $11,
+                        manager_title = $12,
+                        expiration_date = $13,
+                        benefits_medical = $14,
+                        benefits_medical_coverage = $15,
+                        benefits_medical_waiting_days = $16,
+                        benefits_dental = $17,
+                        benefits_vision = $18,
+                        benefits_401k = $19,
+                        benefits_401k_match = $20,
+                        benefits_wellness = $21,
+                        benefits_pto_vacation = $22,
+                        benefits_pto_sick = $23,
+                        benefits_holidays = $24,
+                        benefits_other = $25,
+                        contingency_background_check = $26,
+                        contingency_credit_check = $27,
+                        contingency_drug_screening = $28,
+                        company_logo_url = $29,
+                        salary_range_min = $30,
+                        salary_range_max = $31,
+                        candidate_email = $32,
+                        status = 'draft',
+                        updated_at = NOW()
+                    WHERE id = $33 AND company_id = $34
+                    RETURNING id, status, updated_at
+                    """,
+                    payload["candidate_name"],
+                    payload["position_title"],
+                    payload["company_name"],
+                    payload["salary"],
+                    payload["bonus"],
+                    payload["stock_options"],
+                    payload["start_date"],
+                    payload["employment_type"],
+                    payload["location"],
+                    payload["benefits"],
+                    payload["manager_name"],
+                    payload["manager_title"],
+                    payload["expiration_date"],
+                    payload["benefits_medical"],
+                    payload["benefits_medical_coverage"],
+                    payload["benefits_medical_waiting_days"],
+                    payload["benefits_dental"],
+                    payload["benefits_vision"],
+                    payload["benefits_401k"],
+                    payload["benefits_401k_match"],
+                    payload["benefits_wellness"],
+                    payload["benefits_pto_vacation"],
+                    payload["benefits_pto_sick"],
+                    payload["benefits_holidays"],
+                    payload["benefits_other"],
+                    payload["contingency_background_check"],
+                    payload["contingency_credit_check"],
+                    payload["contingency_drug_screening"],
+                    payload["company_logo_url"],
+                    payload["salary_range_min"],
+                    payload["salary_range_max"],
+                    payload["candidate_email"],
+                    existing_offer_id,
+                    company_id,
+                )
+
+            if saved is None:
+                saved = await conn.fetchrow(
+                    """
+                    INSERT INTO offer_letters (
+                        candidate_name, position_title, company_name, company_id, status,
+                        salary, bonus, stock_options, start_date, employment_type, location, benefits,
+                        manager_name, manager_title, expiration_date,
+                        benefits_medical, benefits_medical_coverage, benefits_medical_waiting_days,
+                        benefits_dental, benefits_vision, benefits_401k, benefits_401k_match,
+                        benefits_wellness, benefits_pto_vacation, benefits_pto_sick,
+                        benefits_holidays, benefits_other,
+                        contingency_background_check, contingency_credit_check, contingency_drug_screening,
+                        company_logo_url, salary_range_min, salary_range_max, candidate_email
+                    )
+                    VALUES (
+                        $1, $2, $3, $4, 'draft',
+                        $5, $6, $7, $8, $9, $10, $11,
+                        $12, $13, $14,
+                        $15, $16, $17,
+                        $18, $19, $20, $21,
+                        $22, $23, $24,
+                        $25, $26,
+                        $27, $28, $29,
+                        $30, $31, $32, $33
+                    )
+                    RETURNING id, status, updated_at
+                    """,
+                    payload["candidate_name"],
+                    payload["position_title"],
+                    payload["company_name"],
+                    company_id,
+                    payload["salary"],
+                    payload["bonus"],
+                    payload["stock_options"],
+                    payload["start_date"],
+                    payload["employment_type"],
+                    payload["location"],
+                    payload["benefits"],
+                    payload["manager_name"],
+                    payload["manager_title"],
+                    payload["expiration_date"],
+                    payload["benefits_medical"],
+                    payload["benefits_medical_coverage"],
+                    payload["benefits_medical_waiting_days"],
+                    payload["benefits_dental"],
+                    payload["benefits_vision"],
+                    payload["benefits_401k"],
+                    payload["benefits_401k_match"],
+                    payload["benefits_wellness"],
+                    payload["benefits_pto_vacation"],
+                    payload["benefits_pto_sick"],
+                    payload["benefits_holidays"],
+                    payload["benefits_other"],
+                    payload["contingency_background_check"],
+                    payload["contingency_credit_check"],
+                    payload["contingency_drug_screening"],
+                    payload["company_logo_url"],
+                    payload["salary_range_min"],
+                    payload["salary_range_max"],
+                    payload["candidate_email"],
+                )
+
+            await conn.execute(
+                """
+                UPDATE mw_threads
+                SET linked_offer_letter_id = $1, updated_at = NOW()
+                WHERE id = $2 AND company_id = $3
+                """,
+                saved["id"],
+                thread_id,
+                company_id,
+            )
+
+            return {
+                "thread_id": thread_id,
+                "linked_offer_letter_id": saved["id"],
+                "offer_status": saved["status"],
+                "saved_at": saved["updated_at"],
+            }
 
 
 async def finalize_thread(thread_id: UUID, company_id: UUID) -> dict:

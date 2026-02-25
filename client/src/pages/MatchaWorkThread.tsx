@@ -61,6 +61,7 @@ export default function MatchaWorkThread() {
   const [error, setError] = useState<string | null>(null);
   const [showVersions, setShowVersions] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -174,6 +175,22 @@ export default function MatchaWorkThread() {
     }
   };
 
+  const handleSaveDraft = async () => {
+    if (!threadId || savingDraft || isArchived) return;
+    try {
+      setSavingDraft(true);
+      setError(null);
+      const resp = await matchaWork.saveDraft(threadId);
+      setThread((prev) =>
+        prev ? { ...prev, linked_offer_letter_id: resp.linked_offer_letter_id } : prev
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save draft');
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
   const isFinalized = thread?.status === 'finalized';
   const isArchived = thread?.status === 'archived';
   const inputDisabled = isFinalized || isArchived || sending;
@@ -232,6 +249,11 @@ export default function MatchaWorkThread() {
                   Archived
                 </span>
               )}
+              {thread.linked_offer_letter_id && (
+                <span className="text-xs bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">
+                  Draft Saved
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -260,6 +282,16 @@ export default function MatchaWorkThread() {
               Preview
             </button>
           </div>
+
+          {!isArchived && (
+            <button
+              onClick={handleSaveDraft}
+              disabled={savingDraft}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+            >
+              {savingDraft ? 'Saving...' : 'Save Draft'}
+            </button>
+          )}
 
           {!isFinalized && !isArchived && (
             <button

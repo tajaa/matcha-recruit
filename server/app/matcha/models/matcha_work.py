@@ -127,5 +127,12 @@ class FinalizeResponse(BaseModel):
     linked_offer_letter_id: Optional[UUID] = None
 
 
+class SaveDraftResponse(BaseModel):
+    thread_id: UUID
+    linked_offer_letter_id: UUID
+    offer_status: str
+    saved_at: datetime
+
+
 class UpdateTitleRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)

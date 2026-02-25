@@ -16,6 +16,7 @@ from ..models.matcha_work import (
     FinalizeResponse,
     MWMessageOut,
     RevertRequest,
+    SaveDraftResponse,
     SendMessageRequest,
     SendMessageResponse,
     ThreadDetailResponse,
@@ -306,6 +307,27 @@ async def finalize_thread(
         raise HTTPException(status_code=400, detail=str(e))
 
     return FinalizeResponse(**result)
+
+
+@router.post("/threads/{thread_id}/save-draft", response_model=SaveDraftResponse)
+async def save_draft(
+    thread_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Save the current Matcha Work state into offer_letters as a draft."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    try:
+        result = await doc_svc.save_offer_letter_draft(thread_id, company_id)
+    except ValueError as e:
+        detail = str(e)
+        if detail == "Thread not found":
+            raise HTTPException(status_code=404, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+    return SaveDraftResponse(**result)
 
 
 @router.get("/threads/{thread_id}/pdf")

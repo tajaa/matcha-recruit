@@ -2961,6 +2961,7 @@ import type {
   MWSendMessageResponse,
   MWDocumentVersion,
   MWFinalizeResponse,
+  MWSaveDraftResponse,
 } from '../types/matcha-work';
 
 export const matchaWork = {
@@ -2999,6 +3000,11 @@ export const matchaWork = {
 
   finalize: (threadId: string): Promise<MWFinalizeResponse> =>
     request<MWFinalizeResponse>(`/matcha-work/threads/${threadId}/finalize`, {
+      method: 'POST',
+    }),
+
+  saveDraft: (threadId: string): Promise<MWSaveDraftResponse> =>
+    request<MWSaveDraftResponse>(`/matcha-work/threads/${threadId}/save-draft`, {
       method: 'POST',
     }),
 
