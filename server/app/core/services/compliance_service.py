@@ -800,6 +800,36 @@ async def _try_load_county_requirements(
     return [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
 
 
+async def _try_load_state_requirements(
+    conn, jurisdiction_id: UUID, threshold_days: int
+) -> Optional[List[Dict]]:
+    """Walk up parent_id chain to the state jurisdiction and load cached reqs if fresh."""
+    current_id = jurisdiction_id
+    for _ in range(3):  # Walk up to 3 levels (city -> county -> state)
+        row = await conn.fetchrow(
+            "SELECT parent_id FROM jurisdictions WHERE id = $1", current_id
+        )
+        if not row or not row["parent_id"]:
+            return None
+        current_id = row["parent_id"]
+        
+        j_row = await conn.fetchrow(
+            "SELECT id, city, state FROM jurisdictions WHERE id = $1", current_id
+        )
+        if j_row and j_row["city"] == "":  # State jurisdictions have empty city
+            state_id = j_row["id"]
+            if not await _is_jurisdiction_fresh(conn, state_id, threshold_days):
+                return None
+            
+            j_reqs = await _load_jurisdiction_requirements(conn, state_id)
+            if not j_reqs:
+                return None
+                
+            print(f"[Compliance] Reusing state jurisdiction data ({len(j_reqs)} reqs) for jurisdiction {jurisdiction_id}")
+            return [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+    return None
+
+
 async def _get_county_jurisdiction_id(conn, city_jurisdiction_id: UUID) -> Optional[UUID]:
     """Get the county jurisdiction ID from parent_id chain."""
     row = await conn.fetchrow(
@@ -2034,6 +2064,21 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
                 county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, 7)
                 if county_reqs:
                     req_dicts = county_reqs
+                    # If county is missing categories, try filling gaps from state
+                    missing_from_county = _missing_required_categories(req_dicts)
+                    if missing_from_county:
+                        state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, 7)
+                        if state_reqs:
+                            target_set = {_normalize_category(c) or c for c in missing_from_county}
+                            state_fill = [
+                                r for r in state_reqs 
+                                if (_normalize_category(r.get("category")) or r.get("category")) in target_set
+                            ]
+                            req_dicts.extend(state_fill)
+                else:
+                    state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, 7)
+                    if state_reqs:
+                        req_dicts = state_reqs
 
         if req_dicts:
             # Normalize and filter (with preemption awareness) before cloning.
@@ -2196,7 +2241,7 @@ async def run_compliance_check_stream(
                     used_repository = True
 
             # ============================================================
-            # TIER 2.5: County data reuse for no-local-ordinance cities
+            # TIER 2.5: County/State data reuse for no-local-ordinance cities
             # ============================================================
             if not used_repository and has_local_ordinance is False:
                 county_reqs = await _try_load_county_requirements(
@@ -2206,15 +2251,49 @@ async def run_compliance_check_stream(
                     yield {"type": "repository", "message": f"Using {location.county or 'county'} data for {location.city}..."}
                     requirements = county_reqs
                     missing_categories = _missing_required_categories(requirements)
+                    
+                    if missing_categories:
+                        # Try filling missing categories from state before live research
+                        state_reqs = await _try_load_state_requirements(
+                            conn, jurisdiction_id, location.auto_check_interval_days or 7
+                        )
+                        if state_reqs:
+                            target_set = {_normalize_category(c) or c for c in missing_categories}
+                            state_fill = [
+                                r for r in state_reqs 
+                                if (_normalize_category(r.get("category")) or r.get("category")) in target_set
+                            ]
+                            if state_fill:
+                                requirements.extend(state_fill)
+                                yield {"type": "repository", "message": f"Filled missing categories from state data..."}
+                                missing_categories = _missing_required_categories(requirements)
+                    
                     if missing_categories:
                         research_categories = missing_categories
                         cached_requirements_for_merge = list(requirements)
                         yield {
                             "type": "researching",
-                            "message": f"County cache missing {', '.join(missing_categories)}. Running live research...",
+                            "message": f"Cache missing {', '.join(missing_categories)}. Running live research...",
                         }
                     else:
                         used_repository = True
+                else:
+                    state_reqs = await _try_load_state_requirements(
+                        conn, jurisdiction_id, location.auto_check_interval_days or 7
+                    )
+                    if state_reqs:
+                        yield {"type": "repository", "message": f"Using state data for {location.city}..."}
+                        requirements = state_reqs
+                        missing_categories = _missing_required_categories(requirements)
+                        if missing_categories:
+                            research_categories = missing_categories
+                            cached_requirements_for_merge = list(requirements)
+                            yield {
+                                "type": "researching",
+                                "message": f"State cache missing {', '.join(missing_categories)}. Running live research...",
+                            }
+                        else:
+                            used_repository = True
 
             # ============================================================
             # TIER 3: Research with Gemini (stale or missing data)
@@ -3413,21 +3492,48 @@ async def run_compliance_check_background(
                 else:
                     used_repository = True
 
-            # TIER 2.5: County data reuse for no-local-ordinance cities
+            # TIER 2.5: County/State data reuse for no-local-ordinance cities
             if not used_repository and has_local_ordinance is False:
                 county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, threshold)
                 if county_reqs:
                     requirements = county_reqs
                     missing_categories = _missing_required_categories(requirements)
+                    
+                    if missing_categories:
+                        state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, threshold)
+                        if state_reqs:
+                            target_set = {_normalize_category(c) or c for c in missing_categories}
+                            state_fill = [
+                                r for r in state_reqs 
+                                if (_normalize_category(r.get("category")) or r.get("category")) in target_set
+                            ]
+                            if state_fill:
+                                requirements.extend(state_fill)
+                                missing_categories = _missing_required_categories(requirements)
+                                
                     if missing_categories:
                         research_categories = missing_categories
                         cached_requirements_for_merge = list(requirements)
                         print(
-                            f"[Compliance] County cache missing categories for {location.city}, {location.state}: "
+                            f"[Compliance] Cache missing categories for {location.city}, {location.state}: "
                             f"{', '.join(missing_categories)}. Running live research."
                         )
                     else:
                         used_repository = True
+                else:
+                    state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, threshold)
+                    if state_reqs:
+                        requirements = state_reqs
+                        missing_categories = _missing_required_categories(requirements)
+                        if missing_categories:
+                            research_categories = missing_categories
+                            cached_requirements_for_merge = list(requirements)
+                            print(
+                                f"[Compliance] State cache missing categories for {location.city}, {location.state}: "
+                                f"{', '.join(missing_categories)}. Running live research."
+                            )
+                        else:
+                            used_repository = True
 
             # TIER 3: Research with Gemini (stale or missing data)
             if not used_repository and allow_live_research:
