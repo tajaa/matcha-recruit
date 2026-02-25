@@ -3416,7 +3416,7 @@ async def init_db():
                 created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 title VARCHAR(255) NOT NULL DEFAULT 'Untitled Chat',
                 task_type VARCHAR(40) NOT NULL DEFAULT 'offer_letter'
-                    CHECK (task_type IN ('offer_letter')),
+                    CHECK (task_type IN ('offer_letter', 'review')),
                 status VARCHAR(20) NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active', 'finalized', 'archived')),
                 current_state JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -3446,13 +3446,35 @@ async def init_db():
             """
         )
         await conn.execute("""
+            DO $$
+            DECLARE
+                c RECORD;
+            BEGIN
+                FOR c IN
+                    SELECT conname
+                    FROM pg_constraint
+                    WHERE conrelid = 'mw_threads'::regclass
+                      AND contype = 'c'
+                      AND pg_get_constraintdef(oid) ILIKE '%task_type%'
+                LOOP
+                    EXECUTE format('ALTER TABLE mw_threads DROP CONSTRAINT %I', c.conname);
+                END LOOP;
+
+                ALTER TABLE mw_threads
+                ADD CONSTRAINT mw_threads_task_type_check
+                CHECK (task_type IN ('offer_letter', 'review'));
+            EXCEPTION WHEN duplicate_object THEN
+                NULL;
+            END $$;
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_elements (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 thread_id UUID NOT NULL UNIQUE REFERENCES mw_threads(id) ON DELETE CASCADE,
                 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
                 created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 element_type VARCHAR(40) NOT NULL DEFAULT 'offer_letter'
-                    CHECK (element_type IN ('offer_letter')),
+                    CHECK (element_type IN ('offer_letter', 'review')),
                 title VARCHAR(255) NOT NULL DEFAULT 'Untitled Chat',
                 status VARCHAR(20) NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active', 'finalized', 'archived')),
@@ -3513,6 +3535,28 @@ async def init_db():
                 updated_at = EXCLUDED.updated_at
             """
         )
+        await conn.execute("""
+            DO $$
+            DECLARE
+                c RECORD;
+            BEGIN
+                FOR c IN
+                    SELECT conname
+                    FROM pg_constraint
+                    WHERE conrelid = 'mw_elements'::regclass
+                      AND contype = 'c'
+                      AND pg_get_constraintdef(oid) ILIKE '%element_type%'
+                LOOP
+                    EXECUTE format('ALTER TABLE mw_elements DROP CONSTRAINT %I', c.conname);
+                END LOOP;
+
+                ALTER TABLE mw_elements
+                ADD CONSTRAINT mw_elements_element_type_check
+                CHECK (element_type IN ('offer_letter', 'review'));
+            EXCEPTION WHEN duplicate_object THEN
+                NULL;
+            END $$;
+        """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_messages (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

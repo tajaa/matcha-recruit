@@ -1,10 +1,11 @@
 export type MWThreadStatus = 'active' | 'finalized' | 'archived';
 export type MWMessageRole = 'user' | 'assistant' | 'system';
+export type MWTaskType = 'offer_letter' | 'review';
 
 export interface MWThread {
   id: string;
   title: string;
-  task_type: string;
+  task_type: MWTaskType;
   status: MWThreadStatus;
   version: number;
   created_at: string;
@@ -14,7 +15,7 @@ export interface MWThread {
 export interface MWElement {
   id: string;
   thread_id: string;
-  element_type: string;
+  element_type: MWTaskType;
   title: string;
   status: MWThreadStatus;
   version: number;
@@ -65,12 +66,22 @@ export interface MWDocumentState {
   salary_range_min?: number | null;
   salary_range_max?: number | null;
   candidate_email?: string | null;
+  review_title?: string | null;
+  review_subject?: string | null;
+  context?: string | null;
+  accomplishments?: string | null;
+  strengths?: string | null;
+  growth_areas?: string | null;
+  next_steps?: string | null;
+  summary?: string | null;
+  overall_rating?: number | null;
+  anonymized?: boolean | null;
 }
 
 export interface MWThreadDetail {
   id: string;
   title: string;
-  task_type: string;
+  task_type: MWTaskType;
   status: MWThreadStatus;
   current_state: MWDocumentState;
   version: number;

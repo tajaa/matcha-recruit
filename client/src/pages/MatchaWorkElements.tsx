@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { matchaWork } from '../api/client';
-import type { MWElement, MWThreadStatus } from '../types/matcha-work';
+import type { MWElement, MWTaskType, MWThreadStatus } from '../types/matcha-work';
 
 type StatusFilter = 'all' | MWThreadStatus;
 
@@ -23,7 +23,7 @@ export default function MatchaWorkElements() {
   const navigate = useNavigate();
   const [elements, setElements] = useState<MWElement[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [creatingType, setCreatingType] = useState<MWTaskType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
@@ -48,15 +48,16 @@ export default function MatchaWorkElements() {
     loadElements();
   }, [loadElements]);
 
-  const handleCreateChat = async () => {
+  const handleCreateElement = async (taskType: MWTaskType) => {
     try {
-      setCreating(true);
+      setCreatingType(taskType);
       setError(null);
-      const thread = await matchaWork.createThread({ title: 'Untitled Chat' });
+      const title = taskType === 'review' ? 'Untitled Review' : 'Untitled Chat';
+      const thread = await matchaWork.createThread({ title, task_type: taskType });
       navigate(`/app/matcha/work/${thread.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create chat');
-      setCreating(false);
+      setError(err instanceof Error ? err.message : 'Failed to create element');
+      setCreatingType(null);
     }
   };
 
@@ -81,13 +82,22 @@ export default function MatchaWorkElements() {
           </p>
         </div>
 
-        <button
-          onClick={handleCreateChat}
-          disabled={creating}
-          className="px-3 py-2 text-sm rounded-lg bg-matcha-600 hover:bg-matcha-700 disabled:opacity-50 text-white transition-colors"
-        >
-          {creating ? 'Creating...' : 'New Chat'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleCreateElement('offer_letter')}
+            disabled={creatingType !== null}
+            className="px-3 py-2 text-sm rounded-lg bg-matcha-600 hover:bg-matcha-700 disabled:opacity-50 text-white transition-colors"
+          >
+            {creatingType === 'offer_letter' ? 'Creating...' : 'New Offer Letter'}
+          </button>
+          <button
+            onClick={() => handleCreateElement('review')}
+            disabled={creatingType !== null}
+            className="px-3 py-2 text-sm rounded-lg bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white transition-colors"
+          >
+            {creatingType === 'review' ? 'Creating...' : 'New Anonymous Review'}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -122,11 +132,11 @@ export default function MatchaWorkElements() {
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-8 text-center">
           <p className="text-sm text-zinc-400">No elements found for this filter.</p>
           <button
-            onClick={handleCreateChat}
-            disabled={creating}
+            onClick={() => handleCreateElement('review')}
+            disabled={creatingType !== null}
             className="mt-3 px-3 py-1.5 text-xs rounded-lg bg-matcha-600 hover:bg-matcha-700 disabled:opacity-50 text-white transition-colors"
           >
-            Start in Chat
+            Start Anonymous Review
           </button>
         </div>
       ) : (
@@ -142,7 +152,7 @@ export default function MatchaWorkElements() {
                   {element.title}
                 </p>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  {element.element_type.replace('_', ' ')} · v{element.version} · Updated{' '}
+                  {element.element_type === 'review' ? 'anonymized review' : 'offer letter'} · v{element.version} · Updated{' '}
                   {formatDate(element.updated_at)}
                 </p>
               </div>

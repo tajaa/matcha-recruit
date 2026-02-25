@@ -1,8 +1,11 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+
+MatchaWorkTaskType = Literal["offer_letter", "review"]
 
 
 class OfferLetterDocument(BaseModel):
@@ -46,9 +49,25 @@ class OfferLetterDocument(BaseModel):
     candidate_email: Optional[str] = None
 
 
+class ReviewDocument(BaseModel):
+    """Incremental one-off anonymized review state."""
+
+    review_title: Optional[str] = None
+    review_subject: Optional[str] = None
+    context: Optional[str] = None
+    accomplishments: Optional[str] = None
+    strengths: Optional[str] = None
+    growth_areas: Optional[str] = None
+    next_steps: Optional[str] = None
+    summary: Optional[str] = None
+    overall_rating: Optional[int] = None
+    anonymized: Optional[bool] = None
+
+
 class CreateThreadRequest(BaseModel):
     title: Optional[str] = None
     initial_message: Optional[str] = None
+    task_type: MatchaWorkTaskType = "offer_letter"
 
 
 class CreateThreadResponse(BaseModel):
@@ -95,7 +114,7 @@ class SendMessageResponse(BaseModel):
 class ThreadListItem(BaseModel):
     id: UUID
     title: str
-    task_type: str
+    task_type: MatchaWorkTaskType
     status: str
     version: int
     created_at: datetime
@@ -105,7 +124,7 @@ class ThreadListItem(BaseModel):
 class ElementListItem(BaseModel):
     id: UUID
     thread_id: UUID
-    element_type: str
+    element_type: MatchaWorkTaskType
     title: str
     status: str
     version: int
@@ -117,7 +136,7 @@ class ElementListItem(BaseModel):
 class ThreadDetailResponse(BaseModel):
     id: UUID
     title: str
-    task_type: str
+    task_type: MatchaWorkTaskType
     status: str
     current_state: dict
     version: int

@@ -2961,6 +2961,7 @@ export const adminNews = {
 // Matcha Work API (chat-driven offer letter generation)
 import type {
   MWElement,
+  MWTaskType,
   MWThread,
   MWThreadDetail,
   MWCreateThreadResponse,
@@ -2973,7 +2974,9 @@ import type {
 } from '../types/matcha-work';
 
 export const matchaWork = {
-  createThread: (data: { title?: string; initial_message?: string }): Promise<MWCreateThreadResponse> =>
+  createThread: (
+    data: { title?: string; initial_message?: string; task_type?: MWTaskType }
+  ): Promise<MWCreateThreadResponse> =>
     request<MWCreateThreadResponse>('/matcha-work/threads', {
       method: 'POST',
       body: JSON.stringify(data),

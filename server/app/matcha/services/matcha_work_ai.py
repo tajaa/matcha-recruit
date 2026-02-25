@@ -10,15 +10,16 @@ from google import genai
 from google.genai import types
 
 from ...config import get_settings
-from ..models.matcha_work import OfferLetterDocument
+from ..models.matcha_work import OfferLetterDocument, ReviewDocument
 
 logger = logging.getLogger(__name__)
 
 GEMINI_CALL_TIMEOUT = 60
 
-VALID_FIELDS = list(OfferLetterDocument.model_fields.keys())
+OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
+REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())
 
-SYSTEM_PROMPT_TEMPLATE = """You are an offer letter assistant. Help the user create and refine a professional job offer letter.
+OFFER_LETTER_SYSTEM_PROMPT_TEMPLATE = """You are an offer letter assistant. Help the user create and refine a professional job offer letter.
 
 Current document state (JSON):
 {current_state}
@@ -46,6 +47,34 @@ Rules:
 - Return only the JSON object — no markdown fences, no extra text
 """
 
+REVIEW_SYSTEM_PROMPT_TEMPLATE = """You are an anonymized performance review assistant. Help the user draft a one-off anonymous review.
+
+Current review state (JSON):
+{current_state}
+
+Your job:
+1. Understand what the user wants to add, change, or clarify in the anonymous review.
+2. Extract structured review updates from the user's message.
+3. Reply conversationally, confirming changes and suggesting any missing details.
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "reply": "Your conversational response to the user",
+  "updates": {{
+    "field_name": "value"
+  }}
+}}
+
+Rules:
+- Only include fields in "updates" that should actually be changed
+- If no fields should be updated, use an empty object: "updates": {{}}
+- Always include both "reply" and "updates" keys
+- Valid field names: {valid_fields}
+- Keep all output professional and anonymized by default
+- For overall_rating use an integer from 1-5
+- Return only the JSON object — no markdown fences, no extra text
+"""
+
 
 def _clean_json_text(text: str) -> str:
     """Strip markdown code fences from model output."""
@@ -67,6 +96,7 @@ class MatchaWorkAIProvider:
         self,
         messages: list[dict],
         current_state: dict,
+        task_type: str = "offer_letter",
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -96,12 +126,15 @@ class GeminiProvider(MatchaWorkAIProvider):
         self,
         messages: list[dict],
         current_state: dict,
+        task_type: str = "offer_letter",
     ) -> AIResponse:
-        system_prompt, contents = self._build_prompt_and_contents(messages, current_state)
+        system_prompt, contents, valid_fields = self._build_prompt_and_contents(
+            messages, current_state, task_type=task_type
+        )
 
         try:
             response = await asyncio.wait_for(
-                asyncio.to_thread(self._call_gemini, system_prompt, contents),
+                asyncio.to_thread(self._call_gemini, system_prompt, contents, valid_fields),
                 timeout=GEMINI_CALL_TIMEOUT,
             )
             return response
@@ -118,7 +151,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 structured_update=None,
             )
 
-    def _call_gemini(self, system_prompt: str, contents: list) -> AIResponse:
+    def _call_gemini(self, system_prompt: str, contents: list, valid_fields: list[str]) -> AIResponse:
         model = self.settings.analysis_model
         response = self.client.models.generate_content(
             model=model,
@@ -149,7 +182,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         updates = parsed.get("updates", {})
 
         if isinstance(updates, dict):
-            allowed = set(VALID_FIELDS)
+            allowed = set(valid_fields)
             updates = {k: v for k, v in updates.items() if k in allowed}
         else:
             updates = {}
@@ -164,8 +197,11 @@ class GeminiProvider(MatchaWorkAIProvider):
         self,
         messages: list[dict],
         current_state: dict,
+        task_type: str = "offer_letter",
     ) -> dict:
-        system_prompt, _ = self._build_prompt_and_contents(messages, current_state)
+        system_prompt, _, _ = self._build_prompt_and_contents(
+            messages, current_state, task_type=task_type
+        )
         windowed = messages[-20:]
         char_count = len(system_prompt) + sum(len(str(msg.get("content", ""))) for msg in windowed)
         prompt_tokens = max(1, char_count // 4)
@@ -181,12 +217,22 @@ class GeminiProvider(MatchaWorkAIProvider):
         self,
         messages: list[dict],
         current_state: dict,
-    ) -> tuple[str, list]:
+        task_type: str = "offer_letter",
+    ) -> tuple[str, list, list[str]]:
         windowed = messages[-20:]
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            current_state=json.dumps(current_state, indent=2, default=str),
-            valid_fields=", ".join(VALID_FIELDS),
-        )
+        normalized_task_type = "review" if task_type == "review" else "offer_letter"
+        if normalized_task_type == "review":
+            valid_fields = REVIEW_FIELDS
+            system_prompt = REVIEW_SYSTEM_PROMPT_TEMPLATE.format(
+                current_state=json.dumps(current_state, indent=2, default=str),
+                valid_fields=", ".join(valid_fields),
+            )
+        else:
+            valid_fields = OFFER_LETTER_FIELDS
+            system_prompt = OFFER_LETTER_SYSTEM_PROMPT_TEMPLATE.format(
+                current_state=json.dumps(current_state, indent=2, default=str),
+                valid_fields=", ".join(valid_fields),
+            )
 
         contents = []
         for msg in windowed:
@@ -197,7 +243,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     parts=[types.Part(text=msg["content"])],
                 )
             )
-        return system_prompt, contents
+        return system_prompt, contents, valid_fields
 
     def _extract_usage_metadata(self, response: Any, model: str) -> Optional[dict]:
         usage = getattr(response, "usage_metadata", None)

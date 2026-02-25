@@ -11,6 +11,21 @@ import { matchaWork } from '../api/client';
 
 type Tab = 'chat' | 'preview';
 
+function toItemList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter((item) => item.length > 0);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/\n|;/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+  return [];
+}
+
 function MessageBubble({ msg }: { msg: MWMessage }) {
   const isUser = msg.role === 'user';
   const isSystem = msg.role === 'system';
@@ -93,10 +108,12 @@ export default function MatchaWorkThread() {
       setMessages(threadData.messages);
       setVersions(verData);
       setUsageSummary(usageData);
-      // Get PDF URL for current version
-      if (threadData.version > 0) {
+      // Offer-letter threads render a PDF preview.
+      if (threadData.task_type === 'offer_letter' && threadData.version > 0) {
         const pdfData = await matchaWork.getPdf(threadId);
         setPdfUrl(pdfData.pdf_url);
+      } else {
+        setPdfUrl(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load thread');
@@ -140,10 +157,12 @@ export default function MatchaWorkThread() {
           setThread((prev) =>
             prev ? { ...prev, current_state: resp.current_state, version: resp.version } : prev
           );
+          if (resp.version > 0) {
+            shouldRefreshVersions = true;
+          }
           if (resp.pdf_url) {
             setPdfUrl(resp.pdf_url);
             setActiveTab('preview');
-            shouldRefreshVersions = true;
           }
           if (resp.token_usage) {
             setTokenUsage({ ...resp.token_usage, stage: 'final' });
@@ -269,7 +288,7 @@ export default function MatchaWorkThread() {
   };
 
   const handleSaveDraft = async () => {
-    if (!threadId || savingDraft || isArchived) return;
+    if (!threadId || savingDraft || isArchived || !isOfferLetter) return;
     try {
       setSavingDraft(true);
       setError(null);
@@ -286,6 +305,8 @@ export default function MatchaWorkThread() {
 
   const isFinalized = thread?.status === 'finalized';
   const isArchived = thread?.status === 'archived';
+  const isOfferLetter = thread?.task_type === 'offer_letter';
+  const isReview = thread?.task_type === 'review';
   const inputDisabled = isFinalized || isArchived || sending;
   const formatTokenCount = (value: number | null | undefined) =>
     value == null ? '—' : value.toLocaleString();
@@ -334,6 +355,9 @@ export default function MatchaWorkThread() {
             <h1 className="text-sm font-medium text-zinc-200 truncate">{thread.title}</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-xs text-zinc-500">v{thread.version}</span>
+              <span className="text-xs bg-zinc-700/60 text-zinc-300 px-1.5 py-0.5 rounded capitalize">
+                {thread.task_type === 'review' ? 'Anonymous Review' : 'Offer Letter'}
+              </span>
               {isFinalized && (
                 <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
                   Finalized
@@ -407,7 +431,7 @@ export default function MatchaWorkThread() {
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              Preview
+              {isOfferLetter ? 'Preview' : 'Summary'}
             </button>
             <button
               onClick={() => navigate('/app/matcha/work/elements')}
@@ -417,7 +441,7 @@ export default function MatchaWorkThread() {
             </button>
           </div>
 
-          {!isArchived && (
+          {isOfferLetter && !isArchived && (
             <button
               onClick={handleSaveDraft}
               disabled={savingDraft}
@@ -472,8 +496,9 @@ export default function MatchaWorkThread() {
                 </div>
                 <p className="text-sm text-zinc-400 font-medium">Start chatting</p>
                 <p className="text-xs text-zinc-600 mt-1 max-w-xs">
-                  Describe what you want to create. Offer letters are currently supported and saved as
-                  Matcha Work elements.
+                  {isReview
+                    ? 'Describe the anonymized review you want to draft. Include strengths, growth areas, and summary details.'
+                    : 'Describe what you want to create. Offer letters and anonymized reviews are supported as Matcha Work elements.'}
                 </p>
               </div>
             ) : (
@@ -512,7 +537,11 @@ export default function MatchaWorkThread() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   disabled={inputDisabled}
-                  placeholder="Describe changes or add details..."
+                  placeholder={
+                    isReview
+                      ? 'Add anonymized review details...'
+                      : 'Describe changes or add details...'
+                  }
                   rows={1}
                   className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:border-matcha-500/50 disabled:opacity-50 transition-colors"
                   style={{ minHeight: '42px', maxHeight: '120px' }}
@@ -559,7 +588,7 @@ export default function MatchaWorkThread() {
               </button>
             </div>
             <div className="flex items-center gap-2">
-              {pdfUrl && (
+              {isOfferLetter && pdfUrl && (
                 <a
                   href={pdfUrl}
                   download={`${thread.title}.pdf`}
@@ -612,22 +641,99 @@ export default function MatchaWorkThread() {
 
           {/* PDF iframe */}
           <div className="flex-1 bg-zinc-900 min-h-0">
-            {pdfUrl ? (
-              <iframe
-                src={pdfUrl}
-                className="w-full h-full border-0"
-                title="Offer Letter Preview"
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                <div className="w-12 h-12 rounded bg-zinc-800 flex items-center justify-center mb-3">
-                  <svg className="w-6 h-6 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
+            {isOfferLetter ? (
+              pdfUrl ? (
+                <iframe
+                  src={pdfUrl}
+                  className="w-full h-full border-0"
+                  title="Offer Letter Preview"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center py-8">
+                  <div className="w-12 h-12 rounded bg-zinc-800 flex items-center justify-center mb-3">
+                    <svg className="w-6 h-6 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <p className="text-sm text-zinc-500">
+                    Preview will appear here as you add details
+                  </p>
                 </div>
-                <p className="text-sm text-zinc-500">
-                  Preview will appear here as you add details
-                </p>
+              )
+            ) : (
+              <div className="h-full overflow-y-auto p-4">
+                <div className="max-w-2xl mx-auto bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-4 space-y-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-zinc-500">Anonymous Review</p>
+                    <h3 className="text-base font-semibold text-zinc-100 mt-1">
+                      {thread.current_state.review_title || thread.current_state.review_subject || 'Untitled Review'}
+                    </h3>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="text-xs bg-zinc-700 text-zinc-200 px-2 py-0.5 rounded">
+                        {thread.current_state.anonymized === false ? 'Not anonymized' : 'Anonymized'}
+                      </span>
+                      {thread.current_state.overall_rating != null && (
+                        <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">
+                          Rating: {thread.current_state.overall_rating}/5
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {(thread.current_state.summary || thread.current_state.context) && (
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Summary</p>
+                      <p className="text-sm text-zinc-200 whitespace-pre-wrap">
+                        {thread.current_state.summary || thread.current_state.context}
+                      </p>
+                    </div>
+                  )}
+
+                  {toItemList(thread.current_state.strengths).length > 0 && (
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Strengths</p>
+                      <ul className="space-y-1">
+                        {toItemList(thread.current_state.strengths).map((item, idx) => (
+                          <li key={`${item}-${idx}`} className="text-sm text-zinc-200">
+                            • {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {toItemList(thread.current_state.growth_areas).length > 0 && (
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Growth Areas</p>
+                      <ul className="space-y-1">
+                        {toItemList(thread.current_state.growth_areas).map((item, idx) => (
+                          <li key={`${item}-${idx}`} className="text-sm text-zinc-200">
+                            • {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {thread.current_state.next_steps && (
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Next Steps</p>
+                      <p className="text-sm text-zinc-200 whitespace-pre-wrap">
+                        {thread.current_state.next_steps}
+                      </p>
+                    </div>
+                  )}
+
+                  {!thread.current_state.summary &&
+                    !thread.current_state.context &&
+                    toItemList(thread.current_state.strengths).length === 0 &&
+                    toItemList(thread.current_state.growth_areas).length === 0 &&
+                    !thread.current_state.next_steps && (
+                      <p className="text-sm text-zinc-500">
+                        Review summary will appear here as details are captured.
+                      </p>
+                    )}
+                </div>
               </div>
             )}
           </div>
@@ -638,10 +744,13 @@ export default function MatchaWorkThread() {
       {showFinalizeConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl">
-            <h2 className="text-base font-semibold text-zinc-100 mb-2">Finalize offer letter?</h2>
+            <h2 className="text-base font-semibold text-zinc-100 mb-2">
+              {isOfferLetter ? 'Finalize offer letter?' : 'Finalize anonymous review?'}
+            </h2>
             <p className="text-sm text-zinc-400 mb-5">
-              This will lock the document and generate a final PDF without a watermark. You won't be
-              able to make further edits.
+              {isOfferLetter
+                ? "This will lock the document and generate a final PDF without a watermark. You won't be able to make further edits."
+                : "This will lock the review and prevent further edits. You can still view the final thread content."}
             </p>
             <div className="flex gap-2">
               <button

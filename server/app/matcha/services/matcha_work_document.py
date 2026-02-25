@@ -121,13 +121,15 @@ async def create_thread(
     company_id: UUID,
     user_id: UUID,
     title: str = "Untitled Chat",
+    task_type: str = "offer_letter",
 ) -> dict:
+    normalized_task_type = "review" if task_type == "review" else "offer_letter"
     async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                INSERT INTO mw_threads(company_id, created_by, title)
-                VALUES($1, $2, $3)
+                INSERT INTO mw_threads(company_id, created_by, title, task_type)
+                VALUES($1, $2, $3, $4)
                 RETURNING id, company_id, created_by, title, task_type, status,
                           current_state, version, linked_offer_letter_id,
                           created_at, updated_at
@@ -135,6 +137,7 @@ async def create_thread(
                 company_id,
                 user_id,
                 title,
+                normalized_task_type,
             )
             await _upsert_element_from_thread_row(conn, dict(row))
         d = dict(row)
@@ -870,7 +873,7 @@ async def finalize_thread(thread_id: UUID, company_id: UUID) -> dict:
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT current_state, version, status
+                SELECT current_state, version, status, task_type
                 FROM mw_threads
                 WHERE id=$1 AND company_id=$2
                 FOR UPDATE
@@ -892,9 +895,12 @@ async def finalize_thread(thread_id: UUID, company_id: UUID) -> dict:
             await _sync_element_for_thread(conn, thread_id)
             current_state = _parse_jsonb(row["current_state"])
             version = row["version"]
+            task_type = row["task_type"]
 
-    # Generate final PDF outside the transaction (CPU-bound, may be slow)
-    pdf_url = await generate_pdf(current_state, thread_id, version, is_draft=False)
+    pdf_url = None
+    if task_type == "offer_letter":
+        # Generate final PDF outside the transaction (CPU-bound, may be slow)
+        pdf_url = await generate_pdf(current_state, thread_id, version, is_draft=False)
 
     return {
         "thread_id": thread_id,

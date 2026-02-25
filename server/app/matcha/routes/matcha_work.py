@@ -1,4 +1,4 @@
-"""Matcha Work — chat-driven, AI-powered offer letter generation."""
+"""Matcha Work — chat-driven AI workspace for HR document elements."""
 
 import json
 import logging
@@ -18,6 +18,7 @@ from ..models.matcha_work import (
     ElementListItem,
     FinalizeResponse,
     MWMessageOut,
+    ReviewDocument,
     RevertRequest,
     SaveDraftResponse,
     SendMessageRequest,
@@ -35,12 +36,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-VALID_DOCUMENT_FIELDS = set(OfferLetterDocument.model_fields.keys())
+VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys())
+VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
 
 
-def _validate_updates(updates: dict) -> dict:
-    """Filter AI updates to only known OfferLetterDocument fields."""
-    return {k: v for k, v in updates.items() if k in VALID_DOCUMENT_FIELDS}
+def _normalize_task_type(task_type: Optional[str]) -> str:
+    return "review" if task_type == "review" else "offer_letter"
+
+
+def _is_offer_letter_task(task_type: Optional[str]) -> bool:
+    return _normalize_task_type(task_type) == "offer_letter"
+
+
+def _validate_updates(task_type: Optional[str], updates: dict) -> dict:
+    """Filter AI updates to known fields for the thread task type."""
+    valid_fields = VALID_OFFER_LETTER_FIELDS if _is_offer_letter_task(task_type) else VALID_REVIEW_FIELDS
+    return {k: v for k, v in updates.items() if k in valid_fields}
 
 
 def _row_to_message(row: dict) -> MWMessageOut:
@@ -68,8 +79,10 @@ async def create_thread(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with this account")
 
-    title = body.title or "Untitled Chat"
-    thread = await doc_svc.create_thread(company_id, current_user.id, title)
+    task_type = _normalize_task_type(body.task_type)
+    default_title = "Untitled Review" if task_type == "review" else "Untitled Chat"
+    title = body.title or default_title
+    thread = await doc_svc.create_thread(company_id, current_user.id, title, task_type=task_type)
     thread_id = thread["id"]
 
     assistant_reply = None
@@ -82,20 +95,29 @@ async def create_thread(
         # Call AI
         ai_provider = get_ai_provider()
         messages = [{"role": "user", "content": body.initial_message}]
-        estimated_usage = ai_provider.estimate_usage(messages, thread["current_state"])
-        ai_resp = await ai_provider.generate(messages, thread["current_state"])
+        estimated_usage = ai_provider.estimate_usage(
+            messages, thread["current_state"], task_type=thread["task_type"]
+        )
+        ai_resp = await ai_provider.generate(
+            messages, thread["current_state"], task_type=thread["task_type"]
+        )
         final_usage = ai_resp.token_usage or estimated_usage
 
         new_version = thread["version"]
+        applied_update = False
         if ai_resp.structured_update:
-            safe_updates = _validate_updates(ai_resp.structured_update)
+            safe_updates = _validate_updates(thread["task_type"], ai_resp.structured_update)
             if safe_updates:
                 result = await doc_svc.apply_update(thread_id, safe_updates)
                 new_version = result["version"]
                 thread["current_state"] = result["current_state"]
+                applied_update = True
 
         await doc_svc.add_message(
-            thread_id, "assistant", ai_resp.assistant_reply, version_created=new_version
+            thread_id,
+            "assistant",
+            ai_resp.assistant_reply,
+            version_created=new_version if applied_update else None,
         )
         try:
             await doc_svc.log_token_usage_event(
@@ -111,8 +133,8 @@ async def create_thread(
         thread["version"] = new_version
         assistant_reply = ai_resp.assistant_reply
 
-        # Generate PDF if there are document fields
-        if thread["current_state"]:
+        # Offer-letter threads render draft PDFs; review threads remain chat-only.
+        if _is_offer_letter_task(thread["task_type"]) and thread["current_state"]:
             pdf_url = await doc_svc.generate_pdf(
                 thread["current_state"], thread_id, new_version, is_draft=True
             )
@@ -221,33 +243,40 @@ async def send_message(
 
     # Call AI
     ai_provider = get_ai_provider()
-    estimated_usage = ai_provider.estimate_usage(msg_dicts, thread["current_state"])
-    ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"])
+    estimated_usage = ai_provider.estimate_usage(
+        msg_dicts, thread["current_state"], task_type=thread["task_type"]
+    )
+    ai_resp = await ai_provider.generate(
+        msg_dicts, thread["current_state"], task_type=thread["task_type"]
+    )
     final_usage = ai_resp.token_usage or estimated_usage
 
     current_version = thread["version"]
     current_state = thread["current_state"]
     pdf_url = None
+    applied_update = False
 
     # Apply updates if AI returned any
     if ai_resp.structured_update:
-        safe_updates = _validate_updates(ai_resp.structured_update)
+        safe_updates = _validate_updates(thread["task_type"], ai_resp.structured_update)
         if safe_updates:
             result = await doc_svc.apply_update(thread_id, safe_updates)
             current_version = result["version"]
             current_state = result["current_state"]
+            applied_update = True
 
-            # Generate PDF
-            pdf_url = await doc_svc.generate_pdf(
-                current_state, thread_id, current_version, is_draft=True
-            )
+            if _is_offer_letter_task(thread["task_type"]):
+                # Generate PDF for offer-letter mode.
+                pdf_url = await doc_svc.generate_pdf(
+                    current_state, thread_id, current_version, is_draft=True
+                )
 
     # Save assistant message
     assistant_msg = await doc_svc.add_message(
         thread_id,
         "assistant",
         ai_resp.assistant_reply,
-        version_created=current_version if ai_resp.structured_update else None,
+        version_created=current_version if applied_update else None,
     )
 
     try:
@@ -300,7 +329,9 @@ async def send_message_stream(
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     ai_provider = get_ai_provider()
-    estimated_usage = ai_provider.estimate_usage(msg_dicts, thread["current_state"])
+    estimated_usage = ai_provider.estimate_usage(
+        msg_dicts, thread["current_state"], task_type=thread["task_type"]
+    )
 
     async def event_stream():
         try:
@@ -314,31 +345,36 @@ async def send_message_stream(
                 }
             )
 
-            ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"])
+            ai_resp = await ai_provider.generate(
+                msg_dicts, thread["current_state"], task_type=thread["task_type"]
+            )
 
             current_version = thread["version"]
             current_state = thread["current_state"]
             pdf_url = None
+            applied_update = False
 
             # Apply updates if AI returned any
             if ai_resp.structured_update:
-                safe_updates = _validate_updates(ai_resp.structured_update)
+                safe_updates = _validate_updates(thread["task_type"], ai_resp.structured_update)
                 if safe_updates:
                     result = await doc_svc.apply_update(thread_id, safe_updates)
                     current_version = result["version"]
                     current_state = result["current_state"]
+                    applied_update = True
 
-                    # Generate PDF
-                    pdf_url = await doc_svc.generate_pdf(
-                        current_state, thread_id, current_version, is_draft=True
-                    )
+                    if _is_offer_letter_task(thread["task_type"]):
+                        # Generate PDF for offer-letter mode.
+                        pdf_url = await doc_svc.generate_pdf(
+                            current_state, thread_id, current_version, is_draft=True
+                        )
 
             # Save assistant message
             assistant_msg = await doc_svc.add_message(
                 thread_id,
                 "assistant",
                 ai_resp.assistant_reply,
-                version_created=current_version if ai_resp.structured_update else None,
+                version_created=current_version if applied_update else None,
             )
 
             final_usage = ai_resp.token_usage or estimated_usage
@@ -473,7 +509,9 @@ async def revert_thread(
         version_created=new_version,
     )
 
-    pdf_url = await doc_svc.generate_pdf(new_state, thread_id, new_version, is_draft=True)
+    pdf_url = None
+    if _is_offer_letter_task(thread["task_type"]):
+        pdf_url = await doc_svc.generate_pdf(new_state, thread_id, new_version, is_draft=True)
 
     return SendMessageResponse(
         user_message=_row_to_message(system_msg),
@@ -512,6 +550,12 @@ async def save_draft(
     if company_id is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not _is_offer_letter_task(thread["task_type"]):
+        raise HTTPException(status_code=400, detail="Save draft is only available for offer letters")
+
     try:
         result = await doc_svc.save_offer_letter_draft(thread_id, company_id)
     except ValueError as e:
@@ -537,6 +581,8 @@ async def get_pdf(
     thread = await doc_svc.get_thread(thread_id, company_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+    if not _is_offer_letter_task(thread["task_type"]):
+        raise HTTPException(status_code=400, detail="PDF preview is only available for offer letters")
 
     target_version = version if version is not None else thread["version"]
     state = thread["current_state"]
