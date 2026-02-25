@@ -2161,6 +2161,31 @@ export interface HandbookAcknowledgementSummary {
   expired_count: number;
 }
 
+export interface HandbookFreshnessFinding {
+  section_key: string | null;
+  finding_type: string;
+  summary: string;
+  change_request_id: string | null;
+  source_url: string | null;
+  effective_date: string | null;
+}
+
+export interface HandbookFreshnessCheck {
+  check_id: string;
+  handbook_id: string;
+  check_type: 'manual' | 'scheduled';
+  status: 'running' | 'completed' | 'failed';
+  is_outdated: boolean;
+  impacted_sections: number;
+  new_change_requests_count: number;
+  requirements_last_updated_at: string | null;
+  data_staleness_days: number | null;
+  current_fingerprint: string | null;
+  previous_fingerprint: string | null;
+  checked_at: string;
+  findings: HandbookFreshnessFinding[];
+}
+
 export interface HandbookGuidedQuestion {
   id: string;
   question: string;

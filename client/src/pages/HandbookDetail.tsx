@@ -13,11 +13,13 @@ import {
   Check,
   Star,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import { handbooks } from '../api/client';
 import type {
   HandbookChangeRequest,
   HandbookDetail as HandbookDetailData,
+  HandbookFreshnessCheck,
   HandbookSection,
 } from '../types';
 import HandbookDistributeModal from '../components/HandbookDistributeModal';
@@ -51,7 +53,9 @@ function HandbookDetailPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [distributionLoading, setDistributionLoading] = useState(false);
+  const [freshnessLoading, setFreshnessLoading] = useState(false);
   const [showDistributeModal, setShowDistributeModal] = useState(false);
+  const [freshnessCheck, setFreshnessCheck] = useState<HandbookFreshnessCheck | null>(null);
   const [activeSectionTabId, setActiveSectionTabId] = useState<string | null>(null);
   const [sectionSearch, setSectionSearch] = useState('');
   const [highlightedSectionTabIds, setHighlightedSectionTabIds] = useState<string[]>([]);
@@ -66,15 +70,17 @@ function HandbookDetailPage() {
     try {
       setLoading(true);
       setLoadError(null);
-      const [detail, changeRows, ack] = await Promise.all([
+      const [detail, changeRows, ack, latestFreshness] = await Promise.all([
         handbooks.get(id),
         handbooks.listChanges(id).catch(() => []),
         handbooks.acknowledgements(id).catch(() => null),
+        handbooks.getLatestFreshnessCheck(id).catch(() => null),
       ]);
       setHandbook(detail);
       setSections(detail.sections || []);
       setChanges(changeRows || []);
       setAckSummary(ack);
+      setFreshnessCheck(latestFreshness);
     } catch (error) {
       console.error('Failed to load handbook detail:', error);
       setLoadError(error instanceof Error ? error.message : 'Failed to load handbook');
@@ -346,6 +352,32 @@ function HandbookDetailPage() {
     setShowDistributeModal(true);
   };
 
+  const handleRunFreshnessCheck = async () => {
+    if (!id || freshnessLoading) return;
+    try {
+      setFreshnessLoading(true);
+      const result = await handbooks.runFreshnessCheck(id);
+      setFreshnessCheck(result);
+      await loadData();
+      if (result.new_change_requests_count > 0) {
+        alert(
+          `Freshness check found ${result.impacted_sections} impacted section(s) and created ${result.new_change_requests_count} pending change request(s).`
+        );
+      } else if (result.is_outdated) {
+        alert(
+          `Freshness check found requirement changes, but no new change requests were created (likely already pending).`
+        );
+      } else {
+        alert('Handbook appears up to date with current requirement data.');
+      }
+    } catch (error) {
+      console.error('Failed to run handbook freshness check:', error);
+      alert(error instanceof Error ? error.message : 'Failed to run freshness check');
+    } finally {
+      setFreshnessLoading(false);
+    }
+  };
+
   const handleConfirmDistribution = async (employeeIds?: string[]) => {
     if (!id || distributionLoading) return;
     try {
@@ -463,6 +495,16 @@ function HandbookDetailPage() {
             <Download size={12} />
             PDF
           </button>
+          {handbook.status !== 'archived' && (
+            <button
+              onClick={handleRunFreshnessCheck}
+              disabled={freshnessLoading}
+              className="flex items-center gap-1.5 text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider font-medium px-3 py-2 transition-colors border border-zinc-700 hover:border-zinc-500 disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={freshnessLoading ? 'animate-spin' : ''} />
+              {freshnessLoading ? 'Checking...' : 'Check Updates'}
+            </button>
+          )}
           {handbook.status !== 'active' && (
             <button
               onClick={handlePublish}
@@ -758,6 +800,54 @@ function HandbookDetailPage() {
                 >
                   Clear Highlights
                 </button>
+              </div>
+            )}
+          </div>
+
+          <div className="border border-white/10 bg-zinc-950 p-5 space-y-3">
+            <h2 className="text-[10px] uppercase tracking-widest text-zinc-400 border-b border-white/10 pb-2">Freshness Check</h2>
+            {!freshnessCheck ? (
+              <p className="text-xs text-zinc-500">
+                No freshness checks have been run for this handbook yet.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <div className={`text-xs ${
+                  freshnessCheck.status === 'running'
+                    ? 'text-sky-300'
+                    : freshnessCheck.status === 'failed'
+                    ? 'text-red-400'
+                    : freshnessCheck.is_outdated
+                    ? 'text-amber-300'
+                    : 'text-emerald-300'
+                }`}>
+                  {freshnessCheck.status === 'running'
+                    ? 'Check in progress'
+                    : freshnessCheck.status === 'failed'
+                    ? 'Last check failed'
+                    : freshnessCheck.is_outdated
+                    ? 'Potential updates detected'
+                    : 'Up to date'}
+                </div>
+                <div className="text-xs text-zinc-500">
+                  Checked: {new Date(freshnessCheck.checked_at).toLocaleString()}
+                </div>
+                <div className="text-xs text-zinc-400">
+                  Impacted sections: {freshnessCheck.impacted_sections}
+                </div>
+                <div className="text-xs text-zinc-400">
+                  New change requests: {freshnessCheck.new_change_requests_count}
+                </div>
+                {freshnessCheck.requirements_last_updated_at && (
+                  <div className="text-xs text-zinc-500">
+                    Requirement data updated: {new Date(freshnessCheck.requirements_last_updated_at).toLocaleString()}
+                  </div>
+                )}
+                {freshnessCheck.data_staleness_days != null && (
+                  <div className="text-xs text-zinc-500">
+                    Requirement data staleness: {freshnessCheck.data_staleness_days} day{freshnessCheck.data_staleness_days === 1 ? '' : 's'}
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date, datetime, timedelta
+from hashlib import sha256
 import json
 import html
 import re
@@ -18,6 +19,8 @@ from ..models.handbook import (
     HandbookDetailResponse,
     HandbookDistributionRecipientResponse,
     HandbookDistributionResponse,
+    HandbookFreshnessCheckResponse,
+    HandbookFreshnessFindingResponse,
     HandbookGuidedDraftRequest,
     HandbookGuidedDraftResponse,
     HandbookGuidedQuestion,
@@ -1236,6 +1239,93 @@ def _requirements_cover_topic(requirements: list[dict[str, Any]], topic: str) ->
         if any(pattern in haystack for pattern in patterns):
             return True
     return False
+
+
+def _stringify_temporal(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return str(value)
+
+
+def _build_requirements_fingerprint(
+    state_requirement_map: dict[str, list[dict[str, Any]]],
+) -> tuple[str, Optional[datetime], int]:
+    records: list[dict[str, Optional[str]]] = []
+    latest_updated_at: Optional[datetime] = None
+
+    for state in sorted(state_requirement_map.keys()):
+        for row in state_requirement_map.get(state, []):
+            updated_at = row.get("updated_at")
+            if isinstance(updated_at, datetime):
+                if latest_updated_at is None or updated_at > latest_updated_at:
+                    latest_updated_at = updated_at
+
+            records.append(
+                {
+                    "state": state,
+                    "category": _stringify_temporal(row.get("category")),
+                    "jurisdiction_level": _stringify_temporal(row.get("jurisdiction_level")),
+                    "jurisdiction_name": _stringify_temporal(row.get("jurisdiction_name")),
+                    "title": _stringify_temporal(row.get("title")),
+                    "current_value": _stringify_temporal(row.get("current_value")),
+                    "effective_date": _stringify_temporal(row.get("effective_date")),
+                    "source_url": _stringify_temporal(row.get("source_url")),
+                    "source_name": _stringify_temporal(row.get("source_name")),
+                    "updated_at": _stringify_temporal(updated_at),
+                }
+            )
+
+    records.sort(
+        key=lambda item: (
+            item.get("state") or "",
+            item.get("category") or "",
+            item.get("jurisdiction_level") or "",
+            item.get("jurisdiction_name") or "",
+            item.get("title") or "",
+            item.get("current_value") or "",
+            item.get("effective_date") or "",
+            item.get("updated_at") or "",
+        )
+    )
+    payload = json.dumps(records, sort_keys=True, separators=(",", ":"))
+    return sha256(payload.encode("utf-8")).hexdigest(), latest_updated_at, len(records)
+
+
+def _state_section_key(state: str) -> str:
+    return f"state_addendum_{state.lower()}"
+
+
+def _normalize_section_content(value: Optional[str]) -> str:
+    return (value or "").strip()
+
+
+def _select_finding_source_url(requirements: list[dict[str, Any]]) -> Optional[str]:
+    for req in requirements:
+        source_url = _normalize_text_snippet(req.get("source_url"), max_len=1000)
+        if source_url:
+            return source_url
+    return None
+
+
+def _select_latest_effective_date(requirements: list[dict[str, Any]]) -> Optional[date]:
+    latest_effective: Optional[date] = None
+    for req in requirements:
+        raw = req.get("effective_date")
+        candidate: Optional[date] = None
+        if isinstance(raw, datetime):
+            candidate = raw.date()
+        elif isinstance(raw, date):
+            candidate = raw
+        elif isinstance(raw, str):
+            try:
+                candidate = date.fromisoformat(raw[:10])
+            except ValueError:
+                candidate = None
+        if candidate and (latest_effective is None or candidate > latest_effective):
+            latest_effective = candidate
+    return latest_effective
 
 
 def _validate_required_state_coverage(
@@ -2706,6 +2796,373 @@ class HandbookService:
                     )
 
         return HandbookChangeRequestResponse(**dict(updated)) if updated else None
+
+    @staticmethod
+    def _build_freshness_response(
+        check_row: dict[str, Any],
+        findings_rows: list[dict[str, Any]],
+    ) -> HandbookFreshnessCheckResponse:
+        findings = [
+            HandbookFreshnessFindingResponse(
+                section_key=row.get("section_key"),
+                finding_type=row.get("finding_type") or "info",
+                summary=row.get("summary") or "",
+                change_request_id=row.get("change_request_id"),
+                source_url=row.get("source_url"),
+                effective_date=row.get("effective_date"),
+            )
+            for row in findings_rows
+        ]
+
+        checked_at = check_row.get("completed_at") or check_row.get("created_at") or datetime.utcnow()
+        return HandbookFreshnessCheckResponse(
+            check_id=check_row["id"],
+            handbook_id=check_row["handbook_id"],
+            check_type=check_row["check_type"],
+            status=check_row["status"],
+            is_outdated=bool(check_row.get("is_outdated")),
+            impacted_sections=int(check_row.get("impacted_sections") or 0),
+            new_change_requests_count=int(check_row.get("changes_created") or 0),
+            requirements_last_updated_at=check_row.get("requirements_last_updated_at"),
+            data_staleness_days=check_row.get("data_staleness_days"),
+            current_fingerprint=check_row.get("requirements_fingerprint"),
+            previous_fingerprint=check_row.get("previous_fingerprint"),
+            checked_at=checked_at,
+            findings=findings,
+        )
+
+    @staticmethod
+    async def get_latest_freshness_check(
+        handbook_id: str,
+        company_id: str,
+    ) -> Optional[HandbookFreshnessCheckResponse]:
+        async with get_connection() as conn:
+            exists = await conn.fetchval(
+                "SELECT 1 FROM handbooks WHERE id = $1 AND company_id = $2",
+                handbook_id,
+                company_id,
+            )
+            if not exists:
+                return None
+
+            check_row = await conn.fetchrow(
+                """
+                SELECT *
+                FROM handbook_freshness_checks
+                WHERE handbook_id = $1 AND company_id = $2
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                handbook_id,
+                company_id,
+            )
+            if not check_row:
+                return None
+
+            finding_rows = await conn.fetch(
+                """
+                SELECT section_key, finding_type, summary, change_request_id, source_url, effective_date
+                FROM handbook_freshness_findings
+                WHERE freshness_check_id = $1
+                ORDER BY created_at ASC
+                """,
+                check_row["id"],
+            )
+            return HandbookService._build_freshness_response(
+                dict(check_row),
+                [dict(row) for row in finding_rows],
+            )
+
+    @staticmethod
+    async def run_freshness_check(
+        handbook_id: str,
+        company_id: str,
+        triggered_by: Optional[str] = None,
+        check_type: str = "manual",
+    ) -> Optional[HandbookFreshnessCheckResponse]:
+        if check_type not in {"manual", "scheduled"}:
+            raise ValueError("Invalid freshness check type")
+
+        async with get_connection() as conn:
+            handbook_exists = await conn.fetchval(
+                "SELECT 1 FROM handbooks WHERE id = $1 AND company_id = $2",
+                handbook_id,
+                company_id,
+            )
+            if not handbook_exists:
+                return None
+
+            check_id = await conn.fetchval(
+                """
+                INSERT INTO handbook_freshness_checks (
+                    handbook_id,
+                    company_id,
+                    triggered_by,
+                    check_type,
+                    status,
+                    created_at
+                )
+                VALUES ($1, $2, $3, $4, 'running', NOW())
+                RETURNING id
+                """,
+                handbook_id,
+                company_id,
+                triggered_by,
+                check_type,
+            )
+
+            try:
+                async with conn.transaction():
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext($1))",
+                        f"handbook-freshness:{company_id}:{handbook_id}",
+                    )
+
+                    handbook_row = await conn.fetchrow(
+                        "SELECT id, active_version FROM handbooks WHERE id = $1 AND company_id = $2",
+                        handbook_id,
+                        company_id,
+                    )
+                    if not handbook_row:
+                        raise ValueError("Handbook not found")
+
+                    version_id = await HandbookService._get_active_version_id(
+                        conn,
+                        handbook_id,
+                        handbook_row["active_version"],
+                    )
+                    if version_id is None:
+                        raise ValueError("Active handbook version not found")
+
+                    scope_rows = await conn.fetch(
+                        """
+                        SELECT state, city, zipcode, location_id
+                        FROM handbook_scopes
+                        WHERE handbook_id = $1
+                        ORDER BY state, city NULLS LAST, zipcode NULLS LAST
+                        """,
+                        handbook_id,
+                    )
+                    scopes = [dict(row) for row in scope_rows]
+
+                    profile = await HandbookService.get_or_default_profile(company_id)
+                    profile_data = profile.model_dump(
+                        exclude={"company_id", "updated_by", "updated_at"},
+                    )
+                    normalized_profile = _normalize_profile(CompanyHandbookProfileInput(**profile_data))
+
+                    requirement_map = await _fetch_state_requirements(conn, scopes)
+                    current_fingerprint, latest_requirement_update, _ = _build_requirements_fingerprint(
+                        requirement_map
+                    )
+                    previous_fingerprint = await conn.fetchval(
+                        """
+                        SELECT requirements_fingerprint
+                        FROM handbook_freshness_checks
+                        WHERE handbook_id = $1
+                          AND company_id = $2
+                          AND status = 'completed'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        handbook_id,
+                        company_id,
+                    )
+
+                    section_rows = await conn.fetch(
+                        """
+                        SELECT section_key, content
+                        FROM handbook_sections
+                        WHERE handbook_version_id = $1
+                        """,
+                        version_id,
+                    )
+                    sections_by_key = {row["section_key"]: row["content"] for row in section_rows}
+
+                    states, selected_cities_by_state, _ = _collect_state_city_scope(scopes)
+                    impacted_sections = 0
+                    changes_created = 0
+
+                    for state in states:
+                        section_key = _state_section_key(state)
+                        if section_key not in sections_by_key:
+                            continue
+
+                        requirements = requirement_map.get(state, [])
+                        proposed_content = _build_state_addendum_content(
+                            state=state,
+                            state_name=STATE_NAMES.get(state, state),
+                            profile=normalized_profile,
+                            requirements=requirements,
+                            selected_cities=selected_cities_by_state.get(state),
+                        )
+                        old_content = sections_by_key.get(section_key) or ""
+                        if _normalize_section_content(old_content) == _normalize_section_content(proposed_content):
+                            continue
+
+                        impacted_sections += 1
+                        source_url = _select_finding_source_url(requirements)
+                        effective_date = _select_latest_effective_date(requirements)
+
+                        existing_pending_change_id = await conn.fetchval(
+                            """
+                            SELECT id
+                            FROM handbook_change_requests
+                            WHERE handbook_id = $1
+                              AND handbook_version_id = $2
+                              AND section_key = $3
+                              AND status = 'pending'
+                              AND proposed_content = $4
+                            LIMIT 1
+                            """,
+                            handbook_id,
+                            version_id,
+                            section_key,
+                            proposed_content,
+                        )
+
+                        change_request_id = existing_pending_change_id
+                        finding_type = "already_pending" if existing_pending_change_id else "change_request_created"
+                        summary = (
+                            f"{STATE_NAMES.get(state, state)} addendum appears outdated based on current jurisdiction requirements."
+                        )
+
+                        if not existing_pending_change_id:
+                            change_request_id = await conn.fetchval(
+                                """
+                                INSERT INTO handbook_change_requests (
+                                    handbook_id,
+                                    handbook_version_id,
+                                    section_key,
+                                    old_content,
+                                    proposed_content,
+                                    rationale,
+                                    source_url,
+                                    effective_date,
+                                    status,
+                                    created_at
+                                )
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', NOW())
+                                RETURNING id
+                                """,
+                                handbook_id,
+                                version_id,
+                                section_key,
+                                old_content,
+                                proposed_content,
+                                "Automated handbook freshness check detected newer statutory baseline language.",
+                                source_url,
+                                effective_date,
+                            )
+                            changes_created += 1
+
+                        await conn.execute(
+                            """
+                            INSERT INTO handbook_freshness_findings (
+                                freshness_check_id,
+                                handbook_id,
+                                section_key,
+                                finding_type,
+                                summary,
+                                old_content,
+                                proposed_content,
+                                source_url,
+                                effective_date,
+                                change_request_id,
+                                created_at
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+                            """,
+                            check_id,
+                            handbook_id,
+                            section_key,
+                            finding_type,
+                            summary,
+                            old_content,
+                            proposed_content,
+                            source_url,
+                            effective_date,
+                            change_request_id,
+                        )
+
+                    is_outdated = bool(
+                        impacted_sections > 0
+                        or (
+                            previous_fingerprint
+                            and current_fingerprint
+                            and previous_fingerprint != current_fingerprint
+                        )
+                    )
+                    data_staleness_days = (
+                        (datetime.utcnow().date() - latest_requirement_update.date()).days
+                        if latest_requirement_update
+                        else None
+                    )
+
+                    await conn.execute(
+                        """
+                        UPDATE handbook_freshness_checks
+                        SET
+                            status = 'completed',
+                            is_outdated = $1,
+                            impacted_sections = $2,
+                            changes_created = $3,
+                            requirements_fingerprint = $4,
+                            previous_fingerprint = $5,
+                            requirements_last_updated_at = $6,
+                            data_staleness_days = $7,
+                            completed_at = NOW()
+                        WHERE id = $8
+                        """,
+                        is_outdated,
+                        impacted_sections,
+                        changes_created,
+                        current_fingerprint,
+                        previous_fingerprint,
+                        latest_requirement_update,
+                        data_staleness_days,
+                        check_id,
+                    )
+
+                    if changes_created > 0:
+                        await conn.execute(
+                            """
+                            UPDATE handbooks
+                            SET updated_at = NOW(), file_url = NULL, file_name = NULL
+                            WHERE id = $1
+                            """,
+                            handbook_id,
+                        )
+
+                    check_row = await conn.fetchrow(
+                        "SELECT * FROM handbook_freshness_checks WHERE id = $1",
+                        check_id,
+                    )
+                    finding_rows = await conn.fetch(
+                        """
+                        SELECT section_key, finding_type, summary, change_request_id, source_url, effective_date
+                        FROM handbook_freshness_findings
+                        WHERE freshness_check_id = $1
+                        ORDER BY created_at ASC
+                        """,
+                        check_id,
+                    )
+
+                return HandbookService._build_freshness_response(
+                    dict(check_row),
+                    [dict(row) for row in finding_rows],
+                )
+            except Exception as exc:
+                await conn.execute(
+                    """
+                    UPDATE handbook_freshness_checks
+                    SET status = 'failed', error_message = $1, completed_at = NOW()
+                    WHERE id = $2
+                    """,
+                    str(exc),
+                    check_id,
+                )
+                raise
 
     @staticmethod
     async def _ensure_handbook_pdf(

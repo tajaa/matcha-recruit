@@ -198,6 +198,31 @@ class HandbookAcknowledgementSummary(BaseModel):
     expired_count: int
 
 
+class HandbookFreshnessFindingResponse(BaseModel):
+    section_key: Optional[str] = None
+    finding_type: str
+    summary: str
+    change_request_id: Optional[UUID] = None
+    source_url: Optional[str] = None
+    effective_date: Optional[date] = None
+
+
+class HandbookFreshnessCheckResponse(BaseModel):
+    check_id: UUID
+    handbook_id: UUID
+    check_type: Literal["manual", "scheduled"]
+    status: Literal["running", "completed", "failed"]
+    is_outdated: bool
+    impacted_sections: int
+    new_change_requests_count: int
+    requirements_last_updated_at: Optional[datetime] = None
+    data_staleness_days: Optional[int] = None
+    current_fingerprint: Optional[str] = None
+    previous_fingerprint: Optional[str] = None
+    checked_at: datetime
+    findings: list[HandbookFreshnessFindingResponse] = Field(default_factory=list)
+
+
 class HandbookGuidedQuestion(BaseModel):
     id: str = Field(..., min_length=2, max_length=80)
     question: str = Field(..., min_length=4, max_length=500)

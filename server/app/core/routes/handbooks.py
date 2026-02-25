@@ -17,6 +17,7 @@ from ..models.handbook import (
     HandbookDistributionRecipientResponse,
     HandbookDistributionRequest,
     HandbookDistributionResponse,
+    HandbookFreshnessCheckResponse,
     HandbookGuidedDraftRequest,
     HandbookGuidedDraftResponse,
     HandbookListItemResponse,
@@ -359,6 +360,49 @@ async def get_handbook_acknowledgements(
     if summary is None:
         raise HTTPException(status_code=404, detail="Handbook not found")
     return summary
+
+
+@router.get("/{handbook_id}/freshness-check/latest", response_model=Optional[HandbookFreshnessCheckResponse])
+async def get_latest_handbook_freshness_check(
+    handbook_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    handbook = await HandbookService.get_handbook_by_id(handbook_id, str(company_id))
+    if handbook is None:
+        raise HTTPException(status_code=404, detail="Handbook not found")
+
+    return await HandbookService.get_latest_freshness_check(
+        handbook_id,
+        str(company_id),
+    )
+
+
+@router.post("/{handbook_id}/freshness-check", response_model=HandbookFreshnessCheckResponse)
+async def run_handbook_freshness_check(
+    handbook_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await HandbookService.run_freshness_check(
+            handbook_id,
+            str(company_id),
+            triggered_by=str(current_user.id),
+            check_type="manual",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Handbook not found")
+    return result
 
 
 @router.get("/{handbook_id}/pdf")

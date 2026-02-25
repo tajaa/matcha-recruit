@@ -135,6 +135,7 @@ import type {
   HandbookDistributionResult,
   HandbookDistributionRecipient,
   HandbookAcknowledgementSummary,
+  HandbookFreshnessCheck,
   HandbookReference,
   OfferLetter,
   OfferLetterCreate,
@@ -2391,6 +2392,14 @@ export const handbooks = {
 
   acknowledgements: (id: string) =>
     request<HandbookAcknowledgementSummary>(`/handbooks/${id}/acknowledgements`),
+
+  getLatestFreshnessCheck: (id: string) =>
+    request<HandbookFreshnessCheck | null>(`/handbooks/${id}/freshness-check/latest`),
+
+  runFreshnessCheck: (id: string) =>
+    request<HandbookFreshnessCheck>(`/handbooks/${id}/freshness-check`, {
+      method: 'POST',
+    }),
 
   downloadPdf: async (id: string, title: string): Promise<void> => {
     const token = getAccessToken();
