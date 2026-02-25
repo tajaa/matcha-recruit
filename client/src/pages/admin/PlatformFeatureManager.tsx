@@ -110,9 +110,25 @@ function DroppableZone({ id, children, className }: { id: string; children: Reac
 export function PlatformFeatureManager({ onClose }: Props) {
   const { platformFeatures, setPlatformFeatures } = useAuth();
   const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set(platformFeatures));
+  const [modelMode, setModelMode] = useState<'light' | 'heavy'>('light');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch initial settings
+  useState(() => {
+    setLoading(true);
+    adminPlatformSettings.get()
+      .then(data => {
+        setModelMode(data.matcha_work_model_mode as 'light' | 'heavy');
+      })
+      .catch(() => {
+        // Fallback if settings don't exist yet
+        setModelMode('light');
+      })
+      .finally(() => setLoading(false));
+  });
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -156,8 +172,11 @@ export function PlatformFeatureManager({ onClose }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const result = await adminPlatformSettings.update(Array.from(activeKeys));
-      setPlatformFeatures(new Set(result.visible_features));
+      const [featuresResult] = await Promise.all([
+        adminPlatformSettings.update(Array.from(activeKeys)),
+        adminPlatformSettings.updateMatchaWorkModelMode(modelMode),
+      ]);
+      setPlatformFeatures(new Set(featuresResult.visible_features));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save changes');
@@ -245,9 +264,31 @@ export function PlatformFeatureManager({ onClose }: Props) {
 
           {/* Footer */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 shrink-0">
-            <div className="text-[10px] text-zinc-600">
-              {activeKeys.size} of {ALL_FEATURES.length} features active
-              {error && <span className="text-red-400 ml-3">{error}</span>}
+            <div className="flex items-center gap-8">
+              <div className="text-[10px] text-zinc-600">
+                {activeKeys.size} of {ALL_FEATURES.length} features active
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold">Matcha Work AI:</span>
+                <div className="flex bg-zinc-900 border border-white/5 p-0.5 rounded">
+                  <button
+                    onClick={() => setModelMode('light')}
+                    className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${modelMode === 'light' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    Light
+                  </button>
+                  <button
+                    onClick={() => setModelMode('heavy')}
+                    className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${modelMode === 'heavy' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    Heavy
+                  </button>
+                </div>
+              </div>
+              
+              {error && <span className="text-red-400 text-[10px] font-mono">{error}</span>}
+              {loading && <span className="text-zinc-600 text-[10px] font-mono animate-pulse">Loading settings...</span>}
             </div>
             <div className="flex gap-3">
               <button

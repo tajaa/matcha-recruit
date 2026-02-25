@@ -238,7 +238,7 @@ async def create_thread(
             # Call AI
             ai_provider = get_ai_provider()
             messages = [{"role": "user", "content": body.initial_message}]
-            estimated_usage = ai_provider.estimate_usage(
+            estimated_usage = await ai_provider.estimate_usage(
                 messages, thread["current_state"], task_type=resolved_task_type
             )
             ai_resp = await ai_provider.generate(
@@ -472,7 +472,7 @@ async def send_message(
 
     # Call AI
     ai_provider = get_ai_provider()
-    estimated_usage = ai_provider.estimate_usage(
+    estimated_usage = await ai_provider.estimate_usage(
         msg_dicts, thread["current_state"], task_type=resolved_task_type
     )
     ai_resp = await ai_provider.generate(
@@ -587,7 +587,7 @@ async def send_message_stream(
         return StreamingResponse(unsupported_stream(), media_type="text/event-stream")
 
     ai_provider = get_ai_provider()
-    estimated_usage = ai_provider.estimate_usage(
+    estimated_usage = await ai_provider.estimate_usage(
         msg_dicts, thread["current_state"], task_type=resolved_task_type
     )
 

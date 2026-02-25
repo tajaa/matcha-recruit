@@ -28,7 +28,10 @@ from ..services.compliance_service import (
 )
 from ..services.rate_limiter import get_rate_limiter
 from ..services.auth import hash_password
-from ..services.platform_settings import get_visible_features, prime_visible_features_cache
+from ..services.platform_settings import (
+    get_visible_features, prime_visible_features_cache,
+    get_matcha_work_model_mode, prime_matcha_work_model_mode_cache
+)
 from ...config import get_settings
 
 router = APIRouter()
@@ -44,6 +47,15 @@ KNOWN_PLATFORM_ITEMS = {
 
 class PlatformFeaturesUpdate(BaseModel):
     visible_features: list[str]
+
+
+class MatchaWorkModelModeUpdate(BaseModel):
+    mode: str = Field(..., pattern="^(light|heavy)$")
+
+
+class PlatformSettingsResponse(BaseModel):
+    visible_features: list[str]
+    matcha_work_model_mode: str
 
 
 STRICT_CONFIDENCE_THRESHOLD = 0.95
@@ -4259,6 +4271,16 @@ async def update_poster_order(order_id: UUID, request: PosterOrderUpdateRequest)
         return {"status": "updated", "order_id": str(order_id)}
 
 
+@router.get("/platform-settings", response_model=PlatformSettingsResponse, dependencies=[Depends(require_admin)])
+async def get_all_platform_settings():
+    visible = await get_visible_features()
+    mode = await get_matcha_work_model_mode()
+    return {
+        "visible_features": visible,
+        "matcha_work_model_mode": mode
+    }
+
+
 @router.get("/platform-settings/features")
 async def get_platform_features(admin=Depends(require_admin)):
     visible = await get_visible_features()
@@ -4284,3 +4306,21 @@ async def update_platform_features(
         )
     visible = prime_visible_features_cache(body.visible_features)
     return {"visible_features": visible}
+
+
+@router.put("/platform-settings/matcha-work-model-mode", dependencies=[Depends(require_admin)])
+async def update_matcha_work_model_mode(
+    body: MatchaWorkModelModeUpdate,
+    admin=Depends(require_admin)
+):
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value, updated_at)
+            VALUES ('matcha_work_model_mode', $1::jsonb, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            json.dumps(body.mode)
+        )
+    mode = prime_matcha_work_model_mode_cache(body.mode)
+    return {"matcha_work_model_mode": mode}

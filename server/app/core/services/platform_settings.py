@@ -19,10 +19,14 @@ DEFAULT_VISIBLE_FEATURES = [
     "onboarding",
     "employees",
 ]
+DEFAULT_MATCHA_WORK_MODEL_MODE = "light"
 VISIBLE_FEATURES_CACHE_TTL_SECONDS = 30
 
 _visible_features_cache: list[str] | None = None
 _visible_features_cached_at: float = 0.0
+
+_matcha_work_model_mode_cache: str | None = None
+_matcha_work_model_mode_cached_at: float = 0.0
 
 
 def _normalize_visible_features(value: object) -> list[str]:
@@ -58,6 +62,13 @@ def prime_visible_features_cache(features: Sequence[str]) -> list[str]:
     return list(normalized)
 
 
+def prime_matcha_work_model_mode_cache(mode: str) -> str:
+    global _matcha_work_model_mode_cache, _matcha_work_model_mode_cached_at
+    _matcha_work_model_mode_cache = mode
+    _matcha_work_model_mode_cached_at = time.monotonic()
+    return mode
+
+
 async def get_visible_features(*, conn=None) -> list[str]:
     global _visible_features_cache, _visible_features_cached_at
 
@@ -82,3 +93,43 @@ async def get_visible_features(*, conn=None) -> list[str]:
     _visible_features_cache = normalized
     _visible_features_cached_at = now
     return list(normalized)
+
+
+async def get_matcha_work_model_mode(*, conn=None) -> str:
+    global _matcha_work_model_mode_cache, _matcha_work_model_mode_cached_at
+
+    now = time.monotonic()
+    if (
+        _matcha_work_model_mode_cache is not None
+        and now - _matcha_work_model_mode_cached_at < VISIBLE_FEATURES_CACHE_TTL_SECONDS
+    ):
+        return _matcha_work_model_mode_cache
+
+    if conn is None:
+        async with get_connection() as managed_conn:
+            raw = await managed_conn.fetchval(
+                "SELECT value FROM platform_settings WHERE key = 'matcha_work_model_mode'"
+            )
+    else:
+        raw = await conn.fetchval(
+            "SELECT value FROM platform_settings WHERE key = 'matcha_work_model_mode'"
+        )
+
+    if raw is None:
+        return DEFAULT_MATCHA_WORK_MODEL_MODE
+
+    # Value is JSONB, so it might be quoted string or just string if it was inserted as such
+    if isinstance(raw, str):
+        try:
+            mode = json.loads(raw)
+        except json.JSONDecodeError:
+            mode = raw
+    else:
+        mode = str(raw)
+
+    if mode not in ["light", "heavy"]:
+        mode = DEFAULT_MATCHA_WORK_MODEL_MODE
+
+    _matcha_work_model_mode_cache = mode
+    _matcha_work_model_mode_cached_at = now
+    return mode

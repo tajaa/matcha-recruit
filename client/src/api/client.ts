@@ -3253,11 +3253,16 @@ export const onboardingDraft = {
 };
 
 export const adminPlatformSettings = {
-  get: (): Promise<{ visible_features: string[] }> =>
-    request('/admin/platform-settings/features'),
+  get: (): Promise<{ visible_features: string[]; matcha_work_model_mode: string }> =>
+    request('/admin/platform-settings'),
   update: (visible_features: string[]): Promise<{ visible_features: string[] }> =>
     request('/admin/platform-settings/features', {
       method: 'PUT',
       body: JSON.stringify({ visible_features }),
+    }),
+  updateMatchaWorkModelMode: (mode: 'light' | 'heavy'): Promise<{ matcha_work_model_mode: string }> =>
+    request('/admin/platform-settings/matcha-work-model-mode', {
+      method: 'PUT',
+      body: JSON.stringify({ mode }),
     }),
 };

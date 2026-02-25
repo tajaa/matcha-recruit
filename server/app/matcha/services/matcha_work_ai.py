@@ -10,6 +10,7 @@ from google import genai
 from google.genai import types
 
 from ...config import get_settings
+from ...core.services.platform_settings import get_matcha_work_model_mode
 from ..models.matcha_work import OfferLetterDocument, ReviewDocument, WorkbookDocument
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,13 @@ def _normalize_task_type(task_type: Optional[str]) -> str:
     return "offer_letter"
 
 
+async def _get_model(settings) -> str:
+    mode = await get_matcha_work_model_mode()
+    if mode == "heavy":
+        return "gemini-3.1-pro-preview"
+    return settings.analysis_model
+
+
 @dataclass
 class AIResponse:
     assistant_reply: str
@@ -171,10 +179,11 @@ class GeminiProvider(MatchaWorkAIProvider):
         system_prompt, contents, valid_fields = self._build_prompt_and_contents(
             messages, current_state, task_type=task_type
         )
+        model = await _get_model(self.settings)
 
         try:
             response = await asyncio.wait_for(
-                asyncio.to_thread(self._call_gemini, system_prompt, contents, valid_fields),
+                asyncio.to_thread(self._call_gemini, system_prompt, contents, valid_fields, model),
                 timeout=GEMINI_CALL_TIMEOUT,
             )
             return response
@@ -191,8 +200,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 structured_update=None,
             )
 
-    def _call_gemini(self, system_prompt: str, contents: list, valid_fields: list[str]) -> AIResponse:
-        model = self.settings.analysis_model
+    def _call_gemini(self, system_prompt: str, contents: list, valid_fields: list[str], model: str) -> AIResponse:
         response = self.client.models.generate_content(
             model=model,
             contents=contents,
@@ -233,7 +241,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             token_usage=self._extract_usage_metadata(response, model),
         )
 
-    def estimate_usage(
+    async def estimate_usage(
         self,
         messages: list[dict],
         current_state: dict,
@@ -242,6 +250,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         system_prompt, _, _ = self._build_prompt_and_contents(
             messages, current_state, task_type=task_type
         )
+        model = await _get_model(self.settings)
         windowed = messages[-20:]
         char_count = len(system_prompt) + sum(len(str(msg.get("content", ""))) for msg in windowed)
         prompt_tokens = max(1, char_count // 4)
@@ -250,7 +259,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             "completion_tokens": None,
             "total_tokens": prompt_tokens,
             "estimated": True,
-            "model": self.settings.analysis_model,
+            "model": model,
         }
 
     def _build_prompt_and_contents(
