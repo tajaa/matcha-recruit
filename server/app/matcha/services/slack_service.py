@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -28,6 +27,52 @@ def _extract_response_error(response: httpx.Response) -> str:
     except Exception:
         pass
     return (response.text or "Unknown Slack API error").strip()
+
+
+SLACK_NEEDS_ACTION_ERRORS = {
+    "account_inactive",
+    "feature_not_enabled",
+    "invalid_auth",
+    "invalid_team",
+    "is_bot",
+    "method_not_supported_for_team",
+    "missing_scope",
+    "no_permission",
+    "not_allowed_token_type",
+    "not_authed",
+    "token_revoked",
+}
+
+SLACK_ALREADY_PRESENT_ERRORS = {
+    "already_active",
+    "already_in_team",
+    "already_invited",
+    "already_exists",
+}
+
+
+def _needs_action_for_slack_error(error: str, status_code: int) -> bool:
+    return error in SLACK_NEEDS_ACTION_ERRORS or status_code in {401, 403}
+
+
+def _response_payload_dict(response: httpx.Response, operation: str) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except Exception:
+        raise SlackProvisioningError(
+            "api_response_invalid",
+            f"Slack {operation} returned a non-JSON response: {_extract_response_error(response)}",
+            needs_action=response.status_code in {401, 403},
+        )
+
+    if not isinstance(payload, dict):
+        raise SlackProvisioningError(
+            "api_response_invalid",
+            f"Slack {operation} returned an invalid payload",
+            needs_action=response.status_code in {401, 403},
+        )
+
+    return payload
 
 
 class SlackService:
@@ -108,12 +153,11 @@ class SlackService:
             raise SlackProvisioningError("missing_email", "Employee email is required for Slack provisioning")
 
         headers = {"Authorization": f"Bearer {access_token}"}
-        
-        # Slack user invite API: admin.users.invite (Enterprise Grid)
-        # OR users.admin.invite (Undocumented, requires client token)
-        # Since we don't know the exact tier, we'll simulate the invite if the token is valid,
-        # or attempt users.lookupByEmail to see if they exist.
-        
+        first_name = str(employee.get("first_name") or "").strip()
+        last_name = str(employee.get("last_name") or "").strip()
+        full_name = " ".join(part for part in [first_name, last_name] if part)
+        team_id = str(config.get("slack_team_id") or "").strip()
+
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             # Check if user already exists
             response = await client.get(
@@ -121,21 +165,7 @@ class SlackService:
                 headers=headers,
                 params={"email": email}
             )
-            try:
-                payload = response.json()
-            except Exception:
-                raise SlackProvisioningError(
-                    "lookup_failed",
-                    _extract_response_error(response),
-                    needs_action=response.status_code in {401, 403},
-                )
-
-            if not isinstance(payload, dict):
-                raise SlackProvisioningError(
-                    "lookup_failed",
-                    "Slack lookup by email returned an invalid response payload",
-                    needs_action=response.status_code in {401, 403},
-                )
+            payload = _response_payload_dict(response, "lookup by email")
 
             if payload.get("ok"):
                 # User exists
@@ -153,32 +183,55 @@ class SlackService:
                     "status": "active",
                     "warnings": ["User already exists in Slack"],
                 }
-            
+
             error = str(payload.get("error") or "").strip()
             if error != "users_not_found":
-                needs_action = error in {
-                    "invalid_auth",
-                    "account_inactive",
-                    "token_revoked",
-                    "not_authed",
-                    "missing_scope",
-                    "no_permission",
-                } or response.status_code in {401, 403}
                 raise SlackProvisioningError(
                     "lookup_failed",
                     f"Slack lookup by email failed: {error or _extract_response_error(response)}",
-                    needs_action=needs_action,
+                    needs_action=_needs_action_for_slack_error(error, response.status_code),
                 )
-                
-            # If we reach here, we'd normally call admin.users.invite.
-            # But most apps don't have this scope. For now, we'll mark as pending/mocked invite
-            # and maybe send a message to default channels.
-            
-            # Simulate success
-            return {
-                "mode": "api_simulated",
-                "external_user_id": f"sim-slack-{uuid4().hex[:8]}",
-                "external_email": email,
-                "status": "invited",
-                "warnings": ["Simulated Slack invite due to API scope limitations on standard plans."],
-            }
+
+            invite_payload: dict[str, str] = {"email": str(email)}
+            if full_name:
+                invite_payload["real_name"] = full_name
+            if team_id:
+                invite_payload["team_id"] = team_id
+
+            invite_response = await client.post(
+                f"{self.BASE_URL}/admin.users.invite",
+                headers=headers,
+                data=invite_payload,
+            )
+            invite_result = _response_payload_dict(invite_response, "invite")
+
+            if invite_result.get("ok"):
+                return {
+                    "mode": "api_invite",
+                    "external_user_id": None,
+                    "external_email": email,
+                    "status": "invited",
+                    "warnings": [],
+                }
+
+            invite_error = str(invite_result.get("error") or "").strip()
+            if invite_error in SLACK_ALREADY_PRESENT_ERRORS:
+                status_value = "active" if invite_error in {"already_active", "already_in_team"} else "invited"
+                return {
+                    "mode": "api_invite",
+                    "external_user_id": None,
+                    "external_email": email,
+                    "status": status_value,
+                    "warnings": [f"Slack returned '{invite_error}' while inviting user."],
+                }
+
+            hint = (
+                " Ensure your Slack app/token can call admin.users.invite "
+                "(typically admin scopes on Enterprise Grid), or invite manually in Slack."
+            )
+            message = f"Slack invite failed: {invite_error or _extract_response_error(invite_response)}.{hint}"
+            raise SlackProvisioningError(
+                "invite_failed",
+                message,
+                needs_action=_needs_action_for_slack_error(invite_error, invite_response.status_code),
+            )
