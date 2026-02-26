@@ -5,7 +5,33 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
-MatchaWorkTaskType = Literal["offer_letter", "review", "workbook"]
+MatchaWorkTaskType = Literal["offer_letter", "review", "workbook", "onboarding"]
+
+
+class OnboardingEmployee(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    work_email: Optional[str] = None
+    personal_email: Optional[str] = None
+    work_state: Optional[str] = None
+    employment_type: Optional[str] = None  # full-time, part-time, contractor
+    start_date: Optional[str] = None  # YYYY-MM-DD
+    address: Optional[str] = None
+    status: Optional[str] = None  # pending, created, provisioning, done, error
+    error: Optional[str] = None
+    employee_id: Optional[str] = None  # set after creation
+    provisioning_results: Optional[dict] = None
+
+
+class OnboardingDocument(BaseModel):
+    """Incremental onboarding state — builds turn by turn as employees are collected."""
+
+    employees: Optional[list[OnboardingEmployee]] = None
+    company_name: Optional[str] = None
+    default_start_date: Optional[str] = None
+    default_employment_type: Optional[str] = None
+    default_work_state: Optional[str] = None
+    batch_status: Optional[str] = None  # collecting, ready, processing, complete
 
 
 class OfferLetterDocument(BaseModel):

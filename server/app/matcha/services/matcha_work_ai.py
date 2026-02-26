@@ -11,7 +11,7 @@ from google.genai import types
 
 from ...config import get_settings
 from ...core.services.platform_settings import get_matcha_work_model_mode
-from ..models.matcha_work import OfferLetterDocument, ReviewDocument, WorkbookDocument
+from ..models.matcha_work import OfferLetterDocument, OnboardingDocument, ReviewDocument, WorkbookDocument
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,10 @@ GEMINI_CALL_TIMEOUT = 120
 OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
 REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())
 WORKBOOK_FIELDS = list(WorkbookDocument.model_fields.keys())
+ONBOARDING_FIELDS = list(OnboardingDocument.model_fields.keys())
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
-SUPPORTED_AI_SKILLS = {"offer_letter", "review", "workbook", "none"}
+SUPPORTED_AI_SKILLS = {"offer_letter", "review", "workbook", "onboarding", "none"}
 SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
@@ -31,6 +32,7 @@ SUPPORTED_AI_OPERATIONS = {
     "finalize",
     "send_requests",
     "track",
+    "create_employees",
     "none",
 }
 
@@ -51,6 +53,13 @@ Supported skills:
 - offer_letter: create/update offer letter content, save_draft, send_draft, finalize
 - review: create/update anonymized review content, collect recipient_emails, send review requests, track responses
 - workbook: create/update HR workbook documents and section content
+- onboarding: collect employee details and create employee records with automatic provisioning.
+  Required per employee: first_name, last_name, work_email.
+  Optional per employee: personal_email, work_state, employment_type, start_date, address.
+  The "employees" field is a JSON array of employee objects.
+  Set batch_status to "collecting" while gathering info, "ready" when user confirms the list.
+  Use create_employees operation ONLY when user explicitly confirms the employee list is ready.
+  Always collect ALL employees before creating. Do not create one at a time unless asked.
 
 Mode selection:
 - mode=skill when user clearly asks for a supported action.
@@ -72,8 +81,8 @@ Output constraints:
 - JSON format:
 {{
   "mode": "skill|general|clarify|refuse",
-  "skill": "offer_letter|review|workbook|none",
-  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|none",
+  "skill": "offer_letter|review|workbook|onboarding|none",
+  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|none",
   "confidence": 0.0,
   "updates": {{}},
   "missing_fields": [],
@@ -104,6 +113,8 @@ def _normalize_task_type(task_type: Optional[str]) -> str:
         return "review"
     if task_type == "workbook":
         return "workbook"
+    if task_type == "onboarding":
+        return "onboarding"
     return "offer_letter"
 
 
@@ -315,6 +326,8 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields = REVIEW_FIELDS
         elif normalized_task_type == "workbook":
             valid_fields = WORKBOOK_FIELDS
+        elif normalized_task_type == "onboarding":
+            valid_fields = ONBOARDING_FIELDS
         else:
             valid_fields = OFFER_LETTER_FIELDS
 

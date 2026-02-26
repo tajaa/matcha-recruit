@@ -1,6 +1,6 @@
 export type MWThreadStatus = 'active' | 'finalized' | 'archived';
 export type MWMessageRole = 'user' | 'assistant' | 'system';
-export type MWTaskType = 'offer_letter' | 'review' | 'workbook';
+export type MWTaskType = 'offer_letter' | 'review' | 'workbook' | 'onboarding';
 
 export interface MWThread {
   id: string;

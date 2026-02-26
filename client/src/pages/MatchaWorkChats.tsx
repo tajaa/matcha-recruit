@@ -107,7 +107,7 @@ export default function MatchaWorkChats() {
             Stored chats for your company. Pin important threads to keep them at the top.
           </p>
           <p className="text-xs text-zinc-500 mt-2">
-            Default mode: US HR chat. Skills: offer letters (save/send draft), anonymized reviews, HR workbooks. Ask naturally and Matcha will route supported commands.
+            Default mode: US HR chat. Skills: offer letters, anonymized reviews, HR workbooks, employee onboarding. Ask naturally and Matcha will route supported commands.
           </p>
         </div>
 
@@ -175,7 +175,7 @@ export default function MatchaWorkChats() {
                   {thread.title}
                 </p>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  {thread.task_type === 'review' ? 'anonymized review' : thread.task_type === 'workbook' ? 'HR workbook' : 'offer letter'} · v{thread.version} · Updated{' '}
+                  {thread.task_type === 'review' ? 'anonymized review' : thread.task_type === 'workbook' ? 'HR workbook' : thread.task_type === 'onboarding' ? 'employee onboarding' : 'offer letter'} · v{thread.version} · Updated{' '}
                   {formatDate(thread.updated_at)}
                 </p>
               </div>

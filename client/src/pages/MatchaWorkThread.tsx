@@ -565,6 +565,7 @@ export default function MatchaWorkThread() {
   const isOfferLetter = thread?.task_type === 'offer_letter';
   const isReview = thread?.task_type === 'review';
   const isWorkbook = thread?.task_type === 'workbook';
+  const isOnboarding = thread?.task_type === 'onboarding';
   const reviewStatuses: MWReviewRequestStatus[] = (thread?.current_state.review_request_statuses || [])
     .filter((row): row is MWReviewRequestStatus => Boolean(row && typeof row === 'object' && row.email));
   const reviewStrengths = toItemList(thread?.current_state.strengths);
@@ -655,7 +656,7 @@ export default function MatchaWorkThread() {
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-xs text-zinc-500">v{thread.version}</span>
               <span className="text-xs bg-zinc-700/60 text-zinc-300 px-1.5 py-0.5 rounded capitalize">
-                {isUnscopedChat ? 'Intent-driven chat' : thread.task_type === 'review' ? 'Anonymous Review' : thread.task_type === 'workbook' ? 'HR Workbook' : 'Offer Letter'}
+                {isUnscopedChat ? 'Intent-driven chat' : thread.task_type === 'review' ? 'Anonymous Review' : thread.task_type === 'workbook' ? 'HR Workbook' : thread.task_type === 'onboarding' ? 'Onboarding' : 'Offer Letter'}
               </span>
               {isFinalized && (
                 <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
@@ -863,7 +864,7 @@ export default function MatchaWorkThread() {
                   Tell me what you need in natural language.
                 </p>
                 <div className="mt-3 text-[11px] text-zinc-500 max-w-sm">
-                  Default mode: US HR chat. Skills: offer letters (save/send draft), anonymized reviews, HR workbooks. Ask naturally and Matcha will route commands when supported.
+                  Default mode: US HR chat. Skills: offer letters, anonymized reviews, HR workbooks, employee onboarding. Ask naturally and Matcha will route commands when supported.
                 </div>
                 <div className="mt-1 text-[11px] text-zinc-600 max-w-sm">
                   For review workflows, include recipient emails and use Send Requests to distribute links.
@@ -925,11 +926,13 @@ export default function MatchaWorkThread() {
                   disabled={inputDisabled}
                   placeholder={
                     isUnscopedChat
-                      ? 'Ask for an offer letter, review, or workbook...'
+                      ? 'Ask for an offer letter, review, workbook, or onboarding...'
                       : isReview
                       ? 'Add anonymized review details...'
                       : isWorkbook
                       ? 'Describe workbook sections or objective...'
+                      : isOnboarding
+                      ? 'Add employee details or confirm to create...'
                       : 'Describe changes or add details...'
                   }
                   rows={1}
@@ -1305,13 +1308,15 @@ export default function MatchaWorkThread() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl">
             <h2 className="text-base font-semibold text-zinc-100 mb-2">
-              {isOfferLetter ? 'Finalize offer letter?' : isWorkbook ? 'Finalize workbook?' : 'Finalize anonymous review?'}
+              {isOfferLetter ? 'Finalize offer letter?' : isWorkbook ? 'Finalize workbook?' : isOnboarding ? 'Finalize onboarding?' : 'Finalize anonymous review?'}
             </h2>
             <p className="text-sm text-zinc-400 mb-5">
               {isOfferLetter
                 ? "This will lock the document and generate a final PDF without a watermark. You won't be able to make further edits."
                 : isWorkbook
                 ? "This will lock the workbook and prevent further edits. You can still view the content here."
+                : isOnboarding
+                ? "This will lock the onboarding thread. Created employees will remain in the system."
                 : "This will lock the review and prevent further edits. You can still view the final thread content."}
             </p>
             <div className="flex gap-2">

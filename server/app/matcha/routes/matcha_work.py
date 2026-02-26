@@ -21,6 +21,7 @@ from ..models.matcha_work import (
     ElementListItem,
     FinalizeResponse,
     MWMessageOut,
+    OnboardingDocument,
     ReviewDocument,
     RevertRequest,
     SaveDraftResponse,
@@ -44,6 +45,12 @@ from ..models.matcha_work import (
 )
 from ..services import matcha_work_document as doc_svc
 from ..services.matcha_work_ai import get_ai_provider
+from ..services.onboarding_orchestrator import (
+    PROVIDER_GOOGLE_WORKSPACE,
+    PROVIDER_SLACK,
+    start_google_workspace_onboarding,
+    start_slack_onboarding,
+)
 from ...core.services.handbook_service import HandbookService
 
 logger = logging.getLogger(__name__)
@@ -54,6 +61,7 @@ public_router = APIRouter()
 VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys())
 VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
 VALID_WORKBOOK_FIELDS = set(WorkbookDocument.model_fields.keys())
+VALID_ONBOARDING_FIELDS = set(OnboardingDocument.model_fields.keys())
 THREAD_SCOPE_REPLY_TEMPLATE = (
     "This chat is currently focused on {current}. Start a new chat to work on {requested}, "
     "or continue with {current} in this thread."
@@ -90,6 +98,16 @@ WORKBOOK_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
     (r"\bguide\b", 1),
     (r"\bpolicy collection\b", 4),
 )
+
+ONBOARDING_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
+    (r"\bonboard(?:ing)?\b", 4),
+    (r"\bnew\s+(?:hire|employee|team\s+member)s?\b", 4),
+    (r"\badd\s+employee", 4),
+    (r"\bcreate\s+employee", 4),
+    (r"\bhire\b", 1),
+    (r"\bprovision(?:ing)?\b", 1),
+)
+
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 
 
@@ -98,6 +116,8 @@ def _normalize_task_type(task_type: Optional[str]) -> str:
         return "review"
     if task_type == "workbook":
         return "workbook"
+    if task_type == "onboarding":
+        return "onboarding"
     return "offer_letter"
 
 
@@ -107,6 +127,8 @@ def _task_type_label(task_type: Optional[str]) -> str:
         return "anonymized reviews"
     if normalized == "workbook":
         return "HR workbooks"
+    if normalized == "onboarding":
+        return "employee onboarding"
     return "offer letters"
 
 
@@ -121,6 +143,8 @@ def _validate_updates(task_type: Optional[str], updates: dict) -> dict:
         valid_fields = VALID_OFFER_LETTER_FIELDS
     elif ntype == "review":
         valid_fields = VALID_REVIEW_FIELDS
+    elif ntype == "onboarding":
+        valid_fields = VALID_ONBOARDING_FIELDS
     else:
         valid_fields = VALID_WORKBOOK_FIELDS
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -141,14 +165,16 @@ def _detect_requested_task_type(content: str) -> Optional[str]:
     offer_score = _intent_score(text, OFFER_INTENT_PATTERNS)
     review_score = _intent_score(text, REVIEW_INTENT_PATTERNS)
     workbook_score = _intent_score(text, WORKBOOK_INTENT_PATTERNS)
+    onboarding_score = _intent_score(text, ONBOARDING_INTENT_PATTERNS)
 
-    if offer_score == 0 and review_score == 0 and workbook_score == 0:
+    if offer_score == 0 and review_score == 0 and workbook_score == 0 and onboarding_score == 0:
         return None
 
     scores = [
         ("offer_letter", offer_score),
         ("review", review_score),
         ("workbook", workbook_score),
+        ("onboarding", onboarding_score),
     ]
     scores.sort(key=lambda x: x[1], reverse=True)
 
@@ -157,6 +183,8 @@ def _detect_requested_task_type(content: str) -> Optional[str]:
         return scores[0][0]
 
     # Tie-breaking / explicit keywords
+    if re.search(r"\bonboard(?:ing)?\b|\bnew\s+(?:hire|employee)s?\b|\badd\s+employee\b|\bcreate\s+employee\b", text):
+        return "onboarding"
     if re.search(r"\boffer letter\b|\bjob offer\b|\bemployment offer\b", text):
         return "offer_letter"
     if re.search(r"\bperformance review\b|\banonym(?:ous|ized)\s+review\b", text):
@@ -275,6 +303,166 @@ def _collect_offer_draft_recipients(
     return doc_svc.normalize_recipient_emails(collected)
 
 
+def _json_object(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _coerce_bool(value, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+async def _create_onboarding_employees(
+    *,
+    company_id: UUID,
+    triggered_by: UUID,
+    employees: list[dict],
+) -> list[dict]:
+    """Create employee records and trigger provisioning for each. Returns updated employee dicts."""
+    results: list[dict] = []
+
+    async with get_connection() as conn:
+        # Pre-fetch integration config once for the company
+        google_workspace_auto = False
+        slack_auto = False
+        try:
+            integration_rows = await conn.fetch(
+                """
+                SELECT provider, config
+                FROM integration_connections
+                WHERE company_id = $1 AND status = 'connected'
+                """,
+                company_id,
+            )
+            for irow in integration_rows:
+                cfg = _json_object(irow["config"])
+                if irow["provider"] == PROVIDER_GOOGLE_WORKSPACE:
+                    google_workspace_auto = _coerce_bool(cfg.get("auto_provision_on_employee_create"), True)
+                elif irow["provider"] == PROVIDER_SLACK:
+                    slack_auto = _coerce_bool(cfg.get("auto_invite_on_employee_create"), True)
+        except Exception:
+            logger.exception("Unable to query integration connections for company %s", company_id)
+
+        for emp in employees:
+            emp_status = (emp.get("status") or "").strip().lower()
+            if emp_status in ("created", "done", "error"):
+                results.append(emp)
+                continue
+
+            first_name = (emp.get("first_name") or "").strip()
+            last_name = (emp.get("last_name") or "").strip()
+            work_email = (emp.get("work_email") or "").strip().lower()
+
+            if not first_name or not last_name or not work_email:
+                emp["status"] = "error"
+                emp["error"] = "Missing required fields: first_name, last_name, work_email"
+                results.append(emp)
+                continue
+
+            try:
+                existing = await conn.fetchval(
+                    "SELECT id FROM employees WHERE org_id = $1 AND email = $2",
+                    company_id, work_email,
+                )
+                if existing:
+                    emp["status"] = "error"
+                    emp["error"] = f"Employee with email {work_email} already exists"
+                    results.append(emp)
+                    continue
+
+                start_date = None
+                raw_start = (emp.get("start_date") or "").strip()
+                if raw_start:
+                    try:
+                        start_date = datetime.strptime(raw_start, "%Y-%m-%d").date()
+                    except ValueError:
+                        pass  # leave as None
+
+                personal_email = (emp.get("personal_email") or "").strip().lower() or None
+                address = (emp.get("address") or "").strip() or None
+
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO employees (org_id, email, personal_email, first_name, last_name,
+                                           work_state, employment_type, start_date, address)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    RETURNING id
+                    """,
+                    company_id,
+                    work_email,
+                    personal_email,
+                    first_name,
+                    last_name,
+                    (emp.get("work_state") or "").strip() or None,
+                    (emp.get("employment_type") or "").strip() or None,
+                    start_date,
+                    address,
+                )
+
+                emp["status"] = "created"
+                emp["employee_id"] = str(row["id"])
+                emp["error"] = None
+
+                # Trigger provisioning
+                prov = {}
+                if google_workspace_auto:
+                    try:
+                        await start_google_workspace_onboarding(
+                            company_id=company_id,
+                            employee_id=row["id"],
+                            triggered_by=triggered_by,
+                            trigger_source="matcha_work_onboarding",
+                        )
+                        prov["google_workspace"] = "triggered"
+                    except Exception as gex:
+                        logger.exception("Google Workspace provisioning failed for %s", work_email)
+                        prov["google_workspace"] = f"error: {gex}"
+
+                if slack_auto:
+                    try:
+                        await start_slack_onboarding(
+                            company_id=company_id,
+                            employee_id=row["id"],
+                            triggered_by=triggered_by,
+                            trigger_source="matcha_work_onboarding",
+                        )
+                        prov["slack"] = "triggered"
+                    except Exception as sex:
+                        logger.exception("Slack provisioning failed for %s", work_email)
+                        prov["slack"] = f"error: {sex}"
+
+                if prov:
+                    emp["provisioning_results"] = prov
+
+            except Exception as e:
+                logger.exception("Failed to create employee %s %s: %s", first_name, last_name, e)
+                emp["status"] = "error"
+                emp["error"] = str(e)
+
+            results.append(emp)
+
+    return results
+
+
 async def _apply_ai_updates_and_operations(
     *,
     thread_id: UUID,
@@ -284,6 +472,7 @@ async def _apply_ai_updates_and_operations(
     current_state: dict,
     current_version: int,
     user_message: str,
+    current_user_id: Optional[UUID] = None,
 ) -> tuple[dict, int, Optional[str], bool, str]:
     """Apply structured updates, execute supported operations, and return updated response state."""
     normalized_task_type = _normalize_task_type(task_type)
@@ -392,6 +581,39 @@ async def _apply_ai_updates_and_operations(
                 if finalized.get("pdf_url"):
                     pdf_url = finalized["pdf_url"]
                 action_note = "Thread finalized."
+            elif operation == "create_employees":
+                if normalized_task_type != "onboarding":
+                    action_note = "Employee creation is only available in onboarding threads."
+                else:
+                    raw_employees = current_state.get("employees")
+                    if not isinstance(raw_employees, list) or not raw_employees:
+                        action_note = "No employees found to create. Please add employee details first."
+                    else:
+                        results = await _create_onboarding_employees(
+                            company_id=company_id,
+                            triggered_by=current_user_id,
+                            employees=[dict(e) for e in raw_employees],
+                        )
+                        current_state["employees"] = results
+                        current_state["batch_status"] = "complete"
+                        created = sum(1 for e in results if e.get("status") == "created")
+                        errors = sum(1 for e in results if e.get("status") == "error")
+                        result = await doc_svc.apply_update(
+                            thread_id,
+                            current_state,
+                            diff_summary=f"Created {created} employee(s), {errors} error(s)",
+                        )
+                        current_version = result["version"]
+                        current_state = result["current_state"]
+                        changed = True
+                        action_note = f"Created {created} employee(s)"
+                        if errors:
+                            error_names = [
+                                f"{e.get('first_name', '?')} {e.get('last_name', '?')}: {e.get('error', 'unknown')}"
+                                for e in results if e.get("status") == "error"
+                            ]
+                            action_note += f", {errors} failed: " + "; ".join(error_names[:5])
+                        action_note += "."
             else:
                 action_note = f"The action '{operation}' is not supported yet."
         except ValueError as e:
@@ -426,6 +648,8 @@ async def create_thread(
         default_title = "Untitled Review"
     elif task_type == "workbook":
         default_title = "Untitled Workbook"
+    elif task_type == "onboarding":
+        default_title = "New Onboarding"
     else:
         default_title = "Untitled Chat"
 
@@ -476,6 +700,7 @@ async def create_thread(
                 current_state=thread["current_state"],
                 current_version=new_version,
                 user_message=body.initial_message,
+                current_user_id=current_user.id,
             )
             thread["current_state"] = updated_state
 
@@ -712,6 +937,7 @@ async def send_message(
         current_state=thread["current_state"],
         current_version=current_version,
         user_message=body.content,
+        current_user_id=current_user.id,
     )
 
     # Save assistant message
@@ -836,6 +1062,7 @@ async def send_message_stream(
                 current_state=thread["current_state"],
                 current_version=current_version,
                 user_message=body.content,
+                current_user_id=current_user.id,
             )
 
             # Save assistant message
