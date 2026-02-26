@@ -144,6 +144,38 @@ export interface ComplianceSummary {
     }[];
 }
 
+/** A single item in the coming_up list returned by GET /compliance/dashboard */
+export interface ComplianceDashboardItem {
+    legislation_id: string;
+    title: string;
+    description: string | null;
+    category: string | null;
+    /** Inferred or alert-linked severity: 'info' | 'warning' | 'critical' */
+    severity: 'info' | 'warning' | 'critical';
+    status: string;
+    effective_date: string | null;
+    days_until: number | null;
+    location_id: string;
+    location_name: string;
+    location_state: string;
+    affected_employee_count: number;
+    /** Up to 5 sample employee names for display */
+    affected_employee_sample: string[];
+    /** Precision level — 'state_estimate' until Phase 2 exact FK is wired */
+    impact_basis: 'state_estimate' | 'exact';
+    source_url: string | null;
+}
+
+export interface ComplianceDashboard {
+    kpis: {
+        total_locations: number;
+        unread_alerts: number;
+        critical_alerts: number;
+        employees_at_risk: number;
+    };
+    coming_up: ComplianceDashboardItem[];
+}
+
 import { getAccessToken } from './client';
 
 function companyParam(url: string, companyId?: string): string {
@@ -273,6 +305,17 @@ export const complianceAPI = {
             },
         });
         if (!response.ok) throw new Error('Failed to fetch summary');
+        return response.json();
+    },
+
+    async getDashboard(horizonDays: 30 | 60 | 90 | 180 | 365 = 90, companyId?: string): Promise<ComplianceDashboard> {
+        const url = `/api/compliance/dashboard?horizon_days=${horizonDays}`;
+        const response = await fetch(companyParam(url, companyId), {
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+            },
+        });
+        if (!response.ok) throw new Error('Failed to fetch compliance dashboard');
         return response.json();
     },
 

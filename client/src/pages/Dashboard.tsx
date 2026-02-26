@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle } from 'lucide-react';
+import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert } from 'lucide-react';
 import { getAccessToken } from '../api/client';
 import { OnboardingWizard } from '../components/OnboardingWizard';
 import { Collapsible } from '../components/Collapsible';
 import { Tabs } from '../components/Tabs';
 import { WidgetContainer } from '../components/WidgetContainer';
+import { complianceAPI, COMPLIANCE_CATEGORY_LABELS } from '../api/compliance';
+import type { ComplianceDashboard, ComplianceDashboardItem } from '../api/compliance';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -46,8 +49,224 @@ interface DashboardStats {
   incident_summary?: IncidentSummary;
 }
 
+type HorizonDays = 30 | 60 | 90;
+
+const SEVERITY_STYLES: Record<string, { dot: string; border: string; badge: string; label: string }> = {
+  critical: {
+    dot: 'bg-red-500 animate-pulse',
+    border: 'border-red-500/20 hover:border-red-500/40',
+    badge: 'bg-red-500/10 text-red-400 border border-red-500/20',
+    label: 'Critical',
+  },
+  warning: {
+    dot: 'bg-amber-500',
+    border: 'border-amber-500/20 hover:border-amber-500/40',
+    badge: 'bg-amber-500/10 text-amber-400 border border-amber-500/20',
+    label: 'Warning',
+  },
+  info: {
+    dot: 'bg-blue-400',
+    border: 'border-white/10 hover:border-white/20',
+    badge: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
+    label: 'Info',
+  },
+};
+
+function ComplianceDashboardWidget() {
+  const navigate = useNavigate();
+  const [horizon, setHorizon] = useState<HorizonDays>(90);
+  const [data, setData] = useState<ComplianceDashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(false);
+    complianceAPI.getDashboard(horizon)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => { setError(true); setLoading(false); });
+  }, [horizon]);
+
+  const handleItemClick = (item: ComplianceDashboardItem) => {
+    const params = new URLSearchParams({
+      location_id: item.location_id,
+      tab: 'upcoming',
+      legislation_id: item.legislation_id,
+    });
+    navigate(`/app/matcha/compliance?${params.toString()}`);
+  };
+
+  const criticalCount = data?.coming_up.filter(i => i.severity === 'critical').length ?? 0;
+  const warningCount = data?.coming_up.filter(i => i.severity === 'warning').length ?? 0;
+
+  return (
+    <div className="border border-white/10 bg-zinc-900/30">
+      {/* Header */}
+      <div className="p-3 border-b border-white/10 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="w-3.5 h-3.5 text-emerald-500" />
+          <h2 className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">Compliance Impact</h2>
+          {criticalCount > 0 && (
+            <span className="px-1.5 py-0.5 text-[7px] font-mono uppercase tracking-widest bg-red-500/10 text-red-400 border border-red-500/20">
+              {criticalCount} critical
+            </span>
+          )}
+        </div>
+        {/* Horizon selector */}
+        <div className="flex gap-px">
+          {([30, 60, 90] as HorizonDays[]).map(d => (
+            <button
+              key={d}
+              onClick={() => setHorizon(d)}
+              className={`px-2 py-0.5 text-[7px] font-mono uppercase tracking-widest transition-colors ${
+                horizon === d
+                  ? 'bg-white text-black'
+                  : 'text-zinc-500 hover:text-white border border-white/10'
+              }`}
+            >
+              {d}d
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI row */}
+      {data && (
+        <div className="grid grid-cols-4 gap-px bg-white/5 border-b border-white/10">
+          {[
+            { label: 'Locations', value: data.kpis.total_locations, color: 'text-white' },
+            { label: 'Unread Alerts', value: data.kpis.unread_alerts, color: data.kpis.unread_alerts > 0 ? 'text-amber-400' : 'text-white' },
+            { label: 'Critical', value: data.kpis.critical_alerts, color: data.kpis.critical_alerts > 0 ? 'text-red-400' : 'text-white' },
+            { label: 'At Risk', value: data.kpis.employees_at_risk, color: data.kpis.employees_at_risk > 0 ? 'text-amber-400' : 'text-zinc-500' },
+          ].map(kpi => (
+            <div key={kpi.label} className="bg-zinc-950 p-2 text-center">
+              <div className={`text-lg font-light tabular-nums ${kpi.color}`}>{kpi.value}</div>
+              <div className="text-[7px] uppercase tracking-widest text-zinc-500 mt-0.5">{kpi.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Coming up list */}
+      <div className="divide-y divide-white/5">
+        {loading && (
+          <div className="p-6 text-center">
+            <div className="w-4 h-4 border border-zinc-700 border-t-white rounded-full animate-spin mx-auto mb-2" />
+            <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Loading</p>
+          </div>
+        )}
+
+        {error && !loading && (
+          <div className="p-4 text-center">
+            <TriangleAlert className="w-4 h-4 text-zinc-700 mx-auto mb-1.5" />
+            <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Failed to load</p>
+          </div>
+        )}
+
+        {!loading && !error && data && data.coming_up.length === 0 && (
+          <div className="p-4 text-center">
+            <CheckCircle2 className="w-4 h-4 text-zinc-700 mx-auto mb-1.5" />
+            <p className="text-[9px] text-zinc-500 uppercase tracking-wider">No upcoming changes in {horizon}d window</p>
+          </div>
+        )}
+
+        {!loading && !error && data && data.coming_up.map((item) => {
+          const sev = SEVERITY_STYLES[item.severity] ?? SEVERITY_STYLES.info;
+          const categoryLabel = item.category ? (COMPLIANCE_CATEGORY_LABELS[item.category] ?? item.category) : null;
+          const daysLabel = item.days_until != null
+            ? item.days_until <= 0 ? 'Today' : `${item.days_until}d`
+            : '—';
+          const daysColor = item.days_until != null && item.days_until <= 30
+            ? 'text-red-400'
+            : item.days_until != null && item.days_until <= 60
+            ? 'text-amber-400'
+            : 'text-zinc-400';
+
+          return (
+            <button
+              key={item.legislation_id}
+              onClick={() => handleItemClick(item)}
+              className={`w-full text-left p-3 border-l-2 ${sev.border} bg-zinc-950 hover:bg-zinc-900 transition-all group`}
+            >
+              <div className="flex items-start gap-2.5">
+                <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${sev.dot}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <span className="text-[11px] text-zinc-200 group-hover:text-white transition-colors font-medium leading-tight truncate">
+                      {item.title}
+                    </span>
+                    <span className={`text-[9px] font-mono tabular-nums flex-shrink-0 ${daysColor}`}>
+                      {daysLabel}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1 text-zinc-500">
+                      <MapPin className="w-2.5 h-2.5" />
+                      <span className="text-[8px] uppercase tracking-wider">{item.location_name}</span>
+                    </div>
+
+                    {categoryLabel && (
+                      <span className="text-[7px] font-mono uppercase tracking-widest text-zinc-600 border border-white/10 px-1 py-px">
+                        {categoryLabel}
+                      </span>
+                    )}
+
+                    <span className={`text-[7px] font-mono uppercase tracking-widest px-1 py-px ${sev.badge}`}>
+                      {sev.label}
+                    </span>
+                  </div>
+
+                  {/* Affected employees */}
+                  {item.affected_employee_count > 0 && (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <Users className="w-2.5 h-2.5 text-zinc-600" />
+                      <span className="text-[8px] text-zinc-500">
+                        {item.affected_employee_count} employee{item.affected_employee_count !== 1 ? 's' : ''}
+                        {item.affected_employee_sample.length > 0 && (
+                          <span className="text-zinc-600">
+                            {' '}— {item.affected_employee_sample.slice(0, 3).join(', ')}
+                            {item.affected_employee_count > 3 ? ` +${item.affected_employee_count - 3} more` : ''}
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-[7px] text-zinc-700 font-mono">~est</span>
+                    </div>
+                  )}
+                </div>
+
+                <ChevronRight className="w-3 h-3 text-zinc-600 group-hover:text-zinc-400 transition-colors flex-shrink-0 mt-0.5" />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Footer */}
+      {data && data.coming_up.length > 0 && (
+        <div className="p-2.5 border-t border-white/10 bg-white/5 flex items-center justify-between">
+          {(criticalCount > 0 || warningCount > 0) && (
+            <span className="text-[7px] font-mono text-zinc-600 uppercase tracking-widest">
+              {criticalCount > 0 && `${criticalCount} critical`}
+              {criticalCount > 0 && warningCount > 0 && ' · '}
+              {warningCount > 0 && `${warningCount} warning`}
+            </span>
+          )}
+          <button
+            onClick={() => navigate('/app/matcha/compliance?tab=upcoming')}
+            className="ml-auto text-[8px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors"
+          >
+            Full Compliance View
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
+  const { user, hasFeature } = useAuth();
   const [ptoSummary, setPtoSummary] = useState<PTOSummary | null>(null);
   const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
 
@@ -103,9 +322,12 @@ export function Dashboard() {
 
   const complianceRate = dashStats?.compliance_rate ?? 0;
 
+  const showComplianceImpact = user?.role === 'client' && hasFeature('compliance');
+
   const dashboardWidgets = [
     { id: 'stats', label: 'Key Metrics', icon: Activity },
     { id: 'compliance', label: 'Compliance Health', icon: ShieldAlert },
+    { id: 'compliance_impact', label: 'Compliance Impact', icon: ShieldAlert },
     { id: 'actions', label: 'Pending Actions', icon: Clock },
     { id: 'activity', label: 'System Activity', icon: History },
     { id: 'incidents', label: 'Incident Reports', icon: AlertTriangle },
@@ -328,6 +550,12 @@ export function Dashboard() {
                           </div>
                         )}
                       </div>
+
+                      {visibleWidgets.has('compliance_impact') && showComplianceImpact && (
+                        <div className="lg:col-span-3">
+                          <ComplianceDashboardWidget />
+                        </div>
+                      )}
                     </>
                   )}
 

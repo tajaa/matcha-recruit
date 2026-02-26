@@ -256,6 +256,43 @@ export function Compliance() {
         setSelectedLocationId(null);
     }, [selectedCompanyId]);
 
+    // ── Deep-link support ────────────────────────────────────────────────────
+    // Honour ?location_id=<uuid>&tab=upcoming&legislation_id=<uuid> so that
+    // clicking a dashboard item lands on the exact compliance context.
+    const deepLinkApplied = useState(false);
+    useEffect(() => {
+        if (deepLinkApplied[0]) return;
+        if (!locations || locations.length === 0) return;
+
+        const paramLocationId = searchParams.get('location_id');
+        const paramTab = searchParams.get('tab') as typeof activeTab | null;
+        const paramLegislationId = searchParams.get('legislation_id');
+
+        if (!paramLocationId) return;
+        const match = locations.find(l => l.id === paramLocationId);
+        if (!match) return;
+
+        deepLinkApplied[1](true);
+        setSelectedLocationId(paramLocationId);
+
+        if (paramTab === 'upcoming' || paramTab === 'alerts' || paramTab === 'requirements' || paramTab === 'history' || paramTab === 'posters') {
+            setActiveTab(paramTab);
+        }
+
+        if (paramLegislationId) {
+            // Scroll to the legislation card after a short render delay
+            setTimeout(() => {
+                const el = document.getElementById(`legislation-${paramLegislationId}`);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.classList.add('ring-1', 'ring-emerald-500/50');
+                    setTimeout(() => el.classList.remove('ring-1', 'ring-emerald-500/50'), 3000);
+                }
+            }, 400);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [locations]);
+
     // Load poster data when tab becomes active
     useEffect(() => {
         if (activeTab !== 'posters') return;
@@ -892,7 +929,7 @@ export function Compliance() {
                                                 const isEffectiveNow = leg.days_until_effective !== null && leg.days_until_effective <= 0;
                                                 const displayStatus = isEffectiveNow ? 'effective' : leg.current_status;
                                                 return (
-                                                    <div key={leg.id} className="border border-white/5 rounded-sm p-6 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors">
+                                                    <div key={leg.id} id={`legislation-${leg.id}`} className="border border-white/5 rounded-sm p-6 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors">
                                                         <div className="flex items-start justify-between gap-6">
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-3 flex-wrap mb-2">

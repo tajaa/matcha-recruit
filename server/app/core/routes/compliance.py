@@ -8,7 +8,12 @@ from uuid import UUID
 
 from ...matcha.dependencies import require_admin_or_client, get_client_company_id
 from ...database import get_connection
-from ..services.redis_cache import get_redis_cache, cache_get, cache_set, jurisdictions_key
+from ..services.redis_cache import (
+    get_redis_cache,
+    cache_get,
+    cache_set,
+    jurisdictions_key,
+)
 from ..models.auth import CurrentUser
 from ..models.compliance import (
     LocationCreate,
@@ -30,6 +35,7 @@ from ..services.compliance_service import (
     mark_alert_read,
     dismiss_alert,
     get_compliance_summary,
+    get_compliance_dashboard,
     run_compliance_check_background,
     run_compliance_check_stream,
     get_check_log,
@@ -42,7 +48,9 @@ from ..services.compliance_service import (
 router = APIRouter()
 
 
-async def resolve_company_id(current_user, company_id_override: str | None) -> UUID | None:
+async def resolve_company_id(
+    current_user, company_id_override: str | None
+) -> UUID | None:
     """Resolve company ID, allowing admins to override via query param."""
     if current_user.role == "admin" and company_id_override:
         try:
@@ -50,7 +58,9 @@ async def resolve_company_id(current_user, company_id_override: str | None) -> U
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid company_id")
         async with get_connection() as conn:
-            exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1)", cid)
+            exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1)", cid
+            )
         if not exists:
             raise HTTPException(status_code=404, detail="Company not found")
         return cid
@@ -113,7 +123,9 @@ async def create_location_endpoint(
 
     # Trigger background research when repository coverage is missing/partial.
     if not has_complete_repository_coverage:
-        background_tasks.add_task(run_compliance_check_background, location.id, company_id)
+        background_tasks.add_task(
+            run_compliance_check_background, location.id, company_id
+        )
 
     return {
         "id": str(location.id),
@@ -160,9 +172,7 @@ async def check_location_compliance_endpoint(
             loc_uuid,
         )
     repository_requirements = [
-        {"category": row["category"]}
-        for row in rows
-        if row["category"]
+        {"category": row["category"]} for row in rows if row["category"]
     ]
     missing_categories = _missing_required_categories(repository_requirements)
     allow_live = len(missing_categories) > 0
@@ -204,25 +214,31 @@ async def get_locations_endpoint(
     result = []
     for loc in locations:
         counts = await get_location_counts(loc.id)
-        result.append({
-            "id": str(loc.id),
-            "company_id": str(loc.company_id),
-            "name": loc.name,
-            "address": loc.address,
-            "city": loc.city,
-            "state": loc.state,
-            "county": loc.county,
-            "zipcode": loc.zipcode,
-            "is_active": loc.is_active,
-            "auto_check_enabled": loc.auto_check_enabled,
-            "auto_check_interval_days": loc.auto_check_interval_days,
-            "next_auto_check": loc.next_auto_check.isoformat() if loc.next_auto_check else None,
-            "last_compliance_check": loc.last_compliance_check.isoformat() if loc.last_compliance_check else None,
-            "created_at": loc.created_at.isoformat(),
-            "has_local_ordinance": loc.has_local_ordinance,
-            "requirements_count": counts["requirements_count"],
-            "unread_alerts_count": counts["unread_alerts_count"],
-        })
+        result.append(
+            {
+                "id": str(loc.id),
+                "company_id": str(loc.company_id),
+                "name": loc.name,
+                "address": loc.address,
+                "city": loc.city,
+                "state": loc.state,
+                "county": loc.county,
+                "zipcode": loc.zipcode,
+                "is_active": loc.is_active,
+                "auto_check_enabled": loc.auto_check_enabled,
+                "auto_check_interval_days": loc.auto_check_interval_days,
+                "next_auto_check": loc.next_auto_check.isoformat()
+                if loc.next_auto_check
+                else None,
+                "last_compliance_check": loc.last_compliance_check.isoformat()
+                if loc.last_compliance_check
+                else None,
+                "created_at": loc.created_at.isoformat(),
+                "has_local_ordinance": loc.has_local_ordinance,
+                "requirements_count": counts["requirements_count"],
+                "unread_alerts_count": counts["unread_alerts_count"],
+            }
+        )
     return result
 
 
@@ -246,6 +262,7 @@ async def get_location_endpoint(
         raise HTTPException(status_code=404, detail="Location not found")
 
     from ..services.compliance_service import get_location_counts
+
     counts = await get_location_counts(loc_uuid)
 
     return {
@@ -260,8 +277,12 @@ async def get_location_endpoint(
         "is_active": location.is_active,
         "auto_check_enabled": location.auto_check_enabled,
         "auto_check_interval_days": location.auto_check_interval_days,
-        "next_auto_check": location.next_auto_check.isoformat() if location.next_auto_check else None,
-        "last_compliance_check": location.last_compliance_check.isoformat() if location.last_compliance_check else None,
+        "next_auto_check": location.next_auto_check.isoformat()
+        if location.next_auto_check
+        else None,
+        "last_compliance_check": location.last_compliance_check.isoformat()
+        if location.last_compliance_check
+        else None,
         "created_at": location.created_at.isoformat(),
         "has_local_ordinance": location.has_local_ordinance,
         "requirements_count": counts["requirements_count"],
@@ -299,7 +320,9 @@ async def update_location_endpoint(
         "county": location.county,
         "zipcode": location.zipcode,
         "is_active": location.is_active,
-        "last_compliance_check": location.last_compliance_check.isoformat() if location.last_compliance_check else None,
+        "last_compliance_check": location.last_compliance_check.isoformat()
+        if location.last_compliance_check
+        else None,
         "created_at": location.created_at.isoformat(),
     }
 
@@ -326,7 +349,9 @@ async def delete_location_endpoint(
     return {"message": "Location deleted successfully"}
 
 
-@router.get("/locations/{location_id}/requirements", response_model=List[RequirementResponse])
+@router.get(
+    "/locations/{location_id}/requirements", response_model=List[RequirementResponse]
+)
 async def get_location_requirements_endpoint(
     location_id: str,
     category: Optional[str] = None,
@@ -343,10 +368,6 @@ async def get_location_requirements_endpoint(
         raise HTTPException(status_code=400, detail="Invalid location ID")
 
     return await get_location_requirements(loc_uuid, company_id, category)
-
-
-
-
 
 
 @router.get("/locations/{location_id}/check-log", response_model=List[CheckLogEntry])
@@ -368,7 +389,10 @@ async def get_check_log_endpoint(
     return await get_check_log(loc_uuid, company_id, limit)
 
 
-@router.get("/locations/{location_id}/upcoming-legislation", response_model=List[UpcomingLegislationResponse])
+@router.get(
+    "/locations/{location_id}/upcoming-legislation",
+    response_model=List[UpcomingLegislationResponse],
+)
 async def get_upcoming_legislation_endpoint(
     location_id: str,
     company_id: Optional[str] = Query(None),
@@ -425,8 +449,11 @@ async def mark_alert_read_endpoint(
 
 class DismissAlertRequest(BaseModel):
     """Optional correction data when dismissing an alert (Phase 3.1)."""
+
     is_false_positive: bool = True  # True if the alert was incorrect/not a real change
-    correction_reason: Optional[str] = None  # "misread_date", "wrong_jurisdiction", "hallucination", "outdated_source"
+    correction_reason: Optional[str] = (
+        None  # "misread_date", "wrong_jurisdiction", "hallucination", "outdated_source"
+    )
     admin_notes: Optional[str] = None
 
 
@@ -476,6 +503,28 @@ async def get_compliance_summary_endpoint(
     return await get_compliance_summary(company_id)
 
 
+@router.get("/dashboard")
+async def get_compliance_dashboard_endpoint(
+    horizon_days: int = Query(
+        90, ge=1, le=365, description="Look-ahead window in days (30/60/90/180/365)"
+    ),
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """
+    Compliance impact dashboard for client admins.
+
+    Returns KPI totals and a coming_up list of upcoming legislation items enriched with
+    affected-employee counts derived from employees.work_state == location.state.
+    Pass ?horizon_days=30|60|90 to filter the look-ahead window (default 90).
+    """
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return await get_compliance_dashboard(company_id, horizon_days=horizon_days)
+
+
 # =====================================================
 # Verification Calibration Endpoints (Phase 1.2)
 # =====================================================
@@ -484,7 +533,9 @@ async def get_compliance_summary_endpoint(
 class VerificationFeedbackRequest(BaseModel):
     actual_is_change: bool
     admin_notes: Optional[str] = None
-    correction_reason: Optional[str] = None  # "misread_date", "wrong_jurisdiction", "hallucination", etc.
+    correction_reason: Optional[str] = (
+        None  # "misread_date", "wrong_jurisdiction", "hallucination", etc.
+    )
 
 
 @router.post("/alerts/{alert_id}/feedback")
@@ -516,7 +567,9 @@ async def record_verification_feedback_endpoint(
         company_id=company_id,
     )
     if not success:
-        raise HTTPException(status_code=404, detail="No verification outcome found for this alert")
+        raise HTTPException(
+            status_code=404, detail="No verification outcome found for this alert"
+        )
 
     return {"message": "Feedback recorded"}
 

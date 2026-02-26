@@ -16,19 +16,26 @@ export function WidgetContainer({ widgets, children }: WidgetContainerProps) {
   const [isConfiguring, setIsConfiguring] = useState(false);
   const [visibleWidgets, setVisibleWidgets] = useState<Set<string>>(new Set(widgets.map(w => w.id)));
 
-  // Load from localStorage on mount
+  // Load from localStorage on mount, merging any new widget IDs not yet saved
   useEffect(() => {
-    const saved = localStorage.getItem('matcha-dashboard-widgets');
+    const saved = localStorage.getItem('matcha-dashboard-widgets-v2');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          setVisibleWidgets(new Set(parsed));
+          const savedSet = new Set<string>(parsed);
+          // New widgets (not in localStorage yet) default to visible
+          const allIds = widgets.map(w => w.id);
+          const merged = new Set([...savedSet, ...allIds.filter(id => !savedSet.has(id))]);
+          setVisibleWidgets(merged);
+          return;
         }
       } catch (e) {
         console.error('Failed to parse dashboard widgets from localStorage:', e);
       }
     }
+  // widgets identity is stable per render; only run on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleWidget = (id: string) => {
@@ -39,7 +46,7 @@ export function WidgetContainer({ widgets, children }: WidgetContainerProps) {
       next.add(id);
     }
     setVisibleWidgets(next);
-    localStorage.setItem('matcha-dashboard-widgets', JSON.stringify(Array.from(next)));
+    localStorage.setItem('matcha-dashboard-widgets-v2', JSON.stringify(Array.from(next)));
   };
 
   return (
