@@ -38,9 +38,10 @@ router = APIRouter()
 DEFAULT_SLACK_SCOPES = [
     "users:read",
     "users:read.email",
-    "users:write",
+    "users.profile:read",
+    "team:read",
     "channels:read",
-    "conversations.invite",
+    "channels:manage",
 ]
 SLACK_OAUTH_STATE_TTL_SECONDS = 900
 
@@ -216,12 +217,9 @@ class GoogleWorkspaceConnectionStatus(BaseModel):
 
 
 class SlackConnectionRequest(BaseModel):
-    client_id: Optional[str] = Field(default=None, max_length=255)
-    client_secret: Optional[str] = None
     workspace_url: Optional[str] = Field(default=None, max_length=255)
     admin_email: Optional[EmailStr] = None
     default_channels: list[str] = Field(default_factory=list)
-    oauth_scopes: list[str] = Field(default_factory=lambda: list(DEFAULT_SLACK_SCOPES))
     auto_invite_on_employee_create: bool = True
     sync_display_name: bool = True
 
@@ -230,12 +228,9 @@ class SlackConnectionStatus(BaseModel):
     provider: str = PROVIDER_SLACK
     connected: bool
     status: str
-    client_id: Optional[str] = None
-    has_client_secret: bool = False
     workspace_url: Optional[str] = None
     admin_email: Optional[str] = None
     default_channels: list[str] = Field(default_factory=list)
-    oauth_scopes: list[str] = Field(default_factory=lambda: list(DEFAULT_SLACK_SCOPES))
     auto_invite_on_employee_create: bool = True
     sync_display_name: bool = True
     has_bot_token: bool = False
@@ -243,8 +238,6 @@ class SlackConnectionStatus(BaseModel):
     slack_team_name: Optional[str] = None
     slack_team_domain: Optional[str] = None
     bot_user_id: Optional[str] = None
-    oauth_redirect_uri: Optional[str] = None
-    default_oauth_redirect_uri: Optional[str] = None
     last_tested_at: Optional[datetime] = None
     last_error: Optional[str] = None
     updated_at: Optional[datetime] = None
@@ -363,16 +356,10 @@ def _connection_status_payload(row) -> GoogleWorkspaceConnectionStatus:
 
 
 def _slack_connection_status_payload(row) -> SlackConnectionStatus:
-    resolved_redirect_uri = _slack_oauth_redirect_uri()
-    default_redirect_uri = _default_slack_oauth_redirect_uri()
     if not row:
         return SlackConnectionStatus(
             connected=False,
             status="disconnected",
-            oauth_scopes=list(DEFAULT_SLACK_SCOPES),
-            has_client_secret=False,
-            oauth_redirect_uri=resolved_redirect_uri,
-            default_oauth_redirect_uri=default_redirect_uri,
         )
 
     config = _json_object(row["config"])
@@ -381,12 +368,9 @@ def _slack_connection_status_payload(row) -> SlackConnectionStatus:
     return SlackConnectionStatus(
         connected=status_value == "connected",
         status=status_value,
-        client_id=config.get("client_id"),
-        has_client_secret=bool(secrets.get("client_secret")),
         workspace_url=config.get("workspace_url"),
         admin_email=config.get("admin_email"),
         default_channels=_normalize_slack_channels(config.get("default_channels")),
-        oauth_scopes=_normalize_slack_scopes(config.get("oauth_scopes")),
         auto_invite_on_employee_create=_coerce_bool(
             config.get("auto_invite_on_employee_create"), True
         ),
@@ -396,8 +380,6 @@ def _slack_connection_status_payload(row) -> SlackConnectionStatus:
         slack_team_name=config.get("slack_team_name"),
         slack_team_domain=config.get("slack_team_domain"),
         bot_user_id=config.get("bot_user_id"),
-        oauth_redirect_uri=resolved_redirect_uri,
-        default_oauth_redirect_uri=default_redirect_uri,
         last_tested_at=row["last_tested_at"],
         last_error=row["last_error"],
         updated_at=row["updated_at"],
@@ -664,12 +646,9 @@ async def connect_slack(
 ):
     company_id = await get_client_company_id(current_user)
 
-    requested_client_id = (request.client_id or "").strip() or None
-    requested_client_secret = (request.client_secret or "").strip() or None
     workspace_url = (request.workspace_url or "").strip() or None
     admin_email = str(request.admin_email).strip() if request.admin_email else None
     default_channels = _normalize_slack_channels(request.default_channels)
-    oauth_scopes = _normalize_slack_scopes(request.oauth_scopes)
 
     async with get_connection() as conn:
         existing = await conn.fetchrow(
@@ -683,41 +662,20 @@ async def connect_slack(
         )
         existing_config = _json_object(existing["config"]) if existing else {}
         existing_secrets = _json_object(existing["secrets"]) if existing else {}
-        existing_client_secret_plain: Optional[str] = None
-        existing_client_secret_unreadable = False
-        if existing_secrets.get("client_secret"):
-            try:
-                existing_client_secret_plain = decrypt_secret(
-                    existing_secrets.get("client_secret")
-                )
-            except ValueError:
-                existing_client_secret_unreadable = True
 
-        existing_client_id = str(existing_config.get("client_id") or "").strip() or None
-        client_id = requested_client_id or existing_client_id
-
-        secrets_for_storage = dict(existing_secrets)
-        if requested_client_secret:
-            secrets_for_storage["client_secret"] = encrypt_secret(
-                requested_client_secret
-            )
-        elif existing_client_secret_plain:
-            # Normalize already-stored values to the current encryption envelope.
-            secrets_for_storage["client_secret"] = encrypt_secret(
-                existing_client_secret_plain
-            )
-        elif existing_client_secret_unreadable:
-            # Drop unreadable legacy values so UI accurately reports that secret must be re-entered.
-            secrets_for_storage.pop("client_secret", None)
+        # Only preserve bot_access_token and refresh_token from existing secrets
+        secrets_for_storage: dict = {}
+        if existing_secrets.get("bot_access_token"):
+            secrets_for_storage["bot_access_token"] = existing_secrets["bot_access_token"]
+        if existing_secrets.get("refresh_token"):
+            secrets_for_storage["refresh_token"] = existing_secrets["refresh_token"]
 
         has_bot_token = bool(existing_secrets.get("bot_access_token"))
 
         config = {
-            "client_id": client_id,
             "workspace_url": workspace_url,
             "admin_email": admin_email,
             "default_channels": default_channels,
-            "oauth_scopes": oauth_scopes,
             "auto_invite_on_employee_create": bool(
                 request.auto_invite_on_employee_create
             ),
@@ -769,56 +727,19 @@ async def start_slack_oauth(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT config, secrets
-            FROM integration_connections
-            WHERE company_id = $1 AND provider = $2
-            """,
-            company_id,
-            PROVIDER_SLACK,
+
+    settings = get_settings()
+    if not settings.slack_client_id or not settings.slack_client_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Platform Slack credentials are not configured. Contact support.",
         )
-        if not row:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Save Slack provisioning settings first, including client ID and client secret.",
-            )
-        config = _json_object(row["config"]) if row else {}
-        secrets = _json_object(row["secrets"]) if row else {}
-        client_id = (str(config.get("client_id") or "")).strip()
-        if not client_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Slack client ID is missing. Save it in Slack provisioning settings.",
-            )
-
-        encrypted_client_secret = secrets.get("client_secret")
-        if not encrypted_client_secret:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Slack client secret is missing. Save it in Slack provisioning settings.",
-            )
-        try:
-            decrypted_client_secret = decrypt_secret(encrypted_client_secret)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Stored Slack client secret is unreadable. Re-save Slack client secret in provisioning settings.",
-            )
-        if not str(decrypted_client_secret).strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Slack client secret is empty. Save it in Slack provisioning settings.",
-            )
-
-        scopes = _normalize_slack_scopes(config.get("oauth_scopes"))
 
     state_value = _build_slack_oauth_state(company_id)
     oauth_redirect_uri = _slack_oauth_redirect_uri()
     authorize_params = {
-        "client_id": client_id,
-        "scope": ",".join(scopes),
+        "client_id": settings.slack_client_id,
+        "scope": ",".join(DEFAULT_SLACK_SCOPES),
         "state": state_value,
         "redirect_uri": oauth_redirect_uri,
     }
@@ -854,6 +775,13 @@ async def slack_oauth_callback(
             "error", f"Slack OAuth state validation failed: {exc}"
         )
 
+    settings = get_settings()
+    if not settings.slack_client_id or not settings.slack_client_secret:
+        return _slack_callback_redirect(
+            "error",
+            "Platform Slack credentials are not configured. Contact support.",
+        )
+
     async with get_connection() as conn:
         existing = await conn.fetchrow(
             """
@@ -865,51 +793,20 @@ async def slack_oauth_callback(
             PROVIDER_SLACK,
         )
 
-    if not existing:
-        return _slack_callback_redirect(
-            "error",
-            "Slack provisioning settings are missing. Save client ID and client secret, then retry OAuth.",
-        )
-
-    existing_config = _json_object(existing["config"])
-    existing_secrets = _json_object(existing["secrets"])
-    client_id = str(existing_config.get("client_id") or "").strip()
-    if not client_id:
-        return _slack_callback_redirect(
-            "error",
-            "Slack client ID is missing. Save it in provisioning settings and retry OAuth.",
-        )
-
-    encrypted_client_secret = existing_secrets.get("client_secret")
-    if not encrypted_client_secret:
-        return _slack_callback_redirect(
-            "error",
-            "Slack client secret is missing. Save it in provisioning settings and retry OAuth.",
-        )
-    try:
-        client_secret = decrypt_secret(encrypted_client_secret)
-    except ValueError:
-        return _slack_callback_redirect(
-            "error",
-            "Stored Slack client secret is unreadable. Re-save it in provisioning settings and retry OAuth.",
-        )
-    if not str(client_secret).strip():
-        return _slack_callback_redirect(
-            "error",
-            "Slack client secret is empty. Save it in provisioning settings and retry OAuth.",
-        )
+    existing_config = _json_object(existing["config"]) if existing else {}
+    existing_secrets = _json_object(existing["secrets"]) if existing else {}
 
     try:
         oauth_redirect_uri = _slack_oauth_redirect_uri()
         token_request_payload = {
-            "client_id": client_id,
-            "client_secret": client_secret,
+            "client_id": settings.slack_client_id,
+            "client_secret": settings.slack_client_secret,
             "code": code,
             "redirect_uri": oauth_redirect_uri,
         }
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(
+        async with httpx.AsyncClient(timeout=20.0) as http_client:
+            response = await http_client.post(
                 "https://slack.com/api/oauth.v2.access",
                 data=token_request_payload,
             )
@@ -932,13 +829,9 @@ async def slack_oauth_callback(
 
     team = payload.get("team") or {}
     authed_user = payload.get("authed_user") or {}
-    scope_value = payload.get("scope")
 
     async with get_connection() as conn:
         config = dict(existing_config)
-        config.setdefault("oauth_scopes", list(DEFAULT_SLACK_SCOPES))
-        if scope_value:
-            config["oauth_scopes"] = _normalize_slack_scopes(scope_value)
         config.setdefault("auto_invite_on_employee_create", True)
         config.setdefault("sync_display_name", True)
         config["slack_team_id"] = team.get("id")
@@ -955,7 +848,13 @@ async def slack_oauth_callback(
         config["admin_email"] = config.get("admin_email") or authed_user.get("email")
         config["authed_user_id"] = authed_user.get("id")
 
-        secrets_for_storage = dict(existing_secrets)
+        # Only store bot_access_token and refresh_token — no client credentials
+        secrets_for_storage: dict = {}
+        if existing_secrets.get("bot_access_token"):
+            secrets_for_storage["bot_access_token"] = existing_secrets["bot_access_token"]
+        if existing_secrets.get("refresh_token"):
+            secrets_for_storage["refresh_token"] = existing_secrets["refresh_token"]
+        # Overwrite with fresh tokens from this OAuth exchange
         secrets_for_storage["bot_access_token"] = encrypt_secret(bot_access_token)
         if payload.get("refresh_token"):
             secrets_for_storage["refresh_token"] = encrypt_secret(

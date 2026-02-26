@@ -4,24 +4,17 @@ import { provisioning } from '../api/client';
 import type { SlackConnectionRequest, SlackConnectionStatus } from '../types';
 
 interface SlackProvisioningForm {
-  client_id: string;
-  client_secret: string;
   workspace_url: string;
   admin_email: string;
   default_channels: string;
-  oauth_scopes: string;
   auto_invite_on_employee_create: boolean;
   sync_display_name: boolean;
 }
 
-const DEFAULT_OAUTH_SCOPES = 'users:read,users:read.email,users:write,channels:read,conversations.invite';
 const EMPTY_FORM: SlackProvisioningForm = {
-  client_id: '',
-  client_secret: '',
   workspace_url: '',
   admin_email: '',
   default_channels: '',
-  oauth_scopes: DEFAULT_OAUTH_SCOPES,
   auto_invite_on_employee_create: true,
   sync_display_name: true,
 };
@@ -42,12 +35,9 @@ function splitCsv(value: string): string[] {
 
 function hydrateFormFromStatus(status: SlackConnectionStatus): SlackProvisioningForm {
   return {
-    client_id: status.client_id || '',
-    client_secret: '',
     workspace_url: status.workspace_url || '',
     admin_email: status.admin_email || '',
     default_channels: (status.default_channels || []).join(', '),
-    oauth_scopes: (status.oauth_scopes || []).join(', ') || DEFAULT_OAUTH_SCOPES,
     auto_invite_on_employee_create: status.auto_invite_on_employee_create ?? true,
     sync_display_name: status.sync_display_name ?? true,
   };
@@ -103,10 +93,6 @@ export default function SlackProvisioning() {
   }, [searchParams, setSearchParams]);
 
   const currentStatus = status?.status || 'disconnected';
-  const expectedRedirectUri =
-    status?.oauth_redirect_uri ||
-    status?.default_oauth_redirect_uri ||
-    `${window.location.origin}/api/provisioning/slack/oauth/callback`;
   const statusBadgeText = useMemo(() => {
     if (loading) return 'Checking';
     if (!status || status.status === 'disconnected') return 'Not Connected';
@@ -116,12 +102,9 @@ export default function SlackProvisioning() {
   }, [loading, status]);
 
   const buildPayload = (): SlackConnectionRequest => ({
-    client_id: form.client_id.trim() || undefined,
-    client_secret: form.client_secret.trim() || undefined,
     workspace_url: form.workspace_url.trim() || undefined,
     admin_email: form.admin_email.trim() || undefined,
     default_channels: splitCsv(form.default_channels),
-    oauth_scopes: splitCsv(form.oauth_scopes),
     auto_invite_on_employee_create: form.auto_invite_on_employee_create,
     sync_display_name: form.sync_display_name,
   });
@@ -182,9 +165,6 @@ export default function SlackProvisioning() {
         <p className="text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
           Configure workspace defaults and connect OAuth for onboarding invites.
         </p>
-        <p className="mt-3 text-[11px] text-zinc-400">
-          Slack Redirect URL: <span className="font-mono text-zinc-200">{expectedRedirectUri}</span>
-        </p>
       </div>
 
       {error && (
@@ -205,8 +185,6 @@ export default function SlackProvisioning() {
             <p className="text-sm font-semibold uppercase tracking-wider mt-1">{currentStatus}</p>
           </div>
           <div className="text-xs opacity-80 space-y-1">
-            <p>Client ID: {status?.client_id || 'not set'}</p>
-            <p>Client secret: {status?.has_client_secret ? 'stored' : 'missing'}</p>
             <p>Workspace: {status?.workspace_url || 'not set'}</p>
             <p>Team: {status?.slack_team_name || status?.slack_team_id || 'not connected'}</p>
             <p>Bot token: {status?.has_bot_token ? 'stored' : 'missing'}</p>
@@ -220,29 +198,6 @@ export default function SlackProvisioning() {
 
       <form onSubmit={handleSave} className="border border-white/10 bg-zinc-900/40 p-5 space-y-5">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="space-y-2">
-            <span className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold">Slack Client ID</span>
-            <input
-              type="text"
-              value={form.client_id}
-              onChange={(event) => setForm((prev) => ({ ...prev, client_id: event.target.value }))}
-              placeholder="1234567890.1234567890"
-              className="w-full px-3 py-2 bg-black/40 border border-white/10 text-sm text-zinc-100 focus:outline-none focus:border-white/30"
-            />
-          </label>
-
-          <label className="space-y-2">
-            <span className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold">Slack Client Secret</span>
-            <input
-              type="password"
-              value={form.client_secret}
-              onChange={(event) => setForm((prev) => ({ ...prev, client_secret: event.target.value }))}
-              placeholder={status?.has_client_secret ? '•••••••• (leave blank to keep)' : 'Enter client secret'}
-              className="w-full px-3 py-2 bg-black/40 border border-white/10 text-sm text-zinc-100 focus:outline-none focus:border-white/30"
-            />
-            <p className="text-[11px] text-zinc-500">Leave blank to keep the currently stored secret.</p>
-          </label>
-
           <label className="space-y-2">
             <span className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold">Workspace URL</span>
             <input
@@ -276,16 +231,6 @@ export default function SlackProvisioning() {
             className="w-full px-3 py-2 bg-black/40 border border-white/10 text-sm text-zinc-100 focus:outline-none focus:border-white/30"
           />
           <p className="text-[11px] text-zinc-500">Comma-separated channel names to invite new hires into by default.</p>
-        </label>
-
-        <label className="space-y-2 block">
-          <span className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold">OAuth Scopes</span>
-          <input
-            type="text"
-            value={form.oauth_scopes}
-            onChange={(event) => setForm((prev) => ({ ...prev, oauth_scopes: event.target.value }))}
-            className="w-full px-3 py-2 bg-black/40 border border-white/10 text-sm text-zinc-100 focus:outline-none focus:border-white/30"
-          />
         </label>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-zinc-300">
