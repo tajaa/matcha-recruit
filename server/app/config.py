@@ -74,10 +74,6 @@ class Settings:
     gemini_hourly_limit: int = 50
     gemini_daily_limit: int = 50
 
-    # Slack (platform-level app)
-    slack_client_id: Optional[str] = None
-    slack_client_secret: Optional[str] = None
-
 
 # Global settings instance
 _settings: Optional[Settings] = None
@@ -161,8 +157,6 @@ def load_settings() -> Settings:
         celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),
         gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "50")),
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "50")),
-        slack_client_id=os.getenv("SLACK_CLIENT_ID"),
-        slack_client_secret=os.getenv("SLACK_CLIENT_SECRET"),
     )
     return _settings
 
