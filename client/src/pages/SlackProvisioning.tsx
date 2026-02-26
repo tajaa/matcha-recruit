@@ -10,6 +10,7 @@ interface SlackProvisioningForm {
   admin_email: string;
   default_channels: string;
   oauth_scopes: string;
+  invite_link: string;
   auto_invite_on_employee_create: boolean;
   sync_display_name: boolean;
 }
@@ -22,6 +23,7 @@ const EMPTY_FORM: SlackProvisioningForm = {
   admin_email: '',
   default_channels: '',
   oauth_scopes: DEFAULT_OAUTH_SCOPES,
+  invite_link: '',
   auto_invite_on_employee_create: true,
   sync_display_name: true,
 };
@@ -48,6 +50,7 @@ function hydrateFormFromStatus(status: SlackConnectionStatus): SlackProvisioning
     admin_email: status.admin_email || '',
     default_channels: (status.default_channels || []).join(', '),
     oauth_scopes: (status.oauth_scopes || []).join(', ') || DEFAULT_OAUTH_SCOPES,
+    invite_link: status.invite_link || '',
     auto_invite_on_employee_create: status.auto_invite_on_employee_create ?? true,
     sync_display_name: status.sync_display_name ?? true,
   };
@@ -122,6 +125,7 @@ export default function SlackProvisioning() {
     admin_email: form.admin_email.trim() || undefined,
     default_channels: splitCsv(form.default_channels),
     oauth_scopes: splitCsv(form.oauth_scopes),
+    invite_link: form.invite_link.trim() || undefined,
     auto_invite_on_employee_create: form.auto_invite_on_employee_create,
     sync_display_name: form.sync_display_name,
   });
@@ -286,6 +290,18 @@ export default function SlackProvisioning() {
             onChange={(event) => setForm((prev) => ({ ...prev, oauth_scopes: event.target.value }))}
             className="w-full px-3 py-2 bg-black/40 border border-white/10 text-sm text-zinc-100 focus:outline-none focus:border-white/30"
           />
+        </label>
+
+        <label className="space-y-2 block">
+          <span className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold">Workspace Invite Link</span>
+          <input
+            type="text"
+            value={form.invite_link}
+            onChange={(event) => setForm((prev) => ({ ...prev, invite_link: event.target.value }))}
+            placeholder="https://join.slack.com/t/your-workspace/shared_invite/..."
+            className="w-full px-3 py-2 bg-black/40 border border-white/10 text-sm text-zinc-100 focus:outline-none focus:border-white/30"
+          />
+          <p className="text-[11px] text-zinc-500">Fallback for non-Enterprise workspaces. New hires receive this link when API invite isn't available.</p>
         </label>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-zinc-300">

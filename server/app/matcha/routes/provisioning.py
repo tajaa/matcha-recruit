@@ -223,6 +223,7 @@ class SlackConnectionRequest(BaseModel):
     admin_email: Optional[EmailStr] = None
     default_channels: list[str] = Field(default_factory=list)
     oauth_scopes: list[str] = Field(default_factory=lambda: list(DEFAULT_SLACK_SCOPES))
+    invite_link: Optional[str] = Field(default=None, max_length=500)
     auto_invite_on_employee_create: bool = True
     sync_display_name: bool = True
 
@@ -237,6 +238,7 @@ class SlackConnectionStatus(BaseModel):
     admin_email: Optional[str] = None
     default_channels: list[str] = Field(default_factory=list)
     oauth_scopes: list[str] = Field(default_factory=lambda: list(DEFAULT_SLACK_SCOPES))
+    invite_link: Optional[str] = None
     auto_invite_on_employee_create: bool = True
     sync_display_name: bool = True
     has_bot_token: bool = False
@@ -388,6 +390,7 @@ def _slack_connection_status_payload(row) -> SlackConnectionStatus:
         admin_email=config.get("admin_email"),
         default_channels=_normalize_slack_channels(config.get("default_channels")),
         oauth_scopes=_normalize_slack_scopes(config.get("oauth_scopes")),
+        invite_link=config.get("invite_link"),
         auto_invite_on_employee_create=_coerce_bool(
             config.get("auto_invite_on_employee_create"), True
         ),
@@ -713,12 +716,15 @@ async def connect_slack(
 
         has_bot_token = bool(existing_secrets.get("bot_access_token"))
 
+        invite_link = (request.invite_link or "").strip() or None
+
         config = {
             "client_id": client_id,
             "workspace_url": workspace_url,
             "admin_email": admin_email,
             "default_channels": default_channels,
             "oauth_scopes": oauth_scopes,
+            "invite_link": invite_link,
             "auto_invite_on_employee_create": bool(
                 request.auto_invite_on_employee_create
             ),

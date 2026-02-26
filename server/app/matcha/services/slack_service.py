@@ -50,6 +50,13 @@ SLACK_ALREADY_PRESENT_ERRORS = {
     "already_exists",
 }
 
+SLACK_ENTERPRISE_ONLY_ERRORS = {
+    "not_allowed_token_type",
+    "missing_scope",
+    "feature_not_enabled",
+    "method_not_supported_for_team",
+}
+
 
 def _needs_action_for_slack_error(error: str, status_code: int) -> bool:
     return error in SLACK_NEEDS_ACTION_ERRORS or status_code in {401, 403}
@@ -225,9 +232,24 @@ class SlackService:
                     "warnings": [f"Slack returned '{invite_error}' while inviting user."],
                 }
 
+            # Non-Enterprise workspaces can't use admin.users.invite — fall back to invite link
+            invite_link = str(config.get("invite_link") or "").strip()
+            if invite_error in SLACK_ENTERPRISE_ONLY_ERRORS and invite_link:
+                return {
+                    "mode": "invite_link",
+                    "external_user_id": None,
+                    "external_email": email,
+                    "status": "invited_via_link",
+                    "invite_link": invite_link,
+                    "warnings": [
+                        f"Workspace doesn't support admin.users.invite ({invite_error}). "
+                        "Falling back to shared invite link."
+                    ],
+                }
+
             hint = (
                 " Ensure your Slack app/token can call admin.users.invite "
-                "(typically admin scopes on Enterprise Grid), or invite manually in Slack."
+                "(typically admin scopes on Enterprise Grid), or add a workspace invite link in Slack provisioning settings."
             )
             message = f"Slack invite failed: {invite_error or _extract_response_error(invite_response)}.{hint}"
             raise SlackProvisioningError(

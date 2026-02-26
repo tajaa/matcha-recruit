@@ -790,6 +790,7 @@ export interface SlackConnectionRequest {
   admin_email?: string;
   default_channels?: string[];
   oauth_scopes?: string[];
+  invite_link?: string;
   auto_invite_on_employee_create?: boolean;
   sync_display_name?: boolean;
 }
@@ -804,6 +805,7 @@ export interface SlackConnectionStatus {
   admin_email: string | null;
   default_channels: string[];
   oauth_scopes: string[];
+  invite_link: string | null;
   auto_invite_on_employee_create: boolean;
   sync_display_name: boolean;
   has_bot_token: boolean;
