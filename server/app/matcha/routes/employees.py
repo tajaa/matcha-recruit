@@ -25,7 +25,9 @@ from ...core.models.auth import CurrentUser
 from ...core.services.email import EmailService
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
+    PROVIDER_SLACK,
     start_google_workspace_onboarding,
+    start_slack_onboarding,
 )
 
 logger = logging.getLogger(__name__)
@@ -281,6 +283,27 @@ async def _run_google_workspace_auto_provisioning(
             company_id,
         )
 
+async def _run_slack_auto_provisioning(
+    *,
+    company_id: UUID,
+    employee_id: UUID,
+    triggered_by: UUID,
+) -> None:
+    """Fire-and-forget Slack provisioning kickoff for employee creation flow."""
+    try:
+        await start_slack_onboarding(
+            company_id=company_id,
+            employee_id=employee_id,
+            triggered_by=triggered_by,
+            trigger_source="employee_create",
+        )
+    except Exception:
+        logger.exception(
+            "Failed Slack auto-provisioning for employee %s in company %s",
+            employee_id,
+            company_id,
+        )
+
 
 # ================================
 # Endpoints
@@ -438,28 +461,31 @@ async def create_employee(
         )
 
         google_workspace_auto_provision = False
+        slack_auto_provision = False
         try:
-            integration_row = await conn.fetchrow(
+            integration_rows = await conn.fetch(
                 """
-                SELECT config
+                SELECT provider, config
                 FROM integration_connections
                 WHERE company_id = $1
-                  AND provider = $2
                   AND status = 'connected'
-                ORDER BY updated_at DESC NULLS LAST, created_at DESC
-                LIMIT 1
                 """,
                 company_id,
-                PROVIDER_GOOGLE_WORKSPACE,
             )
-            if integration_row:
+            for integration_row in integration_rows:
                 integration_config = _json_object(integration_row["config"])
-                google_workspace_auto_provision = _coerce_bool(
-                    integration_config.get("auto_provision_on_employee_create"),
-                    True,
-                )
+                if integration_row["provider"] == PROVIDER_GOOGLE_WORKSPACE:
+                    google_workspace_auto_provision = _coerce_bool(
+                        integration_config.get("auto_provision_on_employee_create"),
+                        True,
+                    )
+                elif integration_row["provider"] == PROVIDER_SLACK:
+                    slack_auto_provision = _coerce_bool(
+                        integration_config.get("auto_invite_on_employee_create"),
+                        True,
+                    )
         except Exception:
-            logger.exception("Unable to evaluate Google Workspace connection status for company %s", company_id)
+            logger.exception("Unable to evaluate integration connection statuses for company %s", company_id)
 
         response = EmployeeDetailResponse(
             id=row["id"],
@@ -486,6 +512,14 @@ async def create_employee(
         if google_workspace_auto_provision and not request.skip_google_workspace_provisioning:
             background_tasks.add_task(
                 _run_google_workspace_auto_provisioning,
+                company_id=row["org_id"],
+                employee_id=row["id"],
+                triggered_by=current_user.id,
+            )
+
+        if slack_auto_provision:
+            background_tasks.add_task(
+                _run_slack_auto_provisioning,
                 company_id=row["org_id"],
                 employee_id=row["id"],
                 triggered_by=current_user.id,

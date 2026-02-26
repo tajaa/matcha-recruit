@@ -872,6 +872,29 @@ export interface EmployeeGoogleWorkspaceProvisioningStatus {
   runs: ProvisioningRunStatus[];
 }
 
+export interface EmployeeSlackProvisioningStatus {
+  connection: SlackConnectionStatus;
+  external_identity: ExternalIdentity | null;
+  runs: ProvisioningRunStatus[];
+}
+
+export interface ProvisioningRunListItem {
+  run_id: string;
+  company_id: string;
+  employee_id: string;
+  employee_name: string | null;
+  employee_email: string | null;
+  provider: string;
+  status: string;
+  trigger_source: string;
+  triggered_by: string | null;
+  last_error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface OnboardingFunnel {
   invited: number;
   accepted: number;

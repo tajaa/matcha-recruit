@@ -27,13 +27,14 @@ from ..dependencies import get_client_company_id, require_admin_or_client
 from ..services.google_workspace_service import GoogleWorkspaceService
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
+    PROVIDER_SLACK,
     retry_google_workspace_onboarding,
     start_google_workspace_onboarding,
+    start_slack_onboarding,
 )
 
 router = APIRouter()
 
-PROVIDER_SLACK = "slack"
 DEFAULT_SLACK_SCOPES = [
     "users:read",
     "users:read.email",
@@ -157,7 +158,9 @@ def _decode_slack_oauth_state(state: str) -> UUID:
     company_raw, timestamp_raw, nonce, provided_signature = parts
     payload = f"{company_raw}:{timestamp_raw}:{nonce}"
     secret = get_settings().jwt_secret_key.encode("utf-8")
-    expected_signature = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    expected_signature = hmac.new(
+        secret, payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
 
     if not hmac.compare_digest(provided_signature, expected_signature):
         raise ValueError("State signature mismatch")
@@ -301,6 +304,29 @@ class EmployeeProvisioningStatusResponse(BaseModel):
     runs: list[ProvisioningRunStatusResponse] = Field(default_factory=list)
 
 
+class SlackEmployeeProvisioningStatusResponse(BaseModel):
+    connection: SlackConnectionStatus
+    external_identity: Optional[ExternalIdentityResponse] = None
+    runs: list[ProvisioningRunStatusResponse] = Field(default_factory=list)
+
+
+class ProvisioningRunListItem(BaseModel):
+    run_id: UUID
+    company_id: UUID
+    employee_id: UUID
+    employee_name: Optional[str] = None
+    employee_email: Optional[str] = None
+    provider: str
+    status: str
+    trigger_source: str
+    triggered_by: Optional[UUID] = None
+    last_error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 def _connection_status_payload(row) -> GoogleWorkspaceConnectionStatus:
     if not row:
         return GoogleWorkspaceConnectionStatus(
@@ -320,8 +346,14 @@ def _connection_status_payload(row) -> GoogleWorkspaceConnectionStatus:
         admin_email=config.get("admin_email"),
         delegated_admin_email=config.get("delegated_admin_email"),
         default_org_unit=config.get("default_org_unit"),
-        default_groups=[str(item) for item in (config.get("default_groups") or []) if str(item).strip()],
-        auto_provision_on_employee_create=_coerce_bool(config.get("auto_provision_on_employee_create"), True),
+        default_groups=[
+            str(item)
+            for item in (config.get("default_groups") or [])
+            if str(item).strip()
+        ],
+        auto_provision_on_employee_create=_coerce_bool(
+            config.get("auto_provision_on_employee_create"), True
+        ),
         has_access_token=bool(secrets.get("access_token")),
         has_service_account_credentials=bool(secrets.get("service_account_json")),
         last_tested_at=row["last_tested_at"],
@@ -355,7 +387,9 @@ def _slack_connection_status_payload(row) -> SlackConnectionStatus:
         admin_email=config.get("admin_email"),
         default_channels=_normalize_slack_channels(config.get("default_channels")),
         oauth_scopes=_normalize_slack_scopes(config.get("oauth_scopes")),
-        auto_invite_on_employee_create=_coerce_bool(config.get("auto_invite_on_employee_create"), True),
+        auto_invite_on_employee_create=_coerce_bool(
+            config.get("auto_invite_on_employee_create"), True
+        ),
         sync_display_name=_coerce_bool(config.get("sync_display_name"), True),
         has_bot_token=bool(secrets.get("bot_access_token")),
         slack_team_id=config.get("slack_team_id"),
@@ -424,7 +458,9 @@ async def get_google_workspace_connection_status(
     return _connection_status_payload(row)
 
 
-@router.post("/google-workspace/connect", response_model=GoogleWorkspaceConnectionStatus)
+@router.post(
+    "/google-workspace/connect", response_model=GoogleWorkspaceConnectionStatus
+)
 async def connect_google_workspace(
     request: GoogleWorkspaceConnectionRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -447,32 +483,50 @@ async def connect_google_workspace(
         existing_access_token_unreadable = False
         if existing_secrets.get("access_token"):
             try:
-                existing_access_token_plain = decrypt_secret(existing_secrets.get("access_token"))
+                existing_access_token_plain = decrypt_secret(
+                    existing_secrets.get("access_token")
+                )
             except ValueError:
                 existing_access_token_unreadable = True
         existing_service_account_json_plain: Optional[str] = None
         existing_service_account_json_unreadable = False
         if existing_secrets.get("service_account_json"):
             try:
-                existing_service_account_json_plain = decrypt_secret(existing_secrets.get("service_account_json"))
+                existing_service_account_json_plain = decrypt_secret(
+                    existing_secrets.get("service_account_json")
+                )
             except ValueError:
                 existing_service_account_json_unreadable = True
 
-        default_groups = [str(item).strip() for item in request.default_groups if str(item).strip()]
+        default_groups = [
+            str(item).strip() for item in request.default_groups if str(item).strip()
+        ]
         config = {
             "mode": request.mode,
             "domain": request.domain,
             "admin_email": str(request.admin_email) if request.admin_email else None,
-            "delegated_admin_email": str(request.delegated_admin_email) if request.delegated_admin_email else None,
+            "delegated_admin_email": str(request.delegated_admin_email)
+            if request.delegated_admin_email
+            else None,
             "default_org_unit": request.default_org_unit,
             "default_groups": default_groups,
-            "auto_provision_on_employee_create": bool(request.auto_provision_on_employee_create),
+            "auto_provision_on_employee_create": bool(
+                request.auto_provision_on_employee_create
+            ),
         }
 
-        requested_access_token = request.access_token.strip() if request.access_token else None
-        requested_service_account_json = request.service_account_json.strip() if request.service_account_json else None
+        requested_access_token = (
+            request.access_token.strip() if request.access_token else None
+        )
+        requested_service_account_json = (
+            request.service_account_json.strip()
+            if request.service_account_json
+            else None
+        )
         access_token_plain = requested_access_token or existing_access_token_plain
-        service_account_json_plain = requested_service_account_json or existing_service_account_json_plain
+        service_account_json_plain = (
+            requested_service_account_json or existing_service_account_json_plain
+        )
 
         secrets_for_storage = dict(existing_secrets)
         secrets_for_test: dict = {}
@@ -493,21 +547,30 @@ async def connect_google_workspace(
             secrets_for_storage.pop("service_account_json", None)
         elif request.mode == "service_account":
             if not service_account_json_plain:
-                message = "service_account_json is required when mode is service_account"
-                if existing_service_account_json_unreadable and not requested_service_account_json:
+                message = (
+                    "service_account_json is required when mode is service_account"
+                )
+                if (
+                    existing_service_account_json_unreadable
+                    and not requested_service_account_json
+                ):
                     message = "Stored service account credentials are unreadable. Provide new service_account_json."
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=message,
                 )
-            delegated_admin_email = config.get("delegated_admin_email") or config.get("admin_email")
+            delegated_admin_email = config.get("delegated_admin_email") or config.get(
+                "admin_email"
+            )
             if not delegated_admin_email:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="delegated_admin_email is required when mode is service_account",
                 )
             secrets_for_test["service_account_json"] = service_account_json_plain
-            secrets_for_storage["service_account_json"] = encrypt_secret(service_account_json_plain)
+            secrets_for_storage["service_account_json"] = encrypt_secret(
+                service_account_json_plain
+            )
             secrets_for_storage.pop("access_token", None)
         else:
             raise HTTPException(
@@ -516,14 +579,22 @@ async def connect_google_workspace(
             )
 
         # Normalize older plaintext stored tokens into encrypted format on save.
-        if request.mode == "api_token" and existing_access_token_plain and not requested_access_token:
-            secrets_for_storage["access_token"] = encrypt_secret(existing_access_token_plain)
+        if (
+            request.mode == "api_token"
+            and existing_access_token_plain
+            and not requested_access_token
+        ):
+            secrets_for_storage["access_token"] = encrypt_secret(
+                existing_access_token_plain
+            )
         if (
             request.mode == "service_account"
             and existing_service_account_json_plain
             and not requested_service_account_json
         ):
-            secrets_for_storage["service_account_json"] = encrypt_secret(existing_service_account_json_plain)
+            secrets_for_storage["service_account_json"] = encrypt_secret(
+                existing_service_account_json_plain
+            )
 
         status_value = "connected" if request.mode == "mock" else "needs_action"
         last_error = None
@@ -616,7 +687,9 @@ async def connect_slack(
         existing_client_secret_unreadable = False
         if existing_secrets.get("client_secret"):
             try:
-                existing_client_secret_plain = decrypt_secret(existing_secrets.get("client_secret"))
+                existing_client_secret_plain = decrypt_secret(
+                    existing_secrets.get("client_secret")
+                )
             except ValueError:
                 existing_client_secret_unreadable = True
 
@@ -625,10 +698,14 @@ async def connect_slack(
 
         secrets_for_storage = dict(existing_secrets)
         if requested_client_secret:
-            secrets_for_storage["client_secret"] = encrypt_secret(requested_client_secret)
+            secrets_for_storage["client_secret"] = encrypt_secret(
+                requested_client_secret
+            )
         elif existing_client_secret_plain:
             # Normalize already-stored values to the current encryption envelope.
-            secrets_for_storage["client_secret"] = encrypt_secret(existing_client_secret_plain)
+            secrets_for_storage["client_secret"] = encrypt_secret(
+                existing_client_secret_plain
+            )
         elif existing_client_secret_unreadable:
             # Drop unreadable legacy values so UI accurately reports that secret must be re-entered.
             secrets_for_storage.pop("client_secret", None)
@@ -641,7 +718,9 @@ async def connect_slack(
             "admin_email": admin_email,
             "default_channels": default_channels,
             "oauth_scopes": oauth_scopes,
-            "auto_invite_on_employee_create": bool(request.auto_invite_on_employee_create),
+            "auto_invite_on_employee_create": bool(
+                request.auto_invite_on_employee_create
+            ),
             "sync_display_name": bool(request.sync_display_name),
             "slack_team_id": existing_config.get("slack_team_id"),
             "slack_team_name": existing_config.get("slack_team_name"),
@@ -650,7 +729,9 @@ async def connect_slack(
         }
 
         status_value = "connected" if has_bot_token else "needs_action"
-        last_error = None if has_bot_token else (existing["last_error"] if existing else None)
+        last_error = (
+            None if has_bot_token else (existing["last_error"] if existing else None)
+        )
         last_tested_at = existing["last_tested_at"] if existing else None
 
         row = await conn.fetchrow(
@@ -762,12 +843,16 @@ async def slack_oauth_callback(
         return _slack_callback_redirect("error", f"Slack OAuth was cancelled: {error}")
 
     if not code or not state:
-        return _slack_callback_redirect("error", "Slack OAuth callback is missing required parameters.")
+        return _slack_callback_redirect(
+            "error", "Slack OAuth callback is missing required parameters."
+        )
 
     try:
         company_id = _decode_slack_oauth_state(state)
     except ValueError as exc:
-        return _slack_callback_redirect("error", f"Slack OAuth state validation failed: {exc}")
+        return _slack_callback_redirect(
+            "error", f"Slack OAuth state validation failed: {exc}"
+        )
 
     async with get_connection() as conn:
         existing = await conn.fetchrow(
@@ -841,7 +926,9 @@ async def slack_oauth_callback(
 
     bot_access_token = payload.get("access_token")
     if not bot_access_token:
-        return _slack_callback_redirect("error", "Slack OAuth did not return a bot access token.")
+        return _slack_callback_redirect(
+            "error", "Slack OAuth did not return a bot access token."
+        )
 
     team = payload.get("team") or {}
     authed_user = payload.get("authed_user") or {}
@@ -861,7 +948,9 @@ async def slack_oauth_callback(
             config["slack_team_domain"] = team.get("domain")
         config["bot_user_id"] = payload.get("bot_user_id") or config.get("bot_user_id")
         config["workspace_url"] = config.get("workspace_url") or (
-            f"https://{team.get('domain')}.slack.com" if team.get("domain") else config.get("workspace_url")
+            f"https://{team.get('domain')}.slack.com"
+            if team.get("domain")
+            else config.get("workspace_url")
         )
         config["admin_email"] = config.get("admin_email") or authed_user.get("email")
         config["authed_user_id"] = authed_user.get("id")
@@ -869,7 +958,9 @@ async def slack_oauth_callback(
         secrets_for_storage = dict(existing_secrets)
         secrets_for_storage["bot_access_token"] = encrypt_secret(bot_access_token)
         if payload.get("refresh_token"):
-            secrets_for_storage["refresh_token"] = encrypt_secret(str(payload.get("refresh_token")))
+            secrets_for_storage["refresh_token"] = encrypt_secret(
+                str(payload.get("refresh_token"))
+            )
 
         await conn.execute(
             """
@@ -899,7 +990,10 @@ async def slack_oauth_callback(
     )
 
 
-@router.post("/employees/{employee_id}/google-workspace", response_model=ProvisioningRunStatusResponse)
+@router.post(
+    "/employees/{employee_id}/google-workspace",
+    response_model=ProvisioningRunStatusResponse,
+)
 async def provision_employee_google_workspace(
     employee_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -937,7 +1031,10 @@ async def retry_google_workspace_provisioning_run(
     return ProvisioningRunStatusResponse.model_validate(run_payload)
 
 
-@router.get("/employees/{employee_id}/google-workspace", response_model=EmployeeProvisioningStatusResponse)
+@router.get(
+    "/employees/{employee_id}/google-workspace",
+    response_model=EmployeeProvisioningStatusResponse,
+)
 async def get_employee_google_workspace_provisioning_status(
     employee_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -951,7 +1048,9 @@ async def get_employee_google_workspace_provisioning_status(
             company_id,
         )
         if not employee_exists:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found"
+            )
 
         connection_row = await conn.fetchrow(
             """
@@ -1027,3 +1126,197 @@ async def get_employee_google_workspace_provisioning_status(
         external_identity=external_identity,
         runs=runs,
     )
+
+
+@router.post(
+    "/employees/{employee_id}/slack", response_model=ProvisioningRunStatusResponse
+)
+async def provision_employee_slack(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+
+    try:
+        run_payload = await start_slack_onboarding(
+            company_id=company_id,
+            employee_id=employee_id,
+            triggered_by=current_user.id,
+            trigger_source="manual",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+    return ProvisioningRunStatusResponse.model_validate(run_payload)
+
+
+@router.get(
+    "/employees/{employee_id}/slack",
+    response_model=SlackEmployeeProvisioningStatusResponse,
+)
+async def get_employee_slack_provisioning_status(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        employee_exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM employees WHERE id = $1 AND org_id = $2)",
+            employee_id,
+            company_id,
+        )
+        if not employee_exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found"
+            )
+
+        connection_row = await conn.fetchrow(
+            """
+            SELECT *
+            FROM integration_connections
+            WHERE company_id = $1 AND provider = $2
+            """,
+            company_id,
+            PROVIDER_SLACK,
+        )
+        connection = _slack_connection_status_payload(connection_row)
+
+        identity_row = await conn.fetchrow(
+            """
+            SELECT *
+            FROM external_identities
+            WHERE company_id = $1
+              AND employee_id = $2
+              AND provider = $3
+            """,
+            company_id,
+            employee_id,
+            PROVIDER_SLACK,
+        )
+        external_identity = None
+        if identity_row:
+            external_identity = ExternalIdentityResponse(
+                provider=identity_row["provider"],
+                external_user_id=identity_row["external_user_id"],
+                external_email=identity_row["external_email"],
+                status=identity_row["status"],
+                raw_profile=_json_object(identity_row["raw_profile"]),
+                created_at=identity_row["created_at"],
+                updated_at=identity_row["updated_at"],
+            )
+
+        run_rows = await conn.fetch(
+            """
+            SELECT *
+            FROM onboarding_runs
+            WHERE company_id = $1
+              AND employee_id = $2
+              AND provider = $3
+            ORDER BY created_at DESC
+            LIMIT 25
+            """,
+            company_id,
+            employee_id,
+            PROVIDER_SLACK,
+        )
+
+        run_ids = [row["id"] for row in run_rows]
+        step_rows = []
+        if run_ids:
+            step_rows = await conn.fetch(
+                """
+                SELECT *
+                FROM onboarding_steps
+                WHERE run_id = ANY($1::uuid[])
+                ORDER BY created_at ASC
+                """,
+                run_ids,
+            )
+
+        steps_by_run: dict[UUID, list] = {}
+        for step in step_rows:
+            steps_by_run.setdefault(step["run_id"], []).append(step)
+
+        runs = [_run_payload(run, steps_by_run.get(run["id"], [])) for run in run_rows]
+
+    return SlackEmployeeProvisioningStatusResponse(
+        connection=connection,
+        external_identity=external_identity,
+        runs=runs,
+    )
+
+
+@router.get("/runs", response_model=list[ProvisioningRunListItem])
+async def list_provisioning_runs(
+    provider: Optional[str] = None,
+    run_status: Optional[str] = Query(default=None, alias="status"),
+    limit: int = Query(default=50, le=200),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return recent provisioning runs for the company, optionally filtered by provider or status."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        filters = ["r.company_id = $1"]
+        params: list = [company_id]
+        idx = 2
+
+        if provider:
+            filters.append(f"r.provider = ${idx}")
+            params.append(provider)
+            idx += 1
+
+        if run_status:
+            filters.append(f"r.status = ${idx}")
+            params.append(run_status)
+            idx += 1
+
+        params.append(limit)
+        where_clause = " AND ".join(filters)
+
+        rows = await conn.fetch(
+            f"""
+            SELECT
+                r.id,
+                r.company_id,
+                r.employee_id,
+                r.provider,
+                r.status,
+                r.trigger_source,
+                r.triggered_by,
+                r.last_error,
+                r.started_at,
+                r.completed_at,
+                r.created_at,
+                r.updated_at,
+                e.first_name || ' ' || e.last_name AS employee_name,
+                e.email AS employee_email
+            FROM onboarding_runs r
+            LEFT JOIN employees e ON e.id = r.employee_id
+            WHERE {where_clause}
+            ORDER BY r.created_at DESC
+            LIMIT ${idx}
+            """,
+            *params,
+        )
+
+        return [
+            ProvisioningRunListItem(
+                run_id=row["id"],
+                company_id=row["company_id"],
+                employee_id=row["employee_id"],
+                employee_name=row["employee_name"],
+                employee_email=row["employee_email"],
+                provider=row["provider"],
+                status=row["status"],
+                trigger_source=row["trigger_source"],
+                triggered_by=row["triggered_by"],
+                last_error=row["last_error"],
+                started_at=row["started_at"],
+                completed_at=row["completed_at"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]

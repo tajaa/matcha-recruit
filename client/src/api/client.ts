@@ -44,6 +44,8 @@ import type {
   SlackOAuthStartResponse,
   ProvisioningRunStatus,
   EmployeeGoogleWorkspaceProvisioningStatus,
+  EmployeeSlackProvisioningStatus,
+  ProvisioningRunListItem,
   OnboardingAnalytics,
   Project,
   ProjectCreate,
@@ -558,6 +560,23 @@ export const provisioning = {
     request<ProvisioningRunStatus>(`/provisioning/runs/${runId}/retry`, {
       method: 'POST',
     }),
+
+  provisionEmployeeSlack: (employeeId: string) =>
+    request<ProvisioningRunStatus>(`/provisioning/employees/${employeeId}/slack`, {
+      method: 'POST',
+    }),
+
+  getEmployeeSlackStatus: (employeeId: string) =>
+    request<EmployeeSlackProvisioningStatus>(`/provisioning/employees/${employeeId}/slack`),
+
+  listRuns: (params?: { provider?: string; status?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.provider) qs.set('provider', params.provider);
+    if (params?.status) qs.set('status', params.status);
+    if (params?.limit != null) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return request<ProvisioningRunListItem[]>(`/provisioning/runs${query ? `?${query}` : ''}`);
+  },
 };
 
 export const onboarding = {

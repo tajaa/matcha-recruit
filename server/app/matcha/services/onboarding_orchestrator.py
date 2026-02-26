@@ -9,9 +9,13 @@ from uuid import UUID
 from ...core.services.secret_crypto import decrypt_secret
 from ...database import get_connection
 from .google_workspace_service import GoogleWorkspaceProvisioningError, GoogleWorkspaceService
+from .slack_service import SlackProvisioningError, SlackService
 
 PROVIDER_GOOGLE_WORKSPACE = "google_workspace"
 STEP_GOOGLE_PROVISION_USER = "google_workspace.provision_user"
+
+PROVIDER_SLACK = "slack"
+STEP_SLACK_PROVISION_USER = "slack.provision_user"
 
 
 def _json_object(value: Any) -> dict:
@@ -518,3 +522,246 @@ async def retry_google_workspace_onboarding(
         trigger_source="retry",
         retry_of_run_id=run_id,
     )
+
+
+async def start_slack_onboarding(
+    *,
+    company_id: UUID,
+    employee_id: UUID,
+    triggered_by: UUID,
+    trigger_source: str = "manual",
+    retry_of_run_id: Optional[UUID] = None,
+) -> dict:
+    service = SlackService()
+
+    async with get_connection() as conn:
+        employee = await conn.fetchrow(
+            """
+            SELECT id, org_id, email, first_name, last_name
+            FROM employees
+            WHERE id = $1 AND org_id = $2
+            """,
+            employee_id,
+            company_id,
+        )
+        if not employee:
+            raise ValueError("Employee not found for this company")
+
+        metadata = {}
+        if retry_of_run_id:
+            metadata["retry_of_run_id"] = str(retry_of_run_id)
+
+        run_row = await conn.fetchrow(
+            """
+            INSERT INTO onboarding_runs (
+                company_id, employee_id, provider, status, trigger_source, triggered_by, metadata
+            )
+            VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb)
+            RETURNING *
+            """,
+            company_id,
+            employee_id,
+            PROVIDER_SLACK,
+            trigger_source,
+            triggered_by,
+            json.dumps(metadata),
+        )
+        run_id = run_row["id"]
+
+        step_row = await conn.fetchrow(
+            """
+            INSERT INTO onboarding_steps (run_id, step_key, status)
+            VALUES ($1, $2, 'pending')
+            RETURNING *
+            """,
+            run_id,
+            STEP_SLACK_PROVISION_USER,
+        )
+        step_id = step_row["id"]
+
+        await conn.execute(
+            """
+            UPDATE onboarding_runs
+            SET status = 'running', started_at = NOW(), updated_at = NOW()
+            WHERE id = $1
+            """,
+            run_id,
+        )
+        await conn.execute(
+            """
+            UPDATE onboarding_steps
+            SET status = 'running', started_at = NOW(), updated_at = NOW()
+            WHERE id = $1
+            """,
+            step_id,
+        )
+
+        connection = await conn.fetchrow(
+            """
+            SELECT *
+            FROM integration_connections
+            WHERE company_id = $1 AND provider = $2
+            """,
+            company_id,
+            PROVIDER_SLACK,
+        )
+        if not connection:
+            message = "Slack integration is not connected"
+            await conn.execute(
+                """
+                UPDATE onboarding_steps
+                SET status = 'needs_action', attempts = attempts + 1, last_error = $2, completed_at = NOW(), updated_at = NOW()
+                WHERE id = $1
+                """,
+                step_id,
+                message,
+            )
+            await conn.execute(
+                """
+                UPDATE onboarding_runs
+                SET status = 'needs_action', last_error = $2, completed_at = NOW(), updated_at = NOW()
+                WHERE id = $1
+                """,
+                run_id,
+                message,
+            )
+            await _insert_audit_log(
+                conn,
+                company_id=company_id,
+                employee_id=employee_id,
+                run_id=run_id,
+                step_id=step_id,
+                actor_user_id=triggered_by,
+                provider=PROVIDER_SLACK,
+                action="provision_user",
+                status="error",
+                error_code="not_connected",
+                detail=message,
+            )
+            return await _fetch_run_payload(conn, run_id)
+
+        config = _json_object(connection["config"])
+        secrets = _json_object(connection["secrets"])
+
+        try:
+            provision_result = await service.provision_user(config, secrets, dict(employee))
+
+            await conn.execute(
+                """
+                INSERT INTO external_identities (company_id, employee_id, provider, external_user_id, external_email, status, raw_profile)
+                VALUES ($1, $2, $3, $4, $5, 'active', $6::jsonb)
+                ON CONFLICT (employee_id, provider) DO UPDATE SET
+                    external_user_id = EXCLUDED.external_user_id,
+                    external_email = EXCLUDED.external_email,
+                    status = 'active',
+                    raw_profile = EXCLUDED.raw_profile,
+                    updated_at = NOW()
+                """,
+                company_id,
+                employee_id,
+                PROVIDER_SLACK,
+                provision_result.get("external_user_id"),
+                provision_result.get("external_email"),
+                json.dumps(provision_result),
+            )
+
+            await conn.execute(
+                """
+                UPDATE onboarding_steps
+                SET status = 'completed', attempts = attempts + 1, last_response = $2::jsonb, completed_at = NOW(), updated_at = NOW()
+                WHERE id = $1
+                """,
+                step_id,
+                json.dumps(provision_result),
+            )
+            await conn.execute(
+                """
+                UPDATE onboarding_runs
+                SET status = 'completed', completed_at = NOW(), updated_at = NOW()
+                WHERE id = $1
+                """,
+                run_id,
+            )
+            await _insert_audit_log(
+                conn,
+                company_id=company_id,
+                employee_id=employee_id,
+                run_id=run_id,
+                step_id=step_id,
+                actor_user_id=triggered_by,
+                provider=PROVIDER_SLACK,
+                action="provision_user",
+                status="success",
+                detail=f"Successfully provisioned via {provision_result.get('mode', 'unknown')} mode",
+            )
+
+        except SlackProvisioningError as exc:
+            run_status = "needs_action" if exc.needs_action else "failed"
+            await conn.execute(
+                """
+                UPDATE onboarding_steps
+                SET status = $2, attempts = attempts + 1, last_error = $3, completed_at = NOW(), updated_at = NOW()
+                WHERE id = $1
+                """,
+                step_id,
+                run_status,
+                str(exc),
+            )
+            await conn.execute(
+                """
+                UPDATE onboarding_runs
+                SET status = $2, last_error = $3, completed_at = NOW(), updated_at = NOW()
+                WHERE id = $1
+                """,
+                run_id,
+                run_status,
+                str(exc),
+            )
+            await _insert_audit_log(
+                conn,
+                company_id=company_id,
+                employee_id=employee_id,
+                run_id=run_id,
+                step_id=step_id,
+                actor_user_id=triggered_by,
+                provider=PROVIDER_SLACK,
+                action="provision_user",
+                status="error",
+                error_code=exc.code,
+                detail=str(exc),
+            )
+        except Exception as exc:
+            message = f"Unexpected provisioning error: {exc}"
+            await conn.execute(
+                """
+                UPDATE onboarding_steps
+                SET status = 'failed', attempts = attempts + 1, last_error = $2, completed_at = NOW(), updated_at = NOW()
+                WHERE id = $1
+                """,
+                step_id,
+                message,
+            )
+            await conn.execute(
+                """
+                UPDATE onboarding_runs
+                SET status = 'failed', last_error = $2, completed_at = NOW(), updated_at = NOW()
+                WHERE id = $1
+                """,
+                run_id,
+                message,
+            )
+            await _insert_audit_log(
+                conn,
+                company_id=company_id,
+                employee_id=employee_id,
+                run_id=run_id,
+                step_id=step_id,
+                actor_user_id=triggered_by,
+                provider=PROVIDER_SLACK,
+                action="provision_user",
+                status="error",
+                error_code="unexpected_error",
+                detail=message,
+            )
+
+        return await _fetch_run_payload(conn, run_id)

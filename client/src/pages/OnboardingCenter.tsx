@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { onboarding, provisioning } from '../api/client';
 import { FeatureGuideTrigger } from '../features/feature-guides';
-import type { GoogleWorkspaceConnectionStatus, OnboardingAnalytics, SlackConnectionStatus } from '../types';
+import type { GoogleWorkspaceConnectionStatus, OnboardingAnalytics, ProvisioningRunListItem, SlackConnectionStatus } from '../types';
 import Employees from './Employees';
 import OnboardingTemplates from './OnboardingTemplates';
 import CompanyProfile from './CompanyProfile';
@@ -100,6 +100,13 @@ export default function OnboardingCenter() {
   const [slackStatus, setSlackStatus] = useState<SlackConnectionStatus | null>(null);
   const [slackStatusError, setSlackStatusError] = useState('');
 
+  // Activity Tab State
+  const [runs, setRuns] = useState<ProvisioningRunListItem[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runsError, setRunsError] = useState('');
+  const [runsProviderFilter, setRunsProviderFilter] = useState<string>('');
+  const [runsStatusFilter, setRunsStatusFilter] = useState<string>('');
+
   useEffect(() => {
     const tab = searchParams.get('tab');
     if (tab && ['workspace', 'employees', 'templates', 'runs', 'profile'].includes(tab)) {
@@ -161,6 +168,30 @@ export default function OnboardingCenter() {
       };
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'runs') {
+      let mounted = true;
+      const loadRuns = async () => {
+        setRunsLoading(true);
+        setRunsError('');
+        try {
+          const data = await provisioning.listRuns({
+            provider: runsProviderFilter || undefined,
+            status: runsStatusFilter || undefined,
+            limit: 100,
+          });
+          if (mounted) setRuns(data);
+        } catch (err) {
+          if (mounted) setRunsError(err instanceof Error ? err.message : 'Could not load activity');
+        } finally {
+          if (mounted) setRunsLoading(false);
+        }
+      };
+      loadRuns();
+      return () => { mounted = false; };
+    }
+  }, [activeTab, runsProviderFilter, runsStatusFilter]);
 
   const handleTabChange = (tab: Tab) => {
     setActiveTab(tab);
@@ -367,11 +398,108 @@ export default function OnboardingCenter() {
         )}
 
         {activeTab === 'runs' && (
-          <div data-tour="onboarding-runs-panel" className="flex items-center justify-center h-64 border border-dashed border-white/10 bg-white/5">
-            <div className="text-center">
-              <p className="text-zinc-500 text-sm font-mono uppercase tracking-wide">Activity Log Coming Soon</p>
-              <p className="text-zinc-600 text-xs mt-2">View provisioning run history and retries here.</p>
+          <div data-tour="onboarding-runs-panel" className="space-y-4">
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                value={runsProviderFilter}
+                onChange={(e) => setRunsProviderFilter(e.target.value)}
+                className="bg-zinc-900 border border-white/10 text-xs text-zinc-300 px-3 py-1.5 focus:outline-none focus:border-white/30"
+              >
+                <option value="">All Providers</option>
+                <option value="slack">Slack</option>
+                <option value="google_workspace">Google Workspace</option>
+              </select>
+              <select
+                value={runsStatusFilter}
+                onChange={(e) => setRunsStatusFilter(e.target.value)}
+                className="bg-zinc-900 border border-white/10 text-xs text-zinc-300 px-3 py-1.5 focus:outline-none focus:border-white/30"
+              >
+                <option value="">All Statuses</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+                <option value="needs_action">Needs Action</option>
+                <option value="running">Running</option>
+                <option value="pending">Pending</option>
+              </select>
+              {(runsProviderFilter || runsStatusFilter) && (
+                <button
+                  onClick={() => { setRunsProviderFilter(''); setRunsStatusFilter(''); }}
+                  className="text-[10px] uppercase tracking-wider text-zinc-500 hover:text-white"
+                >
+                  Clear
+                </button>
+              )}
+              <span className="ml-auto text-[10px] text-zinc-500 uppercase tracking-wider">
+                {runs.length} run{runs.length !== 1 ? 's' : ''}
+              </span>
             </div>
+
+            {runsError && (
+              <div className="border border-red-500/30 bg-red-950/20 px-4 py-3 text-xs text-red-300">
+                {runsError}
+              </div>
+            )}
+
+            {runsLoading ? (
+              <p className="text-xs text-zinc-500 font-mono uppercase tracking-wider animate-pulse py-8 text-center">
+                Loading activity...
+              </p>
+            ) : runs.length === 0 ? (
+              <div className="flex items-center justify-center h-48 border border-dashed border-white/10 bg-white/5">
+                <div className="text-center">
+                  <p className="text-zinc-500 text-xs font-mono uppercase tracking-wide">No provisioning runs found</p>
+                  <p className="text-zinc-600 text-[10px] mt-2">Runs appear here when employees are created or provisioned manually.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {/* Header row */}
+                <div className="grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-600 border-b border-white/5">
+                  <span>Employee</span>
+                  <span>Provider</span>
+                  <span>Status</span>
+                  <span>Trigger</span>
+                  <span>Time</span>
+                </div>
+                {runs.map((run) => {
+                  let statusClass = 'bg-zinc-800 text-zinc-300 border-zinc-700';
+                  if (run.status === 'completed') statusClass = 'bg-emerald-900/30 text-emerald-300 border-emerald-600/30';
+                  else if (run.status === 'failed') statusClass = 'bg-red-900/30 text-red-300 border-red-600/30';
+                  else if (run.status === 'needs_action') statusClass = 'bg-amber-900/30 text-amber-300 border-amber-600/30';
+                  else if (run.status === 'running') statusClass = 'bg-blue-900/30 text-blue-300 border-blue-600/30';
+
+                  return (
+                    <div
+                      key={run.run_id}
+                      className="grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-3 border border-white/5 bg-zinc-900/30 hover:bg-zinc-900/60 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs text-white truncate">{run.employee_name || '—'}</p>
+                        <p className="text-[10px] text-zinc-500 truncate">{run.employee_email || run.employee_id}</p>
+                        {run.last_error && (
+                          <p className="text-[10px] text-red-400 mt-0.5 truncate" title={run.last_error}>
+                            {run.last_error}
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-zinc-400 self-center">
+                        {run.provider === 'google_workspace' ? 'Google WS' : run.provider.charAt(0).toUpperCase() + run.provider.slice(1)}
+                      </span>
+                      <span className={`self-center px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border w-fit ${statusClass}`}>
+                        {run.status}
+                      </span>
+                      <span className="text-[10px] text-zinc-500 self-center capitalize">
+                        {run.trigger_source.replace(/_/g, ' ')}
+                      </span>
+                      <span className="text-[10px] text-zinc-500 self-center">
+                        {new Date(run.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

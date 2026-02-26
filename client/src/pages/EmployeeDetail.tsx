@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getAccessToken, provisioning } from '../api/client';
-import type { EmployeeGoogleWorkspaceProvisioningStatus, ProvisioningRunStatus } from '../types';
+import type { EmployeeGoogleWorkspaceProvisioningStatus, EmployeeSlackProvisioningStatus, ProvisioningRunStatus } from '../types';
 import {
   ArrowLeft, Mail, Phone, MapPin, Calendar, Users, CheckCircle, Clock, FileText,
   Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward, RotateCcw
@@ -86,8 +86,10 @@ export default function EmployeeDetail() {
   const [selectedTemplates, setSelectedTemplates] = useState<string[]>([]);
   const [assigningAll, setAssigningAll] = useState(false);
   const [provisioningStatus, setProvisioningStatus] = useState<EmployeeGoogleWorkspaceProvisioningStatus | null>(null);
+  const [slackProvisioningStatus, setSlackProvisioningStatus] = useState<EmployeeSlackProvisioningStatus | null>(null);
   const [provisioningLoading, setProvisioningLoading] = useState(false);
   const [provisioningActionLoading, setProvisioningActionLoading] = useState(false);
+  const [slackActionLoading, setSlackActionLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const fetchEmployee = async () => {
@@ -138,8 +140,12 @@ export default function EmployeeDetail() {
     if (!employeeId) return;
     setProvisioningLoading(true);
     try {
-      const data = await provisioning.getEmployeeGoogleWorkspaceStatus(employeeId);
-      setProvisioningStatus(data);
+      const [gwData, slackData] = await Promise.allSettled([
+        provisioning.getEmployeeGoogleWorkspaceStatus(employeeId),
+        provisioning.getEmployeeSlackStatus(employeeId),
+      ]);
+      if (gwData.status === 'fulfilled') setProvisioningStatus(gwData.value);
+      if (slackData.status === 'fulfilled') setSlackProvisioningStatus(slackData.value);
     } catch (err) {
       console.error('Failed to fetch provisioning status:', err);
     } finally {
@@ -266,6 +272,22 @@ export default function EmployeeDetail() {
     }
   };
 
+  const handleProvisionSlack = async () => {
+    if (!employeeId) return;
+    setSlackActionLoading(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const run = await provisioning.provisionEmployeeSlack(employeeId);
+      await fetchProvisioningStatus();
+      setStatusMessage(`Slack provisioning run started (${run.status}).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to provision Slack account');
+    } finally {
+      setSlackActionLoading(false);
+    }
+  };
+
   const groupedTasks = tasks.reduce((acc, task) => {
     const cat = task.category;
     if (!acc[cat]) acc[cat] = [];
@@ -278,9 +300,11 @@ export default function EmployeeDetail() {
   const progress = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
   const googleConnection = provisioningStatus?.connection;
   const recentProvisioningRuns = provisioningStatus?.runs?.slice(0, 3) || [];
-
   const latestRetryableRun: ProvisioningRunStatus | null =
     provisioningStatus?.runs.find((run) => run.status === 'failed' || run.status === 'needs_action') || null;
+
+  const slackConnection = slackProvisioningStatus?.connection;
+  const recentSlackRuns = slackProvisioningStatus?.runs?.slice(0, 3) || [];
 
   if (loading) {
     return (
@@ -515,6 +539,96 @@ export default function EmployeeDetail() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Slack Provisioning Card */}
+        <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Slack</h2>
+            <button
+              onClick={() => navigate('/app/matcha/slack-provisioning')}
+              className="text-[10px] uppercase tracking-wider text-zinc-400 hover:text-white"
+            >
+              Settings
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-zinc-500 uppercase tracking-wider">Connection</span>
+              <span className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(slackConnection?.status)}`}>
+                {slackConnection?.status || 'disconnected'}
+              </span>
+            </div>
+
+            {slackConnection?.slack_team_name && (
+              <p className="text-xs text-zinc-400">
+                Workspace: <span className="text-white">{slackConnection.slack_team_name}</span>
+              </p>
+            )}
+
+            {slackProvisioningStatus?.external_identity ? (
+              <div className="space-y-1 border border-white/10 bg-zinc-950/50 p-3">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">External Identity</p>
+                <p className="text-xs text-white">{slackProvisioningStatus.external_identity.external_email || 'No email returned'}</p>
+                <p className="text-[10px] text-zinc-500">
+                  Slack ID: <span className="text-zinc-300">{slackProvisioningStatus.external_identity.external_user_id || '—'}</span>
+                </p>
+                <p className="text-[10px] text-zinc-500">
+                  Status: <span className="text-zinc-300 uppercase">{slackProvisioningStatus.external_identity.status}</span>
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-500">No Slack account provisioned yet.</p>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => {
+                  if (!slackConnection?.connected) {
+                    navigate('/app/matcha/slack-provisioning');
+                    return;
+                  }
+                  handleProvisionSlack();
+                }}
+                disabled={slackActionLoading}
+                className="px-3 py-1.5 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+              >
+                {slackActionLoading ? 'Working...' : slackConnection?.connected ? 'Provision Now' : 'Connect Slack'}
+              </button>
+            </div>
+
+            {recentSlackRuns.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Recent Runs</p>
+                {recentSlackRuns.map((run) => {
+                  const warningsRaw = run.steps?.[0]?.last_response?.warnings;
+                  const warnings = Array.isArray(warningsRaw)
+                    ? warningsRaw.filter((item): item is string => typeof item === 'string')
+                    : [];
+
+                  return (
+                    <div key={run.run_id} className="border border-white/10 bg-zinc-950/50 p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-zinc-400">
+                          {new Date(run.created_at).toLocaleString()}
+                        </span>
+                        <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(run.status)}`}>
+                          {run.status}
+                        </span>
+                      </div>
+                      {run.last_error && (
+                        <p className="text-[10px] text-red-300 mt-1">{run.last_error}</p>
+                      )}
+                      {warnings.length > 0 && (
+                        <p className="text-[10px] text-amber-400 mt-1">{warnings[0]}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
