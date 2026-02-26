@@ -206,6 +206,17 @@ class RejectRequest(BaseModel):
     reason: str
 
 
+class UpdateBusinessRegistrationRequest(BaseModel):
+    """Request model for updating business registration details."""
+    company_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    industry: Optional[str] = Field(default=None, max_length=100)
+    company_size: Optional[str] = Field(default=None, max_length=50)
+    owner_email: Optional[EmailStr] = None
+    owner_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    owner_phone: Optional[str] = Field(default=None, max_length=50)
+    owner_job_title: Optional[str] = Field(default=None, max_length=100)
+
+
 @router.get("/business-registrations", response_model=BusinessRegistrationListResponse, dependencies=[Depends(require_admin)])
 async def list_business_registrations(
     status_filter: Optional[str] = Query(None, alias="status", description="Filter by status: pending, approved, rejected")
@@ -317,6 +328,184 @@ async def get_business_registration(company_id: UUID):
             approved_at=row["approved_at"],
             approved_by_email=row["approved_by_email"],
             created_at=row["created_at"]
+        )
+
+
+@router.patch("/business-registrations/{company_id}", response_model=BusinessRegistrationResponse, dependencies=[Depends(require_admin)])
+async def update_business_registration(
+    company_id: UUID,
+    request: UpdateBusinessRegistrationRequest,
+):
+    """Update business registration company and owner details."""
+    payload = request.model_dump(exclude_unset=True)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one field must be provided",
+        )
+
+    def _clean_optional_text(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            owner_row = await conn.fetchrow(
+                """
+                SELECT comp.id, comp.owner_id
+                FROM companies comp
+                WHERE comp.id = $1 AND comp.owner_id IS NOT NULL
+                """,
+                company_id,
+            )
+            if not owner_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Business registration not found",
+                )
+
+            owner_id = owner_row["owner_id"]
+
+            if "company_name" in payload:
+                company_name = (request.company_name or "").strip()
+                if not company_name:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Company name cannot be empty",
+                    )
+                await conn.execute(
+                    "UPDATE companies SET name = $1 WHERE id = $2",
+                    company_name,
+                    company_id,
+                )
+
+            if "industry" in payload:
+                await conn.execute(
+                    "UPDATE companies SET industry = $1 WHERE id = $2",
+                    _clean_optional_text(request.industry),
+                    company_id,
+                )
+
+            if "company_size" in payload:
+                await conn.execute(
+                    "UPDATE companies SET size = $1 WHERE id = $2",
+                    _clean_optional_text(request.company_size),
+                    company_id,
+                )
+
+            if "owner_email" in payload:
+                owner_email = str(request.owner_email).strip().lower() if request.owner_email else ""
+                if not owner_email:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Owner email cannot be empty",
+                    )
+
+                existing_user_id = await conn.fetchval(
+                    "SELECT id FROM users WHERE lower(email) = lower($1) AND id <> $2",
+                    owner_email,
+                    owner_id,
+                )
+                if existing_user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Another user already uses this email",
+                    )
+
+                await conn.execute(
+                    "UPDATE users SET email = $1 WHERE id = $2",
+                    owner_email,
+                    owner_id,
+                )
+
+            client_fields: list[str] = []
+            client_params: list[Any] = []
+            idx = 1
+
+            if "owner_name" in payload:
+                owner_name = (request.owner_name or "").strip()
+                if not owner_name:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Owner name cannot be empty",
+                    )
+                client_fields.append(f"name = ${idx}")
+                client_params.append(owner_name)
+                idx += 1
+
+            if "owner_phone" in payload:
+                client_fields.append(f"phone = ${idx}")
+                client_params.append(_clean_optional_text(request.owner_phone))
+                idx += 1
+
+            if "owner_job_title" in payload:
+                client_fields.append(f"job_title = ${idx}")
+                client_params.append(_clean_optional_text(request.owner_job_title))
+                idx += 1
+
+            if client_fields:
+                client_params.extend([owner_id, company_id])
+                result = await conn.execute(
+                    f"""
+                    UPDATE clients
+                    SET {", ".join(client_fields)}
+                    WHERE user_id = ${idx} AND company_id = ${idx + 1}
+                    """,
+                    *client_params,
+                )
+                if result == "UPDATE 0":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Business owner profile not found for this company",
+                    )
+
+        row = await conn.fetchrow(
+            """
+            SELECT
+                comp.id,
+                comp.name as company_name,
+                comp.industry,
+                comp.size as company_size,
+                u.email as owner_email,
+                c.name as owner_name,
+                c.phone as owner_phone,
+                c.job_title as owner_job_title,
+                comp.status,
+                comp.rejection_reason,
+                comp.approved_at,
+                approver.email as approved_by_email,
+                comp.created_at
+            FROM companies comp
+            JOIN users u ON u.id = comp.owner_id
+            JOIN clients c ON c.user_id = comp.owner_id AND c.company_id = comp.id
+            LEFT JOIN users approver ON comp.approved_by = approver.id
+            WHERE comp.id = $1 AND comp.owner_id IS NOT NULL
+            """,
+            company_id,
+        )
+
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Business registration not found",
+            )
+
+        return BusinessRegistrationResponse(
+            id=row["id"],
+            company_name=row["company_name"],
+            industry=row["industry"],
+            company_size=row["company_size"],
+            owner_email=row["owner_email"],
+            owner_name=row["owner_name"],
+            owner_phone=row["owner_phone"],
+            owner_job_title=row["owner_job_title"],
+            status=row["status"] or "approved",
+            rejection_reason=row["rejection_reason"],
+            approved_at=row["approved_at"],
+            approved_by_email=row["approved_by_email"],
+            created_at=row["created_at"],
         )
 
 

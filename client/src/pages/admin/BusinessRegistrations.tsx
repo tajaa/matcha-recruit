@@ -4,6 +4,16 @@ import { adminBusinessRegistrations, adminBusinessInvites } from '../../api/clie
 import type { BusinessRegistration, BusinessRegistrationStatus, BusinessInvite } from '../../types';
 import { Building2, Mail, Phone, Briefcase, Calendar, CheckCircle, XCircle, Clock, Link2, Copy, Plus, Trash2 } from 'lucide-react';
 
+interface BusinessRegistrationEditForm {
+  company_name: string;
+  industry: string;
+  company_size: string;
+  owner_email: string;
+  owner_name: string;
+  owner_phone: string;
+  owner_job_title: string;
+}
+
 export function BusinessRegistrations() {
   const [registrations, setRegistrations] = useState<BusinessRegistration[]>([]);
   const [loading, setLoading] = useState(true);
@@ -15,6 +25,18 @@ export function BusinessRegistrations() {
   const [rejectReason, setRejectReason] = useState('');
   const [selectedRegistration, setSelectedRegistration] = useState<BusinessRegistration | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingRegistration, setEditingRegistration] = useState<BusinessRegistration | null>(null);
+  const [editForm, setEditForm] = useState<BusinessRegistrationEditForm>({
+    company_name: '',
+    industry: '',
+    company_size: '',
+    owner_email: '',
+    owner_name: '',
+    owner_phone: '',
+    owner_job_title: '',
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Invite state
   const [invites, setInvites] = useState<BusinessInvite[]>([]);
@@ -97,6 +119,53 @@ export function BusinessRegistrations() {
       setError('Failed to reject registration');
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const openEditModal = (registration: BusinessRegistration) => {
+    setEditingRegistration(registration);
+    setEditForm({
+      company_name: registration.company_name,
+      industry: registration.industry || '',
+      company_size: registration.company_size || '',
+      owner_email: registration.owner_email,
+      owner_name: registration.owner_name,
+      owner_phone: registration.owner_phone || '',
+      owner_job_title: registration.owner_job_title || '',
+    });
+    setEditModalOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingRegistration) return;
+
+    if (!editForm.company_name.trim() || !editForm.owner_name.trim() || !editForm.owner_email.trim()) {
+      setError('Company name, owner name, and owner email are required');
+      return;
+    }
+
+    try {
+      setSavingEdit(true);
+      setError(null);
+
+      const updated = await adminBusinessRegistrations.update(editingRegistration.id, {
+        company_name: editForm.company_name.trim(),
+        industry: editForm.industry.trim(),
+        company_size: editForm.company_size.trim(),
+        owner_email: editForm.owner_email.trim(),
+        owner_name: editForm.owner_name.trim(),
+        owner_phone: editForm.owner_phone.trim(),
+        owner_job_title: editForm.owner_job_title.trim(),
+      });
+
+      setRegistrations(prev => prev.map(r => (r.id === updated.id ? updated : r)));
+      setEditModalOpen(false);
+      setEditingRegistration(null);
+    } catch (err) {
+      console.error('Failed to update registration:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update registration');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -329,8 +398,18 @@ export function BusinessRegistrations() {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        {registration.status === 'pending' && (
-                          <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => openEditModal(registration)}
+                            disabled={processing || savingEdit}
+                            className="bg-zinc-800/70 text-zinc-200 border border-zinc-700 hover:bg-zinc-700 px-3 py-1.5 text-[10px] uppercase tracking-wider"
+                          >
+                            Edit
+                          </Button>
+                          {registration.status === 'pending' && (
+                            <>
                             <Button
                               size="sm"
                               onClick={() => handleApprove(registration)}
@@ -348,8 +427,9 @@ export function BusinessRegistrations() {
                             >
                               Reject
                             </Button>
-                          </div>
-                        )}
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -400,8 +480,18 @@ export function BusinessRegistrations() {
                       <Calendar size={10} />
                       {formatDate(registration.created_at)}
                     </div>
-                    {registration.status === 'pending' && (
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => openEditModal(registration)}
+                        disabled={processing || savingEdit}
+                        className="bg-zinc-800/70 text-zinc-200 border border-zinc-700 hover:bg-zinc-700 px-3 py-1.5 text-[10px] uppercase tracking-wider"
+                      >
+                        Edit
+                      </Button>
+                      {registration.status === 'pending' && (
+                        <>
                         <Button
                           size="sm"
                           onClick={() => handleApprove(registration)}
@@ -419,8 +509,9 @@ export function BusinessRegistrations() {
                         >
                           Reject
                         </Button>
-                      </div>
-                    )}
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   {registration.status === 'rejected' && registration.rejection_reason && (
@@ -479,6 +570,104 @@ export function BusinessRegistrations() {
               className="flex-1 bg-red-500 text-white hover:bg-red-600 font-bold uppercase tracking-wider"
             >
               {processing ? 'Processing...' : 'Confirm Rejection'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        title="Edit Registration"
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="sm:col-span-2">
+              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Company Name</label>
+              <input
+                type="text"
+                value={editForm.company_name}
+                onChange={(e) => setEditForm(prev => ({ ...prev, company_name: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white text-sm px-3 py-2 focus:outline-none focus:border-zinc-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Industry</label>
+              <input
+                type="text"
+                value={editForm.industry}
+                onChange={(e) => setEditForm(prev => ({ ...prev, industry: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white text-sm px-3 py-2 focus:outline-none focus:border-zinc-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Company Size</label>
+              <input
+                type="text"
+                value={editForm.company_size}
+                onChange={(e) => setEditForm(prev => ({ ...prev, company_size: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white text-sm px-3 py-2 focus:outline-none focus:border-zinc-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Owner Name</label>
+              <input
+                type="text"
+                value={editForm.owner_name}
+                onChange={(e) => setEditForm(prev => ({ ...prev, owner_name: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white text-sm px-3 py-2 focus:outline-none focus:border-zinc-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Owner Email</label>
+              <input
+                type="email"
+                value={editForm.owner_email}
+                onChange={(e) => setEditForm(prev => ({ ...prev, owner_email: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white text-sm px-3 py-2 focus:outline-none focus:border-zinc-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Owner Phone</label>
+              <input
+                type="text"
+                value={editForm.owner_phone}
+                onChange={(e) => setEditForm(prev => ({ ...prev, owner_phone: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white text-sm px-3 py-2 focus:outline-none focus:border-zinc-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Owner Job Title</label>
+              <input
+                type="text"
+                value={editForm.owner_job_title}
+                onChange={(e) => setEditForm(prev => ({ ...prev, owner_job_title: e.target.value }))}
+                className="w-full bg-zinc-950 border border-zinc-800 text-white text-sm px-3 py-2 focus:outline-none focus:border-zinc-600"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              variant="secondary"
+              onClick={() => setEditModalOpen(false)}
+              className="flex-1 bg-transparent border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveEdit}
+              disabled={savingEdit}
+              className="flex-1 bg-white text-black hover:bg-zinc-200 font-bold uppercase tracking-wider"
+            >
+              {savingEdit ? 'Saving...' : 'Save Changes'}
             </Button>
           </div>
         </div>

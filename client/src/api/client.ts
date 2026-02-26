@@ -1787,7 +1787,14 @@ export const adminBeta = {
 };
 
 // Admin Business Registrations API
-import type { BusinessRegistration, BusinessRegistrationListResponse, BusinessRegistrationStatus, CompanyWithFeatures, EnabledFeatures } from '../types';
+import type {
+  BusinessRegistration,
+  BusinessRegistrationListResponse,
+  BusinessRegistrationStatus,
+  BusinessRegistrationUpdateRequest,
+  CompanyWithFeatures,
+  EnabledFeatures,
+} from '../types';
 
 export const adminBusinessRegistrations = {
   list: (status?: BusinessRegistrationStatus): Promise<BusinessRegistrationListResponse> => {
@@ -1797,6 +1804,12 @@ export const adminBusinessRegistrations = {
 
   get: (companyId: string): Promise<BusinessRegistration> =>
     request<BusinessRegistration>(`/admin/business-registrations/${companyId}`),
+
+  update: (companyId: string, data: BusinessRegistrationUpdateRequest): Promise<BusinessRegistration> =>
+    request<BusinessRegistration>(`/admin/business-registrations/${companyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 
   approve: (companyId: string): Promise<{ status: string; message: string }> =>
     request<{ status: string; message: string }>(`/admin/business-registrations/${companyId}/approve`, {

@@ -2512,6 +2512,16 @@ export interface BusinessRegistration {
   created_at: string;
 }
 
+export interface BusinessRegistrationUpdateRequest {
+  company_name?: string;
+  industry?: string;
+  company_size?: string;
+  owner_email?: string;
+  owner_name?: string;
+  owner_phone?: string;
+  owner_job_title?: string;
+}
+
 export interface BusinessRegistrationListResponse {
   registrations: BusinessRegistration[];
   total: number;
