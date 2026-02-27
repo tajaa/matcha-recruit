@@ -608,6 +608,24 @@ export interface OnboardingNotificationSettings {
   timezone: string;
 }
 
+export interface OnboardingTemplate {
+  id: string;
+  org_id: string;
+  title: string;
+  description: string | null;
+  category: string;
+  is_employee_task: boolean;
+  due_days: number;
+  is_active: boolean;
+  sort_order: number;
+  link_type: string | null;
+  link_id: string | null;
+  link_label: string | null;
+  link_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export const onboarding = {
   getAnalytics: () => request<OnboardingAnalytics>('/onboarding/analytics'),
   getNotificationSettings: () =>
@@ -617,6 +635,39 @@ export const onboarding = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+
+  // Priority templates (category='priority')
+  getPriorityTemplates: () =>
+    request<OnboardingTemplate[]>('/onboarding/templates?category=priority'),
+  createPriorityTemplate: (data: {
+    title: string;
+    description?: string;
+    due_days?: number;
+    link_type?: string | null;
+    link_id?: string | null;
+    link_label?: string | null;
+    link_url?: string | null;
+  }) =>
+    request<OnboardingTemplate>('/onboarding/templates', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, category: 'priority', is_employee_task: true, sort_order: 0 }),
+    }),
+  updatePriorityTemplate: (id: string, data: Partial<{
+    title: string;
+    description: string;
+    due_days: number;
+    is_active: boolean;
+    link_type: string | null;
+    link_id: string | null;
+    link_label: string | null;
+    link_url: string | null;
+  }>) =>
+    request<OnboardingTemplate>(`/onboarding/templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deletePriorityTemplate: (id: string) =>
+    request<{ message: string }>(`/onboarding/templates/${id}`, { method: 'DELETE' }),
 };
 
 // Interviews

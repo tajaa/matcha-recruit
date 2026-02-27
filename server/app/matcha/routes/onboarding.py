@@ -26,10 +26,14 @@ router = APIRouter()
 class OnboardingTaskTemplateCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    category: str = "admin"  # documents, equipment, training, admin, return_to_work
+    category: str = "admin"  # documents, equipment, training, admin, return_to_work, priority
     is_employee_task: bool = False
     due_days: int = 7
     sort_order: int = 0
+    link_type: Optional[str] = None   # 'policy' | 'handbook' | 'url'
+    link_id: Optional[UUID] = None
+    link_label: Optional[str] = None
+    link_url: Optional[str] = None
 
 
 class OnboardingTaskTemplateUpdate(BaseModel):
@@ -40,6 +44,10 @@ class OnboardingTaskTemplateUpdate(BaseModel):
     due_days: Optional[int] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
+    link_type: Optional[str] = None
+    link_id: Optional[UUID] = None
+    link_label: Optional[str] = None
+    link_url: Optional[str] = None
 
 
 class OnboardingTaskTemplateResponse(BaseModel):
@@ -52,6 +60,10 @@ class OnboardingTaskTemplateResponse(BaseModel):
     due_days: int
     is_active: bool
     sort_order: int
+    link_type: Optional[str] = None
+    link_id: Optional[UUID] = None
+    link_label: Optional[str] = None
+    link_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -377,6 +389,10 @@ async def list_templates(
                 due_days=row["due_days"],
                 is_active=row["is_active"],
                 sort_order=row["sort_order"],
+                link_type=row["link_type"],
+                link_id=row["link_id"],
+                link_label=row["link_label"],
+                link_url=row["link_url"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -393,20 +409,23 @@ async def create_template(
     company_id = await get_client_company_id(current_user)
 
     # Validate category
-    valid_categories = ["documents", "equipment", "training", "admin", "return_to_work"]
+    valid_categories = ["documents", "equipment", "training", "admin", "return_to_work", "priority"]
     if request.category not in valid_categories:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {valid_categories}")
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO onboarding_tasks (org_id, title, description, category, is_employee_task, due_days, sort_order)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO onboarding_tasks
+                (org_id, title, description, category, is_employee_task, due_days, sort_order,
+                 link_type, link_id, link_label, link_url)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
             """,
             company_id, request.title, request.description,
             request.category, request.is_employee_task,
-            request.due_days, request.sort_order
+            request.due_days, request.sort_order,
+            request.link_type, request.link_id, request.link_label, request.link_url,
         )
 
         return OnboardingTaskTemplateResponse(
@@ -419,6 +438,10 @@ async def create_template(
             due_days=row["due_days"],
             is_active=row["is_active"],
             sort_order=row["sort_order"],
+            link_type=row["link_type"],
+            link_id=row["link_id"],
+            link_label=row["link_label"],
+            link_url=row["link_url"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -444,7 +467,7 @@ async def update_template(
 
         # Validate category if provided
         if request.category:
-            valid_categories = ["documents", "equipment", "training", "admin", "return_to_work"]
+            valid_categories = ["documents", "equipment", "training", "admin", "return_to_work", "priority"]
             if request.category not in valid_categories:
                 raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {valid_categories}")
 
@@ -488,6 +511,27 @@ async def update_template(
             values.append(request.sort_order)
             param_num += 1
 
+        # Link fields — always write when provided (allow clearing with None)
+        if request.link_type is not None or "link_type" in request.model_fields_set:
+            updates.append(f"link_type = ${param_num}")
+            values.append(request.link_type)
+            param_num += 1
+
+        if request.link_id is not None or "link_id" in request.model_fields_set:
+            updates.append(f"link_id = ${param_num}")
+            values.append(request.link_id)
+            param_num += 1
+
+        if request.link_label is not None or "link_label" in request.model_fields_set:
+            updates.append(f"link_label = ${param_num}")
+            values.append(request.link_label)
+            param_num += 1
+
+        if request.link_url is not None or "link_url" in request.model_fields_set:
+            updates.append(f"link_url = ${param_num}")
+            values.append(request.link_url)
+            param_num += 1
+
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -513,6 +557,10 @@ async def update_template(
             due_days=row["due_days"],
             is_active=row["is_active"],
             sort_order=row["sort_order"],
+            link_type=row["link_type"],
+            link_id=row["link_id"],
+            link_label=row["link_label"],
+            link_url=row["link_url"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

@@ -1,7 +1,7 @@
 """Add mw_subscriptions table for auto-renewal billing
 
-Revision ID: a1b2c3d4e5f6
-Revises: z7a8b9c0d1e_add_onboarding_reminder_infrastructure
+Revision ID: a1b2c3d4e5f8
+Revises: z7a8b9c0d1e
 Create Date: 2026-02-26 00:00:00.000000
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
-revision = 'a1b2c3d4e5f6'
-down_revision = 'z7a8b9c0d1e_add_onboarding_reminder_infrastructure'
+revision = 'a1b2c3d4e5f8'
+down_revision = 'z7a8b9c0d1e'
 branch_labels = None
 depends_on = None
 

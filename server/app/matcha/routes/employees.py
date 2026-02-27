@@ -542,7 +542,8 @@ async def create_employee(
         # Auto-assign active onboarding task templates to the new employee
         try:
             template_rows = await conn.fetch(
-                "SELECT id, title, description, category, is_employee_task, due_days "
+                "SELECT id, title, description, category, is_employee_task, due_days, "
+                "link_type, link_id, link_label, link_url "
                 "FROM onboarding_tasks WHERE org_id = $1 AND is_active = TRUE ORDER BY sort_order",
                 company_id,
             )
@@ -552,8 +553,9 @@ async def create_employee(
                     due = base_date + timedelta(days=tmpl["due_days"])
                     await conn.execute(
                         "INSERT INTO employee_onboarding_tasks "
-                        "(id, employee_id, task_id, title, description, category, is_employee_task, due_date, status) "
-                        "VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'pending')",
+                        "(id, employee_id, task_id, title, description, category, is_employee_task, due_date, status, "
+                        "link_type, link_id, link_label, link_url) "
+                        "VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11)",
                         row["id"],
                         tmpl["id"],
                         tmpl["title"],
@@ -561,6 +563,10 @@ async def create_employee(
                         tmpl["category"],
                         tmpl["is_employee_task"],
                         due,
+                        tmpl["link_type"],
+                        tmpl["link_id"],
+                        tmpl["link_label"],
+                        tmpl["link_url"],
                     )
         except Exception:
             logger.exception("Failed to auto-assign onboarding tasks for employee %s", row["id"])

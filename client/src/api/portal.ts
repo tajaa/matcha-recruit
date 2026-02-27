@@ -117,4 +117,13 @@ export const portalApi = {
       method: 'POST',
       body: JSON.stringify({ employee_notes: employeeNotes }),
     }),
+
+  // Priority Tasks
+  getPriorities: () => fetchWithAuth('/api/v1/portal/me/priorities'),
+
+  completePriority: (taskId: string, notes?: string) =>
+    fetchWithAuth(`/api/v1/portal/me/priorities/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notes: notes || null }),
+    }),
 };

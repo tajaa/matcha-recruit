@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, Clock, Calendar, User, ChevronRight, AlertCircle, Sparkles } from 'lucide-react';
+import { FileText, Clock, Calendar, User, ChevronRight, AlertCircle, Sparkles, CheckSquare, Square, ExternalLink, BookOpen, Globe } from 'lucide-react';
 import { portalApi } from '../../api/portal';
 
 interface PortalDashboard {
@@ -23,6 +23,55 @@ interface PortalDashboard {
   pending_pto_requests_count: number;
 }
 
+interface PriorityTask {
+  id: string;
+  title: string;
+  description: string | null;
+  due_date: string | null;
+  status: string;
+  completed_at: string | null;
+  link_type: string | null;
+  link_id: string | null;
+  link_label: string | null;
+  link_url: string | null;
+}
+
+function TaskLink({ task }: { task: PriorityTask }) {
+  if (!task.link_type) return null;
+  const label = task.link_label || 'View';
+  if (task.link_type === 'url' && task.link_url) {
+    return (
+      <a
+        href={task.link_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
+      >
+        <Globe className="w-3 h-3" />
+        {label}
+        <ExternalLink className="w-2.5 h-2.5" />
+      </a>
+    );
+  }
+  if (task.link_type === 'policy' || task.link_type === 'handbook') {
+    const Icon = task.link_type === 'handbook' ? BookOpen : FileText;
+    const color = task.link_type === 'handbook'
+      ? 'text-purple-400 hover:text-purple-300'
+      : 'text-blue-400 hover:text-blue-300';
+    return (
+      <Link
+        to="/portal/policies"
+        className={`flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider ${color} transition-colors`}
+      >
+        <Icon className="w-3 h-3" />
+        {label}
+        <ChevronRight className="w-2.5 h-2.5" />
+      </Link>
+    );
+  }
+  return null;
+}
+
 function toFiniteNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -36,12 +85,18 @@ export function PortalHome() {
   const [dashboard, setDashboard] = useState<PortalDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [priorities, setPriorities] = useState<PriorityTask[]>([]);
+  const [completingId, setCompletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
-        const data = await portalApi.getDashboard();
+        const [data, priorityData] = await Promise.all([
+          portalApi.getDashboard(),
+          portalApi.getPriorities().catch(() => ({ tasks: [] })),
+        ]);
         setDashboard(data);
+        setPriorities(priorityData.tasks || []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load dashboard');
       } finally {
@@ -51,6 +106,20 @@ export function PortalHome() {
 
     fetchDashboard();
   }, []);
+
+  const handleCompleteTask = async (taskId: string) => {
+    setCompletingId(taskId);
+    try {
+      await portalApi.completePriority(taskId);
+      setPriorities(prev =>
+        prev.map(t => t.id === taskId ? { ...t, status: 'completed', completed_at: new Date().toISOString() } : t)
+      );
+    } catch {
+      // ignore — task stays unchecked
+    } finally {
+      setCompletingId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -170,6 +239,65 @@ export function PortalHome() {
           </Link>
         </div>
       </div>
+
+      {/* Priorities */}
+      {priorities.length > 0 && (
+        <div className="bg-zinc-900/30 border border-white/10">
+          <div className="px-6 py-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
+            <h2 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Priorities</h2>
+            <span className="text-[10px] font-mono text-zinc-600">
+              {priorities.filter(t => t.status === 'completed').length}/{priorities.length} done
+            </span>
+          </div>
+          <div className="divide-y divide-white/5">
+            {priorities.map(task => {
+              const done = task.status === 'completed';
+              const isCompleting = completingId === task.id;
+              return (
+                <div
+                  key={task.id}
+                  className={`flex items-start gap-4 px-6 py-4 transition-colors ${
+                    done ? 'opacity-50' : 'hover:bg-white/5'
+                  }`}
+                >
+                  <button
+                    onClick={() => !done && handleCompleteTask(task.id)}
+                    disabled={done || isCompleting}
+                    className={`mt-0.5 flex-shrink-0 transition-colors ${
+                      done ? 'text-emerald-400 cursor-default' : 'text-zinc-600 hover:text-white'
+                    } disabled:opacity-50`}
+                  >
+                    {done ? (
+                      <CheckSquare className="w-4 h-4" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-medium ${done ? 'line-through text-zinc-500' : 'text-white'}`}>
+                      {task.title}
+                    </p>
+                    {task.description && (
+                      <p className="text-xs text-zinc-500 mt-0.5">{task.description}</p>
+                    )}
+                    <div className="flex items-center gap-3 mt-1 flex-wrap">
+                      {task.due_date && !done && (
+                        <p className="text-[10px] font-mono uppercase tracking-wider text-zinc-600">
+                          Due {new Date(task.due_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </p>
+                      )}
+                      <TaskLink task={task} />
+                    </div>
+                  </div>
+                  {isCompleting && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse mt-2 flex-shrink-0" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Quick Links */}
       <div className="bg-zinc-900/30 border border-white/10">
