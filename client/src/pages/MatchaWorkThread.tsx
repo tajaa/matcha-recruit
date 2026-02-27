@@ -73,12 +73,12 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-2">
-          <div className="inline-flex items-center rounded-lg bg-zinc-800 p-0.5">
+          <div className="inline-flex items-center border border-white/10">
             <button
               onClick={() => setActiveView('workbook')}
-              className={`px-2.5 py-1 text-[11px] rounded transition-colors ${
+              className={`px-2.5 py-1 text-[11px] uppercase tracking-wider transition-colors ${
                 activeView === 'workbook'
-                  ? 'bg-zinc-700 text-zinc-100'
+                  ? 'bg-white/10 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
@@ -86,9 +86,9 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
             </button>
             <button
               onClick={() => setActiveView('presentation')}
-              className={`px-2.5 py-1 text-[11px] rounded transition-colors ${
+              className={`px-2.5 py-1 text-[11px] uppercase tracking-wider transition-colors border-l border-white/10 ${
                 activeView === 'presentation'
-                  ? 'bg-zinc-700 text-zinc-100'
+                  ? 'bg-white/10 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
@@ -98,7 +98,7 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
           {activeView === 'presentation' && presentation && (
             <button
               onClick={handleDownloadPresentation}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:border-zinc-500 transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] border border-white/10 text-zinc-300 hover:text-zinc-100 hover:border-white/20 uppercase tracking-wider transition-colors"
             >
               Download Slides
             </button>
@@ -107,9 +107,9 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
 
         {activeView === 'workbook' ? (
           <>
-        <div className="bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-6">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-1">HR Workbook</p>
-          <h2 className="text-2xl font-bold text-white tracking-tight">
+        <div className="bg-zinc-950 border border-white/10 p-6">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 mb-1">HR Workbook</p>
+          <h2 className="text-xl font-bold text-white tracking-tight">
             {state.workbook_title || 'Untitled Workbook'}
           </h2>
           {state.company_name && (
@@ -118,12 +118,12 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
           {(state.industry || state.objective) && (
             <div className="flex flex-wrap gap-2 mt-4">
               {state.industry && (
-                <span className="px-2 py-0.5 rounded bg-zinc-700 text-zinc-300 text-[10px] uppercase tracking-wider">
+                <span className="px-2 py-0.5 border border-white/10 bg-zinc-800 text-zinc-300 text-[10px] uppercase tracking-wider">
                   {state.industry}
                 </span>
               )}
               {state.objective && (
-                <span className="px-2 py-0.5 rounded bg-matcha-500/10 text-matcha-400 text-[10px] uppercase tracking-wider border border-matcha-500/20">
+                <span className="px-2 py-0.5 border border-matcha-500/20 bg-matcha-500/10 text-matcha-400 text-[10px] uppercase tracking-wider">
                   {state.objective}
                 </span>
               )}
@@ -133,8 +133,8 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
 
         <div className="space-y-4">
           {sections.length === 0 ? (
-            <div className="bg-zinc-900/40 border border-zinc-800 border-dashed rounded-xl p-12 text-center">
-              <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center mx-auto mb-4 text-zinc-600">
+            <div className="border border-white/10 border-dashed p-12 text-center">
+              <div className="w-12 h-12 bg-zinc-800 border border-white/10 flex items-center justify-center mx-auto mb-4 text-zinc-600">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
@@ -145,8 +145,8 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
             </div>
           ) : (
             sections.map((section, idx) => (
-              <div key={idx} className="bg-zinc-900/60 border border-zinc-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-800/30">
+              <div key={idx} className="bg-zinc-950 border border-white/10 overflow-hidden">
+                <div className="px-5 py-3 border-b border-white/10 bg-zinc-900/30">
                   <h3 className="text-sm font-bold text-zinc-200 tracking-wide uppercase">
                     {section.title}
                   </h3>
@@ -162,8 +162,8 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
         ) : (
           <div className="space-y-4">
             {!presentation || !Array.isArray(presentation.slides) || presentation.slides.length === 0 ? (
-              <div className="bg-zinc-900/40 border border-zinc-800 border-dashed rounded-xl p-12 text-center">
-                <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center mx-auto mb-4 text-zinc-600">
+              <div className="border border-white/10 border-dashed p-12 text-center">
+                <div className="w-12 h-12 bg-zinc-800 border border-white/10 flex items-center justify-center mx-auto mb-4 text-zinc-600">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h8M8 14h5m7 7H4a1 1 0 01-1-1V4a1 1 0 011-1h10.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V20a1 1 0 01-1 1z" />
                   </svg>
@@ -174,8 +174,8 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
               </div>
             ) : (
               <>
-                <div className="bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-5">
-                  <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-1">Presentation Deck</p>
+                <div className="bg-zinc-950 border border-white/10 p-5">
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 mb-1">Presentation Deck</p>
                   <h2 className="text-xl font-bold text-white tracking-tight">{presentation.title}</h2>
                   {presentation.subtitle && (
                     <p className="text-sm text-zinc-400 mt-1">{presentation.subtitle}</p>
@@ -185,8 +185,8 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
                   </p>
                 </div>
                 {presentation.slides.map((slide, idx) => (
-                  <div key={`${slide.title}-${idx}`} className="bg-zinc-900/60 border border-zinc-800 rounded-xl overflow-hidden">
-                    <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-800/30 flex items-center justify-between">
+                  <div key={`${slide.title}-${idx}`} className="bg-zinc-950 border border-white/10 overflow-hidden">
+                    <div className="px-5 py-3 border-b border-white/10 bg-zinc-900/30 flex items-center justify-between">
                       <h3 className="text-sm font-bold text-zinc-200 tracking-wide uppercase">{slide.title}</h3>
                       <span className="text-[10px] text-zinc-500">Slide {idx + 1}</span>
                     </div>
@@ -199,7 +199,7 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
                         ))}
                       </ul>
                       {slide.speaker_notes && (
-                        <div className="mt-4 p-3 rounded bg-zinc-800/60 border border-zinc-700/50">
+                        <div className="mt-4 p-3 bg-zinc-900 border border-white/10">
                           <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Speaker Notes</p>
                           <p className="text-xs text-zinc-400 whitespace-pre-wrap">{slide.speaker_notes}</p>
                         </div>
@@ -241,7 +241,7 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
   if (isSystem) {
     return (
       <div className="flex justify-center my-2">
-        <span className="text-xs text-zinc-500 bg-zinc-800 px-3 py-1 rounded-full">
+        <span className="text-xs text-zinc-500 bg-zinc-800 border border-white/10 px-3 py-1">
           {msg.content}
         </span>
       </div>
@@ -251,17 +251,17 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       {!isUser && (
-        <div className="w-7 h-7 rounded-full bg-matcha-600 flex items-center justify-center mr-2 flex-shrink-0 mt-0.5">
+        <div className="w-7 h-7 bg-matcha-600 flex items-center justify-center mr-2 flex-shrink-0 mt-0.5">
           <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.5l1.196 4.784" />
           </svg>
         </div>
       )}
       <div
-        className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+        className={`max-w-[75%] px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
           isUser
-            ? 'bg-matcha-600 text-white rounded-tr-sm'
-            : 'bg-zinc-800 text-zinc-200 rounded-tl-sm border border-zinc-700/50'
+            ? 'bg-matcha-600 text-white'
+            : 'bg-zinc-800 text-zinc-200 border border-white/10'
         }`}
       >
         {msg.content}
@@ -810,60 +810,34 @@ export default function MatchaWorkThread() {
   return (
     <div className="flex flex-col h-full" style={{ height: 'calc(100vh - 56px)' }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => navigate('/app/matcha/work/chats')}
-            className="text-zinc-400 hover:text-zinc-200 transition-colors flex-shrink-0"
+            className="text-zinc-500 hover:text-zinc-200 transition-colors flex-shrink-0"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
           <div className="min-w-0">
-            <h1 className="text-sm font-medium text-zinc-200 truncate">{thread.title}</h1>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs text-zinc-500">v{thread.version}</span>
-              <span className="text-xs bg-zinc-700/60 text-zinc-300 px-1.5 py-0.5 rounded capitalize">
-                {isUnscopedChat ? 'Intent-driven chat' : thread.task_type === 'review' ? 'Anonymous Review' : thread.task_type === 'workbook' ? 'HR Workbook' : thread.task_type === 'onboarding' ? 'Onboarding' : 'Offer Letter'}
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-medium text-zinc-200 truncate">{thread.title}</h1>
+              <span className="text-[10px] text-zinc-600 font-mono border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">
+                v{thread.version}
               </span>
-              {isFinalized && (
-                <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
-                  Finalized
-                </span>
-              )}
-              {isArchived && (
-                <span className="text-xs bg-zinc-500/20 text-zinc-400 px-1.5 py-0.5 rounded">
-                  Archived
-                </span>
-              )}
-              {thread.linked_offer_letter_id && (
-                <span className="text-xs bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">
-                  Draft Saved
-                </span>
-              )}
+              <span className="hidden sm:inline text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">
+                {isUnscopedChat ? 'chat' : thread.task_type === 'review' ? 'review' : thread.task_type === 'workbook' ? 'workbook' : thread.task_type === 'onboarding' ? 'onboarding' : 'offer letter'}
+              </span>
+              {isFinalized && <span className="text-[10px] text-blue-400 border border-blue-500/20 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Finalized</span>}
+              {isArchived && <span className="text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Archived</span>}
+              {thread.linked_offer_letter_id && <span className="text-[10px] text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Draft Saved</span>}
               {tokenUsage && (
-                <span className="text-xs bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">
-                  {tokenUsage.estimated ? '~' : ''}
-                  {formatTokenCount(tokenUsage.total_tokens)} tokens
+                <span className="hidden sm:inline text-[10px] text-zinc-600 font-mono border border-white/10 px-1.5 py-0.5 shrink-0">
+                  {tokenUsage.estimated ? '~' : ''}{formatTokenCount(tokenUsage.total_tokens)} tok
                 </span>
               )}
             </div>
-            {tokenUsage && (
-              <div className="text-[11px] text-zinc-500 mt-0.5">
-                Approx billed tokens ({tokenUsage.estimated ? 'estimate' : 'final'}): p{' '}
-                {formatTokenCount(tokenUsage.prompt_tokens)} | c{' '}
-                {formatTokenCount(tokenUsage.completion_tokens)} | t{' '}
-                {formatTokenCount(tokenUsage.total_tokens)}
-              </div>
-            )}
-            {usageSummary && usageSummary.by_model.length > 0 && (
-              <div className="text-[11px] text-zinc-500 mt-0.5">
-                30d tracked: {formatTokenCount(usageSummary.totals.total_tokens)} tokens across{' '}
-                {usageSummary.by_model.length} model{usageSummary.by_model.length === 1 ? '' : 's'}.
-                Top: {usageSummary.by_model[0].model} ({formatTokenCount(usageSummary.by_model[0].total_tokens)})
-              </div>
-            )}
           </div>
         </div>
 
@@ -871,107 +845,49 @@ export default function MatchaWorkThread() {
           {isAdmin && (
             <button
               onClick={handleToggleModel}
-              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono transition-colors ${
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono border transition-colors ${
                 matchaWorkModelMode === 'heavy'
-                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20'
-                  : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:bg-zinc-700'
+                  ? 'text-amber-400 border-amber-500/20 hover:border-amber-500/40'
+                  : 'text-zinc-500 border-white/10 hover:border-white/20'
               }`}
               title={matchaWorkModelMode === 'heavy' ? 'Switch to light (flash)' : 'Switch to heavy (3.1 pro)'}
             >
-              <span>{matchaWorkModelMode === 'heavy' ? '3.1 pro' : 'flash'}</span>
-              <span className={`px-1 py-px text-[9px] uppercase tracking-widest rounded ${
-                matchaWorkModelMode === 'heavy' ? 'bg-amber-500/20 text-amber-500' : 'bg-zinc-700 text-zinc-500'
-              }`}>
-                {matchaWorkModelMode}
-              </span>
+              {matchaWorkModelMode === 'heavy' ? '3.1 pro' : 'flash'}
             </button>
           )}
-          <div className="hidden sm:flex items-center bg-zinc-800 rounded-lg p-0.5">
-            <button className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-100">
-              Chat
-            </button>
-            <button
-              onClick={() => navigate('/app/matcha/work/chats')}
-              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              Chats
-            </button>
-            <button
-              onClick={() => navigate('/app/matcha/work/elements')}
-              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              Matcha Elements
-            </button>
-            <button
-              onClick={() => navigate('/app/matcha/work/billing')}
-              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              Billing
-            </button>
-          </div>
 
-          {/* Mobile tabs */}
-          <div className="flex md:hidden bg-zinc-800 rounded-lg p-0.5">
-            <button
-              onClick={() => setActiveTab('chat')}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
-                activeTab === 'chat'
-                  ? 'bg-zinc-700 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              Chat
-            </button>
-            {hasPreviewContent && (
+          {/* Mobile preview toggle */}
+          {hasPreviewContent && (
+            <div className="flex md:hidden border border-white/10">
+              <button
+                onClick={() => setActiveTab('chat')}
+                className={`px-3 py-1 text-xs uppercase tracking-wider transition-colors ${activeTab === 'chat' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >Chat</button>
               <button
                 onClick={() => setActiveTab('preview')}
-                className={`px-3 py-1 text-xs rounded transition-colors ${
-                  activeTab === 'preview'
-                    ? 'bg-zinc-700 text-zinc-100'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                {isOfferLetter ? 'Preview' : isWorkbook ? 'Workbook' : 'Summary'}
-              </button>
-            )}
-            <button
-              onClick={() => navigate('/app/matcha/work/elements')}
-              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              Elements
-            </button>
-            <button
-              onClick={() => navigate('/app/matcha/work/chats')}
-              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              Chats
-            </button>
-            <button
-              onClick={() => navigate('/app/matcha/work/billing')}
-              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              Billing
-            </button>
-          </div>
+                className={`px-3 py-1 text-xs uppercase tracking-wider transition-colors border-l border-white/10 ${activeTab === 'preview' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >{isOfferLetter ? 'Preview' : isWorkbook ? 'Workbook' : 'Summary'}</button>
+            </div>
+          )}
 
           <button
             onClick={handleCreateChat}
             disabled={creatingChat}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-matcha-600 hover:bg-matcha-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs uppercase tracking-wider text-zinc-400 hover:text-white border border-white/10 hover:border-white/30 disabled:opacity-50 transition-all"
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
             </svg>
-            <span>{creatingChat ? 'Creating...' : 'New Chat'}</span>
+            {creatingChat ? 'Creating…' : 'New'}
           </button>
 
           {isOfferLetter && !isArchived && (
             <button
               onClick={handleSaveDraft}
               disabled={savingDraft}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+              className="hidden sm:flex items-center px-3 py-1.5 text-xs uppercase tracking-wider text-zinc-400 hover:text-white border border-white/10 hover:border-white/30 disabled:opacity-50 transition-all"
             >
-              {savingDraft ? 'Saving...' : 'Save Draft'}
+              {savingDraft ? 'Saving…' : 'Save Draft'}
             </button>
           )}
 
@@ -979,9 +895,9 @@ export default function MatchaWorkThread() {
             <button
               onClick={handleOpenReviewRequestsModal}
               disabled={sendingReviewRequests}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+              className="hidden sm:flex items-center px-3 py-1.5 text-xs uppercase tracking-wider text-zinc-400 hover:text-white border border-white/10 hover:border-white/30 disabled:opacity-50 transition-all"
             >
-              {sendingReviewRequests ? 'Sending...' : 'Send Requests'}
+              {sendingReviewRequests ? 'Sending…' : 'Send Requests'}
             </button>
           )}
 
@@ -989,9 +905,9 @@ export default function MatchaWorkThread() {
             <button
               onClick={handleOpenHandbookSignatures}
               disabled={loadingActiveHandbooks || sendingHandbookSignatures}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+              className="hidden sm:flex items-center px-3 py-1.5 text-xs uppercase tracking-wider text-zinc-400 hover:text-white border border-white/10 hover:border-white/30 disabled:opacity-50 transition-all"
             >
-              {loadingActiveHandbooks ? 'Loading...' : sendingHandbookSignatures ? 'Sending...' : 'Send Signatures'}
+              {loadingActiveHandbooks ? 'Loading…' : sendingHandbookSignatures ? 'Sending…' : 'Send Signatures'}
             </button>
           )}
 
@@ -999,18 +915,18 @@ export default function MatchaWorkThread() {
             <button
               onClick={handleGeneratePresentation}
               disabled={generatingPresentation}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600/80 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+              className="hidden sm:flex items-center px-3 py-1.5 text-xs uppercase tracking-wider text-zinc-400 hover:text-white border border-white/10 hover:border-white/30 disabled:opacity-50 transition-all"
             >
-              {generatingPresentation ? 'Generating...' : 'Generate Presentation'}
+              {generatingPresentation ? 'Generating…' : 'Presentation'}
             </button>
           )}
 
           {!isFinalized && !isArchived && (
             <button
               onClick={() => setShowFinalizeConfirm(true)}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs uppercase tracking-wider text-zinc-200 hover:text-white border border-white/20 hover:border-white/40 transition-all"
             >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
               Finalize
@@ -1036,7 +952,7 @@ export default function MatchaWorkThread() {
           <span>Out of credits. Purchase more credits to continue using Matcha Work.</span>
           <button
             onClick={() => navigate('/app/matcha/work/billing')}
-            className="px-2 py-1 rounded bg-red-600/30 hover:bg-red-600/50 text-red-100 transition-colors"
+            className="px-2 py-1 border border-red-500/30 bg-red-600/20 hover:bg-red-600/40 text-red-100 uppercase tracking-wider transition-colors"
           >
             Open Billing
           </button>
@@ -1048,7 +964,7 @@ export default function MatchaWorkThread() {
           <span>Low credit warning: {creditBalance} credits remaining.</span>
           <button
             onClick={() => navigate('/app/matcha/work/billing')}
-            className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 transition-colors"
+            className="px-2 py-1 border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-100 uppercase tracking-wider transition-colors"
           >
             Buy Credits
           </button>
@@ -1060,7 +976,7 @@ export default function MatchaWorkThread() {
         {/* Chat panel */}
         <div
           className={`flex flex-col flex-1 min-w-0 ${
-            hasPreviewContent ? 'md:max-w-[50%] border-r border-zinc-800' : ''
+            hasPreviewContent ? 'md:max-w-[50%] border-r border-white/10' : ''
           } ${
             activeTab !== 'chat' ? 'hidden md:flex' : 'flex'
           }`}
@@ -1069,7 +985,7 @@ export default function MatchaWorkThread() {
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                <div className="w-10 h-10 rounded-full bg-matcha-600/20 flex items-center justify-center mb-3">
+                <div className="w-10 h-10 bg-matcha-600/20 flex items-center justify-center mb-3">
                   <svg className="w-5 h-5 text-matcha-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                   </svg>
@@ -1108,12 +1024,12 @@ export default function MatchaWorkThread() {
             )}
             {sending && (
               <div className="flex justify-start mb-3">
-                <div className="w-7 h-7 rounded-full bg-matcha-600 flex items-center justify-center mr-2 flex-shrink-0">
+                <div className="w-7 h-7 bg-matcha-600 flex items-center justify-center mr-2 flex-shrink-0">
                   <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.5l1.196 4.784" />
                   </svg>
                 </div>
-                <div className="bg-zinc-800 border border-zinc-700/50 px-4 py-3 rounded-2xl rounded-tl-sm">
+                <div className="bg-zinc-800 border border-white/10 px-4 py-3">
                   <div className="flex gap-1">
                     <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: '0ms' }} />
                     <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -1126,7 +1042,7 @@ export default function MatchaWorkThread() {
           </div>
 
           {/* Input */}
-          <div className="px-4 pb-4 pt-2 flex-shrink-0 border-t border-zinc-800/50">
+          <div className="px-4 pb-4 pt-2 flex-shrink-0 border-t border-white/10">
             {(isFinalized || isArchived) ? (
               <div className="text-center py-3 text-xs text-zinc-500">
                 This thread is {thread.status} — no further edits.
@@ -1151,7 +1067,7 @@ export default function MatchaWorkThread() {
                       : 'Describe changes or add details...'
                   }
                   rows={1}
-                  className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:border-matcha-500/50 disabled:opacity-50 transition-colors"
+                  className="flex-1 bg-zinc-900 border border-white/10 px-3.5 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:border-white/20 disabled:opacity-50 transition-colors"
                   style={{ minHeight: '42px', maxHeight: '120px' }}
                   onInput={(e) => {
                     const t = e.currentTarget;
@@ -1162,7 +1078,7 @@ export default function MatchaWorkThread() {
                 <button
                   onClick={handleSend}
                   disabled={inputDisabled || !input.trim()}
-                  className="w-9 h-9 flex items-center justify-center bg-matcha-600 hover:bg-matcha-700 disabled:opacity-40 rounded-xl transition-colors flex-shrink-0"
+                  className="w-9 h-9 flex items-center justify-center bg-matcha-600 hover:bg-matcha-700 disabled:opacity-40 transition-colors flex-shrink-0"
                 >
                   <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -1184,7 +1100,7 @@ export default function MatchaWorkThread() {
           }`}
         >
           {/* PDF toolbar */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 flex-shrink-0">
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowVersions(!showVersions)}
@@ -1219,14 +1135,14 @@ export default function MatchaWorkThread() {
 
           {/* Version list dropdown */}
           {showVersions && (
-            <div className="border-b border-zinc-800 bg-zinc-900 max-h-48 overflow-y-auto">
+            <div className="border-b border-white/10 bg-zinc-950 max-h-48 overflow-y-auto">
               {versions.length === 0 ? (
                 <div className="px-4 py-3 text-xs text-zinc-500">No versions yet</div>
               ) : (
                 versions.map((ver) => (
                   <div
                     key={ver.id}
-                    className="flex items-center justify-between px-4 py-2 hover:bg-zinc-800/50"
+                    className="flex items-center justify-between px-4 py-2 hover:bg-zinc-800/30 border-b border-white/5"
                   >
                     <div>
                       <span className="text-xs font-medium text-zinc-300">v{ver.version}</span>
@@ -1262,7 +1178,7 @@ export default function MatchaWorkThread() {
                 />
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                  <div className="w-12 h-12 rounded bg-zinc-800 flex items-center justify-center mb-3">
+                  <div className="w-12 h-12 bg-zinc-800 border border-white/10 flex items-center justify-center mb-3">
                     <svg className="w-6 h-6 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
@@ -1276,18 +1192,18 @@ export default function MatchaWorkThread() {
               <WorkbookPreview state={thread.current_state} />
             ) : (
               <div className="h-full overflow-y-auto p-4">
-                <div className="max-w-2xl mx-auto bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-4 space-y-4">
+                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 p-4 space-y-4">
                   <div>
                     <p className="text-xs uppercase tracking-wider text-zinc-500">Anonymous Review</p>
                     <h3 className="text-base font-semibold text-zinc-100 mt-1">
                       {thread.current_state.review_title || thread.current_state.review_subject || 'Untitled Review'}
                     </h3>
                     <div className="flex items-center gap-2 mt-2">
-                      <span className="text-xs bg-zinc-700 text-zinc-200 px-2 py-0.5 rounded">
+                      <span className="text-xs bg-zinc-800 border border-white/10 text-zinc-200 px-2 py-0.5">
                         {thread.current_state.anonymized === false ? 'Not anonymized' : 'Anonymized'}
                       </span>
                       {thread.current_state.overall_rating != null && (
-                        <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">
+                        <span className="text-xs bg-amber-500/10 border border-amber-500/20 text-amber-300 px-2 py-0.5">
                           Rating: {thread.current_state.overall_rating}/5
                         </span>
                       )}
@@ -1340,18 +1256,18 @@ export default function MatchaWorkThread() {
 
                   <div>
                     <p className="text-xs uppercase tracking-wider text-zinc-500 mb-2">Response Tracking</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-md border border-zinc-700/60 bg-zinc-900/40 p-2">
-                        <p className="text-[11px] text-zinc-500">Expected</p>
-                        <p className="text-sm text-zinc-200 mt-0.5">{reviewExpectedResponses}</p>
+                    <div className="grid grid-cols-3 gap-px bg-white/10 border border-white/10">
+                      <div className="bg-zinc-950 p-2">
+                        <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Expected</p>
+                        <p className="text-sm font-mono text-zinc-200 mt-0.5">{reviewExpectedResponses}</p>
                       </div>
-                      <div className="rounded-md border border-zinc-700/60 bg-zinc-900/40 p-2">
-                        <p className="text-[11px] text-zinc-500">Received</p>
-                        <p className="text-sm text-emerald-300 mt-0.5">{reviewReceivedResponses}</p>
+                      <div className="bg-zinc-950 p-2">
+                        <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Received</p>
+                        <p className="text-sm font-mono text-emerald-300 mt-0.5">{reviewReceivedResponses}</p>
                       </div>
-                      <div className="rounded-md border border-zinc-700/60 bg-zinc-900/40 p-2">
-                        <p className="text-[11px] text-zinc-500">Pending</p>
-                        <p className="text-sm text-amber-300 mt-0.5">{reviewPendingResponses}</p>
+                      <div className="bg-zinc-950 p-2">
+                        <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Pending</p>
+                        <p className="text-sm font-mono text-amber-300 mt-0.5">{reviewPendingResponses}</p>
                       </div>
                     </div>
                     {reviewStatuses.length > 0 ? (
@@ -1359,7 +1275,7 @@ export default function MatchaWorkThread() {
                         {reviewStatuses.map((row) => (
                           <div
                             key={row.email}
-                            className="flex items-center justify-between rounded-md border border-zinc-700/50 bg-zinc-900/30 px-2.5 py-2"
+                            className="flex items-center justify-between border border-white/10 bg-zinc-950 px-2.5 py-2"
                           >
                             <div className="min-w-0">
                               <p className="text-xs text-zinc-300 truncate">{row.email}</p>
@@ -1378,14 +1294,14 @@ export default function MatchaWorkThread() {
                               )}
                             </div>
                             <span
-                              className={`ml-3 text-[11px] px-1.5 py-0.5 rounded ${
+                              className={`ml-3 text-[10px] px-1.5 py-0.5 uppercase tracking-wider border ${
                                 row.status === 'submitted'
-                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  ? 'border-emerald-500/20 text-emerald-300'
                                   : row.status === 'sent'
-                                  ? 'bg-blue-500/20 text-blue-300'
+                                  ? 'border-blue-500/20 text-blue-300'
                                   : row.status === 'failed'
-                                  ? 'bg-red-500/20 text-red-300'
-                                  : 'bg-amber-500/20 text-amber-300'
+                                  ? 'border-red-500/20 text-red-300'
+                                  : 'border-amber-500/20 text-amber-300'
                               }`}
                             >
                               {row.status}
@@ -1405,7 +1321,7 @@ export default function MatchaWorkThread() {
                     reviewStrengths.length === 0 &&
                     reviewGrowthAreas.length === 0 &&
                     !thread.current_state.next_steps && (
-                      <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/40 p-3">
+                      <div className="border border-white/10 bg-zinc-950 p-3">
                         <p className="text-xs uppercase tracking-wider text-zinc-500 mb-2">
                           Starter Template
                         </p>
@@ -1426,17 +1342,17 @@ export default function MatchaWorkThread() {
 
       {showHandbookSelectorModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
-            <h2 className="text-base font-semibold text-zinc-100 mb-2">Select Handbook</h2>
+          <div className="bg-zinc-950 border border-white/10 p-6 max-w-lg w-full mx-4 shadow-xl">
+            <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-widest mb-2">Select Handbook</h2>
             <p className="text-sm text-zinc-400 mb-4">
               Choose an active handbook to send for acknowledgement signatures.
             </p>
-            <div className="max-h-72 overflow-y-auto space-y-2">
+            <div className="max-h-72 overflow-y-auto space-y-1">
               {activeHandbooks.map((handbook) => (
                 <button
                   key={handbook.id}
                   onClick={() => handleSelectHandbookForSignatures(handbook)}
-                  className="w-full text-left rounded-lg border border-zinc-700 hover:border-zinc-500 bg-zinc-800/60 hover:bg-zinc-800 px-3 py-2 transition-colors"
+                  className="w-full text-left border border-white/10 hover:border-white/20 bg-zinc-900 hover:bg-zinc-800 px-3 py-2 transition-colors"
                 >
                   <p className="text-sm text-zinc-100">{handbook.title}</p>
                   <p className="text-[11px] text-zinc-500 mt-0.5">
@@ -1448,7 +1364,7 @@ export default function MatchaWorkThread() {
             <div className="flex gap-2 mt-5">
               <button
                 onClick={() => setShowHandbookSelectorModal(false)}
-                className="flex-1 px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 border border-zinc-700 rounded-lg transition-colors"
+                className="flex-1 px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 border border-white/10 hover:border-white/20 transition-colors"
               >
                 Cancel
               </button>
@@ -1471,42 +1387,42 @@ export default function MatchaWorkThread() {
       {/* Review requests modal */}
       {showReviewRequestsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
-            <h2 className="text-base font-semibold text-zinc-100 mb-2">Send Anonymous Review Requests</h2>
+          <div className="bg-zinc-950 border border-white/10 p-6 max-w-lg w-full mx-4 shadow-xl">
+            <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-widest mb-2">Send Anonymous Review Requests</h2>
             <p className="text-sm text-zinc-400 mb-4">
               Add recipient emails. Each recipient will get a unique link and tracking updates will appear in this thread.
             </p>
             <label className="block">
-              <span className="text-xs text-zinc-500 uppercase tracking-wide">Recipient Emails</span>
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Recipient Emails</span>
               <textarea
                 value={reviewRecipientInput}
                 onChange={(e) => setReviewRecipientInput(e.target.value)}
                 placeholder="manager@company.com, peer@company.com"
                 rows={4}
-                className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-matcha-500/50"
+                className="mt-1 w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-white/20"
               />
             </label>
             <label className="block mt-3">
-              <span className="text-xs text-zinc-500 uppercase tracking-wide">Optional Message</span>
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Optional Message</span>
               <textarea
                 value={reviewEmailMessage}
                 onChange={(e) => setReviewEmailMessage(e.target.value)}
                 placeholder="Add context for reviewers..."
                 rows={3}
-                className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-matcha-500/50"
+                className="mt-1 w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-white/20"
               />
             </label>
             <div className="flex gap-2 mt-5">
               <button
                 onClick={() => setShowReviewRequestsModal(false)}
-                className="flex-1 px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 border border-zinc-700 rounded-lg transition-colors"
+                className="flex-1 px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 border border-white/10 hover:border-white/20 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSendReviewRequests}
                 disabled={sendingReviewRequests}
-                className="flex-1 px-4 py-2 text-sm bg-matcha-600 hover:bg-matcha-700 disabled:opacity-50 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2 text-sm bg-matcha-600 hover:bg-matcha-700 disabled:opacity-50 text-white transition-colors flex items-center justify-center gap-2"
               >
                 {sendingReviewRequests ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1521,8 +1437,8 @@ export default function MatchaWorkThread() {
       {/* Finalize confirm modal */}
       {showFinalizeConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl">
-            <h2 className="text-base font-semibold text-zinc-100 mb-2">
+          <div className="bg-zinc-950 border border-white/10 p-6 max-w-sm w-full mx-4 shadow-xl">
+            <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-widest mb-2">
               {isOfferLetter ? 'Finalize offer letter?' : isWorkbook ? 'Finalize workbook?' : isOnboarding ? 'Finalize onboarding?' : 'Finalize anonymous review?'}
             </h2>
             <p className="text-sm text-zinc-400 mb-5">
@@ -1537,14 +1453,14 @@ export default function MatchaWorkThread() {
             <div className="flex gap-2">
               <button
                 onClick={() => setShowFinalizeConfirm(false)}
-                className="flex-1 px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 border border-zinc-700 rounded-lg transition-colors"
+                className="flex-1 px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 border border-white/10 hover:border-white/20 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleFinalize}
                 disabled={finalizing}
-                className="flex-1 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white transition-colors flex items-center justify-center gap-2"
               >
                 {finalizing ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
