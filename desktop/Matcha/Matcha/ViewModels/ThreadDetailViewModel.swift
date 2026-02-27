@@ -15,7 +15,7 @@ class ThreadDetailViewModel {
     var errorMessage: String?
 
     private let service = MatchaWorkService.shared
-    private let basePath = "http://localhost:8001/api/matcha/matcha-work"
+    private let basePath = "http://127.0.0.1:8001/api/matcha-work"
 
     func loadThread(id: String) async {
         await MainActor.run {

@@ -25,7 +25,7 @@ enum APIError: Error, LocalizedError {
 
 class APIClient {
     static let shared = APIClient()
-    let baseURL = "http://localhost:8001/api"
+    let baseURL = "http://127.0.0.1:8001/api"
     var accessToken: String? {
         get { KeychainHelper.load(key: KeychainHelper.Keys.accessToken) }
     }

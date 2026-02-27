@@ -3,7 +3,7 @@ import Foundation
 class MatchaWorkService {
     static let shared = MatchaWorkService()
     private let client = APIClient.shared
-    private let basePath = "/matcha/matcha-work"
+    private let basePath = "/matcha-work"
     private init() {}
 
     func listThreads(status: String? = nil) async throws -> [MWThread] {

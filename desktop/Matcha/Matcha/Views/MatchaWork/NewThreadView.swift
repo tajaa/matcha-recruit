@@ -8,6 +8,7 @@ struct NewThreadView: View {
     @State private var title = ""
     @State private var initialMessage = ""
     @State private var isCreating = false
+    @State private var errorMessage: String?
 
     struct TaskTypeOption {
         let id: String
@@ -136,6 +137,15 @@ struct NewThreadView: View {
             Divider().opacity(0.3)
 
             // Footer buttons
+            VStack(spacing: 8) {
+                if let err = errorMessage {
+                    Text(err)
+                        .font(.system(size: 12))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                }
             HStack {
                 Button("Cancel") { dismiss() }
                     .buttonStyle(.plain)
@@ -146,6 +156,7 @@ struct NewThreadView: View {
                 Button {
                     Task {
                         isCreating = true
+                        errorMessage = nil
                         let newTitle = title.isEmpty ? nil : title
                         let msg = initialMessage.isEmpty ? nil : initialMessage
                         if let thread = await viewModel.createThread(
@@ -157,6 +168,8 @@ struct NewThreadView: View {
                                 appState.selectedThreadId = thread.id
                                 dismiss()
                             }
+                        } else {
+                            errorMessage = viewModel.errorMessage ?? "Failed to create thread. Is the server running?"
                         }
                         isCreating = false
                     }
@@ -176,7 +189,9 @@ struct NewThreadView: View {
                 .cornerRadius(8)
                 .disabled(isCreating)
             }
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+            } // end VStack footer
         }
         .background(Color.zinc900)
         .frame(width: 480)

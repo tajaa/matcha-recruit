@@ -1069,8 +1069,8 @@ async def send_message(
                 )
             else:
                 logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
-    except Exception as exc:
-        logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
+        except Exception as exc:
+            logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
 
     return SendMessageResponse(
         user_message=_row_to_message(user_msg),

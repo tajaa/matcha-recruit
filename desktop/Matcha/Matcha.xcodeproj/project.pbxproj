@@ -38,7 +38,7 @@
 		CC995D9793AD79440F7616A7 /* MatchaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchaApp.swift; sourceTree = "<group>"; };
 		88DD03E26D63AB66B7AF4B39 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		9A53863E4FE1105A953775B9 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		AD198140CC378D9E843FA827 /* Color+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Color+Extensions.swift; sourceTree = "<group>"; };
+		AD198140CC378D9E843FA827 /* Color+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Extensions.swift"; sourceTree = "<group>"; };
 		210A398CCEA5FA1784C2C92D /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
 		50DADEBEA015DBB962E44A90 /* MatchaWorkModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchaWorkModels.swift; sourceTree = "<group>"; };
 		87CD3FA8F0164D2F29731B2D /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
