@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { BusinessLocation, LocationCreate } from '../../api/compliance';
 import { complianceAPI } from '../../api/compliance';
-import type { AvailablePoster, PosterOrder } from '../../types';
 
 export function useCompliance(companyId: string | null, selectedLocationId: string | null, isAdmin = false) {
   const queryClient = useQueryClient();
@@ -26,10 +25,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
     jurisdictionKey: '',
   });
   const [useManualEntry, setUseManualEntry] = useState(false);
-  const [availablePosters, setAvailablePosters] = useState<AvailablePoster[]>([]);
-  const [posterOrders, setPosterOrders] = useState<PosterOrder[]>([]);
-  const [postersLoading, setPostersLoading] = useState(false);
-  const [posterOrderLoading, setPosterOrderLoading] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   // Query hooks for data fetching
   const { data: locations, isLoading: loadingLocations } = useQuery({
@@ -58,7 +54,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
 
   const { data: checkLog } = useQuery({
     queryKey: ['compliance-check-log', selectedLocationId, companyId],
-    queryFn: () => selectedLocationId ? complianceAPI.getCheckLog(selectedLocationId, 10, companyId || undefined) : Promise.resolve([]),
+    queryFn: () => selectedLocationId ? complianceAPI.getCheckLog(selectedLocationId, 20, companyId || undefined) : Promise.resolve([]),
     enabled: !!selectedLocationId,
   });
 
@@ -85,6 +81,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
       });
       setUseManualEntry(false);
     },
+    onError: () => setMutationError('Failed to create location'),
   });
 
   const updateLocationMutation = useMutation({
@@ -102,6 +99,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
         jurisdictionKey: '',
       });
     },
+    onError: () => setMutationError('Failed to update location'),
   });
 
   const deleteLocationMutation = useMutation({
@@ -110,6 +108,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
       queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
     },
+    onError: () => setMutationError('Failed to delete location'),
   });
 
   const markAlertReadMutation = useMutation({
@@ -118,6 +117,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
       queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
     },
+    onError: () => setMutationError('Failed to acknowledge alert'),
   });
 
   const dismissAlertMutation = useMutation({
@@ -126,6 +126,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
       queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
     },
+    onError: () => setMutationError('Failed to dismiss alert'),
   });
 
   const handleSubmitLocation = (e: React.FormEvent) => {
@@ -179,14 +180,8 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
     setFormData,
     useManualEntry,
     setUseManualEntry,
-    availablePosters,
-    setAvailablePosters,
-    posterOrders,
-    setPosterOrders,
-    postersLoading,
-    setPostersLoading,
-    posterOrderLoading,
-    setPosterOrderLoading,
+    mutationError,
+    setMutationError,
     createLocationMutation,
     updateLocationMutation,
     deleteLocationMutation,

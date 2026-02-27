@@ -186,7 +186,7 @@ export function Compliance() {
         upcomingLegislation, checkLog, createLocationMutation,
         updateLocationMutation, deleteLocationMutation, markAlertReadMutation, dismissAlertMutation,
         showAddModal, setShowAddModal, editingLocation, setEditingLocation, formData, setFormData,
-        useManualEntry, setUseManualEntry
+        useManualEntry, setUseManualEntry, mutationError, setMutationError
     } = complianceHook;
 
     const { checkInProgress, checkMessages, runComplianceCheck } = complianceCheckHook;
@@ -220,6 +220,7 @@ export function Compliance() {
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
     const [activeTab, setActiveTab] = useState<'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters'>('requirements');
     const [expandedAlertSources, setExpandedAlertSources] = useState<Set<string>>(new Set());
+    const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
     const [availablePosters, setAvailablePosters] = useState<AvailablePoster[]>([]);
     const [posterOrders, setPosterOrders] = useState<PosterOrder[]>([]);
     const [postersLoading, setPostersLoading] = useState(false);
@@ -601,29 +602,53 @@ export function Compliance() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                openEditModal(location);
-                                                setShowAddModal(true);
-                                            }}
-                                            className="p-1.5 text-zinc-600 hover:text-white rounded transition-colors"
-                                            title="Edit"
-                                        >
-                                            <Edit2 size={11} />
-                                        </button>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (confirm('Delete this location?')) {
-                                                    deleteLocationMutation.mutate(location.id);
-                                                }
-                                            }}
-                                            className="p-1.5 text-zinc-600 hover:text-red-500 rounded transition-colors"
-                                            title="Delete"
-                                        >
-                                            <Trash2 size={11} />
-                                        </button>
+                                        {confirmDeleteId === location.id ? (
+                                            <>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        deleteLocationMutation.mutate(location.id);
+                                                        setConfirmDeleteId(null);
+                                                    }}
+                                                    className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-red-400 border border-red-500/30 rounded hover:bg-red-500/10 transition-colors"
+                                                >
+                                                    Delete
+                                                </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setConfirmDeleteId(null);
+                                                    }}
+                                                    className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-zinc-500 border border-white/10 rounded hover:bg-white/5 transition-colors"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        openEditModal(location);
+                                                        setShowAddModal(true);
+                                                    }}
+                                                    className="p-1.5 text-zinc-600 hover:text-white rounded transition-colors"
+                                                    title="Edit"
+                                                >
+                                                    <Edit2 size={11} />
+                                                </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setConfirmDeleteId(location.id);
+                                                    }}
+                                                    className="p-1.5 text-zinc-600 hover:text-red-500 rounded transition-colors"
+                                                    title="Delete"
+                                                >
+                                                    <Trash2 size={11} />
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             </motion.div>
@@ -633,6 +658,14 @@ export function Compliance() {
                 </div>
 
                 <div data-tour="compliance-content" className="lg:col-span-2">
+                    {mutationError && (
+                        <div className="mb-4 flex items-center justify-between gap-4 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-sm text-[10px] text-red-400 font-mono uppercase tracking-widest">
+                            <span>{mutationError}</span>
+                            <button onClick={() => setMutationError(null)} className="text-red-400 hover:text-red-300 transition-colors">
+                                <X size={12} />
+                            </button>
+                        </div>
+                    )}
                     {selectedLocationId && selectedLocation ? (
                         <div className="bg-zinc-900/20 border border-white/5 rounded-sm overflow-hidden min-h-[600px] flex flex-col shadow-2xl">
                             <div className="p-6 md:p-8 border-b border-white/5 bg-zinc-900/40">
@@ -1346,153 +1379,7 @@ export function Compliance() {
                                             })}
                                         </div>
                                     )
-                                ) : (
-                                    loadingAlerts ? (
-                                        <div className="space-y-3">
-                                            {[1, 2, 3].map(i => (
-                                                <div key={i} className="h-20 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
-                                            ))}
-                                        </div>
-                                    ) : locationAlerts.length === 0 ? (
-                                        <div className="text-center py-24 border border-dashed border-white/5 bg-white/[0.01]">
-                                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center">
-                                                <CheckCircle size={20} className="text-zinc-700" />
-                                            </div>
-                                            <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">All Systems Nominal</p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            {locationAlerts.map(alert => {
-                                                const confidence = getConfidenceBadge(alert.confidence_score);
-                                                return (
-                                                <motion.div
-                                                    layout
-                                                    initial={{ opacity: 0, y: 10 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    key={alert.id}
-                                                    className={`border rounded-sm p-5 transition-all ${getSeverityStyles(alert.severity)} ${
-                                                        alert.status === 'unread' ? 'bg-opacity-10 border-opacity-30' : 'opacity-50 bg-zinc-900/40 border-white/5'
-                                                    }`}
-                                                >
-                                                    <div className="flex items-start justify-between gap-6">
-                                                        <div className="flex items-start gap-4 min-w-0">
-                                                            <div className="mt-1 flex-shrink-0 opacity-60">
-                                                                {getAlertTypeIcon(alert.alert_type)}
-                                                            </div>
-                                                            <div className="min-w-0">
-                                                                <div className="flex items-center gap-3 flex-wrap mb-2">
-                                                                    <h4 className="text-xs font-bold uppercase tracking-widest text-white">{alert.title}</h4>
-                                                                    {alert.alert_type && alert.alert_type !== 'change' && (
-                                                                        <span className="text-[8px] px-1.5 py-0.5 bg-white/5 border border-white/10 rounded-xs uppercase tracking-widest font-bold text-zinc-400">
-                                                                            {alert.alert_type.replace('_', ' ')}
-                                                                        </span>
-                                                                    )}
-                                                                    {confidence && (
-                                                                        <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${confidence.color}`}>
-                                                                            {confidence.tag} {confidence.label}
-                                                                        </span>
-                                                                    )}
-                                                                    {alert.created_at && (
-                                                                        <span className="text-[9px] text-zinc-600 font-mono uppercase tracking-tighter">
-                                                                            {new Date(alert.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                                <p className="text-xs text-zinc-400 leading-relaxed font-light">{linkifyText(alert.message)}</p>
-                                                                
-                                                                <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-4">
-                                                                    {alert.effective_date && (
-                                                                        <div className="text-[9px] font-mono text-purple-400 uppercase tracking-widest flex items-center gap-2">
-                                                                            <Calendar size={10} className="opacity-50" /> Enforce: {new Date(alert.effective_date).toLocaleDateString()}
-                                                                        </div>
-                                                                    )}
-                                                                    {(alert.source_url || alert.source_name) && (
-                                                                        <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-2">
-                                                                            <span className="opacity-40">Source:</span>
-                                                                            {alert.source_url ? (
-                                                                                <a href={alert.source_url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-white underline decoration-white/10 underline-offset-2 transition-colors">
-                                                                                    {alert.source_name || 'Authority'}
-                                                                                </a>
-                                                                            ) : (
-                                                                                <span>{alert.source_name}</span>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-
-                                                                {alert.verification_sources && alert.verification_sources.length > 0 && (
-                                                                    <div className="mt-4">
-                                                                        <button
-                                                                            onClick={() => toggleAlertSources(alert.id)}
-                                                                            className="text-[8px] uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 flex items-center gap-2 transition-colors"
-                                                                        >
-                                                                            <Eye size={10} />
-                                                                            {expandedAlertSources.has(alert.id) ? 'Hide' : 'Resolve'} {alert.verification_sources.length} Evidence Node(s)
-                                                                        </button>
-                                                                        {expandedAlertSources.has(alert.id) && (
-                                                                            <div className="mt-3 space-y-2 pl-4 border-l border-white/5">
-                                                                                {alert.verification_sources.map((src, idx) => (
-                                                                                    <div key={idx} className="text-[9px]">
-                                                                                        <div className="flex items-center gap-2 mb-1">
-                                                                                            <span className={`px-1 py-0.5 rounded-xs uppercase tracking-widest font-bold text-[7px] ${
-                                                                                                src.type === 'official' ? 'bg-emerald-500/10 text-emerald-400' :
-                                                                                                src.type === 'news' ? 'bg-blue-500/10 text-blue-400' :
-                                                                                                'bg-zinc-800 text-zinc-500'
-                                                                                            }`}>
-                                                                                                {src.type}
-                                                                                            </span>
-                                                                                            {src.url ? (
-                                                                                                <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-white truncate max-w-xs transition-colors">
-                                                                                                    {src.name || src.url}
-                                                                                                </a>
-                                                                                            ) : (
-                                                                                                <span className="text-zinc-500">{src.name}</span>
-                                                                                            )}
-                                                                                        </div>
-                                                                                        {src.snippet && (
-                                                                                            <p className="text-zinc-600 italic leading-relaxed pl-2 border-l border-white/[0.02]">{src.snippet}</p>
-                                                                                        )}
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-                                                                {alert.action_required && (
-                                                                    <div className="mt-4 p-3 bg-white/5 border border-white/5 rounded-sm">
-                                                                        <span className="text-[8px] font-bold uppercase tracking-[0.3em] text-zinc-500 block mb-1">Mandatory Action</span>
-                                                                        <span className="text-[10px] text-white font-bold uppercase tracking-wide">{alert.action_required}</span>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
-                                                            {alert.status === 'unread' && (
-                                                                <button
-                                                                    onClick={() => markAlertReadMutation.mutate(alert.id)}
-                                                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-emerald-500"
-                                                                    title="Acknowledge"
-                                                                >
-                                                                    <CheckCircle size={14} />
-                                                                </button>
-                                                            )}
-                                                            {alert.status !== 'dismissed' && (
-                                                                <button
-                                                                    onClick={() => dismissAlertMutation.mutate(alert.id)}
-                                                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-red-500"
-                                                                    title="Dismiss"
-                                                                >
-                                                                    <X size={14} />
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </motion.div>
-                                                );
-                                            })}
-                                        </div>
-                                    )
-                                )}
+                                ) : null}
                             </div>
                         </div>
                     ) : (

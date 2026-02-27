@@ -59,6 +59,7 @@ export function useComplianceCheck(selectedLocationId: string | null, companyId:
 
       if (selectedLocationId) {
         queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId, companyId] });
+        queryClient.invalidateQueries({ queryKey: ['compliance-upcoming', selectedLocationId, companyId] });
       }
       queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
