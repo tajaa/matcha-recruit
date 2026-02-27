@@ -347,8 +347,12 @@ async def start_google_workspace_onboarding(
             )
             return await _fetch_run_payload(conn, run_id)
 
+        initial_password: str | None = None
         try:
             result = await service.provision_user(config, secrets, dict(employee))
+            initial_password = result.get("initial_password")
+            # Strip initial_password from DB-persisted copies (sensitive)
+            db_result = {k: v for k, v in result.items() if k != "initial_password"}
             await conn.execute(
                 """
                 UPDATE onboarding_steps
@@ -361,7 +365,7 @@ async def start_google_workspace_onboarding(
                 WHERE id = $1
                 """,
                 step_id,
-                json.dumps(result),
+                json.dumps(db_result),
             )
             await conn.execute(
                 """
@@ -391,7 +395,7 @@ async def start_google_workspace_onboarding(
                 PROVIDER_GOOGLE_WORKSPACE,
                 result.get("external_user_id"),
                 result.get("external_email"),
-                json.dumps(result),
+                json.dumps(db_result),
             )
             await _insert_audit_log(
                 conn,
@@ -403,7 +407,7 @@ async def start_google_workspace_onboarding(
                 provider=PROVIDER_GOOGLE_WORKSPACE,
                 action="provision_user",
                 status="success",
-                payload=result,
+                payload=db_result,
             )
         except GoogleWorkspaceProvisioningError as exc:
             failed_status = "needs_action" if exc.needs_action else "failed"
@@ -487,7 +491,10 @@ async def start_google_workspace_onboarding(
                 error_code="unexpected_error",
             )
 
-        return await _fetch_run_payload(conn, run_id)
+        payload = await _fetch_run_payload(conn, run_id)
+        if initial_password:
+            payload["initial_password"] = initial_password
+        return payload
 
 
 async def retry_google_workspace_onboarding(

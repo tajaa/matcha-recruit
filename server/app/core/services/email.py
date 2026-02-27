@@ -2675,6 +2675,133 @@ Thank you for going through our process — we were impressed by your background
             return False
 
 
+    async def send_provisioning_welcome_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        work_email: Optional[str] = None,
+        temp_password: Optional[str] = None,
+        slack_workspace_name: Optional[str] = None,
+        slack_invite_link: Optional[str] = None,
+    ) -> bool:
+        """Send a welcome email to a new employee with their provisioned credentials.
+
+        Sent to the employee's personal email with their new work email,
+        temporary password, and Slack invite info.
+        """
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping provisioning welcome email")
+            return False
+
+        # Build credential sections
+        google_section_html = ""
+        google_section_text = ""
+        if work_email:
+            password_html = ""
+            password_text = ""
+            if temp_password:
+                password_html = f"""
+                    <div style="margin-top: 12px;">
+                        <div style="font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Temporary Password</div>
+                        <div style="margin-top: 4px; font-family: monospace; font-size: 16px; background: #fff; border: 1px solid #e5e7eb; border-radius: 4px; padding: 8px 12px; display: inline-block;">{temp_password}</div>
+                        <div style="margin-top: 8px; color: #dc2626; font-size: 13px;">You will be asked to change this password on your first login.</div>
+                    </div>"""
+                password_text = f"\nTemporary Password: {temp_password}\n(You will be asked to change this on first login.)"
+
+            google_section_html = f"""
+            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <h3 style="margin: 0 0 12px 0; color: #166534;">Google Workspace Account</h3>
+                <div>
+                    <div style="font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Work Email</div>
+                    <div style="margin-top: 4px; font-size: 16px; color: #111;">{work_email}</div>
+                </div>{password_html}
+                <div style="margin-top: 16px;">
+                    <a href="https://accounts.google.com" style="display: inline-block; background: #22c55e; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;">Sign in to Google Workspace</a>
+                </div>
+            </div>"""
+            google_section_text = f"""
+Google Workspace Account
+------------------------
+Work Email: {work_email}{password_text}
+Sign in: https://accounts.google.com
+"""
+
+        slack_section_html = ""
+        slack_section_text = ""
+        if slack_workspace_name and slack_invite_link:
+            slack_section_html = f"""
+            <div style="background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <h3 style="margin: 0 0 12px 0; color: #7c3aed;">Slack Workspace</h3>
+                <div>
+                    <div style="font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Workspace</div>
+                    <div style="margin-top: 4px; font-size: 16px; color: #111;">{slack_workspace_name}</div>
+                </div>
+                <div style="margin-top: 16px;">
+                    <a href="{slack_invite_link}" style="display: inline-block; background: #7c3aed; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;">Join Slack Workspace</a>
+                </div>
+            </div>"""
+            slack_section_text = f"""
+Slack Workspace
+---------------
+Workspace: {slack_workspace_name}
+Join here: {slack_invite_link}
+"""
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>Welcome to <strong>{company_name}</strong>! Your accounts have been set up and are ready to go.</p>
+
+            {google_section_html}
+            {slack_section_html}
+
+            <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">If you have any questions about getting started, reach out to your manager or HR team.</p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""Hi {to_name},
+
+Welcome to {company_name}! Your accounts have been set up and are ready to go.
+{google_section_text}{slack_section_text}
+If you have any questions about getting started, reach out to your manager or HR team.
+
+- Matcha Recruit
+"""
+
+        return await self.send_email(
+            to_email=to_email,
+            to_name=to_name,
+            subject=f"Welcome to {company_name} — Your account credentials",
+            html_content=html_content,
+            text_content=text_content,
+        )
+
+
 # Singleton instance
 _email_service: Optional[EmailService] = None
 

@@ -251,13 +251,14 @@ class GoogleWorkspaceService:
             "Content-Type": "application/json",
         }
 
+        initial_password = self._generate_initial_password()
         user_payload: dict[str, Any] = {
             "primaryEmail": primary_email,
             "name": {
                 "givenName": first_name,
                 "familyName": last_name,
             },
-            "password": self._generate_initial_password(),
+            "password": initial_password,
             "changePasswordAtNextLogin": True,
         }
         if org_unit:
@@ -281,8 +282,10 @@ class GoogleWorkspaceService:
                     if create_resp.status_code in (200, 201, 409):
                         warnings.append(f"org_unit_fallback:{org_unit}:INVALID_OU_ID")
 
+            newly_created = False
             if create_resp.status_code in (200, 201):
                 user_json = create_resp.json()
+                newly_created = True
             elif create_resp.status_code == 409:
                 # User already exists: treat as idempotent success.
                 fetch_resp = await client.get(f"{self.BASE_URL}/users/{primary_email}", headers=headers)
@@ -319,7 +322,7 @@ class GoogleWorkspaceService:
                 else:
                     warnings.append(f"group:{group_key}:{_extract_response_error(member_resp)}")
 
-        return {
+        result = {
             "mode": "api_token",
             "external_user_id": user_json.get("id"),
             "external_email": user_json.get("primaryEmail", primary_email),
@@ -328,3 +331,6 @@ class GoogleWorkspaceService:
             "warnings": warnings,
             "raw_user": user_json,
         }
+        if newly_created:
+            result["initial_password"] = initial_password
+        return result

@@ -51,6 +51,7 @@ from ..services.onboarding_orchestrator import (
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
+from ...core.services.email import get_email_service
 from ...core.services.handbook_service import HandbookService
 
 logger = logging.getLogger(__name__)
@@ -331,6 +332,60 @@ def _coerce_bool(value, default: bool = True) -> bool:
     return default
 
 
+async def _send_mw_provisioning_email(
+    *,
+    company_id: UUID,
+    personal_email: str,
+    employee_name: str,
+    work_email: str,
+    google_result: dict | None,
+    slack_result: dict | None,
+) -> None:
+    """Send a welcome email with provisioning credentials for Matcha Work onboarding."""
+    temp_password: str | None = None
+    if google_result:
+        temp_password = google_result.get("initial_password")
+
+    slack_invite_link: str | None = None
+    slack_workspace_name: str | None = None
+    if slack_result:
+        for step in slack_result.get("steps") or []:
+            resp = step.get("last_response") or {}
+            if resp.get("invite_link"):
+                slack_invite_link = resp["invite_link"]
+                break
+
+    google_succeeded = google_result and google_result.get("status") == "completed"
+    slack_succeeded = slack_result and slack_result.get("status") == "completed"
+
+    if not google_succeeded and not slack_succeeded:
+        return
+
+    async with get_connection() as conn:
+        company_name = await conn.fetchval(
+            "SELECT name FROM companies WHERE id = $1", company_id,
+        ) or "Your Company"
+        if slack_succeeded:
+            slack_config_row = await conn.fetchval(
+                "SELECT config FROM integration_connections WHERE company_id = $1 AND provider = $2",
+                company_id, PROVIDER_SLACK,
+            )
+            if slack_config_row:
+                slack_cfg = json.loads(slack_config_row) if isinstance(slack_config_row, str) else slack_config_row
+                slack_workspace_name = slack_cfg.get("slack_team_name")
+
+    email_svc = get_email_service()
+    await email_svc.send_provisioning_welcome_email(
+        to_email=personal_email,
+        to_name=employee_name,
+        company_name=company_name,
+        work_email=work_email if google_succeeded else None,
+        temp_password=temp_password,
+        slack_workspace_name=slack_workspace_name,
+        slack_invite_link=slack_invite_link,
+    )
+
+
 async def _create_onboarding_employees(
     *,
     company_id: UUID,
@@ -424,9 +479,12 @@ async def _create_onboarding_employees(
 
                 # Trigger provisioning
                 prov = {}
+                google_result: dict | None = None
+                slack_result: dict | None = None
+
                 if google_workspace_auto:
                     try:
-                        await start_google_workspace_onboarding(
+                        google_result = await start_google_workspace_onboarding(
                             company_id=company_id,
                             employee_id=row["id"],
                             triggered_by=triggered_by,
@@ -439,7 +497,7 @@ async def _create_onboarding_employees(
 
                 if slack_auto:
                     try:
-                        await start_slack_onboarding(
+                        slack_result = await start_slack_onboarding(
                             company_id=company_id,
                             employee_id=row["id"],
                             triggered_by=triggered_by,
@@ -452,6 +510,20 @@ async def _create_onboarding_employees(
 
                 if prov:
                     emp["provisioning_results"] = prov
+
+                # Send provisioning welcome email
+                if personal_email and (google_result or slack_result):
+                    try:
+                        await _send_mw_provisioning_email(
+                            company_id=company_id,
+                            personal_email=personal_email,
+                            employee_name=f"{first_name} {last_name}".strip(),
+                            work_email=work_email,
+                            google_result=google_result,
+                            slack_result=slack_result,
+                        )
+                    except Exception:
+                        logger.exception("Failed to send provisioning email for %s", work_email)
 
             except Exception as e:
                 logger.exception("Failed to create employee %s %s: %s", first_name, last_name, e)

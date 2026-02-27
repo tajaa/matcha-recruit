@@ -22,7 +22,7 @@ from ...database import get_connection
 from ...core.dependencies import get_current_user
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
-from ...core.services.email import EmailService
+from ...core.services.email import EmailService, get_email_service
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -262,47 +262,126 @@ async def send_single_invitation(
             await conn.close()
 
 
-async def _run_google_workspace_auto_provisioning(
+async def _run_provisioning_and_notify(
     *,
     company_id: UUID,
     employee_id: UUID,
     triggered_by: UUID,
+    personal_email: str | None,
+    employee_name: str,
+    work_email: str,
+    run_google: bool,
+    run_slack: bool,
 ) -> None:
-    """Fire-and-forget provisioning kickoff for employee creation flow."""
-    try:
-        await start_google_workspace_onboarding(
-            company_id=company_id,
-            employee_id=employee_id,
-            triggered_by=triggered_by,
-            trigger_source="employee_create",
-        )
-    except Exception:
-        logger.exception(
-            "Failed Google Workspace auto-provisioning for employee %s in company %s",
-            employee_id,
-            company_id,
-        )
+    """Run provisioning for Google Workspace and/or Slack, then send a combined welcome email."""
+    google_result: dict | None = None
+    slack_result: dict | None = None
 
-async def _run_slack_auto_provisioning(
+    if run_google:
+        try:
+            google_result = await start_google_workspace_onboarding(
+                company_id=company_id,
+                employee_id=employee_id,
+                triggered_by=triggered_by,
+                trigger_source="employee_create",
+            )
+        except Exception:
+            logger.exception(
+                "Failed Google Workspace auto-provisioning for employee %s in company %s",
+                employee_id,
+                company_id,
+            )
+
+    if run_slack:
+        try:
+            slack_result = await start_slack_onboarding(
+                company_id=company_id,
+                employee_id=employee_id,
+                triggered_by=triggered_by,
+                trigger_source="employee_create",
+            )
+        except Exception:
+            logger.exception(
+                "Failed Slack auto-provisioning for employee %s in company %s",
+                employee_id,
+                company_id,
+            )
+
+    await _send_provisioning_email(
+        company_id=company_id,
+        personal_email=personal_email,
+        employee_name=employee_name,
+        work_email=work_email,
+        google_result=google_result,
+        slack_result=slack_result,
+    )
+
+
+async def _send_provisioning_email(
     *,
     company_id: UUID,
-    employee_id: UUID,
-    triggered_by: UUID,
+    personal_email: str | None,
+    employee_name: str,
+    work_email: str,
+    google_result: dict | None,
+    slack_result: dict | None,
 ) -> None:
-    """Fire-and-forget Slack provisioning kickoff for employee creation flow."""
+    """Send a welcome email with provisioning credentials if applicable."""
+    if not personal_email:
+        return
+
+    # Extract initial_password from Google result (set by orchestrator, not persisted to DB)
+    temp_password: str | None = None
+    if google_result:
+        temp_password = google_result.get("initial_password")
+
+    # Extract Slack invite link and workspace name from Slack result steps + integration config
+    slack_invite_link: str | None = None
+    slack_workspace_name: str | None = None
+    if slack_result:
+        for step in slack_result.get("steps") or []:
+            resp = step.get("last_response") or {}
+            if resp.get("invite_link"):
+                slack_invite_link = resp["invite_link"]
+                break
+
+    google_succeeded = google_result and google_result.get("status") == "completed"
+    slack_succeeded = slack_result and slack_result.get("status") == "completed"
+
+    if not google_succeeded and not slack_succeeded:
+        return
+
+    # Fetch company name and Slack workspace name from DB
     try:
-        await start_slack_onboarding(
-            company_id=company_id,
-            employee_id=employee_id,
-            triggered_by=triggered_by,
-            trigger_source="employee_create",
+        async with get_connection() as conn:
+            company_name = await conn.fetchval(
+                "SELECT name FROM companies WHERE id = $1", company_id,
+            ) or "Your Company"
+            if slack_succeeded:
+                slack_config_row = await conn.fetchval(
+                    "SELECT config FROM integration_connections WHERE company_id = $1 AND provider = $2",
+                    company_id, PROVIDER_SLACK,
+                )
+                if slack_config_row:
+                    slack_cfg = json.loads(slack_config_row) if isinstance(slack_config_row, str) else slack_config_row
+                    slack_workspace_name = slack_cfg.get("slack_team_name")
+    except Exception:
+        logger.exception("Failed to fetch company info for provisioning email")
+        company_name = "Your Company"
+
+    email_svc = get_email_service()
+    try:
+        await email_svc.send_provisioning_welcome_email(
+            to_email=personal_email,
+            to_name=employee_name,
+            company_name=company_name,
+            work_email=work_email if google_succeeded else None,
+            temp_password=temp_password,
+            slack_workspace_name=slack_workspace_name,
+            slack_invite_link=slack_invite_link,
         )
     except Exception:
-        logger.exception(
-            "Failed Slack auto-provisioning for employee %s in company %s",
-            employee_id,
-            company_id,
-        )
+        logger.exception("Failed to send provisioning welcome email to %s", personal_email)
 
 
 # ================================
@@ -509,20 +588,21 @@ async def create_employee(
             updated_at=row["updated_at"],
         )
 
-        if google_workspace_auto_provision and not request.skip_google_workspace_provisioning:
-            background_tasks.add_task(
-                _run_google_workspace_auto_provisioning,
-                company_id=row["org_id"],
-                employee_id=row["id"],
-                triggered_by=current_user.id,
-            )
+        run_google = google_workspace_auto_provision and not request.skip_google_workspace_provisioning
+        run_slack = slack_auto_provision
 
-        if slack_auto_provision:
+        if run_google or run_slack:
+            personal_email = str(request.personal_email).strip().lower() if request.personal_email else None
             background_tasks.add_task(
-                _run_slack_auto_provisioning,
+                _run_provisioning_and_notify,
                 company_id=row["org_id"],
                 employee_id=row["id"],
                 triggered_by=current_user.id,
+                personal_email=personal_email,
+                employee_name=f"{request.first_name} {request.last_name}".strip(),
+                work_email=row["email"],
+                run_google=run_google,
+                run_slack=run_slack,
             )
 
         return response
