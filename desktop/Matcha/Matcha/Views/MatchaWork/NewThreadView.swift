@@ -4,25 +4,10 @@ struct NewThreadView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @Bindable var viewModel: ThreadListViewModel
-    @State private var selectedTaskType = "offer_letter"
     @State private var title = ""
     @State private var initialMessage = ""
     @State private var isCreating = false
     @State private var errorMessage: String?
-
-    struct TaskTypeOption {
-        let id: String
-        let label: String
-        let icon: String
-        let description: String
-    }
-
-    let taskTypes: [TaskTypeOption] = [
-        TaskTypeOption(id: "offer_letter", label: "Offer Letter", icon: "doc.text.fill", description: "Generate offer letters for candidates"),
-        TaskTypeOption(id: "review", label: "Performance Review", icon: "star.fill", description: "Create structured performance reviews"),
-        TaskTypeOption(id: "workbook", label: "Workbook", icon: "book.fill", description: "Build onboarding or training workbooks"),
-        TaskTypeOption(id: "onboarding", label: "Onboarding", icon: "person.badge.plus.fill", description: "Manage employee onboarding")
-    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,48 +35,25 @@ struct NewThreadView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Task type
+                    // Skills info — informational only
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Type")
+                        Text("What I can help with")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
 
-                        ForEach(taskTypes, id: \.id) { option in
-                            Button {
-                                selectedTaskType = option.id
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: option.icon)
-                                        .font(.system(size: 16))
-                                        .foregroundColor(selectedTaskType == option.id ? .matcha500 : .secondary)
-                                        .frame(width: 28)
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(option.label)
-                                            .font(.system(size: 13, weight: .medium))
-                                            .foregroundColor(.white)
-                                        Text(option.description)
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
-                                    }
-
-                                    Spacer()
-
-                                    if selectedTaskType == option.id {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(.matcha500)
-                                    }
-                                }
-                                .padding(10)
-                                .background(selectedTaskType == option.id ? Color.matcha600.opacity(0.15) : Color.zinc800)
-                                .cornerRadius(8)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(selectedTaskType == option.id ? Color.matcha500.opacity(0.5) : Color.clear, lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
+                        VStack(alignment: .leading, spacing: 8) {
+                            SkillRow(icon: "doc.text.fill",        label: "Offer Letters",        description: "Draft, refine, and send offer letters to candidates")
+                            SkillRow(icon: "star.fill",            label: "Performance Reviews",   description: "Create structured, anonymized performance reviews")
+                            SkillRow(icon: "book.fill",            label: "Workbooks",             description: "Build onboarding or training workbooks")
+                            SkillRow(icon: "person.badge.plus.fill", label: "Onboarding",          description: "Manage employee onboarding flows")
                         }
+                        .padding(12)
+                        .background(Color.zinc800)
+                        .cornerRadius(8)
+
+                        Text("Just describe what you need — I'll figure out the rest.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
                     }
 
                     // Optional title
@@ -136,7 +98,6 @@ struct NewThreadView: View {
 
             Divider().opacity(0.3)
 
-            // Footer buttons
             VStack(spacing: 8) {
                 if let err = errorMessage {
                     Text(err)
@@ -146,54 +107,78 @@ struct NewThreadView: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 8)
                 }
-            HStack {
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
+                HStack {
+                    Button("Cancel") { dismiss() }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
 
-                Spacer()
+                    Spacer()
 
-                Button {
-                    Task {
-                        isCreating = true
-                        errorMessage = nil
-                        let newTitle = title.isEmpty ? nil : title
-                        let msg = initialMessage.isEmpty ? nil : initialMessage
-                        if let thread = await viewModel.createThread(
-                            title: newTitle,
-                            taskType: selectedTaskType,
-                            initialMessage: msg
-                        ) {
-                            await MainActor.run {
-                                appState.selectedThreadId = thread.id
-                                dismiss()
+                    Button {
+                        Task {
+                            isCreating = true
+                            errorMessage = nil
+                            let newTitle = title.isEmpty ? nil : title
+                            let msg = initialMessage.isEmpty ? nil : initialMessage
+                            // Pass a default task_type; backend detects the real type from the message
+                            if let thread = await viewModel.createThread(
+                                title: newTitle,
+                                taskType: "offer_letter",
+                                initialMessage: msg
+                            ) {
+                                await MainActor.run {
+                                    appState.selectedThreadId = thread.id
+                                    dismiss()
+                                }
+                            } else {
+                                errorMessage = viewModel.errorMessage ?? "Failed to create thread. Is the server running?"
                             }
-                        } else {
-                            errorMessage = viewModel.errorMessage ?? "Failed to create thread. Is the server running?"
+                            isCreating = false
                         }
-                        isCreating = false
+                    } label: {
+                        if isCreating {
+                            ProgressView().controlSize(.small).tint(.white)
+                        } else {
+                            Text("Start")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
                     }
-                } label: {
-                    if isCreating {
-                        ProgressView().controlSize(.small).tint(.white)
-                    } else {
-                        Text("Create")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 7)
+                    .background(Color.matcha600)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                    .disabled(isCreating)
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-                .background(Color.matcha600)
-                .foregroundColor(.white)
-                .cornerRadius(8)
-                .disabled(isCreating)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
-            } // end VStack footer
         }
         .background(Color.zinc900)
         .frame(width: 480)
+    }
+}
+
+private struct SkillRow: View {
+    let icon: String
+    let label: String
+    let description: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13))
+                .foregroundColor(.matcha500)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                Text(description)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+        }
     }
 }
