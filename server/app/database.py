@@ -2799,6 +2799,13 @@ async def init_db():
             ON CONFLICT (task_key) DO NOTHING
         """)
 
+        # Add scheduler setting for compliance action reminders
+        await conn.execute("""
+            INSERT INTO scheduler_settings (task_key, enabled, max_per_cycle)
+            VALUES ('compliance_action_reminders', TRUE, 100)
+            ON CONFLICT (task_key) DO NOTHING
+        """)
+
         # ===========================================
         # Compliance Poster Tables
         # ===========================================

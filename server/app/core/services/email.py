@@ -1744,6 +1744,89 @@ Please log in and review the Compliance tab to see what changed:
             print(f"[Email] Error sending to {to_email}: {e}")
             return False
 
+    async def send_compliance_action_reminder(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        legislation_title: str,
+        location_name: str,
+        action_due_date: date,
+        days_until_due: int,
+    ) -> bool:
+        """Send a compliance action reminder to the assigned owner."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping compliance action reminder")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        compliance_url = f"{app_base_url}/app/matcha/compliance?tab=upcoming"
+        due_text = action_due_date.strftime("%B %d, %Y")
+        urgency = "today" if days_until_due <= 0 else f"in {days_until_due} day{'s' if days_until_due != 1 else ''}"
+        urgency_color = "#ef4444" if days_until_due <= 1 else "#f59e0b"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .card {{ background: #f9fafb; border-radius: 10px; padding: 20px; margin: 20px 0; border-left: 4px solid {urgency_color}; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+            <p>You have a compliance action due <strong style="color: {urgency_color};">{urgency}</strong>.</p>
+
+            <div class="card">
+                <p style="margin: 0;"><strong>Regulation:</strong> {legislation_title}</p>
+                <p style="margin: 8px 0 0 0;"><strong>Location:</strong> {location_name}</p>
+                <p style="margin: 8px 0 0 0;"><strong>Your deadline:</strong> {due_text}</p>
+            </div>
+
+            <p>Log in to review the regulation details and mark this action complete once handled.</p>
+            <p>
+                <a href="{compliance_url}" class="btn">Open Compliance Dashboard</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent by Matcha on behalf of {company_name}</p>
+        </div>
+    </div>
+</body>
+</html>"""
+
+        text_content = f"""Hi {to_name},
+
+You have a compliance action due {urgency}.
+
+Regulation: {legislation_title}
+Location: {location_name}
+Your deadline: {due_text}
+
+Log in to review and mark complete: {compliance_url}
+
+Sent by Matcha on behalf of {company_name}"""
+
+        return await self.send_email(
+            to_email=to_email,
+            to_name=to_name,
+            subject=f"[{company_name}] Compliance action due {urgency} — {legislation_title}",
+            html_content=html_content,
+            text_content=text_content,
+        )
+
     async def send_ir_incident_notification_email(
         self,
         to_email: str,

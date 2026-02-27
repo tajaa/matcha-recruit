@@ -189,6 +189,13 @@ export interface ComplianceDashboard {
     coming_up: ComplianceDashboardItem[];
 }
 
+export interface AssignableUser {
+    id: string;
+    name: string;
+    email: string;
+    role: 'client' | 'admin';
+}
+
 export interface ComplianceActionPlanUpdate {
     action_owner_id?: string | null;
     next_action?: string | null;
@@ -383,6 +390,16 @@ export const complianceAPI = {
             },
         });
         if (!response.ok) throw new Error('Failed to fetch upcoming legislation');
+        return response.json();
+    },
+
+    async getAssignableUsers(): Promise<AssignableUser[]> {
+        const response = await fetch('/api/compliance/assignable-users', {
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+            },
+        });
+        if (!response.ok) throw new Error('Failed to fetch assignable users');
         return response.json();
     },
 };

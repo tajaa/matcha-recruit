@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert } from 'lucide-react';
+import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink } from 'lucide-react';
 import { getAccessToken } from '../api/client';
 import { OnboardingWizard } from '../components/OnboardingWizard';
 import { Collapsible } from '../components/Collapsible';
 import { Tabs } from '../components/Tabs';
 import { WidgetContainer } from '../components/WidgetContainer';
 import { complianceAPI, COMPLIANCE_CATEGORY_LABELS } from '../api/compliance';
-import type { ComplianceDashboard, ComplianceDashboardItem, ComplianceActionPlanUpdate } from '../api/compliance';
+import type { ComplianceDashboard, ComplianceDashboardItem, ComplianceActionPlanUpdate, AssignableUser } from '../api/compliance';
 import { useAuth } from '../context/AuthContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -72,6 +72,15 @@ const SEVERITY_STYLES: Record<string, { dot: string; border: string; badge: stri
   },
 };
 
+const TURNAROUND_OPTIONS = [
+  { label: '1 day', days: 1 },
+  { label: '2 days', days: 2 },
+  { label: '3 days', days: 3 },
+  { label: '5 days', days: 5 },
+  { label: '1 week', days: 7 },
+  { label: '2 weeks', days: 14 },
+];
+
 function ComplianceDashboardWidget() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
@@ -81,6 +90,14 @@ function ComplianceDashboardWidget() {
   const [error, setError] = useState(false);
   const [savingAlertId, setSavingAlertId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Modal state
+  const [selectedItem, setSelectedItem] = useState<ComplianceDashboardItem | null>(null);
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+  const [modalOwnerId, setModalOwnerId] = useState<string>('');
+  const [modalTurnaround, setModalTurnaround] = useState<number | null>(null);
+  const [modalSaving, setModalSaving] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   const loadDashboard = (windowDays: HorizonDays) => {
     setLoading(true);
@@ -101,12 +118,61 @@ function ComplianceDashboardWidget() {
   }, [horizon]);
 
   const handleItemClick = (item: ComplianceDashboardItem) => {
-    const params = new URLSearchParams({
-      location_id: item.location_id,
-      tab: 'upcoming',
-      legislation_id: item.legislation_id,
-    });
-    navigate(`/app/matcha/compliance?${params.toString()}`);
+    setSelectedItem(item);
+    setModalOwnerId(item.action_owner_id ?? '');
+    setModalTurnaround(null);
+    setModalError(null);
+    if (assignableUsers.length === 0) {
+      complianceAPI.getAssignableUsers()
+        .then(setAssignableUsers)
+        .catch(() => {/* non-fatal */});
+    }
+  };
+
+  const closeModal = () => {
+    setSelectedItem(null);
+    setModalError(null);
+  };
+
+  const saveModalChanges = async () => {
+    if (!selectedItem?.alert_id) return;
+    setModalSaving(true);
+    setModalError(null);
+    try {
+      const payload: ComplianceActionPlanUpdate = {};
+      if (modalOwnerId !== (selectedItem.action_owner_id ?? '')) {
+        payload.action_owner_id = modalOwnerId || null;
+      }
+      if (modalTurnaround !== null) {
+        const due = new Date();
+        due.setDate(due.getDate() + modalTurnaround);
+        payload.action_due_date = due.toISOString().slice(0, 10);
+      }
+      if (Object.keys(payload).length > 0) {
+        await complianceAPI.updateAlertActionPlan(selectedItem.alert_id, payload);
+        loadDashboard(horizon);
+      }
+      closeModal();
+    } catch {
+      setModalError('Could not save changes');
+    } finally {
+      setModalSaving(false);
+    }
+  };
+
+  const markActioned = async (item: ComplianceDashboardItem) => {
+    if (!item.alert_id) return;
+    setModalSaving(true);
+    setModalError(null);
+    try {
+      await complianceAPI.updateAlertActionPlan(item.alert_id, { mark_actioned: true });
+      loadDashboard(horizon);
+      closeModal();
+    } catch {
+      setModalError('Could not mark as actioned');
+    } finally {
+      setModalSaving(false);
+    }
   };
 
   const formatDateLabel = (isoDate: string | null): string => {
@@ -262,7 +328,6 @@ function ComplianceDashboardWidget() {
             : 'text-zinc-400';
           const sla = getSlaStyle(item.sla_state);
           const dueLabel = formatDateLabel(item.action_due_date);
-          const isSaving = item.alert_id !== null && savingAlertId === item.alert_id;
 
           return (
             <div
@@ -341,49 +406,6 @@ function ComplianceDashboardWidget() {
                       </div>
                     )}
 
-                    {item.alert_id && (
-                      <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                        {!item.action_owner_id && currentUser?.id && (
-                          <button
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              void updateActionPlan(item, { action_owner_id: currentUser.id });
-                            }}
-                            disabled={isSaving}
-                            className="px-1.5 py-0.5 text-[7px] uppercase tracking-widest border border-white/20 text-zinc-300 hover:text-white hover:border-white/40 disabled:opacity-50"
-                          >
-                            Assign Me
-                          </button>
-                        )}
-                        <button
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            const targetDueDate = new Date();
-                            targetDueDate.setDate(targetDueDate.getDate() + 7);
-                            void updateActionPlan(item, { action_due_date: targetDueDate.toISOString().slice(0, 10) });
-                          }}
-                          disabled={isSaving}
-                          className="px-1.5 py-0.5 text-[7px] uppercase tracking-widest border border-amber-500/30 text-amber-300 hover:text-amber-200 hover:border-amber-400/50 disabled:opacity-50"
-                        >
-                          Due +7d
-                        </button>
-                        {item.action_status !== 'actioned' && (
-                          <button
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              void updateActionPlan(item, { mark_actioned: true });
-                            }}
-                            disabled={isSaving}
-                            className="px-1.5 py-0.5 text-[7px] uppercase tracking-widest border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 hover:border-emerald-400/50 disabled:opacity-50"
-                          >
-                            Mark Actioned
-                          </button>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -410,6 +432,211 @@ function ComplianceDashboardWidget() {
           >
             Full Compliance View
           </button>
+        </div>
+      )}
+
+      {/* Compliance Action Modal */}
+      {selectedItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+        >
+          <div className="w-full max-w-lg bg-zinc-950 border border-white/10 shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Modal header */}
+            <div className="flex items-start justify-between p-4 border-b border-white/10 flex-shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_STYLES[selectedItem.severity]?.dot ?? 'bg-zinc-500'}`} />
+                <span className="text-[11px] font-semibold text-white leading-tight">{selectedItem.title}</span>
+              </div>
+              <button onClick={closeModal} className="ml-3 flex-shrink-0 text-zinc-500 hover:text-white transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 p-4 space-y-4">
+              {/* Meta badges */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1 text-zinc-500">
+                  <MapPin className="w-2.5 h-2.5" />
+                  <span className="text-[8px] uppercase tracking-wider">{selectedItem.location_name}</span>
+                </div>
+                {selectedItem.category && (
+                  <span className="text-[7px] font-mono uppercase tracking-widest text-zinc-600 border border-white/10 px-1 py-px">
+                    {COMPLIANCE_CATEGORY_LABELS[selectedItem.category] ?? selectedItem.category}
+                  </span>
+                )}
+                <span className={`text-[7px] font-mono uppercase tracking-widest px-1 py-px ${SEVERITY_STYLES[selectedItem.severity]?.badge}`}>
+                  {SEVERITY_STYLES[selectedItem.severity]?.label}
+                </span>
+                {selectedItem.effective_date && (
+                  <span className="text-[7px] font-mono text-zinc-500 border border-white/5 px-1 py-px">
+                    Effective {new Date(`${selectedItem.effective_date}T00:00:00`).toLocaleDateString()}
+                    {selectedItem.days_until != null && (
+                      <span className={selectedItem.days_until <= 30 ? ' text-red-400' : selectedItem.days_until <= 60 ? ' text-amber-400' : ' text-zinc-400'}>
+                        {' '}· {selectedItem.days_until <= 0 ? 'Today' : `${selectedItem.days_until}d`}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
+
+              {/* Description */}
+              {selectedItem.description && (
+                <div className="bg-zinc-900/50 border border-white/5 p-3">
+                  <p className="text-[9px] text-zinc-400 leading-relaxed">{selectedItem.description}</p>
+                </div>
+              )}
+
+              {/* Next action / playbook */}
+              {(selectedItem.next_action || selectedItem.recommended_playbook) && (
+                <div className="space-y-1">
+                  {selectedItem.next_action && (
+                    <div className="text-[9px] text-zinc-400">
+                      <span className="text-[7px] uppercase tracking-widest text-zinc-600 block mb-0.5">Recommended Action</span>
+                      {selectedItem.next_action}
+                    </div>
+                  )}
+                  {selectedItem.recommended_playbook && (
+                    <div className="text-[9px] text-zinc-400">
+                      <span className="text-[7px] uppercase tracking-widest text-zinc-600 block mb-0.5">Playbook</span>
+                      {selectedItem.recommended_playbook}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Affected employees */}
+              {selectedItem.affected_employee_count > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Users className="w-3 h-3 text-zinc-600" />
+                  <span className="text-[8px] text-zinc-500">
+                    {selectedItem.affected_employee_count} employee{selectedItem.affected_employee_count !== 1 ? 's' : ''} affected
+                    {selectedItem.affected_employee_sample.length > 0 && (
+                      <span className="text-zinc-600"> — {selectedItem.affected_employee_sample.slice(0, 3).join(', ')}{selectedItem.affected_employee_count > 3 ? ` +${selectedItem.affected_employee_count - 3} more` : ''}</span>
+                    )}
+                  </span>
+                </div>
+              )}
+
+              {/* Financial exposure */}
+              {selectedItem.estimated_financial_impact && (
+                <div className="text-[8px] text-red-300/80 bg-red-500/5 border border-red-500/10 px-2 py-1">
+                  Exposure: {selectedItem.estimated_financial_impact}
+                </div>
+              )}
+
+              {/* Source link */}
+              {selectedItem.source_url && (
+                <a
+                  href={selectedItem.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[8px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  <ExternalLink className="w-2.5 h-2.5" />
+                  View source
+                </a>
+              )}
+
+              {/* Divider */}
+              <div className="border-t border-white/5" />
+
+              {/* Assign */}
+              {selectedItem.alert_id && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[7px] uppercase tracking-widest text-zinc-500 mb-1.5">Assign To</label>
+                    <select
+                      value={modalOwnerId}
+                      onChange={(e) => setModalOwnerId(e.target.value)}
+                      className="w-full bg-zinc-900 border border-white/10 text-zinc-200 text-[10px] px-2 py-1.5 focus:outline-none focus:border-white/20"
+                    >
+                      <option value="">— Unassigned —</option>
+                      {assignableUsers.map(u => (
+                        <option key={u.id} value={u.id}>{u.name}{u.name !== u.email ? ` (${u.email})` : ''}</option>
+                      ))}
+                      {currentUser && !assignableUsers.find(u => u.id === currentUser.id) && (
+                        <option value={currentUser.id}>Me</option>
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[7px] uppercase tracking-widest text-zinc-500 mb-1.5">Turnaround Time</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {TURNAROUND_OPTIONS.map(opt => (
+                        <button
+                          key={opt.days}
+                          onClick={() => setModalTurnaround(modalTurnaround === opt.days ? null : opt.days)}
+                          className={`px-2 py-1 text-[8px] font-mono uppercase tracking-widest border transition-colors ${
+                            modalTurnaround === opt.days
+                              ? 'bg-white text-black border-white'
+                              : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-zinc-200'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {modalTurnaround !== null && (
+                      <p className="mt-1.5 text-[8px] text-zinc-500">
+                        Due date will be set to {(() => {
+                          const d = new Date();
+                          d.setDate(d.getDate() + modalTurnaround);
+                          return d.toLocaleDateString();
+                        })()} · reminder email sent when due approaches
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {modalError && (
+                <p className="text-[8px] text-red-400 uppercase tracking-wider">{modalError}</p>
+              )}
+            </div>
+
+            {/* Modal footer */}
+            <div className="p-4 border-t border-white/10 flex items-center justify-between gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                {selectedItem.action_status !== 'actioned' && selectedItem.alert_id && (
+                  <button
+                    onClick={() => void markActioned(selectedItem)}
+                    disabled={modalSaving}
+                    className="px-3 py-1.5 text-[8px] uppercase tracking-widest border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 hover:border-emerald-400/50 disabled:opacity-50 transition-colors"
+                  >
+                    Mark Actioned
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    const params = new URLSearchParams({ location_id: selectedItem.location_id, tab: 'upcoming', legislation_id: selectedItem.legislation_id });
+                    navigate(`/app/matcha/compliance?${params.toString()}`);
+                  }}
+                  className="px-3 py-1.5 text-[8px] uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  Full View
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={closeModal}
+                  className="px-3 py-1.5 text-[8px] uppercase tracking-widest border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-colors"
+                >
+                  Cancel
+                </button>
+                {selectedItem.alert_id && (
+                  <button
+                    onClick={() => void saveModalChanges()}
+                    disabled={modalSaving || (modalOwnerId === (selectedItem.action_owner_id ?? '') && modalTurnaround === null)}
+                    className="px-3 py-1.5 text-[8px] uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {modalSaving ? 'Saving…' : 'Save'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -635,3 +635,34 @@ async def get_calibration_stats_endpoint(
     Useful for tuning confidence thresholds.
     """
     return await get_calibration_stats(category, days)
+
+
+@router.get("/assignable-users")
+async def get_assignable_users_endpoint(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    conn=Depends(get_connection),
+):
+    """Return users (clients + admins) that can be assigned compliance actions."""
+    company_id = await get_client_company_id(current_user, conn)
+
+    rows = await conn.fetch(
+        """
+        SELECT u.id, u.email, c.name, 'client' AS role
+        FROM clients c
+        JOIN users u ON u.id = c.user_id
+        WHERE c.company_id = $1 AND u.is_active = TRUE
+
+        UNION
+
+        SELECT u.id, u.email, u.email AS name, 'admin' AS role
+        FROM users u
+        WHERE u.role = 'admin' AND u.is_active = TRUE
+        ORDER BY name
+        """,
+        company_id,
+    )
+
+    return [
+        {"id": str(row["id"]), "name": row["name"], "email": row["email"], "role": row["role"]}
+        for row in rows
+    ]

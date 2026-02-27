@@ -30,6 +30,7 @@ celery_app = Celery(
         "app.workers.tasks.leave_deadline_checks",
         "app.workers.tasks.leave_agent_tasks",
         "app.workers.tasks.onboarding_reminders",
+        "app.workers.tasks.compliance_action_reminders",
         "app.workers.tasks.resume_screening",
         "app.workers.tasks.project_close",
     ],
@@ -149,6 +150,13 @@ def on_worker_ready(**kwargs):
         run_onboarding_reminders.delay()
     else:
         print("[Worker] Onboarding reminders scheduler is disabled, skipping.")
+
+    from app.workers.tasks.compliance_action_reminders import run_compliance_action_reminders
+
+    if _is_scheduler_enabled("compliance_action_reminders"):
+        run_compliance_action_reminders.delay()
+    else:
+        print("[Worker] Compliance action reminders scheduler is disabled, skipping.")
 
     from app.workers.tasks.project_close import check_project_deadlines
 
