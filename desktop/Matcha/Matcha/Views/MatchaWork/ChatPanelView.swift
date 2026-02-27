@@ -6,8 +6,6 @@ struct ChatPanelView: View {
     @State private var inputText = ""
     @State private var previewURL: String? = nil
 
-    private var isWorkbook: Bool { viewModel.thread?.taskType == "workbook" }
-
     private func send() {
         let content = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty, !viewModel.isStreaming else { return }
@@ -89,8 +87,8 @@ struct ChatPanelView: View {
                         .background(Color.red.opacity(0.1))
                 }
 
-                // Image strip — workbook threads only
-                if isWorkbook && (!viewModel.presentationImageURLs.isEmpty || viewModel.isUploadingImages) {
+                // Image strip
+                if !viewModel.presentationImageURLs.isEmpty || viewModel.isUploadingImages {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(viewModel.presentationImageURLs, id: \.self) { url in
@@ -118,25 +116,24 @@ struct ChatPanelView: View {
 
                 // Input area
                 HStack(alignment: .bottom, spacing: 10) {
-                    // Image attach button — workbook threads only
-                    if isWorkbook {
-                        Button { pickImages() } label: {
-                            Image(systemName: "photo")
-                                .font(.system(size: 16))
-                                .foregroundColor(
-                                    viewModel.presentationImageURLs.count >= 4 || viewModel.isUploadingImages
-                                    ? Color.secondary.opacity(0.4)
-                                    : .secondary
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.presentationImageURLs.count >= 4 || viewModel.isUploadingImages)
-                        .help(
-                            viewModel.presentationImageURLs.count >= 4
-                            ? "Maximum 4 images"
-                            : "Add images for presentation (\(viewModel.presentationImageURLs.count)/4)"
-                        )
+                    // Image attach button
+                    let atLimit = viewModel.presentationImageURLs.count >= 4
+                    Button { pickImages() } label: {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 17))
+                            .foregroundColor(
+                                atLimit || viewModel.isUploadingImages
+                                ? Color.secondary.opacity(0.35)
+                                : .secondary
+                            )
                     }
+                    .buttonStyle(.plain)
+                    .disabled(atLimit || viewModel.isUploadingImages)
+                    .help(
+                        atLimit
+                        ? "Maximum 4 images per thread"
+                        : "Upload images (\(viewModel.presentationImageURLs.count)/4)"
+                    )
 
                     TextField("Message...", text: $inputText, axis: .vertical)
                         .textFieldStyle(.plain)
