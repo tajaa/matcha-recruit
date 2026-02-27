@@ -10,11 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from ...core.models.auth import CurrentUser
+from ...core.dependencies import require_admin as require_platform_admin
 from ...core.services.stripe_service import StripeService, StripeServiceError
+from ...database import get_connection
 from ..dependencies import get_client_company_id, require_admin_or_client, require_feature
 from ..services import billing_service
 
 router = APIRouter(dependencies=[Depends(require_feature("matcha_work"))])
+admin_router = APIRouter()
 
 
 class CreditTransactionResponse(BaseModel):
@@ -227,3 +230,78 @@ async def list_billing_transactions(
         limit=history["limit"],
         offset=history["offset"],
     )
+
+
+# ── Admin-only endpoints (no feature gate, platform admin only) ──────────────
+
+
+class CompanyCreditSummary(BaseModel):
+    company_id: UUID
+    company_name: str
+    company_status: str
+    credits_remaining: int
+    total_credits_purchased: int
+    total_credits_granted: int
+    updated_at: Optional[datetime] = None
+
+
+class AdminGrantRequest(BaseModel):
+    credits: int = Field(..., description="Positive = grant, negative = deduct")
+    description: Optional[str] = Field(None, max_length=500)
+
+
+@admin_router.get("/admin/companies", response_model=list[CompanyCreditSummary])
+async def admin_list_company_credits(
+    current_user: CurrentUser = Depends(require_platform_admin),
+    conn=Depends(get_connection),
+):
+    """List all companies with their Matcha Work credit balances."""
+    rows = await conn.fetch(
+        """
+        SELECT
+            c.id, c.name, COALESCE(c.status, 'approved') AS status,
+            COALESCE(b.credits_remaining, 0)        AS credits_remaining,
+            COALESCE(b.total_credits_purchased, 0)  AS total_credits_purchased,
+            COALESCE(b.total_credits_granted, 0)    AS total_credits_granted,
+            b.updated_at
+        FROM companies c
+        LEFT JOIN mw_credit_balances b ON b.company_id = c.id
+        ORDER BY c.name
+        """
+    )
+    return [
+        CompanyCreditSummary(
+            company_id=row["id"],
+            company_name=row["name"],
+            company_status=row["status"],
+            credits_remaining=int(row["credits_remaining"]),
+            total_credits_purchased=int(row["total_credits_purchased"]),
+            total_credits_granted=int(row["total_credits_granted"]),
+            updated_at=row["updated_at"],
+        )
+        for row in rows
+    ]
+
+
+@admin_router.post("/admin/companies/{company_id}/grant", response_model=CreditTransactionResponse)
+async def admin_grant_credits_endpoint(
+    company_id: UUID,
+    body: AdminGrantRequest,
+    current_user: CurrentUser = Depends(require_platform_admin),
+):
+    """Grant or adjust credits for a company."""
+    company_exists = True
+    async with get_connection() as conn:
+        company_exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1)", company_id
+        )
+    if not company_exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    result = await billing_service.grant_credits(
+        company_id=company_id,
+        credits=body.credits,
+        description=body.description or ("Admin grant" if body.credits > 0 else "Admin adjustment"),
+        granted_by=current_user.id,
+    )
+    return CreditTransactionResponse(**result["transaction"])

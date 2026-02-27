@@ -26,7 +26,7 @@ from .provisioning import router as provisioning_router
 from .reach_out import router as reach_out_router
 from .internal_mobility import router as internal_mobility_router
 from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router
-from .billing import router as matcha_work_billing_router
+from .billing import router as matcha_work_billing_router, admin_router as matcha_work_billing_admin_router
 from ..dependencies import require_feature
 
 # Create main Matcha router
@@ -88,6 +88,11 @@ matcha_router.include_router(
     prefix="/matcha-work/billing",
     tags=["matcha-work-billing"],
     dependencies=[Depends(require_feature("matcha_work"))],
+)
+matcha_router.include_router(
+    matcha_work_billing_admin_router,
+    prefix="/matcha-work/billing",
+    tags=["matcha-work-billing-admin"],
 )
 
 # Export individual routers for backwards compatibility
