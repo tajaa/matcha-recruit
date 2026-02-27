@@ -3,7 +3,7 @@ import { Plus, Trash2, Edit2, CheckSquare, X, AlertTriangle, Star, Link, FileTex
 import { onboarding, policies, handbooks, type OnboardingTemplate } from '../api/client';
 import type { Policy, HandbookListItem } from '../types';
 
-type LinkType = 'policy' | 'handbook' | 'url' | null;
+type LinkType = 'policy' | 'handbook' | 'url' | 'template' | null;
 
 interface FormState {
   title: string;
@@ -29,6 +29,7 @@ const LINK_TYPE_META: Record<Exclude<LinkType, null>, { label: string; icon: Rea
   policy: { label: 'Policy / Document', icon: FileText, color: 'text-blue-400' },
   handbook: { label: 'Handbook', icon: BookOpen, color: 'text-purple-400' },
   url: { label: 'External URL', icon: Globe, color: 'text-emerald-400' },
+  template: { label: 'Template', icon: Layers, color: 'text-amber-400' },
 };
 
 export default function OnboardingPriorities() {
@@ -126,6 +127,8 @@ export default function OnboardingPriorities() {
     } finally {
       setLoadingResources(false);
     }
+    // Also load templates if not already loaded
+    loadAllTemplates();
   };
 
   const openCreate = () => {
@@ -161,7 +164,7 @@ export default function OnboardingPriorities() {
   const handleSave = async () => {
     if (!form.title.trim()) { setSaveError('Title is required'); return; }
     if (form.link_type === 'url' && !form.link_url.trim()) { setSaveError('URL is required'); return; }
-    if ((form.link_type === 'policy' || form.link_type === 'handbook') && !form.link_id) {
+    if ((form.link_type === 'policy' || form.link_type === 'handbook' || form.link_type === 'template') && !form.link_id) {
       setSaveError('Please select a resource'); return;
     }
 
@@ -421,7 +424,7 @@ export default function OnboardingPriorities() {
                 </div>
 
                 {/* Link type selector */}
-                <div className="grid grid-cols-4 gap-2 mb-4">
+                <div className="grid grid-cols-5 gap-2 mb-4">
                   <button
                     type="button"
                     onClick={() => handleLinkTypeChange(null)}
@@ -539,6 +542,34 @@ export default function OnboardingPriorities() {
                   </div>
                 )}
 
+                {/* Template picker */}
+                {form.link_type === 'template' && (
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1.5">
+                      Select Template
+                    </label>
+                    {loadingAllTemplates ? (
+                      <p className="text-xs text-zinc-600 py-2">Loading templates...</p>
+                    ) : allTemplates.length === 0 ? (
+                      <p className="text-xs text-zinc-600 py-2">No active templates found</p>
+                    ) : (
+                      <select
+                        value={form.link_id}
+                        onChange={e => {
+                          const t = allTemplates.find(t => t.id === e.target.value);
+                          handleResourceSelect(e.target.value, t?.title || '');
+                        }}
+                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-white/30"
+                      >
+                        <option value="">— Select a template —</option>
+                        {allTemplates.map(t => (
+                          <option key={t.id} value={t.id}>{t.title}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+
                 {/* Preview of selected link */}
                 {form.link_type && form.link_id && (
                   <div className="mt-3 px-3 py-2 bg-zinc-900/60 border border-white/5 text-xs text-zinc-400">
@@ -593,9 +624,11 @@ function TemplateRow({
   const linkIcon = tmpl.link_type === 'policy' ? FileText
     : tmpl.link_type === 'handbook' ? BookOpen
     : tmpl.link_type === 'url' ? Globe
+    : tmpl.link_type === 'template' ? Layers
     : null;
   const linkColor = tmpl.link_type === 'policy' ? 'text-blue-400'
     : tmpl.link_type === 'handbook' ? 'text-purple-400'
+    : tmpl.link_type === 'template' ? 'text-amber-400'
     : 'text-emerald-400';
 
   return (
