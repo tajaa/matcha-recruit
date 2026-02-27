@@ -11,6 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from ...config import get_settings
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services.risk_assessment_service import compute_risk_assessment, generate_recommendations
 
@@ -29,7 +30,8 @@ class DimensionResultResponse(BaseModel):
 class RecommendationResponse(BaseModel):
     dimension: str
     priority: str
-    action: str
+    title: str
+    guidance: str
 
 
 class RiskAssessmentResponse(BaseModel):
@@ -56,9 +58,10 @@ async def get_risk_assessment(
 
     recommendations = None
     if current_user.role == "admin":
-        recommendations = [
-            RecommendationResponse(**r) for r in generate_recommendations(result)
-        ]
+        settings = get_settings()
+        recs = await generate_recommendations(result, settings)
+        if recs:
+            recommendations = [RecommendationResponse(**r) for r in recs]
 
     return RiskAssessmentResponse(
         overall_score=result.overall_score,

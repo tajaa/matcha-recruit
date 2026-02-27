@@ -2632,7 +2632,8 @@ export interface DimensionResult {
 export interface RiskRecommendation {
   dimension: string;
   priority: 'critical' | 'high' | 'medium' | 'low';
-  action: string;
+  title: string;
+  guidance: string;
 }
 
 export interface RiskAssessmentResult {

@@ -227,7 +227,8 @@ export default function RiskAssessment() {
                       <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-bold">
                         {DIMENSION_META[rec.dimension]?.label ?? rec.dimension}
                       </span>
-                      <span className="text-xs text-zinc-300">{rec.action}</span>
+                      <span className="text-sm text-zinc-200 font-medium">{rec.title}</span>
+                      <span className="text-xs text-zinc-400 mt-1">{rec.guidance}</span>
                     </div>
                   </div>
                 ))}

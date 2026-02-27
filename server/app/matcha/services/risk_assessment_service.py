@@ -8,11 +8,14 @@ Computes a live risk score across 5 dimensions for a company:
 - Legislative (5%)
 """
 
+import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 from uuid import UUID
+
+from google import genai
 
 from ...database import get_connection
 
@@ -391,94 +394,132 @@ async def compute_legislative_dimension(company_id: UUID, conn) -> DimensionResu
     )
 
 
-PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+RISK_RECOMMENDATION_PROMPT = """You are a senior HR risk consultant reviewing a company's live risk assessment dashboard.
+
+Below is the full risk assessment data in JSON format. It includes an overall score, per-dimension scores (0-100), risk bands, contributing factors, and raw data for each of the 5 dimensions: compliance, incidents, er_cases, workforce, and legislative.
+
+<risk_assessment>
+{assessment_json}
+</risk_assessment>
+
+Based on this data, produce 5–10 strategic HR consulting recommendations — the kind of specific, actionable guidance a professional HR firm would give after reviewing this dashboard.
+
+Rules:
+- Only recommend for dimensions where the score is greater than 0.
+- Order recommendations by severity: critical first, then high, medium, low.
+- Each recommendation must reference specific numbers or facts from the data (e.g. "With 3 unread critical compliance alerts…" or "Your 42% contingent workforce ratio…").
+- Write guidance as a senior consultant speaking to a business leader — direct, specific, no generic filler.
+- priority must be one of: critical, high, medium, low.
+- dimension must be one of: compliance, incidents, er_cases, workforce, legislative.
+
+Return ONLY a JSON array (no wrapping object, no markdown) where each element has:
+- "dimension": string
+- "priority": "critical" | "high" | "medium" | "low"
+- "title": short heading (5-10 words)
+- "guidance": 2-3 sentences of specific consulting advice referencing the actual data"""
+
+FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
 
-def generate_recommendations(result: RiskAssessmentResult) -> list[dict]:
-    """Derive actionable recommendations from computed risk scores. Pure function, no DB calls."""
-    recs: list[dict] = []
+def _parse_json_response(text: str) -> Any:
+    """Parse JSON from LLM response, handling markdown code blocks."""
+    text = text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return json.loads(text.strip())
 
-    def add(dimension: str, priority: str, action: str):
-        recs.append({"dimension": dimension, "priority": priority, "action": action})
 
-    # --- Compliance ---
-    comp = result.dimensions.get("compliance")
-    if comp and comp.score > 0:
-        rd = comp.raw_data
-        if rd.get("critical_unread", 0) > 0:
-            add("compliance", "critical", f"Review and address {rd['critical_unread']} critical compliance alert{'s' if rd['critical_unread'] != 1 else ''}")
-        if rd.get("warning_unread", 0) > 0:
-            add("compliance", "high", f"Review {rd['warning_unread']} unread warning-level compliance alert{'s' if rd['warning_unread'] != 1 else ''}")
-        last_check = rd.get("last_check")
-        if last_check is None:
-            add("compliance", "medium", "No compliance check on record — run one now")
-        elif last_check:
-            lc = datetime.fromisoformat(last_check) if isinstance(last_check, str) else last_check
-            if lc.tzinfo is None:
-                lc = lc.replace(tzinfo=timezone.utc)
-            days = (datetime.now(timezone.utc) - lc).days
-            if days >= 30:
-                add("compliance", "medium", f"Run a compliance check — last check was {days} days ago")
+def _is_model_unavailable_error(error: Exception) -> bool:
+    message = str(error).lower()
+    if "model" not in message:
+        return False
+    return (
+        "not found" in message
+        or "does not have access" in message
+        or "unsupported model" in message
+        or "404" in message
+    )
 
-    # --- Incidents ---
-    inc = result.dimensions.get("incidents")
-    if inc and inc.score > 0:
-        rd = inc.raw_data
-        if rd.get("open_critical", 0) > 0:
-            add("incidents", "critical", f"Prioritize resolution of {rd['open_critical']} critical incident{'s' if rd['open_critical'] != 1 else ''}")
-        if rd.get("open_high", 0) > 0:
-            add("incidents", "high", f"Address {rd['open_high']} high-severity open incident{'s' if rd['open_high'] != 1 else ''}")
-        if rd.get("open_medium", 0) > 0:
-            add("incidents", "medium", f"Review {rd['open_medium']} medium-severity open incident{'s' if rd['open_medium'] != 1 else ''}")
-        if rd.get("open_low", 0) > 0:
-            add("incidents", "low", f"Close or resolve {rd['open_low']} low-severity open incident{'s' if rd['open_low'] != 1 else ''}")
 
-    # --- ER Cases ---
-    er = result.dimensions.get("er_cases")
-    if er and er.score > 0:
-        rd = er.raw_data
-        if rd.get("pending_determination", 0) > 0:
-            add("er_cases", "critical", f"Make determinations on {rd['pending_determination']} pending ER case{'s' if rd['pending_determination'] != 1 else ''}")
-        if rd.get("in_review", 0) > 0:
-            add("er_cases", "high", f"Complete review of {rd['in_review']} ER case{'s' if rd['in_review'] != 1 else ''} in review")
-        if rd.get("open", 0) > 0:
-            add("er_cases", "medium", f"Progress {rd['open']} open ER case{'s' if rd['open'] != 1 else ''} toward resolution")
-        if rd.get("major_policy_violation"):
-            add("er_cases", "critical", "Investigate major policy violation flagged in case analysis")
-        if rd.get("high_discrepancy"):
-            add("er_cases", "high", "Review high-severity discrepancy findings in ER analysis")
+async def generate_recommendations(result: RiskAssessmentResult, settings) -> list[dict]:
+    """Generate strategic HR consulting recommendations via Gemini."""
+    try:
+        if settings.use_vertex:
+            client = genai.Client(
+                vertexai=True,
+                project=settings.vertex_project,
+                location=settings.vertex_location,
+            )
+        elif settings.gemini_api_key:
+            client = genai.Client(api_key=settings.gemini_api_key)
+        else:
+            logger.warning("No Gemini credentials configured — skipping recommendations")
+            return []
 
-    # --- Workforce ---
-    wf = result.dimensions.get("workforce")
-    if wf and wf.score > 0:
-        rd = wf.raw_data
-        states = rd.get("unique_states", 0)
-        if states > 3:
-            add("workforce", "medium", f"Review multi-state compliance posture — employees in {states} states")
-        total = rd.get("total_employees", 0)
-        contingent = rd.get("contractor_intern_count", 0)
-        if total > 0 and contingent / total > 0.20:
-            pct = int(contingent / total * 100)
-            add("workforce", "medium", f"Audit contractor/intern classification — {pct}% contingent workforce exceeds 20% threshold")
-        if total > 50:
-            add("workforce", "low", f"Ensure HR processes and policies scale with {total}-person headcount")
+        assessment_dict = {
+            "overall_score": result.overall_score,
+            "overall_band": result.overall_band,
+            "dimensions": {
+                key: asdict(dim) for key, dim in result.dimensions.items()
+            },
+            "computed_at": result.computed_at.isoformat(),
+        }
+        prompt = RISK_RECOMMENDATION_PROMPT.format(
+            assessment_json=json.dumps(assessment_dict, indent=2, default=str)
+        )
 
-    # --- Legislative ---
-    leg = result.dimensions.get("legislative")
-    if leg and leg.score > 0:
-        rd = leg.raw_data
-        w30 = rd.get("within_30_days", 0)
-        w90 = rd.get("within_90_days", 0)
-        w180 = rd.get("within_180_days", 0)
-        if w30 > 0:
-            add("legislative", "critical", f"Urgent: {w30} legislation change{'s' if w30 != 1 else ''} effective within 30 days — prepare compliance updates")
-        if w90 > 0:
-            add("legislative", "high", f"Plan for {w90} legislation change{'s' if w90 != 1 else ''} effective within 31–90 days")
-        if w180 > 0:
-            add("legislative", "low", f"Monitor {w180} upcoming legislation change{'s' if w180 != 1 else ''} (91–180 days out)")
+        models_to_try = [settings.analysis_model] + [
+            m for m in FALLBACK_MODELS if m != settings.analysis_model
+        ]
 
-    recs.sort(key=lambda r: PRIORITY_ORDER.get(r["priority"], 99))
-    return recs
+        last_error = None
+        for model in models_to_try:
+            try:
+                response = await client.aio.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
+                break
+            except Exception as e:
+                last_error = e
+                if _is_model_unavailable_error(e):
+                    logger.warning("Model %s unavailable, trying next: %s", model, e)
+                    continue
+                raise
+        else:
+            raise last_error  # type: ignore[misc]
+
+        recs = _parse_json_response(response.text)
+        if not isinstance(recs, list):
+            logger.error("Gemini returned non-list for recommendations")
+            return []
+
+        valid_priorities = {"critical", "high", "medium", "low"}
+        valid_dims = {"compliance", "incidents", "er_cases", "workforce", "legislative"}
+        validated = []
+        for r in recs:
+            if (
+                isinstance(r, dict)
+                and r.get("priority") in valid_priorities
+                and r.get("dimension") in valid_dims
+                and r.get("title")
+                and r.get("guidance")
+            ):
+                validated.append({
+                    "dimension": r["dimension"],
+                    "priority": r["priority"],
+                    "title": r["title"],
+                    "guidance": r["guidance"],
+                })
+        return validated
+
+    except Exception:
+        logger.exception("Failed to generate Gemini recommendations — returning empty")
+        return []
 
 
 async def compute_risk_assessment(company_id: UUID) -> RiskAssessmentResult:
