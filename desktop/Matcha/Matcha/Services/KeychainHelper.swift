@@ -8,22 +8,25 @@ enum KeychainHelper {
     }
 
     static func save(key: String, value: String) {
+        #if DEBUG
+        UserDefaults.standard.set(value, forKey: key)
+        #else
         let data = value.data(using: .utf8)!
-        // nil trustedList = any application can access without prompting
-        var access: SecAccess?
-        SecAccessCreate("Matcha Token" as CFString, nil, &access)
-        var query: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
-        if let access { query[kSecAttrAccess as String] = access }
         SecItemDelete(query as CFDictionary)
         SecItemAdd(query as CFDictionary, nil)
+        #endif
     }
 
     static func load(key: String) -> String? {
+        #if DEBUG
+        return UserDefaults.standard.string(forKey: key)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
@@ -38,13 +41,18 @@ enum KeychainHelper {
             return nil
         }
         return string
+        #endif
     }
 
     static func delete(key: String) {
+        #if DEBUG
+        UserDefaults.standard.removeObject(forKey: key)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key
         ]
         SecItemDelete(query as CFDictionary)
+        #endif
     }
 }
