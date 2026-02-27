@@ -819,7 +819,7 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
         return {"enabled_features": features}
 
 
-@router.post("/companies/{company_id}/credits", dependencies=[Depends(require_admin)])
+@router.post("/companies/{company_id}/credits")
 async def adjust_company_credits(
     company_id: UUID,
     request: CompanyCreditsAdjustRequest,

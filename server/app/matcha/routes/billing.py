@@ -11,10 +11,10 @@ from pydantic import BaseModel, Field
 
 from ...core.models.auth import CurrentUser
 from ...core.services.stripe_service import StripeService, StripeServiceError
-from ..dependencies import get_client_company_id, require_admin_or_client
+from ..dependencies import get_client_company_id, require_admin_or_client, require_feature
 from ..services import billing_service
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_feature("matcha_work"))])
 
 
 class CreditTransactionResponse(BaseModel):

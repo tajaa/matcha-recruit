@@ -42,7 +42,20 @@ async def stripe_webhook(request: Request):
         fulfillment = await billing_service.fulfill_checkout_session(stripe_session_id)
         if fulfillment is None:
             logger.warning("Stripe session %s not found during fulfillment", stripe_session_id)
+        elif fulfillment.get("already_fulfilled"):
+            logger.info("Stripe session %s was already fulfilled (duplicate webhook)", stripe_session_id)
+        else:
+            credits_added = fulfillment.get("transaction", {}).get("credits_delta", "?")
+            new_balance = fulfillment.get("balance", {}).get("credits_remaining", "?")
+            logger.info(
+                "Stripe session %s fulfilled: +%s credits, new balance %s (company %s)",
+                stripe_session_id,
+                credits_added,
+                new_balance,
+                fulfillment.get("session", {}).get("company_id", "?"),
+            )
     elif event_type == "checkout.session.expired":
         await billing_service.mark_stripe_session_expired(stripe_session_id)
+        logger.info("Stripe session %s marked expired", stripe_session_id)
 
     return {"received": True}

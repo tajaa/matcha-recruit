@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
 from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
+from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ..models.matcha_work import (
     CreateThreadRequest,
     CreateThreadResponse,
@@ -58,7 +58,7 @@ from ...core.services.handbook_service import HandbookService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_feature("matcha_work"))])
 public_router = APIRouter()
 
 VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys())

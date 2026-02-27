@@ -8,7 +8,7 @@ from uuid import UUID
 
 try:
     import stripe
-except Exception:  # pragma: no cover - handled at runtime
+except ImportError:  # pragma: no cover - handled at runtime
     stripe = None
 
 from ...config import get_settings
