@@ -425,7 +425,7 @@ Produce 5–10 strategic consulting recommendations based on this data.
 Rules:
 - Only produce recommendations for dimensions where score > 0.
 - Order by severity: critical first, then high, medium, low.
-- Every recommendation must cite the specific numbers from the data (e.g. "With {N} unread critical alerts…", "Your {N}% contingent workforce ratio…").
+- Every recommendation must cite the specific numbers from the data (e.g. "With {{N}} unread critical alerts…", "Your {{N}}% contingent workforce ratio…").
 - Explain the legal or business consequence of the current situation — what exposure does this create?
 - Give concrete, specific next steps (not "address the issue" but "assign an owner, set a 48-hour resolution deadline, document the response in writing").
 - Write in the voice of a senior advisor briefing a CHRO or CEO — authoritative, direct, no filler.
