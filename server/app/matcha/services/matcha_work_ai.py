@@ -368,7 +368,8 @@ class GeminiProvider(MatchaWorkAIProvider):
         elif current_skill == "onboarding":
             valid_fields = ONBOARDING_FIELDS
         else:
-            valid_fields = []
+            # No active skill yet — allow any skill to be initiated
+            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS
 
         system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
             today=date.today().isoformat(),

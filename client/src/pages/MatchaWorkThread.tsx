@@ -399,7 +399,9 @@ export default function MatchaWorkThread() {
           receivedComplete = true;
           setMessages((prev) => [...prev, resp.user_message, resp.assistant_message]);
           setThread((prev) =>
-            prev ? { ...prev, current_state: resp.current_state, version: resp.version } : prev
+            prev
+              ? { ...prev, current_state: resp.current_state, version: resp.version, ...(resp.task_type ? { task_type: resp.task_type } : {}) }
+              : prev
           );
           if (resp.version > 0) {
             shouldRefreshVersions = true;
@@ -419,10 +421,11 @@ export default function MatchaWorkThread() {
             toItemList(resp.current_state?.strengths).length > 0 ||
             toItemList(resp.current_state?.growth_areas).length > 0 ||
             (Array.isArray(resp.current_state?.review_request_statuses) && resp.current_state.review_request_statuses.length > 0);
+          const hasOnboardingState = Array.isArray(resp.current_state?.employees) && resp.current_state.employees.length > 0;
           if (resp.pdf_url) {
             setPdfUrl(resp.pdf_url);
             setActiveTab('preview');
-          } else if (hasWorkbookState || hasReviewState) {
+          } else if (hasWorkbookState || hasReviewState || hasOnboardingState) {
             setActiveTab('preview');
           }
           if (resp.token_usage) {
@@ -565,7 +568,7 @@ export default function MatchaWorkThread() {
       const resp = await matchaWork.revert(threadId, version);
       setMessages((prev) => [...prev, resp.user_message, resp.assistant_message]);
       if (thread) {
-        setThread((prev) => prev ? { ...prev, current_state: resp.current_state, version: resp.version } : prev);
+        setThread((prev) => prev ? { ...prev, current_state: resp.current_state, version: resp.version, ...(resp.task_type ? { task_type: resp.task_type } : {}) } : prev);
       }
       if (resp.pdf_url) setPdfUrl(resp.pdf_url);
       const verData = await matchaWork.getVersions(threadId);
@@ -763,10 +766,14 @@ export default function MatchaWorkThread() {
     reviewGrowthAreas.length > 0 ||
     reviewStatuses.length > 0
   );
+  const hasOnboardingPreviewContent = Boolean(
+    thread?.current_state.employees && (thread.current_state.employees as unknown[]).length > 0
+  );
   const hasPreviewContent = !isUnscopedChat && (
-    (isOfferLetter && hasOfferLetterPreviewContent) ||
-    (isWorkbook && hasWorkbookPreviewContent) ||
-    (isReview && hasReviewPreviewContent)
+    hasOfferLetterPreviewContent ||
+    hasWorkbookPreviewContent ||
+    hasReviewPreviewContent ||
+    hasOnboardingPreviewContent
   );
   const isOutOfCredits = creditBalance !== null && creditBalance <= 0;
   const isLowCredits = creditBalance !== null && creditBalance > 0 && creditBalance < 10;
@@ -827,7 +834,7 @@ export default function MatchaWorkThread() {
                 v{thread.version}
               </span>
               <span className="hidden sm:inline text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">
-                {isUnscopedChat ? 'chat' : thread.task_type === 'review' ? 'review' : thread.task_type === 'workbook' ? 'workbook' : thread.task_type === 'onboarding' ? 'onboarding' : 'offer letter'}
+                {isUnscopedChat || thread.task_type === 'chat' ? 'chat' : thread.task_type === 'review' ? 'review' : thread.task_type === 'workbook' ? 'workbook' : thread.task_type === 'onboarding' ? 'onboarding' : 'offer letter'}
               </span>
               {isFinalized && <span className="text-[10px] text-blue-400 border border-blue-500/20 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Finalized</span>}
               {isArchived && <span className="text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Archived</span>}
@@ -866,7 +873,7 @@ export default function MatchaWorkThread() {
               <button
                 onClick={() => setActiveTab('preview')}
                 className={`px-3 py-1 text-xs uppercase tracking-wider transition-colors border-l border-white/10 ${activeTab === 'preview' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >{isOfferLetter ? 'Preview' : isWorkbook ? 'Workbook' : 'Summary'}</button>
+              >{(isOfferLetter || hasOfferLetterPreviewContent) ? 'Preview' : (isWorkbook || hasWorkbookPreviewContent) ? 'Workbook' : hasOnboardingPreviewContent ? 'Onboarding' : 'Summary'}</button>
             </div>
           )}
 
@@ -1169,7 +1176,7 @@ export default function MatchaWorkThread() {
 
           {/* PDF iframe */}
           <div className="flex-1 bg-zinc-900 min-h-0">
-            {isOfferLetter ? (
+            {(isOfferLetter || hasOfferLetterPreviewContent) ? (
               pdfUrl ? (
                 <iframe
                   src={pdfUrl}
@@ -1188,8 +1195,16 @@ export default function MatchaWorkThread() {
                   </p>
                 </div>
               )
-            ) : isWorkbook ? (
+            ) : (isWorkbook || hasWorkbookPreviewContent) ? (
               <WorkbookPreview state={thread.current_state} />
+            ) : hasOnboardingPreviewContent ? (
+              <div className="h-full overflow-y-auto p-4">
+                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 p-4 space-y-3">
+                  <p className="text-xs uppercase tracking-wider text-zinc-500">Employee Onboarding</p>
+                  <p className="text-sm text-zinc-300">{(thread.current_state.employees as unknown[])?.length || 0} employee(s) queued</p>
+                  <p className="text-xs text-zinc-500">Batch status: {thread.current_state.batch_status || 'collecting'}</p>
+                </div>
+              </div>
             ) : (
               <div className="h-full overflow-y-auto p-4">
                 <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 p-4 space-y-4">

@@ -400,6 +400,13 @@ async def _apply_ai_updates_and_operations(
 ) -> tuple[dict, int, Optional[str], bool, str]:
     """Apply structured updates, execute supported operations, and return updated response state."""
     skill = ai_resp.skill or _infer_skill_from_state(current_state)
+    # If skill is not a known document type (e.g. "none" or "chat"), fall back to
+    # inferring from the update keys themselves so workbook/review/etc. updates
+    # created on a fresh thread aren't silently dropped.
+    if skill not in ("offer_letter", "review", "workbook", "onboarding") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
+        skill_from_updates = _infer_skill_from_state(ai_resp.structured_update)
+        if skill_from_updates != "chat":
+            skill = skill_from_updates
     initial_version = int(current_version)
     pdf_url: Optional[str] = None
     assistant_reply = ai_resp.assistant_reply
@@ -408,6 +415,13 @@ async def _apply_ai_updates_and_operations(
     should_execute_skill = bool(
         ai_resp.mode == "skill"
         and (ai_resp.confidence >= 0.65 or not ai_resp.missing_fields)
+    )
+    logger.info(
+        "[MW] ai mode=%s skill=%s op=%s conf=%.2f missing=%s update_keys=%s should_exec=%s",
+        ai_resp.mode, skill, ai_resp.operation, ai_resp.confidence,
+        ai_resp.missing_fields,
+        list(ai_resp.structured_update.keys()) if isinstance(ai_resp.structured_update, dict) else None,
+        should_execute_skill,
     )
     force_send_draft = (
         skill == "offer_letter"
@@ -646,6 +660,7 @@ async def create_thread(
         status=thread["status"],
         current_state=thread["current_state"],
         version=thread["version"],
+        task_type=_infer_skill_from_state(thread["current_state"]),
         is_pinned=thread.get("is_pinned", False),
         created_at=thread["created_at"],
         assistant_reply=assistant_reply,
@@ -845,6 +860,7 @@ async def get_thread(
         status=thread["status"],
         current_state=thread["current_state"],
         version=thread["version"],
+        task_type=_infer_skill_from_state(thread["current_state"]),
         is_pinned=thread.get("is_pinned", False),
         linked_offer_letter_id=thread.get("linked_offer_letter_id"),
         created_at=thread["created_at"],
@@ -954,6 +970,7 @@ async def send_message(
         assistant_message=_row_to_message(assistant_msg),
         current_state=current_state,
         version=current_version,
+        task_type=_infer_skill_from_state(current_state),
         pdf_url=pdf_url,
         token_usage=final_usage,
     )
@@ -1083,6 +1100,7 @@ async def send_message_stream(
                 assistant_message=_row_to_message(assistant_msg),
                 current_state=current_state,
                 version=current_version,
+                task_type=_infer_skill_from_state(current_state),
                 pdf_url=pdf_url,
                 token_usage=final_usage,
             )

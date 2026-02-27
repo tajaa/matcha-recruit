@@ -121,6 +121,7 @@ class CreateThreadResponse(BaseModel):
     status: str
     current_state: dict
     version: int
+    task_type: Optional[str] = None
     is_pinned: bool = False
     created_at: datetime
     assistant_reply: Optional[str] = None
@@ -153,6 +154,7 @@ class SendMessageResponse(BaseModel):
     assistant_message: MWMessageOut
     current_state: dict
     version: int
+    task_type: Optional[str] = None
     pdf_url: Optional[str] = None
     token_usage: Optional[TokenUsage] = None
 
@@ -162,6 +164,7 @@ class ThreadListItem(BaseModel):
     title: str
     status: str
     version: int
+    task_type: Optional[str] = None
     is_pinned: bool = False
     created_at: datetime
     updated_at: datetime
@@ -185,6 +188,7 @@ class ThreadDetailResponse(BaseModel):
     status: str
     current_state: dict
     version: int
+    task_type: Optional[str] = None
     is_pinned: bool = False
     linked_offer_letter_id: Optional[UUID] = None
     created_at: datetime

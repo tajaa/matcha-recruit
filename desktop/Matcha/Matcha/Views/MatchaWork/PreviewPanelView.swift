@@ -13,6 +13,7 @@ struct PreviewPanelView: View {
         }
         if currentState["overall_rating"] != nil || currentState["review_title"] != nil { return "review" }
         if currentState["sections"] != nil || currentState["workbook_title"] != nil { return "workbook" }
+        if currentState["employees"] != nil { return "onboarding" }
         return "chat"
     }
 
@@ -35,6 +36,8 @@ struct PreviewPanelView: View {
                     ReviewPreview(state: currentState)
                 case "workbook":
                     WorkbookPreview(state: currentState)
+                case "onboarding":
+                    OnboardingPreview(state: currentState)
                 default:
                     EmptyPreviewView()
                 }
@@ -99,7 +102,7 @@ struct PDFKitView: NSViewRepresentable {
 struct ReviewPreview: View {
     let state: [String: AnyCodable]
 
-    var title: String { (state["title"]?.value as? String) ?? "Performance Review" }
+    var title: String { (state["review_title"]?.value as? String) ?? "Performance Review" }
     var overallRating: Int {
         if let v = state["overall_rating"]?.value as? Int { return v }
         if let v = state["overall_rating"]?.value as? Double { return Int(v) }
@@ -223,7 +226,7 @@ struct WorkbookPreview: View {
         }
     }
 
-    var workbookTitle: String { (state["title"]?.value as? String) ?? "Workbook" }
+    var workbookTitle: String { (state["workbook_title"]?.value as? String) ?? "Workbook" }
 
     var body: some View {
         ScrollView {
@@ -248,6 +251,78 @@ struct WorkbookPreview: View {
                                 .font(.system(size: 13))
                                 .foregroundColor(.white.opacity(0.8))
                                 .lineSpacing(4)
+                        }
+                        .padding(12)
+                        .background(Color.zinc800)
+                        .cornerRadius(8)
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }
+}
+
+// MARK: - Onboarding Preview
+
+struct OnboardingPreview: View {
+    let state: [String: AnyCodable]
+
+    struct EmployeeEntry: Identifiable {
+        let id = UUID()
+        let name: String
+        let role: String
+        let startDate: String
+    }
+
+    var employees: [EmployeeEntry] {
+        guard let raw = state["employees"]?.value as? [AnyCodable] else { return [] }
+        return raw.compactMap { item -> EmployeeEntry? in
+            guard let dict = item.value as? [String: AnyCodable] else { return nil }
+            let name = (dict["name"]?.value as? String) ?? (dict["full_name"]?.value as? String) ?? ""
+            let role = (dict["role"]?.value as? String) ?? (dict["position"]?.value as? String) ?? ""
+            let startDate = (dict["start_date"]?.value as? String) ?? ""
+            guard !name.isEmpty else { return nil }
+            return EmployeeEntry(name: name, role: role, startDate: startDate)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Onboarding Plan")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+
+                if employees.isEmpty {
+                    EmptyPreviewView(message: "Onboarding in progress...", icon: "person.badge.plus")
+                } else {
+                    ForEach(employees) { employee in
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.zinc800)
+                                    .frame(width: 36, height: 36)
+                                Text(String(employee.name.prefix(1)).uppercased())
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(employee.name)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.white)
+                                if !employee.role.isEmpty {
+                                    Text(employee.role)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                }
+                                if !employee.startDate.isEmpty {
+                                    Text("Starts \(employee.startDate)")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            Spacer()
                         }
                         .padding(12)
                         .background(Color.zinc800)

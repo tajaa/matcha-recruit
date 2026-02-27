@@ -1,6 +1,6 @@
 export type MWThreadStatus = 'active' | 'finalized' | 'archived';
 export type MWMessageRole = 'user' | 'assistant' | 'system';
-export type MWTaskType = 'offer_letter' | 'review' | 'workbook' | 'onboarding';
+export type MWTaskType = 'offer_letter' | 'review' | 'workbook' | 'onboarding' | 'chat';
 
 export interface MWPresentationSlide {
   title: string;
@@ -102,6 +102,24 @@ export interface MWDocumentState {
   objective?: string | null;
   sections?: { title: string; content: string }[] | null;
   presentation?: MWPresentation | null;
+  // Onboarding fields
+  employees?: Array<{
+    first_name?: string | null;
+    last_name?: string | null;
+    work_email?: string | null;
+    personal_email?: string | null;
+    work_state?: string | null;
+    employment_type?: string | null;
+    start_date?: string | null;
+    address?: string | null;
+    status?: string | null;
+    error?: string | null;
+    employee_id?: string | null;
+  }> | null;
+  batch_status?: string | null;
+  default_start_date?: string | null;
+  default_employment_type?: string | null;
+  default_work_state?: string | null;
 }
 
 export interface MWThreadDetail {
@@ -144,6 +162,7 @@ export interface MWSendMessageResponse {
   assistant_message: MWMessage;
   current_state: MWDocumentState;
   version: number;
+  task_type?: MWTaskType | null;
   pdf_url: string | null;
   token_usage?: MWTokenUsage | null;
 }
