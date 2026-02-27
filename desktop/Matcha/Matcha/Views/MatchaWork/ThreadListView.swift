@@ -84,18 +84,21 @@ struct ThreadListView: View {
                 Spacer()
             } else {
                 List(viewModel.filteredThreads, selection: $appState.selectedThreadId) { thread in
-                    ThreadRowView(thread: thread)
-                        .tag(thread.id)
-                        .contextMenu {
-                            Button(thread.isPinned ? "Unpin" : "Pin") {
-                                Task { await viewModel.togglePin(thread: thread) }
-                            }
-                            Divider()
-                            Button("Delete", role: .destructive) {
-                                threadToDelete = thread
-                                showDeleteConfirm = true
-                            }
+                    ThreadRowView(thread: thread, onDelete: {
+                        threadToDelete = thread
+                        showDeleteConfirm = true
+                    })
+                    .tag(thread.id)
+                    .contextMenu {
+                        Button(thread.isPinned ? "Unpin" : "Pin") {
+                            Task { await viewModel.togglePin(thread: thread) }
                         }
+                        Divider()
+                        Button("Delete", role: .destructive) {
+                            threadToDelete = thread
+                            showDeleteConfirm = true
+                        }
+                    }
                 }
                 .listStyle(.sidebar)
                 .scrollContentBackground(.hidden)
@@ -122,6 +125,8 @@ struct ThreadListView: View {
 
 struct ThreadRowView: View {
     let thread: MWThread
+    let onDelete: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -131,7 +136,14 @@ struct ThreadRowView: View {
                     .foregroundColor(.white)
                     .lineLimit(1)
                 Spacer()
-                if thread.isPinned {
+                if isHovered {
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                } else if thread.isPinned {
                     Image(systemName: "pin.fill")
                         .font(.system(size: 9))
                         .foregroundColor(.matcha500)
@@ -146,5 +158,6 @@ struct ThreadRowView: View {
             }
         }
         .padding(.vertical, 2)
+        .onHover { isHovered = $0 }
     }
 }
