@@ -432,11 +432,21 @@ Rules:
 - priority must be one of: critical, high, medium, low.
 - dimension must be one of: compliance, incidents, er_cases, workforce, legislative.
 
-Return ONLY a valid JSON array (no wrapper object, no markdown fences). Each element:
-- "dimension": string
-- "priority": "critical" | "high" | "medium" | "low"
-- "title": concise heading (6-10 words)
-- "guidance": 4-5 sentences — situation, legal/business consequence, and specific next steps"""
+Return ONLY a valid JSON object (no markdown fences) with two fields:
+
+1. "report": A 2-3 paragraph executive summary written as a senior HR consultant addressing the company's leadership team. Requirements:
+   - Reference the specific scores, bands, and data points from the assessment
+   - Cite historical precedent — real-world examples of what has happened to companies with similar risk profiles (e.g. EEOC settlements and their dollar amounts, OSHA citation patterns, DOL audit triggers, class action lawsuits, jury verdicts)
+   - If the company is doing well (low scores), reinforce what they're doing right, but warn about complacency with examples of companies that let things slip
+   - If the company has issues, be direct and specific about consequences and urgency — what enforcement actions, lawsuits, or penalties are statistically likely given this profile
+   - Tone: authoritative, grounded, zero filler — the kind of memo a CHRO would forward to the board
+   - Do NOT use bullet points or lists — write in flowing narrative paragraphs
+
+2. "recommendations": A JSON array of 5-10 objects, each with:
+   - "dimension": string
+   - "priority": "critical" | "high" | "medium" | "low"
+   - "title": concise heading (6-10 words)
+   - "guidance": 4-5 sentences — situation, legal/business consequence, and specific next steps"""
 
 FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
@@ -465,8 +475,9 @@ def _is_model_unavailable_error(error: Exception) -> bool:
     )
 
 
-async def generate_recommendations(result: RiskAssessmentResult, settings) -> list[dict]:
-    """Generate strategic HR consulting recommendations via Gemini."""
+async def generate_recommendations(result: RiskAssessmentResult, settings) -> dict:
+    """Generate executive report and strategic HR consulting recommendations via Gemini."""
+    empty = {"report": None, "recommendations": []}
     try:
         if settings.use_vertex:
             client = genai.Client(
@@ -478,7 +489,7 @@ async def generate_recommendations(result: RiskAssessmentResult, settings) -> li
             client = genai.Client(api_key=settings.gemini_api_key)
         else:
             logger.warning("No Gemini credentials configured — skipping recommendations")
-            return []
+            return empty
 
         assessment_dict = {
             "overall_score": result.overall_score,
@@ -513,10 +524,15 @@ async def generate_recommendations(result: RiskAssessmentResult, settings) -> li
         else:
             raise last_error  # type: ignore[misc]
 
-        recs = _parse_json_response(response.text)
+        parsed = _parse_json_response(response.text)
+        if not isinstance(parsed, dict):
+            logger.error("Gemini returned non-object for consultation")
+            return empty
+
+        report = parsed.get("report") or None
+        recs = parsed.get("recommendations", [])
         if not isinstance(recs, list):
-            logger.error("Gemini returned non-list for recommendations")
-            return []
+            recs = []
 
         valid_priorities = {"critical", "high", "medium", "low"}
         valid_dims = {"compliance", "incidents", "er_cases", "workforce", "legislative"}
@@ -535,11 +551,11 @@ async def generate_recommendations(result: RiskAssessmentResult, settings) -> li
                     "title": r["title"],
                     "guidance": r["guidance"],
                 })
-        return validated
+        return {"report": report, "recommendations": validated}
 
     except Exception:
-        logger.exception("Failed to generate Gemini recommendations — returning empty")
-        return []
+        logger.exception("Failed to generate Gemini consultation — returning empty")
+        return empty
 
 
 async def compute_risk_assessment(company_id: UUID) -> RiskAssessmentResult:

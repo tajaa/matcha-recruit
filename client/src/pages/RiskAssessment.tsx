@@ -122,7 +122,7 @@ export default function RiskAssessment() {
     setAnalyzing(true);
     try {
       const result = await riskAssessment.getRecommendations();
-      setData(prev => prev ? { ...prev, recommendations: result.recommendations } : result);
+      setData(prev => prev ? { ...prev, report: result.report, recommendations: result.recommendations } : result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Consultation analysis failed.');
     } finally {
@@ -253,6 +253,12 @@ export default function RiskAssessment() {
                 <div className="border border-white/10 p-8 text-center">
                   <div className="text-xs text-zinc-500 uppercase tracking-wider">No analysis yet</div>
                   <div className="text-[10px] text-zinc-600 mt-2 font-mono">Run a consultation to get AI-powered HR guidance based on your risk profile.</div>
+                </div>
+              )}
+
+              {!analyzing && data.report && (
+                <div className="bg-zinc-950 border border-white/10 p-6 mb-4">
+                  <div className="text-sm text-zinc-300 leading-relaxed whitespace-pre-line">{data.report}</div>
                 </div>
               )}
 

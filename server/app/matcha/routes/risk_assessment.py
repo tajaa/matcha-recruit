@@ -39,6 +39,7 @@ class RiskAssessmentResponse(BaseModel):
     overall_band: str
     dimensions: dict[str, DimensionResultResponse]
     computed_at: datetime
+    report: str | None = None
     recommendations: list[RecommendationResponse] | None = None
 
 
@@ -57,10 +58,13 @@ async def get_risk_assessment(
 
     result = await compute_risk_assessment(company_id)
 
+    report = None
     recommendations = None
     if include_recommendations and current_user.role == "admin":
         settings = get_settings()
-        recs = await generate_recommendations(result, settings)
+        consultation = await generate_recommendations(result, settings)
+        report = consultation.get("report")
+        recs = consultation.get("recommendations", [])
         if recs:
             recommendations = [RecommendationResponse(**r) for r in recs]
 
@@ -77,5 +81,6 @@ async def get_risk_assessment(
             for key, dim in result.dimensions.items()
         },
         computed_at=result.computed_at,
+        report=report,
         recommendations=recommendations,
     )
