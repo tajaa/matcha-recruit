@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink } from 'lucide-react';
+import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink, Sparkles } from 'lucide-react';
 import { getAccessToken } from '../api/client';
 import { OnboardingWizard } from '../components/OnboardingWizard';
 import { Collapsible } from '../components/Collapsible';
@@ -9,6 +9,7 @@ import { WidgetContainer } from '../components/WidgetContainer';
 import { complianceAPI, COMPLIANCE_CATEGORY_LABELS } from '../api/compliance';
 import type { ComplianceDashboard, ComplianceDashboardItem, ComplianceActionPlanUpdate, AssignableUser } from '../api/compliance';
 import { useAuth } from '../context/AuthContext';
+import type { ClientProfile } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -80,6 +81,89 @@ const TURNAROUND_OPTIONS = [
   { label: '1 week', days: 7 },
   { label: '2 weeks', days: 14 },
 ];
+
+const PROFILE_DISMISS_KEY = 'company_profile_banner_dismissed';
+
+/** Key fields that indicate the profile is "complete enough" for AI context. */
+const PROFILE_CHECK_FIELDS = ['headquarters_state', 'benefits_summary', 'default_employment_type'] as const;
+
+function CompanyProfileBanner() {
+  const navigate = useNavigate();
+  const { profile, user } = useAuth();
+  const clientProfile = profile as ClientProfile | null;
+  const companyId = clientProfile?.company_id;
+
+  const [visible, setVisible] = useState(false);
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    if (!companyId || user?.role === 'admin') {
+      setChecked(true);
+      return;
+    }
+
+    // Don't show if previously dismissed
+    const dismissed = localStorage.getItem(PROFILE_DISMISS_KEY);
+    if (dismissed === companyId) {
+      setChecked(true);
+      return;
+    }
+
+    // Fetch company and check for missing profile fields
+    const token = getAccessToken();
+    fetch(`${API_BASE}/companies/${companyId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        const missing = PROFILE_CHECK_FIELDS.filter((f) => !data[f]);
+        if (missing.length > 0) {
+          setVisible(true);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setChecked(true));
+  }, [companyId, user?.role]);
+
+  if (!checked || !visible) return null;
+
+  const dismiss = () => {
+    if (companyId) localStorage.setItem(PROFILE_DISMISS_KEY, companyId);
+    setVisible(false);
+  };
+
+  return (
+    <div className="relative border border-emerald-500/20 bg-emerald-950/10 p-5 mb-6 animate-in fade-in slide-in-from-top-2 duration-500">
+      <button
+        onClick={dismiss}
+        className="absolute top-3 right-3 text-zinc-500 hover:text-zinc-300 transition-colors"
+        aria-label="Dismiss"
+      >
+        <X className="w-4 h-4" />
+      </button>
+      <div className="flex items-start gap-4">
+        <div className="p-2 border border-emerald-500/20 bg-emerald-900/20 rounded shrink-0">
+          <Sparkles className="w-5 h-5 text-emerald-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-bold text-white mb-1">Complete your company profile</h3>
+          <p className="text-xs text-zinc-400 leading-relaxed mb-3">
+            Add your headquarters location, benefits, and employment defaults so the AI can pre-fill offer letters,
+            give jurisdiction-aware guidance, and generate better documents without extra questions.
+          </p>
+          <button
+            onClick={() => { dismiss(); navigate('/app/matcha/company'); }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider transition-colors"
+          >
+            Set Up Profile
+            <ChevronRight className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ComplianceDashboardWidget() {
   const navigate = useNavigate();
@@ -758,6 +842,7 @@ export function Dashboard() {
   return (
     <>
     <OnboardingWizard />
+    <CompanyProfileBanner />
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-white/10 pb-4">
