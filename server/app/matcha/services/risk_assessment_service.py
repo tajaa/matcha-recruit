@@ -391,6 +391,96 @@ async def compute_legislative_dimension(company_id: UUID, conn) -> DimensionResu
     )
 
 
+PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
+def generate_recommendations(result: RiskAssessmentResult) -> list[dict]:
+    """Derive actionable recommendations from computed risk scores. Pure function, no DB calls."""
+    recs: list[dict] = []
+
+    def add(dimension: str, priority: str, action: str):
+        recs.append({"dimension": dimension, "priority": priority, "action": action})
+
+    # --- Compliance ---
+    comp = result.dimensions.get("compliance")
+    if comp and comp.score > 0:
+        rd = comp.raw_data
+        if rd.get("critical_unread", 0) > 0:
+            add("compliance", "critical", f"Review and address {rd['critical_unread']} critical compliance alert{'s' if rd['critical_unread'] != 1 else ''}")
+        if rd.get("warning_unread", 0) > 0:
+            add("compliance", "high", f"Review {rd['warning_unread']} unread warning-level compliance alert{'s' if rd['warning_unread'] != 1 else ''}")
+        last_check = rd.get("last_check")
+        if last_check is None:
+            add("compliance", "medium", "No compliance check on record — run one now")
+        elif last_check:
+            lc = datetime.fromisoformat(last_check) if isinstance(last_check, str) else last_check
+            if lc.tzinfo is None:
+                lc = lc.replace(tzinfo=timezone.utc)
+            days = (datetime.now(timezone.utc) - lc).days
+            if days >= 30:
+                add("compliance", "medium", f"Run a compliance check — last check was {days} days ago")
+
+    # --- Incidents ---
+    inc = result.dimensions.get("incidents")
+    if inc and inc.score > 0:
+        rd = inc.raw_data
+        if rd.get("open_critical", 0) > 0:
+            add("incidents", "critical", f"Prioritize resolution of {rd['open_critical']} critical incident{'s' if rd['open_critical'] != 1 else ''}")
+        if rd.get("open_high", 0) > 0:
+            add("incidents", "high", f"Address {rd['open_high']} high-severity open incident{'s' if rd['open_high'] != 1 else ''}")
+        if rd.get("open_medium", 0) > 0:
+            add("incidents", "medium", f"Review {rd['open_medium']} medium-severity open incident{'s' if rd['open_medium'] != 1 else ''}")
+        if rd.get("open_low", 0) > 0:
+            add("incidents", "low", f"Close or resolve {rd['open_low']} low-severity open incident{'s' if rd['open_low'] != 1 else ''}")
+
+    # --- ER Cases ---
+    er = result.dimensions.get("er_cases")
+    if er and er.score > 0:
+        rd = er.raw_data
+        if rd.get("pending_determination", 0) > 0:
+            add("er_cases", "critical", f"Make determinations on {rd['pending_determination']} pending ER case{'s' if rd['pending_determination'] != 1 else ''}")
+        if rd.get("in_review", 0) > 0:
+            add("er_cases", "high", f"Complete review of {rd['in_review']} ER case{'s' if rd['in_review'] != 1 else ''} in review")
+        if rd.get("open", 0) > 0:
+            add("er_cases", "medium", f"Progress {rd['open']} open ER case{'s' if rd['open'] != 1 else ''} toward resolution")
+        if rd.get("major_policy_violation"):
+            add("er_cases", "critical", "Investigate major policy violation flagged in case analysis")
+        if rd.get("high_discrepancy"):
+            add("er_cases", "high", "Review high-severity discrepancy findings in ER analysis")
+
+    # --- Workforce ---
+    wf = result.dimensions.get("workforce")
+    if wf and wf.score > 0:
+        rd = wf.raw_data
+        states = rd.get("unique_states", 0)
+        if states > 3:
+            add("workforce", "medium", f"Review multi-state compliance posture — employees in {states} states")
+        total = rd.get("total_employees", 0)
+        contingent = rd.get("contractor_intern_count", 0)
+        if total > 0 and contingent / total > 0.20:
+            pct = int(contingent / total * 100)
+            add("workforce", "medium", f"Audit contractor/intern classification — {pct}% contingent workforce exceeds 20% threshold")
+        if total > 50:
+            add("workforce", "low", f"Ensure HR processes and policies scale with {total}-person headcount")
+
+    # --- Legislative ---
+    leg = result.dimensions.get("legislative")
+    if leg and leg.score > 0:
+        rd = leg.raw_data
+        w30 = rd.get("within_30_days", 0)
+        w90 = rd.get("within_90_days", 0)
+        w180 = rd.get("within_180_days", 0)
+        if w30 > 0:
+            add("legislative", "critical", f"Urgent: {w30} legislation change{'s' if w30 != 1 else ''} effective within 30 days — prepare compliance updates")
+        if w90 > 0:
+            add("legislative", "high", f"Plan for {w90} legislation change{'s' if w90 != 1 else ''} effective within 31–90 days")
+        if w180 > 0:
+            add("legislative", "low", f"Monitor {w180} upcoming legislation change{'s' if w180 != 1 else ''} (91–180 days out)")
+
+    recs.sort(key=lambda r: PRIORITY_ORDER.get(r["priority"], 99))
+    return recs
+
+
 async def compute_risk_assessment(company_id: UUID) -> RiskAssessmentResult:
     """Compute full risk assessment for a company across all 5 dimensions."""
     async with get_connection() as conn:

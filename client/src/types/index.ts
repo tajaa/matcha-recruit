@@ -2629,6 +2629,12 @@ export interface DimensionResult {
   raw_data: Record<string, unknown>;
 }
 
+export interface RiskRecommendation {
+  dimension: string;
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  action: string;
+}
+
 export interface RiskAssessmentResult {
   overall_score: number;
   overall_band: 'low' | 'moderate' | 'high' | 'critical';
@@ -2640,4 +2646,5 @@ export interface RiskAssessmentResult {
     legislative: DimensionResult;
   };
   computed_at: string;
+  recommendations?: RiskRecommendation[] | null;
 }
