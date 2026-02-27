@@ -312,3 +312,11 @@ class SendHandbookSignaturesResponse(BaseModel):
     assigned_count: int
     skipped_existing_count: int
     distributed_at: datetime
+
+
+class GeneratePresentationResponse(BaseModel):
+    thread_id: UUID
+    version: int
+    current_state: dict
+    slide_count: int
+    generated_at: datetime

@@ -9,6 +9,7 @@ import type {
   MWTokenUsage,
   MWUsageSummaryResponse,
   MWReviewRequestStatus,
+  MWPresentation,
 } from '../types/matcha-work';
 import type { HandbookListItem } from '../types';
 import { ApiRequestError, handbooks, matchaWork, adminPlatformSettings } from '../api/client';
@@ -34,11 +35,78 @@ function toItemList(value: unknown): string[] {
 }
 
 function WorkbookPreview({ state }: { state: MWDocumentState }) {
+  const [activeView, setActiveView] = useState<'workbook' | 'presentation'>('workbook');
   const sections = state.sections || [];
+  const presentation = state.presentation;
+
+  const presentationMarkdown = useCallback((deck: MWPresentation): string => {
+    const lines: string[] = [];
+    lines.push(`# ${deck.title}`);
+    if (deck.subtitle) lines.push('', `_${deck.subtitle}_`);
+    lines.push('', `Generated: ${new Date(deck.generated_at).toLocaleString()}`);
+    deck.slides.forEach((slide, idx) => {
+      lines.push('', `## Slide ${idx + 1}: ${slide.title}`);
+      (slide.bullets || []).forEach((bullet) => lines.push(`- ${bullet}`));
+      if (slide.speaker_notes) {
+        lines.push('', `Notes: ${slide.speaker_notes}`);
+      }
+    });
+    return lines.join('\n');
+  }, []);
+
+  const handleDownloadPresentation = useCallback(() => {
+    if (!presentation) return;
+    const markdown = presentationMarkdown(presentation);
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const safeTitle = (presentation.title || 'presentation').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    anchor.href = url;
+    anchor.download = `${safeTitle || 'presentation'}.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  }, [presentation, presentationMarkdown]);
 
   return (
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-6">
+        <div className="flex items-center justify-between gap-2">
+          <div className="inline-flex items-center rounded-lg bg-zinc-800 p-0.5">
+            <button
+              onClick={() => setActiveView('workbook')}
+              className={`px-2.5 py-1 text-[11px] rounded transition-colors ${
+                activeView === 'workbook'
+                  ? 'bg-zinc-700 text-zinc-100'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Workbook
+            </button>
+            <button
+              onClick={() => setActiveView('presentation')}
+              className={`px-2.5 py-1 text-[11px] rounded transition-colors ${
+                activeView === 'presentation'
+                  ? 'bg-zinc-700 text-zinc-100'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Presentation
+            </button>
+          </div>
+          {activeView === 'presentation' && presentation && (
+            <button
+              onClick={handleDownloadPresentation}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:border-zinc-500 transition-colors"
+            >
+              Download Slides
+            </button>
+          )}
+        </div>
+
+        {activeView === 'workbook' ? (
+          <>
         <div className="bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-6">
           <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-1">HR Workbook</p>
           <h2 className="text-2xl font-bold text-white tracking-tight">
@@ -90,6 +158,59 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
             ))
           )}
         </div>
+          </>
+        ) : (
+          <div className="space-y-4">
+            {!presentation || !Array.isArray(presentation.slides) || presentation.slides.length === 0 ? (
+              <div className="bg-zinc-900/40 border border-zinc-800 border-dashed rounded-xl p-12 text-center">
+                <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center mx-auto mb-4 text-zinc-600">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h8M8 14h5m7 7H4a1 1 0 01-1-1V4a1 1 0 011-1h10.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V20a1 1 0 01-1 1z" />
+                  </svg>
+                </div>
+                <p className="text-zinc-500 text-sm italic font-mono">
+                  No presentation generated yet. Use Generate Presentation.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-5">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-1">Presentation Deck</p>
+                  <h2 className="text-xl font-bold text-white tracking-tight">{presentation.title}</h2>
+                  {presentation.subtitle && (
+                    <p className="text-sm text-zinc-400 mt-1">{presentation.subtitle}</p>
+                  )}
+                  <p className="text-xs text-zinc-500 mt-3">
+                    {presentation.slide_count} slide{presentation.slide_count === 1 ? '' : 's'} · Generated {new Date(presentation.generated_at).toLocaleString()}
+                  </p>
+                </div>
+                {presentation.slides.map((slide, idx) => (
+                  <div key={`${slide.title}-${idx}`} className="bg-zinc-900/60 border border-zinc-800 rounded-xl overflow-hidden">
+                    <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-800/30 flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-zinc-200 tracking-wide uppercase">{slide.title}</h3>
+                      <span className="text-[10px] text-zinc-500">Slide {idx + 1}</span>
+                    </div>
+                    <div className="px-5 py-4">
+                      <ul className="space-y-1.5">
+                        {(slide.bullets || []).map((bullet, bulletIdx) => (
+                          <li key={`${bullet}-${bulletIdx}`} className="text-sm text-zinc-300 leading-relaxed">
+                            • {bullet}
+                          </li>
+                        ))}
+                      </ul>
+                      {slide.speaker_notes && (
+                        <div className="mt-4 p-3 rounded bg-zinc-800/60 border border-zinc-700/50">
+                          <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Speaker Notes</p>
+                          <p className="text-xs text-zinc-400 whitespace-pre-wrap">{slide.speaker_notes}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -176,6 +297,7 @@ export default function MatchaWorkThread() {
   const [usageSummary, setUsageSummary] = useState<MWUsageSummaryResponse | null>(null);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [showReviewRequestsModal, setShowReviewRequestsModal] = useState(false);
+  const [generatingPresentation, setGeneratingPresentation] = useState(false);
   const [sendingReviewRequests, setSendingReviewRequests] = useState(false);
   const [reviewRecipientInput, setReviewRecipientInput] = useState('');
   const [reviewEmailMessage, setReviewEmailMessage] = useState('');
@@ -562,6 +684,21 @@ export default function MatchaWorkThread() {
     }
   };
 
+  const handleGeneratePresentation = async () => {
+    if (!threadId || generatingPresentation || isArchived || !isWorkbook || isFinalized) return;
+    try {
+      setGeneratingPresentation(true);
+      setError(null);
+      await matchaWork.generatePresentation(threadId);
+      await loadThread();
+      setActiveTab('preview');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate presentation');
+    } finally {
+      setGeneratingPresentation(false);
+    }
+  };
+
   const handleSelectHandbookForSignatures = (handbook: HandbookListItem) => {
     setSelectedHandbook({ id: handbook.id, title: handbook.title });
     setShowHandbookSelectorModal(false);
@@ -613,7 +750,8 @@ export default function MatchaWorkThread() {
     thread?.current_state.company_name ||
     thread?.current_state.objective ||
     thread?.current_state.industry ||
-    (thread?.current_state.sections && thread.current_state.sections.length > 0)
+    (thread?.current_state.sections && thread.current_state.sections.length > 0) ||
+    (thread?.current_state.presentation && thread.current_state.presentation.slides?.length > 0)
   );
   const hasReviewPreviewContent = Boolean(
     thread?.current_state.review_title ||
@@ -854,6 +992,16 @@ export default function MatchaWorkThread() {
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded-lg transition-colors"
             >
               {loadingActiveHandbooks ? 'Loading...' : sendingHandbookSignatures ? 'Sending...' : 'Send Signatures'}
+            </button>
+          )}
+
+          {isWorkbook && !isArchived && !isFinalized && (
+            <button
+              onClick={handleGeneratePresentation}
+              disabled={generatingPresentation}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600/80 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+            >
+              {generatingPresentation ? 'Generating...' : 'Generate Presentation'}
             </button>
           )}
 

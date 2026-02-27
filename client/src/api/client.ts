@@ -3067,6 +3067,7 @@ import type {
   MWReviewRequestStatus,
   MWSendReviewRequestsResponse,
   MWSendHandbookSignaturesResponse,
+  MWGeneratePresentationResponse,
   MWPublicReviewRequest,
   MWPublicReviewSubmitResponse,
 } from '../types/matcha-work';
@@ -3257,6 +3258,11 @@ export const matchaWork = {
     request<MWSendHandbookSignaturesResponse>(`/matcha-work/threads/${threadId}/handbook/send-signatures`, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  generatePresentation: (threadId: string): Promise<MWGeneratePresentationResponse> =>
+    request<MWGeneratePresentationResponse>(`/matcha-work/threads/${threadId}/presentation/generate`, {
+      method: 'POST',
     }),
 
   archiveThread: (threadId: string): Promise<void> =>

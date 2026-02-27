@@ -2,6 +2,20 @@ export type MWThreadStatus = 'active' | 'finalized' | 'archived';
 export type MWMessageRole = 'user' | 'assistant' | 'system';
 export type MWTaskType = 'offer_letter' | 'review' | 'workbook' | 'onboarding';
 
+export interface MWPresentationSlide {
+  title: string;
+  bullets: string[];
+  speaker_notes?: string | null;
+}
+
+export interface MWPresentation {
+  title: string;
+  subtitle?: string | null;
+  generated_at: string;
+  slides: MWPresentationSlide[];
+  slide_count: number;
+}
+
 export interface MWThread {
   id: string;
   title: string;
@@ -87,6 +101,7 @@ export interface MWDocumentState {
   industry?: string | null;
   objective?: string | null;
   sections?: { title: string; content: string }[] | null;
+  presentation?: MWPresentation | null;
 }
 
 export interface MWThreadDetail {
@@ -222,6 +237,14 @@ export interface MWSendHandbookSignaturesResponse {
   assigned_count: number;
   skipped_existing_count: number;
   distributed_at: string;
+}
+
+export interface MWGeneratePresentationResponse {
+  thread_id: string;
+  version: number;
+  current_state: MWDocumentState;
+  slide_count: number;
+  generated_at: string;
 }
 
 export type MWCreditTransactionType =

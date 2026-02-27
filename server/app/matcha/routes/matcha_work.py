@@ -41,6 +41,7 @@ from ..models.matcha_work import (
     PublicReviewSubmitResponse,
     SendHandbookSignaturesRequest,
     SendHandbookSignaturesResponse,
+    GeneratePresentationResponse,
     WorkbookDocument,
 )
 from ..services import matcha_work_document as doc_svc
@@ -687,6 +688,21 @@ async def _apply_ai_updates_and_operations(
                             ]
                             action_note += f", {errors} failed: " + "; ".join(error_names[:5])
                         action_note += "."
+            elif operation == "generate_presentation":
+                if normalized_task_type != "workbook":
+                    action_note = "Presentation generation is only available in workbook threads."
+                else:
+                    generated = await doc_svc.generate_workbook_presentation(
+                        thread_id=thread_id,
+                        company_id=company_id,
+                    )
+                    current_state = generated["current_state"]
+                    current_version = generated["version"]
+                    changed = True
+                    action_note = (
+                        f"Generated a presentation with {generated['slide_count']} slides. "
+                        "Open Preview to review and download."
+                    )
             else:
                 action_note = f"The action '{operation}' is not supported yet."
         except ValueError as e:
@@ -1539,6 +1555,33 @@ async def send_handbook_signatures(
 
     payload = distributed.model_dump() if hasattr(distributed, "model_dump") else dict(distributed)
     return SendHandbookSignaturesResponse(**payload)
+
+
+@router.post(
+    "/threads/{thread_id}/presentation/generate",
+    response_model=GeneratePresentationResponse,
+)
+async def generate_workbook_presentation(
+    thread_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Generate slide-ready presentation content from workbook sections."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    try:
+        result = await doc_svc.generate_workbook_presentation(
+            thread_id=thread_id,
+            company_id=company_id,
+        )
+    except ValueError as e:
+        detail = str(e)
+        if detail == "Thread not found":
+            raise HTTPException(status_code=404, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+    return GeneratePresentationResponse(**result)
 
 
 @router.patch("/threads/{thread_id}", response_model=ThreadListItem)

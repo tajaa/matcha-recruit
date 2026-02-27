@@ -33,6 +33,7 @@ SUPPORTED_AI_OPERATIONS = {
     "send_requests",
     "track",
     "create_employees",
+    "generate_presentation",
     "none",
 }
 
@@ -52,7 +53,7 @@ Current thread context:
 Supported skills:
 - offer_letter: create/update offer letter content, save_draft, send_draft, finalize
 - review: create/update anonymized review content, collect recipient_emails, send review requests, track responses
-- workbook: create/update HR workbook documents and section content
+- workbook: create/update HR workbook documents and section content, generate_presentation
 - onboarding: collect employee details and create employee records with automatic provisioning.
   Required per employee: first_name, last_name, work_email.
   Optional per employee: personal_email, work_state, employment_type, start_date, address.
@@ -82,7 +83,7 @@ Output constraints:
 {{
   "mode": "skill|general|clarify|refuse",
   "skill": "offer_letter|review|workbook|onboarding|none",
-  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|none",
+  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|none",
   "confidence": 0.0,
   "updates": {{}},
   "missing_fields": [],
