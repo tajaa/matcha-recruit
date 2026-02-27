@@ -636,6 +636,10 @@ export const onboarding = {
       body: JSON.stringify(data),
     }),
 
+  // All templates (for "add from template" picker)
+  getTemplates: () =>
+    request<OnboardingTemplate[]>('/onboarding/templates'),
+
   // Priority templates (category='priority')
   getPriorityTemplates: () =>
     request<OnboardingTemplate[]>('/onboarding/templates?category=priority'),

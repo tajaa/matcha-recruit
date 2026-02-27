@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, CheckSquare, X, AlertTriangle, Star, Link, FileText, BookOpen, Globe } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, Edit2, CheckSquare, X, AlertTriangle, Star, Link, FileText, BookOpen, Globe, ChevronDown, Layers } from 'lucide-react';
 import { onboarding, policies, handbooks, type OnboardingTemplate } from '../api/client';
 import type { Policy, HandbookListItem } from '../types';
 
@@ -42,6 +42,12 @@ export default function OnboardingPriorities() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // "From template" dropdown
+  const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
+  const [allTemplates, setAllTemplates] = useState<OnboardingTemplate[]>([]);
+  const [loadingAllTemplates, setLoadingAllTemplates] = useState(false);
+  const templateDropdownRef = useRef<HTMLDivElement>(null);
+
   // Resource lists for pickers
   const [policyList, setPolicyList] = useState<Policy[]>([]);
   const [handbookList, setHandbookList] = useState<HandbookListItem[]>([]);
@@ -61,6 +67,51 @@ export default function OnboardingPriorities() {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (templateDropdownRef.current && !templateDropdownRef.current.contains(e.target as Node)) {
+        setShowTemplateDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const loadAllTemplates = async () => {
+    if (allTemplates.length > 0) return;
+    setLoadingAllTemplates(true);
+    try {
+      const data = await onboarding.getTemplates();
+      // Exclude priority category (those are already managed here)
+      setAllTemplates(data.filter(t => t.category !== 'priority' && t.is_active));
+    } catch { /* ignore */ } finally {
+      setLoadingAllTemplates(false);
+    }
+  };
+
+  const openTemplateDropdown = () => {
+    setShowTemplateDropdown(v => !v);
+    loadAllTemplates();
+  };
+
+  const openCreateFromTemplate = (tmpl: OnboardingTemplate) => {
+    setShowTemplateDropdown(false);
+    setEditing(null);
+    setForm({
+      title: tmpl.title,
+      description: tmpl.description || '',
+      due_days: tmpl.due_days,
+      link_type: (tmpl.link_type as LinkType) || null,
+      link_id: tmpl.link_id || '',
+      link_label: tmpl.link_label || '',
+      link_url: tmpl.link_url || '',
+    });
+    setSaveError(null);
+    setShowModal(true);
+    loadResources();
+  };
 
   const loadResources = async () => {
     if (policyList.length > 0 || handbookList.length > 0) return; // already loaded
@@ -199,13 +250,54 @@ export default function OnboardingPriorities() {
             {active.length} active · {inactive.length} inactive
           </p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 border border-white/20 bg-white/5 hover:bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white transition-colors"
-        >
-          <Plus className="w-3 h-3" />
-          Add Priority
-        </button>
+        <div className="flex items-center gap-2">
+          {/* From Template dropdown */}
+          <div className="relative" ref={templateDropdownRef}>
+            <button
+              onClick={openTemplateDropdown}
+              className="flex items-center gap-2 border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+            >
+              <Layers className="w-3 h-3" />
+              From Template
+              <ChevronDown className={`w-3 h-3 transition-transform ${showTemplateDropdown ? 'rotate-180' : ''}`} />
+            </button>
+            {showTemplateDropdown && (
+              <div className="absolute right-0 top-full mt-1 w-72 bg-zinc-950 border border-white/15 shadow-2xl z-20 max-h-72 overflow-y-auto">
+                {loadingAllTemplates ? (
+                  <div className="px-4 py-3 text-xs text-zinc-500 font-mono">Loading templates...</div>
+                ) : allTemplates.length === 0 ? (
+                  <div className="px-4 py-3 text-xs text-zinc-500">No active templates found</div>
+                ) : (
+                  <>
+                    <div className="px-3 py-2 border-b border-white/10">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Pick a template to copy</p>
+                    </div>
+                    {allTemplates.map(tmpl => (
+                      <button
+                        key={tmpl.id}
+                        onClick={() => openCreateFromTemplate(tmpl)}
+                        className="w-full text-left px-4 py-3 hover:bg-white/5 transition-colors border-b border-white/5 last:border-0"
+                      >
+                        <p className="text-sm text-white truncate">{tmpl.title}</p>
+                        <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider mt-0.5">
+                          {tmpl.category} · due {tmpl.due_days}d
+                        </p>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 border border-white/20 bg-white/5 hover:bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white transition-colors"
+          >
+            <Plus className="w-3 h-3" />
+            Add Priority
+          </button>
+        </div>
       </div>
 
       {loading && (
