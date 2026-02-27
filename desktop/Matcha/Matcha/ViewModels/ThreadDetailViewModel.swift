@@ -14,6 +14,22 @@ class ThreadDetailViewModel {
     var tokenUsage: MWTokenUsage?
     var errorMessage: String?
 
+    var hasPreviewContent: Bool {
+        guard let thread = thread else { return false }
+        switch thread.taskType {
+        case "offer_letter": return pdfData != nil
+        case "workbook":
+            return currentState["workbook_title"] != nil ||
+                   currentState["title"] != nil ||
+                   (currentState["sections"]?.value as? [AnyCodable])?.isEmpty == false
+        case "review":
+            return currentState["review_title"] != nil ||
+                   currentState["summary"] != nil ||
+                   currentState["strengths"] != nil
+        default: return false
+        }
+    }
+
     private let service = MatchaWorkService.shared
     private let basePath = "http://127.0.0.1:8001/api/matcha-work"
 

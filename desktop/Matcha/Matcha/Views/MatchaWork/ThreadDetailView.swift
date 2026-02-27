@@ -11,13 +11,15 @@ struct ThreadDetailView: View {
             ChatPanelView(viewModel: viewModel)
                 .frame(minWidth: 320)
 
-            PreviewPanelView(
-                taskType: viewModel.thread?.taskType ?? "",
-                currentState: viewModel.currentState,
-                pdfData: viewModel.pdfData,
-                isLoading: viewModel.isLoadingPDF
-            )
-            .frame(minWidth: 300)
+            if viewModel.hasPreviewContent || viewModel.isLoadingPDF {
+                PreviewPanelView(
+                    taskType: viewModel.thread?.taskType ?? "",
+                    currentState: viewModel.currentState,
+                    pdfData: viewModel.pdfData,
+                    isLoading: viewModel.isLoadingPDF
+                )
+                .frame(minWidth: 300)
+            }
         }
         .background(Color.appBackground)
         .toolbar {

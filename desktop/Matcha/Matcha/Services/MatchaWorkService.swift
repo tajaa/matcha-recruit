@@ -47,6 +47,16 @@ class MatchaWorkService {
     func getPDFData(threadId: String, version: Int? = nil) async throws -> Data {
         var path = "\(basePath)/threads/\(threadId)/pdf"
         if let v = version { path += "?version=\(v)" }
-        return try await client.requestData(method: "GET", path: path)
+        // Step 1: get the signed URL from the backend
+        let response: PDFResponse = try await client.request(method: "GET", path: path)
+        // Step 2: download the actual PDF bytes from the CDN URL
+        guard let url = URL(string: response.pdfUrl) else { throw APIError.invalidURL }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return data
+    }
+
+    private struct PDFResponse: Decodable {
+        let pdfUrl: String
+        enum CodingKeys: String, CodingKey { case pdfUrl = "pdf_url" }
     }
 }
