@@ -236,6 +236,7 @@ Generate practical, concrete recommendations for an investigator. Recommendation
 Return ONLY a JSON object with this structure:
 {{
   "summary": "2-3 sentence executive guidance summary",
+  "determination_suggested": false,
   "cards": [
     {{
       "id": "timeline-gap-1",
@@ -264,6 +265,9 @@ Constraints:
 6. Keep recommendation and rationale concise (1-2 sentences each).
 7. Keep tone neutral and investigation-focused.
 8. Never include legal conclusions; focus on next investigative steps.
+9. Set "determination_suggested" to true ONLY when the investigation appears substantially complete:
+   at least one evidence document, at least two of three analyses (timeline, discrepancies, policy)
+   completed, and no high-priority blockers remain. Never suggest determination prematurely.
 """
 
 

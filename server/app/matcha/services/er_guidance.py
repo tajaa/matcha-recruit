@@ -280,6 +280,21 @@ def _build_fallback_guidance_payload(
             }
         )
 
+    # Determination readiness heuristic
+    has_evidence = doc_count >= 1
+    analyses_completed = 0
+    timeline_events = timeline_data.get("events") or []
+    if timeline_events or timeline_data.get("generated_at"):
+        analyses_completed += 1
+    disc_items = discrepancies_data.get("discrepancies") or []
+    if disc_items or discrepancies_data.get("generated_at"):
+        analyses_completed += 1
+    policy_viols = policy_data.get("violations") or []
+    if policy_viols or policy_data.get("generated_at"):
+        analyses_completed += 1
+    has_high_priority_cards = any(c.get("priority") == "high" for c in cards)
+    determination_suggested = has_evidence and analyses_completed >= 2 and not has_high_priority_cards
+
     objective_fragment = f" Objective focus: {objective}." if objective and objective != "general" else ""
     immediate_risk_fragment = (
         " Immediate risk was flagged at intake; prioritize retaliation/safety follow-up."
@@ -297,6 +312,7 @@ def _build_fallback_guidance_payload(
         "generated_at": datetime.now(timezone.utc),
         "model": "deterministic-fallback",
         "fallback_used": True,
+        "determination_suggested": determination_suggested,
     }
 
 
@@ -328,10 +344,13 @@ def _normalize_suggested_guidance_payload(
     elif not isinstance(generated_at, datetime):
         generated_at = datetime.now(timezone.utc)
 
+    determination_suggested = bool(raw_payload.get("determination_suggested", False))
+
     return {
         "summary": summary,
         "cards": cards,
         "generated_at": generated_at,
         "model": model_name,
         "fallback_used": False,
+        "determination_suggested": determination_suggested,
     }

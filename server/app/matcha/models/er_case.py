@@ -228,6 +228,7 @@ class SuggestedGuidanceResponse(BaseModel):
     generated_at: datetime
     model: str
     fallback_used: bool = False
+    determination_suggested: bool = False
 
 
 # ===========================================

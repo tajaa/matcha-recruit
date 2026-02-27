@@ -263,6 +263,7 @@ function getSuggestedGuidancePayload(note: ERCaseNote | null): ERSuggestedGuidan
         ? raw.model
         : 'unknown',
     fallback_used: raw.fallback_used === true,
+    determination_suggested: raw.determination_suggested === true,
   };
 }
 
@@ -379,6 +380,8 @@ export function ERCaseDetail() {
   const [searchResults, setSearchResults] = useState<EvidenceSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [guidanceActionBusyId, setGuidanceActionBusyId] = useState<string | null>(null);
+  const [determinationDismissed, setDeterminationDismissed] = useState(false);
+  const [determinationAccepting, setDeterminationAccepting] = useState(false);
 
   const fetchCase = useCallback(async () => {
     if (!id) return;
@@ -915,6 +918,7 @@ export function ERCaseDetail() {
           generated_at: new Date().toISOString(),
           model: 'client-fallback',
           fallback_used: true,
+          determination_suggested: false,
         };
       }
       const guidanceNoteContent = buildSuggestedGuidanceNoteContent(suggestedGuidancePayload);
@@ -971,8 +975,10 @@ export function ERCaseDetail() {
           last_reviewed_at: new Date().toISOString(),
           last_run_status: reviewSucceeded ? 'completed' : 'partial',
           guidance_state: nextGuidanceState,
+          determination_dismissed: false,
         },
       };
+      setDeterminationDismissed(false);
 
       const updatedCase = await erCopilot.updateCase(id, { intake_context: nextIntakeContext });
       setCase(updatedCase);
@@ -992,6 +998,15 @@ export function ERCaseDetail() {
       setAutoReviewRunning(false);
     }
   }, [id, handleGenerateTimeline, handleGenerateDiscrepancies, handleRunPolicyCheck, fetchNotes]);
+
+  // Sync determination dismissed state from persisted intake context
+  useEffect(() => {
+    if (!erCase) return;
+    const ctx = normalizeIntakeContext(erCase.intake_context);
+    if (ctx?.assistance?.determination_dismissed) {
+      setDeterminationDismissed(true);
+    }
+  }, [erCase?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!id || loading || !erCase) return;
@@ -1069,6 +1084,11 @@ export function ERCaseDetail() {
     (note) => note.note_type === 'guidance' && getCaseNotePurpose(note) === 'next_steps'
   ) || null;
   const latestGuidancePayload = getSuggestedGuidancePayload(latestGuidanceNote);
+  const showDeterminationBanner =
+    latestGuidancePayload?.determination_suggested === true
+    && erCase.status !== 'pending_determination'
+    && erCase.status !== 'closed'
+    && !determinationDismissed;
   const guidanceState = intakeContext?.assistance?.guidance_state || {};
   const getCardState = (cardId: string): GuidanceCardState => {
     const status = guidanceState[cardId]?.status;
@@ -1240,6 +1260,61 @@ export function ERCaseDetail() {
           {showAssistancePanel && (
             <div className="pt-4 border-t border-zinc-200">
               <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Suggested Guidance</h3>
+
+              {showDeterminationBanner && (
+                <div className="border border-amber-200 bg-amber-50 p-3 rounded-sm mb-3 space-y-2">
+                  <p className="text-xs font-medium text-amber-900">Ready for a determination?</p>
+                  <p className="text-xs text-amber-800 leading-relaxed">
+                    We've collected substantial evidence and analysis for this case. Would you like to focus on a conclusion?
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={async () => {
+                        if (!id) return;
+                        setDeterminationAccepting(true);
+                        try {
+                          const updated = await erCopilot.updateCase(id, { status: 'pending_determination' });
+                          setCase(updated);
+                          await erCopilot.generateSummary(id);
+                          await fetchNotes();
+                        } catch (err) {
+                          console.error('Failed to transition to pending determination:', err);
+                        } finally {
+                          setDeterminationAccepting(false);
+                        }
+                      }}
+                      disabled={determinationAccepting}
+                      className="text-xs font-medium text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1 rounded-sm disabled:opacity-50"
+                    >
+                      {determinationAccepting ? 'Working...' : "Yes, let's wrap up"}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setDeterminationDismissed(true);
+                        if (!id) return;
+                        try {
+                          const ctx = normalizeIntakeContext(erCase.intake_context);
+                          await erCopilot.updateCase(id, {
+                            intake_context: {
+                              ...(ctx || {}),
+                              assistance: {
+                                ...(ctx?.assistance || {}),
+                                determination_dismissed: true,
+                              },
+                            },
+                          });
+                        } catch (err) {
+                          console.error('Failed to persist determination dismissal:', err);
+                        }
+                      }}
+                      className="text-xs text-amber-700 hover:text-amber-900"
+                    >
+                      Continue investigating
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {latestGuidanceNote ? (
                 <div className="space-y-2">
                   <div className="border border-emerald-200 bg-emerald-50 p-2.5 rounded-sm">
