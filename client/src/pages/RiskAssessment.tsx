@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Sparkles } from 'lucide-react';
 import type { RiskAssessmentResult, DimensionResult, RiskRecommendation } from '../types';
 import { riskAssessment } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -102,6 +102,7 @@ export default function RiskAssessment() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
 
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -114,6 +115,18 @@ export default function RiskAssessment() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  }, []);
+
+  const runConsultation = useCallback(async () => {
+    setAnalyzing(true);
+    try {
+      const result = await riskAssessment.getRecommendations();
+      setData(prev => prev ? { ...prev, recommendations: result.recommendations } : result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Consultation analysis failed.');
+    } finally {
+      setAnalyzing(false);
     }
   }, []);
 
@@ -213,26 +226,54 @@ export default function RiskAssessment() {
             </div>
           </div>
 
-          {/* Admin recommendations */}
-          {data.recommendations && data.recommendations.length > 0 && (
+          {/* Admin consultation */}
+          {user?.role === 'admin' && (
             <div>
-              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Recommendations</div>
-              <div className="border border-white/10 divide-y divide-white/10">
-                {data.recommendations.map((rec, i) => (
-                  <div key={i} className="bg-zinc-950 px-6 py-4 flex items-start gap-4">
-                    <span className={`shrink-0 inline-flex items-center px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${PRIORITY_COLOR[rec.priority]?.badge ?? ''}`}>
-                      {rec.priority}
-                    </span>
-                    <div className="flex flex-col gap-1 min-w-0">
-                      <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-bold">
-                        {DIMENSION_META[rec.dimension]?.label ?? rec.dimension}
-                      </span>
-                      <span className="text-sm text-zinc-200 font-medium">{rec.title}</span>
-                      <span className="text-xs text-zinc-400 mt-1">{rec.guidance}</span>
-                    </div>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Consultation Analysis</div>
+                {!data.recommendations && (
+                  <button
+                    onClick={runConsultation}
+                    disabled={analyzing}
+                    className="flex items-center gap-2 px-4 py-2 text-xs text-zinc-300 hover:text-white uppercase tracking-wider transition-colors border border-white/20 hover:border-white/40 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Sparkles size={12} className={analyzing ? 'animate-pulse' : ''} />
+                    {analyzing ? 'Analyzing…' : 'Run Consultation'}
+                  </button>
+                )}
               </div>
+
+              {analyzing && (
+                <div className="border border-white/10 p-8 text-center">
+                  <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Generating HR consulting recommendations…</div>
+                </div>
+              )}
+
+              {!analyzing && !data.recommendations && (
+                <div className="border border-white/10 p-8 text-center">
+                  <div className="text-xs text-zinc-500 uppercase tracking-wider">No analysis yet</div>
+                  <div className="text-[10px] text-zinc-600 mt-2 font-mono">Run a consultation to get AI-powered HR guidance based on your risk profile.</div>
+                </div>
+              )}
+
+              {!analyzing && data.recommendations && data.recommendations.length > 0 && (
+                <div className="border border-white/10 divide-y divide-white/10">
+                  {data.recommendations.map((rec, i) => (
+                    <div key={i} className="bg-zinc-950 px-6 py-4 flex items-start gap-4">
+                      <span className={`shrink-0 inline-flex items-center px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${PRIORITY_COLOR[rec.priority]?.badge ?? ''}`}>
+                        {rec.priority}
+                      </span>
+                      <div className="flex flex-col gap-1 min-w-0">
+                        <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-bold">
+                          {DIMENSION_META[rec.dimension]?.label ?? rec.dimension}
+                        </span>
+                        <span className="text-sm text-zinc-200 font-medium">{rec.title}</span>
+                        <span className="text-xs text-zinc-400 mt-1">{rec.guidance}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

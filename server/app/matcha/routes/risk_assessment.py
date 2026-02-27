@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from ...config import get_settings
@@ -45,6 +45,7 @@ class RiskAssessmentResponse(BaseModel):
 @router.get("", response_model=RiskAssessmentResponse)
 async def get_risk_assessment(
     current_user=Depends(require_admin_or_client),
+    include_recommendations: bool = Query(False),
 ):
     """Return live-computed risk assessment for the company."""
     company_id = await get_client_company_id(current_user)
@@ -57,7 +58,7 @@ async def get_risk_assessment(
     result = await compute_risk_assessment(company_id)
 
     recommendations = None
-    if current_user.role == "admin":
+    if include_recommendations and current_user.role == "admin":
         settings = get_settings()
         recs = await generate_recommendations(result, settings)
         if recs:

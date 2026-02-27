@@ -3422,6 +3422,8 @@ export const matchaWorkPublic = {
 export const riskAssessment = {
   get: (): Promise<RiskAssessmentResult> =>
     request('/risk-assessment'),
+  getRecommendations: (): Promise<RiskAssessmentResult> =>
+    request('/risk-assessment?include_recommendations=true'),
 };
 
 // Combined API object for convenient imports
