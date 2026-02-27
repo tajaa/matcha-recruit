@@ -88,8 +88,6 @@ function ComplianceDashboardWidget() {
   const [data, setData] = useState<ComplianceDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [savingAlertId, setSavingAlertId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
 
   // Modal state
   const [selectedItem, setSelectedItem] = useState<ComplianceDashboardItem | null>(null);
@@ -242,20 +240,6 @@ function ComplianceDashboardWidget() {
     };
   };
 
-  const updateActionPlan = async (item: ComplianceDashboardItem, payload: ComplianceActionPlanUpdate) => {
-    if (!item.alert_id) return;
-    try {
-      setActionError(null);
-      setSavingAlertId(item.alert_id);
-      await complianceAPI.updateAlertActionPlan(item.alert_id, payload);
-      loadDashboard(horizon);
-    } catch {
-      setActionError('Could not update action plan');
-    } finally {
-      setSavingAlertId(null);
-    }
-  };
-
   const criticalCount = data?.coming_up.filter(i => i.severity === 'critical').length ?? 0;
   const warningCount = data?.coming_up.filter(i => i.severity === 'warning').length ?? 0;
 
@@ -312,11 +296,7 @@ function ComplianceDashboardWidget() {
 
       {/* Coming up list */}
       <div className="divide-y divide-white/5">
-        {actionError && (
-          <div className="p-2 border-b border-red-500/20 bg-red-500/10">
-            <p className="text-[8px] text-red-300 uppercase tracking-wider">{actionError}</p>
-          </div>
-        )}
+
 
         {loading && (
           <div className="p-6 text-center">
