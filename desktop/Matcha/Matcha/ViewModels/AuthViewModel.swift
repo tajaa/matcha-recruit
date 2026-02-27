@@ -2,8 +2,13 @@ import Foundation
 
 @Observable
 class AuthViewModel {
+    #if DEBUG
+    var email = "ashVidales+tessu@gmail.com"
+    var password = ""
+    #else
     var email = ""
     var password = ""
+    #endif
     var errorMessage: String?
     var isLoading = false
 

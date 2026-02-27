@@ -9,11 +9,16 @@ enum KeychainHelper {
 
     static func save(key: String, value: String) {
         let data = value.data(using: .utf8)!
-        let query: [String: Any] = [
+        // nil trustedList = any application can access without prompting
+        var access: SecAccess?
+        SecAccessCreate("Matcha Token" as CFString, nil, &access)
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
+        if let access { query[kSecAttrAccess as String] = access }
         SecItemDelete(query as CFDictionary)
         SecItemAdd(query as CFDictionary, nil)
     }

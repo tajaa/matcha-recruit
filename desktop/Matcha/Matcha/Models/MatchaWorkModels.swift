@@ -8,7 +8,7 @@ struct MWThread: Codable, Identifiable {
     var version: Int
     var isPinned: Bool
     let createdAt: String
-    var updatedAt: String
+    var updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, version
@@ -16,6 +16,32 @@ struct MWThread: Codable, Identifiable {
         case isPinned = "is_pinned"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+    }
+}
+
+struct MWCreateThreadResponse: Codable {
+    let id: String
+    let title: String
+    let taskType: String
+    let status: String
+    let version: Int
+    let isPinned: Bool
+    let createdAt: String
+    let assistantReply: String?
+    let pdfUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, status, version
+        case taskType = "task_type"
+        case isPinned = "is_pinned"
+        case createdAt = "created_at"
+        case assistantReply = "assistant_reply"
+        case pdfUrl = "pdf_url"
+    }
+
+    func toThread() -> MWThread {
+        MWThread(id: id, title: title, taskType: taskType, status: status,
+                 version: version, isPinned: isPinned, createdAt: createdAt, updatedAt: nil)
     }
 }
 
