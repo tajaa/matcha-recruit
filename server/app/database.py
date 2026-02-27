@@ -2792,6 +2792,13 @@ async def init_db():
             ON CONFLICT (task_key) DO NOTHING
         """)
 
+        # Add scheduler setting for onboarding reminders
+        await conn.execute("""
+            INSERT INTO scheduler_settings (task_key, enabled, max_per_cycle)
+            VALUES ('onboarding_reminders', TRUE, 200)
+            ON CONFLICT (task_key) DO NOTHING
+        """)
+
         # ===========================================
         # Compliance Poster Tables
         # ===========================================

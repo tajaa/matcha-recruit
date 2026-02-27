@@ -536,3 +536,76 @@ async def delete_template(
             raise HTTPException(status_code=404, detail="Template not found")
 
         return {"message": "Template deleted successfully"}
+
+
+# ================================
+# Notification Settings
+# ================================
+
+class NotificationSettingsUpdate(BaseModel):
+    email_enabled: bool = True
+    hr_escalation_emails: List[str] = []
+    reminder_days_before_due: int = 1
+    escalate_to_manager_after_days: int = 3
+    escalate_to_hr_after_days: int = 5
+    timezone: str = "America/New_York"
+
+
+@router.get("/notification-settings")
+async def get_notification_settings(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get onboarding notification settings for the company."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM onboarding_notification_settings WHERE org_id = $1",
+            company_id,
+        )
+        if not row:
+            return {
+                "email_enabled": True,
+                "hr_escalation_emails": [],
+                "reminder_days_before_due": 1,
+                "escalate_to_manager_after_days": 3,
+                "escalate_to_hr_after_days": 5,
+                "timezone": "America/New_York",
+            }
+        return dict(row)
+
+
+@router.put("/notification-settings")
+async def update_notification_settings(
+    request: NotificationSettingsUpdate,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update onboarding notification settings for the company."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO onboarding_notification_settings
+                (org_id, email_enabled, hr_escalation_emails, reminder_days_before_due,
+                 escalate_to_manager_after_days, escalate_to_hr_after_days, timezone)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (org_id) DO UPDATE SET
+                email_enabled = EXCLUDED.email_enabled,
+                hr_escalation_emails = EXCLUDED.hr_escalation_emails,
+                reminder_days_before_due = EXCLUDED.reminder_days_before_due,
+                escalate_to_manager_after_days = EXCLUDED.escalate_to_manager_after_days,
+                escalate_to_hr_after_days = EXCLUDED.escalate_to_hr_after_days,
+                timezone = EXCLUDED.timezone,
+                updated_at = NOW()
+            RETURNING *
+            """,
+            company_id,
+            request.email_enabled,
+            request.hr_escalation_emails,
+            request.reminder_days_before_due,
+            request.escalate_to_manager_after_days,
+            request.escalate_to_hr_after_days,
+            request.timezone,
+        )
+        return dict(row)

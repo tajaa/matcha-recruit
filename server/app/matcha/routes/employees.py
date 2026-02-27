@@ -539,6 +539,32 @@ async def create_employee(
             request.manager_id,
         )
 
+        # Auto-assign active onboarding task templates to the new employee
+        try:
+            template_rows = await conn.fetch(
+                "SELECT id, title, description, category, is_employee_task, due_days "
+                "FROM onboarding_tasks WHERE org_id = $1 AND is_active = TRUE ORDER BY sort_order",
+                company_id,
+            )
+            if template_rows:
+                base_date = start_date or date.today()
+                for tmpl in template_rows:
+                    due = base_date + timedelta(days=tmpl["due_days"])
+                    await conn.execute(
+                        "INSERT INTO employee_onboarding_tasks "
+                        "(id, employee_id, task_id, title, description, category, is_employee_task, due_date, status) "
+                        "VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'pending')",
+                        row["id"],
+                        tmpl["id"],
+                        tmpl["title"],
+                        tmpl["description"],
+                        tmpl["category"],
+                        tmpl["is_employee_task"],
+                        due,
+                    )
+        except Exception:
+            logger.exception("Failed to auto-assign onboarding tasks for employee %s", row["id"])
+
         google_workspace_auto_provision = False
         slack_auto_provision = False
         try:
@@ -1921,6 +1947,38 @@ async def update_employee_onboarding_task(
         values.append(task_id)
 
         row = await conn.fetchrow(query, *values)
+
+        # Notify HR when a task is completed
+        if request.status == "completed":
+            try:
+                notif_settings = await conn.fetchrow(
+                    "SELECT email_enabled, hr_escalation_emails FROM onboarding_notification_settings WHERE org_id = $1",
+                    company_id,
+                )
+                if notif_settings and notif_settings["email_enabled"] and notif_settings["hr_escalation_emails"]:
+                    emp_row = await conn.fetchrow(
+                        "SELECT e.first_name, e.last_name, c.name AS company_name "
+                        "FROM employees e JOIN companies c ON c.id = e.org_id "
+                        "WHERE e.id = $1",
+                        employee_id,
+                    )
+                    if emp_row:
+                        email_svc = get_email_service()
+                        emp_name = f"{emp_row['first_name']} {emp_row['last_name']}".strip()
+                        co_name = emp_row["company_name"] or "Your Company"
+                        for hr_email in notif_settings["hr_escalation_emails"]:
+                            try:
+                                await email_svc.send_task_completion_notification(
+                                    to_email=hr_email,
+                                    to_name=hr_email.split("@")[0],
+                                    company_name=co_name,
+                                    employee_name=emp_name,
+                                    task_title=row["title"],
+                                )
+                            except Exception:
+                                logger.warning("Failed to send completion notification to %s", hr_email)
+            except Exception:
+                logger.exception("Error sending task completion notifications for task %s", task_id)
 
         return EmployeeOnboardingTaskResponse(
             id=row["id"],

@@ -5,10 +5,11 @@ import { FeatureGuideTrigger } from '../features/feature-guides';
 import type { GoogleWorkspaceConnectionStatus, OnboardingAnalytics, ProvisioningRunListItem, SlackConnectionStatus } from '../types';
 import Employees from './Employees';
 import OnboardingTemplates from './OnboardingTemplates';
+import OnboardingNotificationSettings from './OnboardingNotificationSettings';
 import CompanyProfile from './CompanyProfile';
 import { LifecycleWizard } from '../components/LifecycleWizard';
 
-type Tab = 'workspace' | 'employees' | 'templates' | 'runs' | 'profile';
+type Tab = 'workspace' | 'employees' | 'templates' | 'notifications' | 'runs' | 'profile';
 
 function statusTone(status: string): string {
   if (status === 'connected') return 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200';
@@ -109,7 +110,7 @@ export default function OnboardingCenter() {
 
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab && ['workspace', 'employees', 'templates', 'runs', 'profile'].includes(tab)) {
+    if (tab && ['workspace', 'employees', 'templates', 'notifications', 'runs', 'profile'].includes(tab)) {
       setActiveTab(tab as Tab);
     } else {
       setSearchParams({ tab: 'workspace' }, { replace: true });
@@ -269,6 +270,7 @@ export default function OnboardingCenter() {
             { id: 'workspace', label: 'Workspace' },
             { id: 'employees', label: 'New Hires' },
             { id: 'templates', label: 'Templates' },
+            { id: 'notifications', label: 'Notifications' },
             { id: 'runs', label: 'Activity' },
             { id: 'profile', label: 'Company Profile' },
           ].map((tab) => (
@@ -394,6 +396,12 @@ export default function OnboardingCenter() {
         {activeTab === 'templates' && (
           <div className="space-y-6">
             <OnboardingTemplates />
+          </div>
+        )}
+
+        {activeTab === 'notifications' && (
+          <div className="space-y-6">
+            <OnboardingNotificationSettings />
           </div>
         )}
 

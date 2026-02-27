@@ -599,8 +599,24 @@ export const provisioning = {
   },
 };
 
+export interface OnboardingNotificationSettings {
+  email_enabled: boolean;
+  hr_escalation_emails: string[];
+  reminder_days_before_due: number;
+  escalate_to_manager_after_days: number;
+  escalate_to_hr_after_days: number;
+  timezone: string;
+}
+
 export const onboarding = {
   getAnalytics: () => request<OnboardingAnalytics>('/onboarding/analytics'),
+  getNotificationSettings: () =>
+    request<OnboardingNotificationSettings>('/onboarding/notification-settings'),
+  updateNotificationSettings: (data: Partial<OnboardingNotificationSettings>) =>
+    request<OnboardingNotificationSettings>('/onboarding/notification-settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 };
 
 // Interviews
