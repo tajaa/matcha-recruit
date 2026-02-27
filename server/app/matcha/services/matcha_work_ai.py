@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Optional, Any
 
 from google import genai
@@ -38,6 +39,8 @@ SUPPORTED_AI_OPERATIONS = {
 }
 
 MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE = """You are Matcha Work, an HR copilot for US employers.
+
+Today's date: {today}
 
 Mission:
 1) Provide high-quality general HR guidance for US teams.
@@ -368,6 +371,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields = []
 
         system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
+            today=date.today().isoformat(),
             current_skill=current_skill,
             current_state=json.dumps(current_state, indent=2, default=str),
             valid_fields=", ".join(valid_fields),
