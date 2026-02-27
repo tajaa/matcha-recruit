@@ -1,5 +1,11 @@
 import Foundation
 
+private extension Data {
+    mutating func append(_ string: String) {
+        if let d = string.data(using: .utf8) { append(d) }
+    }
+}
+
 class MatchaWorkService {
     static let shared = MatchaWorkService()
     private let client = APIClient.shared
@@ -58,5 +64,48 @@ class MatchaWorkService {
     private struct PDFResponse: Decodable {
         let pdfUrl: String
         enum CodingKeys: String, CodingKey { case pdfUrl = "pdf_url" }
+    }
+
+    func uploadImages(
+        threadId: String,
+        images: [(data: Data, filename: String, mimeType: String)]
+    ) async throws -> [String] {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        for image in images {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(image.filename)\"\r\n")
+            body.append("Content-Type: \(image.mimeType)\r\n\r\n")
+            body.append(image.data)
+            body.append("\r\n")
+        }
+        body.append("--\(boundary)--\r\n")
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/threads/\(threadId)/images") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? "Upload failed"
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
+        }
+        struct ImagesResponse: Decodable { let images: [String] }
+        return try JSONDecoder().decode(ImagesResponse.self, from: data).images
+    }
+
+    func removeImage(threadId: String, imageUrl: String) async throws -> [String] {
+        let encoded = imageUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? imageUrl
+        let path = "\(basePath)/threads/\(threadId)/images?url=\(encoded)"
+        struct ImagesResponse: Decodable { let images: [String] }
+        let result: ImagesResponse = try await client.request(method: "DELETE", path: path)
+        return result.images
     }
 }

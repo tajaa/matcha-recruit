@@ -9,6 +9,7 @@ class ThreadDetailViewModel {
     var pdfData: Data?
     var isLoadingThread = false
     var isLoadingPDF = false
+    var isUploadingImages = false
     var isStreaming = false
     var streamingContent = ""
     var tokenUsage: MWTokenUsage?
@@ -169,6 +170,42 @@ class ThreadDetailViewModel {
             let updated = try await service.finalizeThread(id: threadId)
             await MainActor.run { thread = updated }
             await loadPDF()
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    var presentationImageURLs: [String] {
+        guard let raw = currentState["images"] else { return [] }
+        if let arr = raw.value as? [AnyCodable] { return arr.compactMap { $0.value as? String } }
+        if let arr = raw.value as? [String] { return arr }
+        return []
+    }
+
+    func uploadImages(_ images: [(data: Data, filename: String, mimeType: String)]) async {
+        guard let threadId = thread?.id else { return }
+        await MainActor.run { isUploadingImages = true }
+        do {
+            let urls = try await service.uploadImages(threadId: threadId, images: images)
+            await MainActor.run {
+                currentState["images"] = AnyCodable(urls.map { AnyCodable($0) })
+                isUploadingImages = false
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                isUploadingImages = false
+            }
+        }
+    }
+
+    func removeImage(url: String) async {
+        guard let threadId = thread?.id else { return }
+        do {
+            let urls = try await service.removeImage(threadId: threadId, imageUrl: url)
+            await MainActor.run {
+                currentState["images"] = AnyCodable(urls.map { AnyCodable($0) })
+            }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }

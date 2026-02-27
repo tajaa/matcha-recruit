@@ -110,6 +110,7 @@ class WorkbookDocument(BaseModel):
     industry: Optional[str] = None
     objective: Optional[str] = None
     sections: Optional[list[WorkbookSection]] = None
+    images: Optional[list[str]] = None  # S3/CDN URLs for presentation images
 
 
 class CreateThreadRequest(BaseModel):

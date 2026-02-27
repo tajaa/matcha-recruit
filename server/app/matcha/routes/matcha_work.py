@@ -887,6 +887,88 @@ async def upload_thread_logo(
         raise HTTPException(status_code=500, detail="Failed to upload logo. Please try again.")
 
 
+@router.post("/threads/{thread_id}/images")
+async def upload_thread_images(
+    thread_id: UUID,
+    files: list[UploadFile] = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload up to 4 images for a workbook thread's presentation (10 MB each)."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread["task_type"] != "workbook":
+        raise HTTPException(status_code=400, detail="Image upload is only available for workbook threads")
+
+    existing: list[str] = (thread.get("current_state") or {}).get("images") or []
+    if len(existing) + len(files) > 4:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum 4 images allowed. You already have {len(existing)}.",
+        )
+
+    try:
+        uploaded_urls: list[str] = []
+        for file in files:
+            if not file.content_type or not file.content_type.startswith("image/"):
+                raise HTTPException(status_code=400, detail=f"'{file.filename}' is not an image")
+            content = await file.read()
+            if len(content) > 10 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail=f"'{file.filename}' exceeds 10 MB limit")
+            url = await get_storage().upload_file(
+                content,
+                file.filename or "image.jpg",
+                prefix=f"matcha-work-images/{thread_id}",
+                content_type=file.content_type,
+            )
+            uploaded_urls.append(url)
+
+        new_images = existing + uploaded_urls
+        await doc_svc.apply_update(thread_id, {"images": new_images}, diff_summary="Added presentation images")
+        return {"images": new_images, "uploaded_count": len(uploaded_urls)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to upload images for thread %s: %s", thread_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to upload images. Please try again.")
+
+
+@router.delete("/threads/{thread_id}/images")
+async def remove_thread_image(
+    thread_id: UUID,
+    url: str = Query(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Remove a single image from a workbook thread by URL."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    current_images: list[str] = (thread.get("current_state") or {}).get("images") or []
+    if url not in current_images:
+        raise HTTPException(status_code=404, detail="Image not found in thread")
+
+    updated_images = [u for u in current_images if u != url]
+    await doc_svc.apply_update(thread_id, {"images": updated_images}, diff_summary="Removed presentation image")
+
+    # Best-effort S3 deletion — don't fail the request if this errors
+    try:
+        await get_storage().delete_file(url)
+    except Exception:
+        pass
+
+    return {"images": updated_images}
+
+
 @router.get("/threads", response_model=list[ThreadListItem])
 async def list_threads(
     status: Optional[str] = Query(None, pattern="^(active|finalized|archived)$"),
