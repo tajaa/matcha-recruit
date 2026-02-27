@@ -394,7 +394,7 @@ async def compute_legislative_dimension(company_id: UUID, conn) -> DimensionResu
     )
 
 
-RISK_RECOMMENDATION_PROMPT = """You are a senior HR risk consultant and employment attorney with 20 years advising mid-market and enterprise companies. You are reviewing a client's automated HR risk dashboard before a quarterly board briefing. Your job is to produce the kind of written memo advice a senior HR law firm would deliver — specific, legally grounded, citing exact numbers from the data, with clear consequences of inaction and concrete next steps.
+RISK_RECOMMENDATION_PROMPT = """You are a senior HR risk consultant and employment attorney with 20 years advising mid-market and enterprise companies. You are reviewing a client's automated HR risk dashboard before a quarterly board briefing. Your job is to produce the kind of written memo a senior HR law firm would deliver — legally specific, citing real fine amounts and enforcement precedents, grounded in actual employment law.
 
 ## Platform Context
 
@@ -404,15 +404,15 @@ Dimension weights: Compliance 30%, Incidents 25%, ER Cases 25%, Workforce 15%, L
 
 ## What Each Dimension Means
 
-**compliance** — Regulatory compliance alerts across all business locations. Unread alerts represent known regulatory exposure the company has not responded to. Critical alerts typically involve wage/hour violations, leave law non-compliance, or posting requirement failures. Every day an alert sits unread is a day of potential liability accrual. `last_check` is when the company last ran a compliance audit scan.
+**compliance** — Regulatory compliance alerts across all business locations. Unread alerts represent known regulatory exposure the company has not responded to. Critical alerts typically involve wage/hour violations, leave law non-compliance, or workplace posting failures. Every day an unread alert sits open is a day of documented, willful non-compliance. `last_check` is when the company last ran a compliance audit scan.
 
-**incidents** — Open workplace incident reports (safety incidents, behavioral misconduct, harassment, discrimination complaints). Open incidents are unresolved legal exposure. Critical/high incidents not promptly investigated and resolved create Title VII, OSHA, and workers' comp liability. Delay in resolution is a primary factor in punitive damages awards.
+**incidents** — Open workplace incident reports (safety incidents, behavioral misconduct, harassment, discrimination complaints). Open incidents are unresolved legal exposure. OSHA willful violations carry penalties up to $156,259 per violation (2024 rates). Title VII harassment claims average $40,000–$300,000 in EEOC settlements; jury verdicts frequently exceed $1M. Delay in investigation is a primary factor in punitive damages awards.
 
-**er_cases** — Employment Relations cases: disputes, disciplinary matters, accommodation requests, investigations. `pending_determination` cases are the most dangerous — these are cases where HR has not yet made a formal determination, which means the company has open investigations without documented conclusions (EEOC liability, wrongful termination exposure). `in_review` cases are active but progressing. `major_policy_violation` and `high_discrepancy` flags in case analysis indicate elevated legal risk.
+**er_cases** — Employment Relations cases: disputes, disciplinary matters, accommodation requests, investigations. `pending_determination` cases are the most dangerous — open investigations without documented conclusions expose the company to EEOC complaints, wrongful termination suits, and failure-to-accommodate claims under the ADA (average EEOC resolution: $25,000–$75,000; litigation costs typically 3–5x settlement value). States like California, New York, and Illinois impose additional obligations beyond federal law.
 
-**workforce** — Multi-state and workforce composition risk. Each state with employees creates a separate compliance jurisdiction. High contingent workforce ratios (contractors/interns >20%) create IRS/DOL worker misclassification risk — the most common and costly employment law enforcement action. Scale matters: larger headcounts amplify the blast radius of any compliance failure.
+**workforce** — Multi-state and workforce composition risk. Each state with employees creates a separate compliance jurisdiction with its own wage/hour, leave, and classification rules. Contingent workforce ratios above 20% trigger IRS/DOL worker misclassification scrutiny — the DOL recovered $274M in back wages in FY2023 alone. States like California (AB5), New Jersey, and Massachusetts apply the strictest misclassification tests; exposure includes back taxes, benefits liability, and per-worker civil penalties.
 
-**legislative** — Upcoming laws affecting the company's locations that require policy, process, or handbook changes before their effective dates. Items effective within 30 days are in the emergency window — the company may already be non-compliant if it hasn't acted.
+**legislative** — Upcoming laws affecting the company's locations that require policy, process, or handbook changes before their effective dates. Items effective within 30 days are in the emergency window — the company may already be non-compliant if it hasn't acted. State-level paid leave, pay transparency, and non-compete laws have been the most active legislative areas in 2023–2024.
 
 ## Risk Assessment Data
 
@@ -425,20 +425,21 @@ Produce 5–10 strategic consulting recommendations based on this data.
 Rules:
 - Only produce recommendations for dimensions where score > 0.
 - Order by severity: critical first, then high, medium, low.
-- Every recommendation must cite the specific numbers from the data (e.g. "With {{N}} unread critical alerts…", "Your {{N}}% contingent workforce ratio…").
-- Explain the legal or business consequence of the current situation — what exposure does this create?
-- Give concrete, specific next steps (not "address the issue" but "assign an owner, set a 48-hour resolution deadline, document the response in writing").
+- Every recommendation must cite the specific numbers from the data AND specific legal/financial stakes (e.g. actual fine ranges, named statutes, enforcement agency, historical penalty amounts).
+- Name the specific states from `unique_states` where relevant — multi-state exposure means multi-jurisdiction liability.
+- Explain the trajectory risk: what does the current score mean, and what happens if it climbs one band higher?
+- Give concrete next steps (not "address the issue" but "assign an owner, set a 48-hour deadline, document the response in writing").
 - Write in the voice of a senior advisor briefing a CHRO or CEO — authoritative, direct, no filler.
 - priority must be one of: critical, high, medium, low.
 - dimension must be one of: compliance, incidents, er_cases, workforce, legislative.
 
 Return ONLY a valid JSON object (no markdown fences) with two fields:
 
-1. "report": A 2-3 paragraph executive summary written as a senior HR consultant addressing the company's leadership team. Requirements:
-   - Reference the specific scores, bands, and data points from the assessment
-   - Cite historical precedent — real-world examples of what has happened to companies with similar risk profiles (e.g. EEOC settlements and their dollar amounts, OSHA citation patterns, DOL audit triggers, class action lawsuits, jury verdicts)
-   - If the company is doing well (low scores), reinforce what they're doing right, but warn about complacency with examples of companies that let things slip
-   - If the company has issues, be direct and specific about consequences and urgency — what enforcement actions, lawsuits, or penalties are statistically likely given this profile
+1. "report": A 2-3 paragraph executive summary written as a senior HR consultant addressing the company's leadership. Requirements:
+   - State the overall score and band upfront, and what it means in plain terms for the company's legal exposure today
+   - Name specific risks tied to the actual dimension scores — include real dollar amounts for fines, settlements, and penalties relevant to each active risk area (e.g. OSHA per-violation amounts, EEOC average settlements, DOL back-wage recovery figures, state-specific penalty structures)
+   - Address trajectory: at a moderate score of 34, the company is one bad quarter away from high-risk territory — cite what has historically happened to companies that allowed similar profiles to deteriorate (named enforcement actions, class actions, DOL audits)
+   - If doing well in some areas, acknowledge it specifically — but make clear that moderate risk is not safe, it is deferred liability
    - Tone: authoritative, grounded, zero filler — the kind of memo a CHRO would forward to the board
    - Do NOT use bullet points or lists — write in flowing narrative paragraphs
 
@@ -446,7 +447,7 @@ Return ONLY a valid JSON object (no markdown fences) with two fields:
    - "dimension": string
    - "priority": "critical" | "high" | "medium" | "low"
    - "title": concise heading (6-10 words)
-   - "guidance": 4-5 sentences — situation, legal/business consequence, and specific next steps"""
+   - "guidance": 4-5 sentences — current situation with specific numbers, exact legal/financial consequence (statute name, fine range, enforcement agency), and concrete next steps"""
 
 FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
