@@ -394,29 +394,49 @@ async def compute_legislative_dimension(company_id: UUID, conn) -> DimensionResu
     )
 
 
-RISK_RECOMMENDATION_PROMPT = """You are a senior HR risk consultant reviewing a company's live risk assessment dashboard.
+RISK_RECOMMENDATION_PROMPT = """You are a senior HR risk consultant and employment attorney with 20 years advising mid-market and enterprise companies. You are reviewing a client's automated HR risk dashboard before a quarterly board briefing. Your job is to produce the kind of written memo advice a senior HR law firm would deliver — specific, legally grounded, citing exact numbers from the data, with clear consequences of inaction and concrete next steps.
 
-Below is the full risk assessment data in JSON format. It includes an overall score, per-dimension scores (0-100), risk bands, contributing factors, and raw data for each of the 5 dimensions: compliance, incidents, er_cases, workforce, and legislative.
+## Platform Context
 
-<risk_assessment>
+This dashboard aggregates live data from an HR platform across 5 risk dimensions. Scores are 0–100 per dimension (weighted into an overall score). Bands: 0–25 = Low, 26–50 = Moderate, 51–75 = High, 76–100 = Critical.
+
+Dimension weights: Compliance 30%, Incidents 25%, ER Cases 25%, Workforce 15%, Legislative 5%.
+
+## What Each Dimension Means
+
+**compliance** — Regulatory compliance alerts across all business locations. Unread alerts represent known regulatory exposure the company has not responded to. Critical alerts typically involve wage/hour violations, leave law non-compliance, or posting requirement failures. Every day an alert sits unread is a day of potential liability accrual. `last_check` is when the company last ran a compliance audit scan.
+
+**incidents** — Open workplace incident reports (safety incidents, behavioral misconduct, harassment, discrimination complaints). Open incidents are unresolved legal exposure. Critical/high incidents not promptly investigated and resolved create Title VII, OSHA, and workers' comp liability. Delay in resolution is a primary factor in punitive damages awards.
+
+**er_cases** — Employment Relations cases: disputes, disciplinary matters, accommodation requests, investigations. `pending_determination` cases are the most dangerous — these are cases where HR has not yet made a formal determination, which means the company has open investigations without documented conclusions (EEOC liability, wrongful termination exposure). `in_review` cases are active but progressing. `major_policy_violation` and `high_discrepancy` flags in case analysis indicate elevated legal risk.
+
+**workforce** — Multi-state and workforce composition risk. Each state with employees creates a separate compliance jurisdiction. High contingent workforce ratios (contractors/interns >20%) create IRS/DOL worker misclassification risk — the most common and costly employment law enforcement action. Scale matters: larger headcounts amplify the blast radius of any compliance failure.
+
+**legislative** — Upcoming laws affecting the company's locations that require policy, process, or handbook changes before their effective dates. Items effective within 30 days are in the emergency window — the company may already be non-compliant if it hasn't acted.
+
+## Risk Assessment Data
+
 {assessment_json}
-</risk_assessment>
 
-Based on this data, produce 5–10 strategic HR consulting recommendations — the kind of specific, actionable guidance a professional HR firm would give after reviewing this dashboard.
+## Instructions
+
+Produce 5–10 strategic consulting recommendations based on this data.
 
 Rules:
-- Only recommend for dimensions where the score is greater than 0.
-- Order recommendations by severity: critical first, then high, medium, low.
-- Each recommendation must reference specific numbers or facts from the data (e.g. "With 3 unread critical compliance alerts…" or "Your 42% contingent workforce ratio…").
-- Write guidance as a senior consultant speaking to a business leader — direct, specific, no generic filler.
+- Only produce recommendations for dimensions where score > 0.
+- Order by severity: critical first, then high, medium, low.
+- Every recommendation must cite the specific numbers from the data (e.g. "With {N} unread critical alerts…", "Your {N}% contingent workforce ratio…").
+- Explain the legal or business consequence of the current situation — what exposure does this create?
+- Give concrete, specific next steps (not "address the issue" but "assign an owner, set a 48-hour resolution deadline, document the response in writing").
+- Write in the voice of a senior advisor briefing a CHRO or CEO — authoritative, direct, no filler.
 - priority must be one of: critical, high, medium, low.
 - dimension must be one of: compliance, incidents, er_cases, workforce, legislative.
 
-Return ONLY a JSON array (no wrapping object, no markdown) where each element has:
+Return ONLY a valid JSON array (no wrapper object, no markdown fences). Each element:
 - "dimension": string
 - "priority": "critical" | "high" | "medium" | "low"
-- "title": short heading (5-10 words)
-- "guidance": 2-3 sentences of specific consulting advice referencing the actual data"""
+- "title": concise heading (6-10 words)
+- "guidance": 4-5 sentences — situation, legal/business consequence, and specific next steps"""
 
 FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
