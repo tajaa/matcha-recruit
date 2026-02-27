@@ -279,14 +279,27 @@ export interface MWBillingBalanceResponse {
 export interface MWCreditPack {
   pack_id: string;
   credits: number;
+  base_cents: number;
   amount_cents: number;
+  fee_cents: number;
   label: string;
+  description: string;
   currency: string;
 }
 
 export interface MWCheckoutResponse {
   checkout_url: string;
   stripe_session_id: string;
+}
+
+export interface MWSubscription {
+  active: boolean;
+  pack_id: string | null;
+  credits_per_cycle: number | null;
+  amount_cents: number | null;
+  status: string | null;
+  current_period_end: string | null;
+  canceled_at: string | null;
 }
 
 export interface MWBillingTransactionsResponse {

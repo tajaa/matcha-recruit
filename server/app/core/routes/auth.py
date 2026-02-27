@@ -1637,6 +1637,35 @@ async def register_business(request: BusinessRegister):
             )
             company_id = company["id"]
 
+            # Grant free signup credits ($50 equivalent = 250 credits)
+            from ...core.services.stripe_service import FREE_SIGNUP_CREDITS
+            await conn.execute(
+                """
+                INSERT INTO mw_credit_balances (
+                    company_id, credits_remaining,
+                    total_credits_purchased, total_credits_granted
+                )
+                VALUES ($1, $2, 0, $2)
+                ON CONFLICT (company_id) DO UPDATE
+                SET credits_remaining = mw_credit_balances.credits_remaining + $2,
+                    total_credits_granted = mw_credit_balances.total_credits_granted + $2,
+                    updated_at = NOW()
+                """,
+                company_id,
+                FREE_SIGNUP_CREDITS,
+            )
+            await conn.execute(
+                """
+                INSERT INTO mw_credit_transactions (
+                    company_id, transaction_type, credits_delta,
+                    credits_after, description
+                )
+                VALUES ($1, 'grant', $2, $2, 'Welcome gift — $50 free credits')
+                """,
+                company_id,
+                FREE_SIGNUP_CREDITS,
+            )
+
             # Step 2: Create user with 'client' role
             password_hash = hash_password(request.password)
             user = await conn.fetchrow(

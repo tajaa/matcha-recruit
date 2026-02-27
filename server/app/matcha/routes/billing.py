@@ -42,13 +42,27 @@ class BillingBalanceResponse(BaseModel):
 class CreditPackResponse(BaseModel):
     pack_id: str
     credits: int
+    base_cents: int
     amount_cents: int
+    fee_cents: int
     label: str
+    description: str
     currency: str = "usd"
+
+
+class SubscriptionResponse(BaseModel):
+    active: bool
+    pack_id: Optional[str] = None
+    credits_per_cycle: Optional[int] = None
+    amount_cents: Optional[int] = None
+    status: Optional[str] = None
+    current_period_end: Optional[datetime] = None
+    canceled_at: Optional[datetime] = None
 
 
 class CheckoutRequest(BaseModel):
     pack_id: str = Field(..., min_length=1, max_length=50)
+    auto_renew: bool = False
     success_url: Optional[str] = Field(default=None, max_length=2000)
     cancel_url: Optional[str] = Field(default=None, max_length=2000)
 
@@ -110,12 +124,20 @@ async def create_checkout_session(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid credit pack")
 
     try:
-        session = await stripe_service.create_checkout_session(
-            company_id=company_id,
-            pack_id=body.pack_id,
-            success_url=body.success_url,
-            cancel_url=body.cancel_url,
-        )
+        if body.auto_renew:
+            session = await stripe_service.create_subscription_checkout_session(
+                company_id=company_id,
+                pack_id=body.pack_id,
+                success_url=body.success_url,
+                cancel_url=body.cancel_url,
+            )
+        else:
+            session = await stripe_service.create_checkout_session(
+                company_id=company_id,
+                pack_id=body.pack_id,
+                success_url=body.success_url,
+                cancel_url=body.cancel_url,
+            )
     except StripeServiceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -136,6 +158,51 @@ async def create_checkout_session(
     )
 
     return CheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
+
+
+@router.get("/subscription", response_model=SubscriptionResponse)
+async def get_subscription(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No company associated with this account")
+
+    sub = await billing_service.get_active_subscription(company_id)
+    if sub is None:
+        return SubscriptionResponse(active=False)
+
+    return SubscriptionResponse(
+        active=True,
+        pack_id=sub["pack_id"],
+        credits_per_cycle=int(sub["credits_per_cycle"]),
+        amount_cents=int(sub["amount_cents"]),
+        status=sub["status"],
+        current_period_end=sub["current_period_end"],
+        canceled_at=sub["canceled_at"],
+    )
+
+
+@router.delete("/subscription", status_code=status.HTTP_200_OK)
+async def cancel_subscription(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No company associated with this account")
+
+    sub = await billing_service.get_active_subscription(company_id)
+    if sub is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active subscription found")
+
+    stripe_service = StripeService()
+    try:
+        await stripe_service.cancel_subscription(sub["stripe_subscription_id"])
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    await billing_service.cancel_subscription_record(sub["stripe_subscription_id"])
+    return {"canceled": True, "message": "Subscription will not renew at the end of the current period."}
 
 
 @router.get("/transactions", response_model=TransactionHistoryResponse)

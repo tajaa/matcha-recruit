@@ -3857,6 +3857,29 @@ async def init_db():
             ON mw_stripe_sessions(company_id, status)
         """)
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_subscriptions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                stripe_subscription_id VARCHAR(255) NOT NULL UNIQUE,
+                stripe_customer_id VARCHAR(255) NOT NULL,
+                pack_id VARCHAR(50) NOT NULL,
+                credits_per_cycle INTEGER NOT NULL,
+                amount_cents INTEGER NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'active',
+                current_period_end TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                canceled_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mw_subscriptions_company_id
+            ON mw_subscriptions(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mw_subscriptions_status
+            ON mw_subscriptions(status)
+        """)
+        await conn.execute("""
             INSERT INTO mw_credit_balances (
                 company_id,
                 credits_remaining,

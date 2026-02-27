@@ -494,6 +494,160 @@ async def fulfill_checkout_session(stripe_session_id: str) -> Optional[dict[str,
     }
 
 
+async def get_active_subscription(company_id: UUID) -> Optional[dict[str, Any]]:
+    """Return the active subscription for a company, or None."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, company_id, stripe_subscription_id, stripe_customer_id,
+                   pack_id, credits_per_cycle, amount_cents, status,
+                   current_period_end, created_at, canceled_at
+            FROM mw_subscriptions
+            WHERE company_id = $1
+              AND status IN ('active', 'past_due')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            company_id,
+        )
+    if row is None:
+        return None
+    return dict(row)
+
+
+async def upsert_subscription(
+    company_id: UUID,
+    stripe_subscription_id: str,
+    stripe_customer_id: str,
+    pack_id: str,
+    credits_per_cycle: int,
+    amount_cents: int,
+    current_period_end=None,
+) -> dict[str, Any]:
+    """Create or update a subscription record."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO mw_subscriptions (
+                company_id, stripe_subscription_id, stripe_customer_id,
+                pack_id, credits_per_cycle, amount_cents, status, current_period_end
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
+            ON CONFLICT (stripe_subscription_id) DO UPDATE
+            SET status = 'active',
+                current_period_end = EXCLUDED.current_period_end,
+                canceled_at = NULL
+            RETURNING id, company_id, stripe_subscription_id, stripe_customer_id,
+                      pack_id, credits_per_cycle, amount_cents, status,
+                      current_period_end, created_at, canceled_at
+            """,
+            company_id,
+            stripe_subscription_id,
+            stripe_customer_id,
+            pack_id,
+            credits_per_cycle,
+            amount_cents,
+            current_period_end,
+        )
+    return dict(row)
+
+
+async def cancel_subscription_record(stripe_subscription_id: str) -> bool:
+    """Mark a subscription as canceled."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """
+            UPDATE mw_subscriptions
+            SET status = 'canceled', canceled_at = NOW()
+            WHERE stripe_subscription_id = $1
+              AND status != 'canceled'
+            """,
+            stripe_subscription_id,
+        )
+    return result.endswith("1")
+
+
+async def fulfill_subscription_invoice(
+    stripe_subscription_id: str,
+    stripe_invoice_id: str,
+) -> Optional[dict[str, Any]]:
+    """Add credits for a paid subscription invoice. Idempotent via reference_id check."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            sub_row = await conn.fetchrow(
+                """
+                SELECT company_id, pack_id, credits_per_cycle, amount_cents
+                FROM mw_subscriptions
+                WHERE stripe_subscription_id = $1
+                """,
+                stripe_subscription_id,
+            )
+            if sub_row is None:
+                return None
+
+            # Idempotency: skip if this invoice was already processed
+            already = await conn.fetchval(
+                """
+                SELECT id FROM mw_credit_transactions
+                WHERE company_id = $1
+                  AND transaction_type = 'purchase'
+                  AND description LIKE $2
+                LIMIT 1
+                """,
+                sub_row["company_id"],
+                f"%{stripe_invoice_id}%",
+            )
+            if already:
+                return {"already_fulfilled": True}
+
+            company_id = sub_row["company_id"]
+            credits_to_add = int(sub_row["credits_per_cycle"])
+
+            await _ensure_balance_row(conn, company_id)
+            locked = await conn.fetchrow(
+                "SELECT credits_remaining FROM mw_credit_balances WHERE company_id = $1 FOR UPDATE",
+                company_id,
+            )
+            next_remaining = int(locked["credits_remaining"]) + credits_to_add
+
+            await conn.execute(
+                """
+                UPDATE mw_credit_balances
+                SET credits_remaining = $2,
+                    total_credits_purchased = total_credits_purchased + $3,
+                    updated_at = NOW()
+                WHERE company_id = $1
+                """,
+                company_id,
+                next_remaining,
+                credits_to_add,
+            )
+
+            transaction = await conn.fetchrow(
+                """
+                INSERT INTO mw_credit_transactions (
+                    company_id, transaction_type, credits_delta, credits_after,
+                    description, created_by
+                )
+                VALUES ($1, 'purchase', $2, $3, $4, NULL)
+                RETURNING id, company_id, transaction_type, credits_delta,
+                          credits_after, description, reference_id, created_by, created_at
+                """,
+                company_id,
+                credits_to_add,
+                next_remaining,
+                f"Auto-renewal ({sub_row['pack_id']}) — invoice {stripe_invoice_id}",
+            )
+
+            balance = await get_credit_balance(company_id, conn=conn)
+
+    return {
+        "already_fulfilled": False,
+        "balance": balance,
+        "transaction": _row_to_transaction(transaction),
+    }
+
+
 async def mark_stripe_session_expired(stripe_session_id: str) -> bool:
     async with get_connection() as conn:
         result = await conn.execute(

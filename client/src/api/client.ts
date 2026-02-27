@@ -3073,6 +3073,7 @@ import type {
   MWBillingTransactionsResponse,
   MWCheckoutResponse,
   MWCreditPack,
+  MWSubscription,
   MWCreateThreadResponse,
   MWSendMessageResponse,
   MWDocumentVersion,
@@ -3235,6 +3236,7 @@ export const matchaWork = {
 
   createCheckout: (
     packId: string,
+    autoRenew = false,
     successUrl?: string,
     cancelUrl?: string
   ): Promise<MWCheckoutResponse> =>
@@ -3242,9 +3244,18 @@ export const matchaWork = {
       method: 'POST',
       body: JSON.stringify({
         pack_id: packId,
+        auto_renew: autoRenew,
         success_url: successUrl,
         cancel_url: cancelUrl,
       }),
+    }),
+
+  getSubscription: (): Promise<MWSubscription> =>
+    request<MWSubscription>('/matcha-work/billing/subscription'),
+
+  cancelSubscription: (): Promise<{ canceled: boolean; message: string }> =>
+    request<{ canceled: boolean; message: string }>('/matcha-work/billing/subscription', {
+      method: 'DELETE',
     }),
 
   getBillingTransactions: (params?: { limit?: number; offset?: number }): Promise<MWBillingTransactionsResponse> => {
