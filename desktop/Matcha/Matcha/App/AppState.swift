@@ -5,6 +5,7 @@ class AppState {
     var isAuthenticated: Bool = false
     var currentUser: UserInfo? = nil
     var selectedThreadId: String? = nil
+    var showSkills: Bool = false
 
     init() {
         Task {

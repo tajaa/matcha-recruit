@@ -14,6 +14,9 @@ struct ContentView: View {
         } detail: {
             if let threadId = appState.selectedThreadId {
                 ThreadDetailView(threadId: threadId)
+                    .onChange(of: threadId) { appState.showSkills = false }
+            } else if appState.showSkills {
+                SkillsView()
             } else {
                 ZStack {
                     Color.appBackground.ignoresSafeArea()

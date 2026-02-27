@@ -106,6 +106,29 @@ struct ThreadListView: View {
             }
         }
         .background(Color.appBackground)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider().opacity(0.3)
+                Button {
+                    appState.selectedThreadId = nil
+                    appState.showSkills = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.showSkills ? .matcha500 : .secondary)
+                        Text("Skills")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(appState.showSkills ? .white : .secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(appState.showSkills ? Color.matcha600.opacity(0.15) : Color.clear)
+                }
+                .buttonStyle(.plain)
+            }
+        }
         .task { await viewModel.loadThreads() }
         .sheet(isPresented: $showNewThread) {
             NewThreadView(viewModel: viewModel)
