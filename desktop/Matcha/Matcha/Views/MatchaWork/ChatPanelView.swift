@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct ChatPanelView: View {
     @Bindable var viewModel: ThreadDetailViewModel
     @State private var inputText = ""
+    @State private var previewURL: String? = nil
 
     private var isWorkbook: Bool { viewModel.thread?.taskType == "workbook" }
 
@@ -93,28 +94,11 @@ struct ChatPanelView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(viewModel.presentationImageURLs, id: \.self) { url in
-                                ZStack(alignment: .topTrailing) {
-                                    AsyncImage(url: URL(string: url)) { phase in
-                                        if let img = phase.image {
-                                            img.resizable().scaledToFill()
-                                        } else {
-                                            Color.zinc800
-                                        }
-                                    }
-                                    .frame(width: 64, height: 64)
-                                    .clipped()
-                                    .cornerRadius(6)
-
-                                    Button {
-                                        Task { await viewModel.removeImage(url: url) }
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.system(size: 15))
-                                            .foregroundStyle(.white, Color.black.opacity(0.6))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .offset(x: 4, y: -4)
-                                }
+                                ImageThumbnailView(
+                                    url: url,
+                                    onPreview: { previewURL = url },
+                                    onRemove: { Task { await viewModel.removeImage(url: url) } }
+                                )
                             }
 
                             if viewModel.isUploadingImages {
@@ -178,6 +162,100 @@ struct ChatPanelView: View {
                 .background(Color.zinc900)
             }
         }
+        .background(Color.appBackground)
+        .sheet(isPresented: Binding(get: { previewURL != nil }, set: { if !$0 { previewURL = nil } })) {
+            if let url = previewURL {
+                ImagePreviewSheet(url: url, onDismiss: { previewURL = nil })
+            }
+        }
+    }
+}
+
+// MARK: - Thumbnail
+
+private struct ImageThumbnailView: View {
+    let url: String
+    let onPreview: () -> Void
+    let onRemove: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Button(action: onPreview) {
+                AsyncImage(url: URL(string: url)) { phase in
+                    if let img = phase.image {
+                        img.resizable().scaledToFill()
+                    } else {
+                        Color.zinc800
+                    }
+                }
+                .frame(width: 72, height: 72)
+                .clipped()
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isHovered ? Color.white.opacity(0.4) : Color.clear, lineWidth: 1.5)
+                )
+                .scaleEffect(isHovered ? 1.03 : 1.0)
+                .animation(.easeOut(duration: 0.12), value: isHovered)
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovered = $0 }
+            .help("Click to preview")
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white, Color.black.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .offset(x: 5, y: -5)
+        }
+    }
+}
+
+// MARK: - Full-size preview sheet
+
+private struct ImagePreviewSheet: View {
+    let url: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button("Done", action: onDismiss)
+                    .buttonStyle(.plain)
+                    .foregroundColor(.matcha500)
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(16)
+            }
+
+            AsyncImage(url: URL(string: url)) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .failure:
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 32))
+                            .foregroundColor(.secondary)
+                        Text("Failed to load image")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 13))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                default:
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+        }
+        .frame(minWidth: 480, minHeight: 400)
         .background(Color.appBackground)
     }
 }
