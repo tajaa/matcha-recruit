@@ -1,0 +1,401 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B2C7DB8AE33E886529C5BF99 /* MatchaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC995D9793AD79440F7616A7 /* MatchaApp.swift */; };
+		A8B0E4F8719EE4B839FFBCBC /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88DD03E26D63AB66B7AF4B39 /* AppState.swift */; };
+		27D89F55D2042BB60126C2E5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A53863E4FE1105A953775B9 /* ContentView.swift */; };
+		E6875027B0F5CBDE47D488EF /* Color+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD198140CC378D9E843FA827 /* Color+Extensions.swift */; };
+		1FEDFFD4BC1C7F59E9CFD687 /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210A398CCEA5FA1784C2C92D /* AuthModels.swift */; };
+		57650AD72FEAE1AA3BC9EA2B /* MatchaWorkModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50DADEBEA015DBB962E44A90 /* MatchaWorkModels.swift */; };
+		29E4BDC2148FC96D831C7A74 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87CD3FA8F0164D2F29731B2D /* KeychainHelper.swift */; };
+		E5454454BDC033D4A00E1FFC /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F1E6446AC5C08F85073A51 /* APIClient.swift */; };
+		0CBD0CD62319C7801E72CE1A /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 696FF167B14C8BBD12958A10 /* AuthService.swift */; };
+		1544DF6ADC7DC9778A60BEA8 /* MatchaWorkService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */; };
+		1896C192062FDFA5D66338DF /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B03E99B58F986725B43CD7A /* AuthViewModel.swift */; };
+		FADFA74F8E449B203A55B306 /* ThreadListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA53495B161A46747955400C /* ThreadListViewModel.swift */; };
+		EC4ABAA381C7E136838EDD09 /* ThreadDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88AB428B69CD0DC86AF1AA9 /* ThreadDetailViewModel.swift */; };
+		4AE084C390D04987CC53601E /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C07C71E59F24539F32D490 /* LoginView.swift */; };
+		C77BADBAE54E04005E00E518 /* ThreadListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B3F3B04FAEA73368120D2C4 /* ThreadListView.swift */; };
+		36EE1D8AC492F24143BFEEBD /* ThreadDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91B82ECF6D3B416A97C8FD9 /* ThreadDetailView.swift */; };
+		788DF3AB085B3D15F4231730 /* ChatPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C52416548CAE98530BAD906E /* ChatPanelView.swift */; };
+		E8EB21EC67FE2F741A8AEA6A /* MessageBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE423DAF2E806EE77E7FB4D /* MessageBubbleView.swift */; };
+		FC22CC98585FB00D59E39358 /* PreviewPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCD9DCBDB9CC47BA70B5F0FF /* PreviewPanelView.swift */; };
+		1BFFF9E1D881752A67CF8777 /* VersionHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C4DFA44755333D647B43C2 /* VersionHistoryView.swift */; };
+		48C216A1C92E1717B236961D /* NewThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */; };
+		59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD09F509367E88989F2B765 /* StatusBadge.swift */; };
+		208F703F48307B35717A911B /* LoadingDots.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13338371A8BC76142D4A946 /* LoadingDots.swift */; };
+		84947A5F80A1EC7B15C1B8E9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 043A0A515D971904874F82FA /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		564E3C3CDF69E05F3D1338CB /* Matcha.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Matcha.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC995D9793AD79440F7616A7 /* MatchaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchaApp.swift; sourceTree = "<group>"; };
+		88DD03E26D63AB66B7AF4B39 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		9A53863E4FE1105A953775B9 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		AD198140CC378D9E843FA827 /* Color+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Color+Extensions.swift; sourceTree = "<group>"; };
+		210A398CCEA5FA1784C2C92D /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
+		50DADEBEA015DBB962E44A90 /* MatchaWorkModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchaWorkModels.swift; sourceTree = "<group>"; };
+		87CD3FA8F0164D2F29731B2D /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		15F1E6446AC5C08F85073A51 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		696FF167B14C8BBD12958A10 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchaWorkService.swift; sourceTree = "<group>"; };
+		0B03E99B58F986725B43CD7A /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
+		FA53495B161A46747955400C /* ThreadListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadListViewModel.swift; sourceTree = "<group>"; };
+		F88AB428B69CD0DC86AF1AA9 /* ThreadDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadDetailViewModel.swift; sourceTree = "<group>"; };
+		A7C07C71E59F24539F32D490 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		0B3F3B04FAEA73368120D2C4 /* ThreadListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadListView.swift; sourceTree = "<group>"; };
+		A91B82ECF6D3B416A97C8FD9 /* ThreadDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadDetailView.swift; sourceTree = "<group>"; };
+		C52416548CAE98530BAD906E /* ChatPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPanelView.swift; sourceTree = "<group>"; };
+		3AE423DAF2E806EE77E7FB4D /* MessageBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubbleView.swift; sourceTree = "<group>"; };
+		DCD9DCBDB9CC47BA70B5F0FF /* PreviewPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPanelView.swift; sourceTree = "<group>"; };
+		49C4DFA44755333D647B43C2 /* VersionHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionHistoryView.swift; sourceTree = "<group>"; };
+		1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewThreadView.swift; sourceTree = "<group>"; };
+		FAD09F509367E88989F2B765 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
+		B13338371A8BC76142D4A946 /* LoadingDots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingDots.swift; sourceTree = "<group>"; };
+		043A0A515D971904874F82FA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9FC1F8270AA213F596F5FE3D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2EB2D8158FC6EF9EB19CB439 = {
+			isa = PBXGroup;
+			children = (
+				A6EBBB116F8E23175474B629 /* Matcha */,
+				1E78B559816E575FC0BDB29C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1E78B559816E575FC0BDB29C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				564E3C3CDF69E05F3D1338CB /* Matcha.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A6EBBB116F8E23175474B629 /* Matcha */ = {
+			isa = PBXGroup;
+			children = (
+				BCA3014F0DF28041826CAE33 /* App */,
+				14DA5117C9FA43B5A33BC95A /* Models */,
+				3CA3F4A0C1D5129426EB4FCB /* Services */,
+				CF8DC11AF90E58CD0A66CCB7 /* ViewModels */,
+				D4D70C04C5C45B4D7F098D3A /* Views */,
+				42FC58810D42613300564031 /* Resources */,
+			);
+			name = Matcha;
+			path = Matcha;
+			sourceTree = "<group>";
+		};
+		D4D70C04C5C45B4D7F098D3A /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				CB1861633F56B0B081A83870 /* Login */,
+				3F39F7E6D963F82CA7F10D0F /* MatchaWork */,
+				2A3B09DBB213E1E548F63A3D /* Components */,
+			);
+			name = Views;
+			path = Views;
+			sourceTree = "<group>";
+		};
+		BCA3014F0DF28041826CAE33 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				CC995D9793AD79440F7616A7 /* MatchaApp.swift */,
+				88DD03E26D63AB66B7AF4B39 /* AppState.swift */,
+				9A53863E4FE1105A953775B9 /* ContentView.swift */,
+				AD198140CC378D9E843FA827 /* Color+Extensions.swift */,
+			);
+			name = App;
+			path = App;
+			sourceTree = "<group>";
+		};
+		14DA5117C9FA43B5A33BC95A /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				210A398CCEA5FA1784C2C92D /* AuthModels.swift */,
+				50DADEBEA015DBB962E44A90 /* MatchaWorkModels.swift */,
+			);
+			name = Models;
+			path = Models;
+			sourceTree = "<group>";
+		};
+		3CA3F4A0C1D5129426EB4FCB /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				87CD3FA8F0164D2F29731B2D /* KeychainHelper.swift */,
+				15F1E6446AC5C08F85073A51 /* APIClient.swift */,
+				696FF167B14C8BBD12958A10 /* AuthService.swift */,
+				4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */,
+			);
+			name = Services;
+			path = Services;
+			sourceTree = "<group>";
+		};
+		CF8DC11AF90E58CD0A66CCB7 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				0B03E99B58F986725B43CD7A /* AuthViewModel.swift */,
+				FA53495B161A46747955400C /* ThreadListViewModel.swift */,
+				F88AB428B69CD0DC86AF1AA9 /* ThreadDetailViewModel.swift */,
+			);
+			name = ViewModels;
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		CB1861633F56B0B081A83870 /* Login */ = {
+			isa = PBXGroup;
+			children = (
+				A7C07C71E59F24539F32D490 /* LoginView.swift */,
+			);
+			name = Login;
+			path = Login;
+			sourceTree = "<group>";
+		};
+		3F39F7E6D963F82CA7F10D0F /* MatchaWork */ = {
+			isa = PBXGroup;
+			children = (
+				0B3F3B04FAEA73368120D2C4 /* ThreadListView.swift */,
+				A91B82ECF6D3B416A97C8FD9 /* ThreadDetailView.swift */,
+				C52416548CAE98530BAD906E /* ChatPanelView.swift */,
+				3AE423DAF2E806EE77E7FB4D /* MessageBubbleView.swift */,
+				DCD9DCBDB9CC47BA70B5F0FF /* PreviewPanelView.swift */,
+				49C4DFA44755333D647B43C2 /* VersionHistoryView.swift */,
+				1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */,
+			);
+			name = MatchaWork;
+			path = MatchaWork;
+			sourceTree = "<group>";
+		};
+		2A3B09DBB213E1E548F63A3D /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				FAD09F509367E88989F2B765 /* StatusBadge.swift */,
+				B13338371A8BC76142D4A946 /* LoadingDots.swift */,
+			);
+			name = Components;
+			path = Components;
+			sourceTree = "<group>";
+		};
+		42FC58810D42613300564031 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				043A0A515D971904874F82FA /* Assets.xcassets */,
+			);
+			name = Resources;
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		EAD6E01D8FE688AA86861CC7 /* Matcha */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E31BA15CC04B0F0B923553D1 /* Build configuration list for PBXNativeTarget "Matcha" */;
+			buildPhases = (
+				E47C533713C9438D057D26E1 /* Sources */,
+				9FC1F8270AA213F596F5FE3D /* Frameworks */,
+				05AE05B62C255B9A1ABCA2D7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Matcha;
+			productName = Matcha;
+			productReference = 564E3C3CDF69E05F3D1338CB /* Matcha.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9E88446A3F44B57E975BE17B /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					EAD6E01D8FE688AA86861CC7 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 314425BAD361EE8153704C56 /* Build configuration list for PBXProject "Matcha" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 2EB2D8158FC6EF9EB19CB439;
+			productRefGroup = 1E78B559816E575FC0BDB29C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				EAD6E01D8FE688AA86861CC7 /* Matcha */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		05AE05B62C255B9A1ABCA2D7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				84947A5F80A1EC7B15C1B8E9 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		E47C533713C9438D057D26E1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B2C7DB8AE33E886529C5BF99 /* MatchaApp.swift in Sources */,
+				A8B0E4F8719EE4B839FFBCBC /* AppState.swift in Sources */,
+				27D89F55D2042BB60126C2E5 /* ContentView.swift in Sources */,
+				E6875027B0F5CBDE47D488EF /* Color+Extensions.swift in Sources */,
+				1FEDFFD4BC1C7F59E9CFD687 /* AuthModels.swift in Sources */,
+				57650AD72FEAE1AA3BC9EA2B /* MatchaWorkModels.swift in Sources */,
+				29E4BDC2148FC96D831C7A74 /* KeychainHelper.swift in Sources */,
+				E5454454BDC033D4A00E1FFC /* APIClient.swift in Sources */,
+				0CBD0CD62319C7801E72CE1A /* AuthService.swift in Sources */,
+				1544DF6ADC7DC9778A60BEA8 /* MatchaWorkService.swift in Sources */,
+				1896C192062FDFA5D66338DF /* AuthViewModel.swift in Sources */,
+				FADFA74F8E449B203A55B306 /* ThreadListViewModel.swift in Sources */,
+				EC4ABAA381C7E136838EDD09 /* ThreadDetailViewModel.swift in Sources */,
+				4AE084C390D04987CC53601E /* LoginView.swift in Sources */,
+				C77BADBAE54E04005E00E518 /* ThreadListView.swift in Sources */,
+				36EE1D8AC492F24143BFEEBD /* ThreadDetailView.swift in Sources */,
+				788DF3AB085B3D15F4231730 /* ChatPanelView.swift in Sources */,
+				E8EB21EC67FE2F741A8AEA6A /* MessageBubbleView.swift in Sources */,
+				FC22CC98585FB00D59E39358 /* PreviewPanelView.swift in Sources */,
+				1BFFF9E1D881752A67CF8777 /* VersionHistoryView.swift in Sources */,
+				48C216A1C92E1717B236961D /* NewThreadView.swift in Sources */,
+				59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */,
+				208F703F48307B35717A911B /* LoadingDots.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		06638E962A6E8E2ACAE332C2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		BF26485C9BD55CCDFED10BBB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		C6F7D77CFEE3F3714426E427 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Matcha/Matcha.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.matcha.Matcha";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		9F8E5B827E07885EFAD454FC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Matcha/Matcha.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.matcha.Matcha";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		314425BAD361EE8153704C56 /* Build configuration list for PBXProject "Matcha" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				06638E962A6E8E2ACAE332C2 /* Debug */,
+				BF26485C9BD55CCDFED10BBB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E31BA15CC04B0F0B923553D1 /* Build configuration list for PBXNativeTarget "Matcha" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C6F7D77CFEE3F3714426E427 /* Debug */,
+				9F8E5B827E07885EFAD454FC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = 9E88446A3F44B57E975BE17B /* Project object */;
+}
