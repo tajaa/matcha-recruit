@@ -24,6 +24,7 @@ class AppState {
         currentUser = nil
         isAuthenticated = false
         selectedThreadId = nil
+        APIClient.shared.accessToken = nil
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)
         KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
     }

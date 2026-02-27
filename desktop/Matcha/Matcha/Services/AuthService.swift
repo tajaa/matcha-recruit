@@ -55,5 +55,6 @@ class AuthService {
     private func saveTokens(_ response: TokenResponse) {
         KeychainHelper.save(key: KeychainHelper.Keys.accessToken, value: response.access_token)
         KeychainHelper.save(key: KeychainHelper.Keys.refreshToken, value: response.refresh_token)
+        client.accessToken = response.access_token
     }
 }

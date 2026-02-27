@@ -26,14 +26,15 @@ enum APIError: Error, LocalizedError {
 class APIClient {
     static let shared = APIClient()
     let baseURL = "http://127.0.0.1:8001/api"
-    var accessToken: String? {
-        get { KeychainHelper.load(key: KeychainHelper.Keys.accessToken) }
-    }
+    var accessToken: String?
 
     // Will be set by AppState to handle logout on 401
     var onUnauthorized: (() -> Void)?
 
-    private init() {}
+    private init() {
+        // Restore cached token from keychain on launch
+        accessToken = KeychainHelper.load(key: KeychainHelper.Keys.accessToken)
+    }
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
