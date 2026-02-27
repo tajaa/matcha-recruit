@@ -62,7 +62,10 @@ class ThreadDetailViewModel {
             streamingContent = ""
         }
 
-        guard let url = URL(string: "\(basePath)/threads/\(threadId)/messages/stream") else { return }
+        guard let url = URL(string: "\(basePath)/threads/\(threadId)/messages/stream") else {
+            await MainActor.run { isStreaming = false }
+            return
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -104,28 +107,22 @@ class ThreadDetailViewModel {
     @MainActor
     private func handleSSEEvent(_ event: SSEEvent) {
         switch event.type {
-        case "content":
-            if let c = event.content {
-                streamingContent += c
-            }
         case "complete":
-            if let msg = event.message {
+            if let msg = event.data?.assistantMessage {
                 messages.append(msg)
             }
-            if let v = event.version {
+            if let v = event.data?.version {
                 thread?.version = v
             }
-            if let state = event.currentState {
+            if let state = event.data?.currentState {
                 currentState = state
             }
-            tokenUsage = event.tokenUsage
             streamingContent = ""
-            // Reload PDF for offer letters
             if thread?.taskType == "offer_letter" {
                 Task { await loadPDF() }
             }
         case "error":
-            errorMessage = event.message?.content ?? "Unknown streaming error"
+            errorMessage = event.message ?? "Unknown streaming error"
         default:
             break
         }
@@ -176,18 +173,25 @@ class ThreadDetailViewModel {
     }
 }
 
-// SSE event struct
-struct SSEEvent: Codable {
-    let type: String
-    let content: String?
-    let message: MWMessage?
-    let version: Int?
+// SSE event structs — backend sends {"type":"complete","data":{...}} or {"type":"error","message":"..."}
+struct SSEEventData: Codable {
+    let userMessage: MWMessage?
+    let assistantMessage: MWMessage?
     let currentState: [String: AnyCodable]?
-    let tokenUsage: MWTokenUsage?
+    let version: Int?
+    let pdfUrl: String?
 
     enum CodingKeys: String, CodingKey {
-        case type, content, message, version
+        case version
+        case userMessage = "user_message"
+        case assistantMessage = "assistant_message"
         case currentState = "current_state"
-        case tokenUsage = "token_usage"
+        case pdfUrl = "pdf_url"
     }
+}
+
+struct SSEEvent: Codable {
+    let type: String
+    let data: SSEEventData?
+    let message: String?  // error events
 }

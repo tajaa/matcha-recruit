@@ -61,13 +61,30 @@ struct MWMessage: Codable, Identifiable {
     }
 }
 
+// Flat response matching backend ThreadDetailResponse
 struct MWThreadDetail: Codable {
-    let thread: MWThread
+    let id: String
+    let title: String
+    let taskType: String
+    let status: String
+    let version: Int
+    let isPinned: Bool
+    let createdAt: String
+    let updatedAt: String
     let messages: [MWMessage]
-    let currentState: [String: AnyCodable]?
+    let currentState: [String: AnyCodable]
+
+    var thread: MWThread {
+        MWThread(id: id, title: title, taskType: taskType, status: status,
+                 version: version, isPinned: isPinned, createdAt: createdAt, updatedAt: updatedAt)
+    }
 
     enum CodingKeys: String, CodingKey {
-        case thread, messages
+        case id, title, status, version, messages
+        case taskType = "task_type"
+        case isPinned = "is_pinned"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
         case currentState = "current_state"
     }
 }
@@ -122,9 +139,6 @@ struct MWCreateThreadRequest: Codable {
     }
 }
 
-struct MWListResponse: Codable {
-    let threads: [MWThread]
-}
 
 struct MWPinRequest: Codable {
     let pinned: Bool

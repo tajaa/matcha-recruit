@@ -9,8 +9,7 @@ class MatchaWorkService {
     func listThreads(status: String? = nil) async throws -> [MWThread] {
         var path = "\(basePath)/threads?limit=50"
         if let status = status { path += "&status=\(status)" }
-        let response: MWListResponse = try await client.request(method: "GET", path: path)
-        return response.threads
+        return try await client.request(method: "GET", path: path)
     }
 
     func getThread(id: String) async throws -> MWThreadDetail {
