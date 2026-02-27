@@ -23,7 +23,7 @@ WORKBOOK_FIELDS = list(WorkbookDocument.model_fields.keys())
 ONBOARDING_FIELDS = list(OnboardingDocument.model_fields.keys())
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
-SUPPORTED_AI_SKILLS = {"offer_letter", "review", "workbook", "onboarding", "none"}
+SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "none"}
 SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
@@ -46,9 +46,9 @@ Mission:
 4) Never block normal Q&A just because no skill is invoked.
 
 Current thread context:
-- current_task_type: {current_task_type}
+- current_skill (inferred from state): {current_skill}
 - current_state (JSON): {current_state}
-- valid_update_fields_for_current_task_type: {valid_fields}
+- valid_update_fields: {valid_fields}
 
 Supported skills:
 - offer_letter: create/update offer letter content, save_draft, send_draft, finalize
@@ -89,7 +89,7 @@ Output constraints:
   "missing_fields": [],
   "reply": ""
 }}
-- "updates" may include only keys from valid_update_fields_for_current_task_type.
+- "updates" may include only keys from valid_update_fields.
 - If no state changes are needed, set "updates": {{}}.
 - If mode != skill, use "operation": "none" unless a clarify step for skill action is needed.
 - recipient_emails must be lowercase email strings in an array.
@@ -109,14 +109,19 @@ def _clean_json_text(text: str) -> str:
     return text.strip()
 
 
-def _normalize_task_type(task_type: Optional[str]) -> str:
-    if task_type == "review":
+def _infer_skill_from_state(current_state: dict) -> str:
+    """Infer the active skill from current_state contents."""
+    if not current_state:
+        return "chat"
+    if any(k in current_state for k in ("candidate_name", "position_title", "salary", "salary_range_min")):
+        return "offer_letter"
+    if any(k in current_state for k in ("overall_rating", "review_title", "review_request_statuses", "review_expected_responses")):
         return "review"
-    if task_type == "workbook":
+    if "sections" in current_state or "workbook_title" in current_state:
         return "workbook"
-    if task_type == "onboarding":
+    if any(k in current_state for k in ("employees", "batch_status")):
         return "onboarding"
-    return "offer_letter"
+    return "chat"
 
 
 async def _get_model(settings) -> str:
@@ -143,7 +148,6 @@ class MatchaWorkAIProvider:
         self,
         messages: list[dict],
         current_state: dict,
-        task_type: str = "offer_letter",
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -173,10 +177,9 @@ class GeminiProvider(MatchaWorkAIProvider):
         self,
         messages: list[dict],
         current_state: dict,
-        task_type: str = "offer_letter",
     ) -> AIResponse:
-        system_prompt, contents, valid_fields = self._build_prompt_and_contents(
-            messages, current_state, task_type=task_type
+        system_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
+            messages, current_state
         )
         model = await _get_model(self.settings)
 
@@ -188,7 +191,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     contents,
                     valid_fields,
                     model,
-                    _normalize_task_type(task_type),
+                    inferred_skill,
                 ),
                 timeout=GEMINI_CALL_TIMEOUT,
             )
@@ -212,7 +215,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         contents: list,
         valid_fields: list[str],
         model: str,
-        fallback_task_type: str,
+        inferred_skill: str,
     ) -> AIResponse:
         response = self.client.models.generate_content(
             model=model,
@@ -260,7 +263,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         raw_skill = str(parsed.get("skill") or "").strip().lower()
         skill = raw_skill if raw_skill in SUPPORTED_AI_SKILLS else ""
         if not skill:
-            skill = fallback_task_type if mode == "skill" else "none"
+            skill = inferred_skill if mode == "skill" else "none"
 
         raw_operation = str(parsed.get("operation") or "").strip().lower()
         operation = raw_operation if raw_operation in SUPPORTED_AI_OPERATIONS else ""
@@ -298,10 +301,9 @@ class GeminiProvider(MatchaWorkAIProvider):
         self,
         messages: list[dict],
         current_state: dict,
-        task_type: str = "offer_letter",
     ) -> dict:
-        system_prompt, _, _ = self._build_prompt_and_contents(
-            messages, current_state, task_type=task_type
+        system_prompt, _, _, _ = self._build_prompt_and_contents(
+            messages, current_state
         )
         model = await _get_model(self.settings)
         windowed = messages[-20:]
@@ -319,21 +321,22 @@ class GeminiProvider(MatchaWorkAIProvider):
         self,
         messages: list[dict],
         current_state: dict,
-        task_type: str = "offer_letter",
-    ) -> tuple[str, list, list[str]]:
+    ) -> tuple[str, list, list[str], str]:
         windowed = messages[-20:]
-        normalized_task_type = _normalize_task_type(task_type)
-        if normalized_task_type == "review":
+        current_skill = _infer_skill_from_state(current_state)
+        if current_skill == "offer_letter":
+            valid_fields = OFFER_LETTER_FIELDS
+        elif current_skill == "review":
             valid_fields = REVIEW_FIELDS
-        elif normalized_task_type == "workbook":
+        elif current_skill == "workbook":
             valid_fields = WORKBOOK_FIELDS
-        elif normalized_task_type == "onboarding":
+        elif current_skill == "onboarding":
             valid_fields = ONBOARDING_FIELDS
         else:
-            valid_fields = OFFER_LETTER_FIELDS
+            valid_fields = []
 
         system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
-            current_task_type=normalized_task_type,
+            current_skill=current_skill,
             current_state=json.dumps(current_state, indent=2, default=str),
             valid_fields=", ".join(valid_fields),
         )
@@ -347,7 +350,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     parts=[types.Part(text=msg["content"])],
                 )
             )
-        return system_prompt, contents, valid_fields
+        return system_prompt, contents, valid_fields, current_skill
 
     def _extract_usage_metadata(self, response: Any, model: str) -> Optional[dict]:
         usage = getattr(response, "usage_metadata", None)

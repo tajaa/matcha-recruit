@@ -120,10 +120,9 @@ struct NewThreadView: View {
                             errorMessage = nil
                             let newTitle = title.isEmpty ? nil : title
                             let msg = initialMessage.isEmpty ? nil : initialMessage
-                            // Pass a default task_type; backend detects the real type from the message
+                            // Pass generic chat type; backend detects the real type from the message
                             if let thread = await viewModel.createThread(
                                 title: newTitle,
-                                taskType: "offer_letter",
                                 initialMessage: msg
                             ) {
                                 await MainActor.run {

@@ -46,7 +46,7 @@ from ..models.matcha_work import (
 )
 from ..services import matcha_work_document as doc_svc
 from ..services import billing_service
-from ..services.matcha_work_ai import get_ai_provider
+from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -65,172 +65,23 @@ VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys())
 VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
 VALID_WORKBOOK_FIELDS = set(WorkbookDocument.model_fields.keys())
 VALID_ONBOARDING_FIELDS = set(OnboardingDocument.model_fields.keys())
-THREAD_SCOPE_REPLY_TEMPLATE = (
-    "This chat is currently focused on {current}. Start a new chat to work on {requested}, "
-    "or continue with {current} in this thread."
-)
-
-OFFER_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
-    (r"\boffer letter\b", 4),
-    (r"\bjob offer\b", 4),
-    (r"\bemployment offer\b", 4),
-    (r"\boffer\b", 1),
-    (r"\bsalary\b", 1),
-    (r"\bcompensation\b", 1),
-    (r"\bbenefits?\b", 1),
-    (r"\bstart date\b", 1),
-    (r"\bcandidate\b", 1),
-)
-
-REVIEW_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
-    (r"\bperformance review\b", 4),
-    (r"\banonym(?:ous|ized)\s+review\b", 4),
-    (r"\breview\b", 1),
-    (r"\bfeedback\b", 1),
-    (r"\bstrengths?\b", 1),
-    (r"\bgrowth areas?\b", 1),
-    (r"\brating\b", 1),
-    (r"\bevaluation\b", 1),
-)
-
-WORKBOOK_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
-    (r"\bworkbook\b", 4),
-    (r"\bhandbook\b", 4),
-    (r"\bmanual\b", 4),
-    (r"\bplaybook\b", 4),
-    (r"\bguide\b", 1),
-    (r"\bpolicy collection\b", 4),
-)
-
-ONBOARDING_INTENT_PATTERNS: tuple[tuple[str, int], ...] = (
-    (r"\bonboard(?:ing)?\b", 4),
-    (r"\bnew\s+(?:hire|employee|team\s+member)s?\b", 4),
-    (r"\badd\s+employee", 4),
-    (r"\bcreate\s+employee", 4),
-    (r"\bhire\b", 1),
-    (r"\bprovision(?:ing)?\b", 1),
-)
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 
 
-def _normalize_task_type(task_type: Optional[str]) -> str:
-    if task_type == "review":
-        return "review"
-    if task_type == "workbook":
-        return "workbook"
-    if task_type == "onboarding":
-        return "onboarding"
-    return "offer_letter"
-
-
-def _task_type_label(task_type: Optional[str]) -> str:
-    normalized = _normalize_task_type(task_type)
-    if normalized == "review":
-        return "anonymized reviews"
-    if normalized == "workbook":
-        return "HR workbooks"
-    if normalized == "onboarding":
-        return "employee onboarding"
-    return "offer letters"
-
-
-def _is_offer_letter_task(task_type: Optional[str]) -> bool:
-    return _normalize_task_type(task_type) == "offer_letter"
-
-
-def _validate_updates(task_type: Optional[str], updates: dict) -> dict:
-    """Filter AI updates to known fields for the thread task type."""
-    ntype = _normalize_task_type(task_type)
-    if ntype == "offer_letter":
+def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
+    """Filter AI updates to known fields for the inferred skill."""
+    if skill == "offer_letter":
         valid_fields = VALID_OFFER_LETTER_FIELDS
-    elif ntype == "review":
+    elif skill == "review":
         valid_fields = VALID_REVIEW_FIELDS
-    elif ntype == "onboarding":
+    elif skill == "onboarding":
         valid_fields = VALID_ONBOARDING_FIELDS
-    else:
+    elif skill == "workbook":
         valid_fields = VALID_WORKBOOK_FIELDS
+    else:
+        return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
-
-
-def _intent_score(text: str, patterns: tuple[tuple[str, int], ...]) -> int:
-    score = 0
-    for pattern, weight in patterns:
-        if re.search(pattern, text):
-            score += weight
-    return score
-
-
-def _detect_requested_task_type(content: str) -> Optional[str]:
-    text = content.lower().strip()
-    if not text:
-        return None
-    offer_score = _intent_score(text, OFFER_INTENT_PATTERNS)
-    review_score = _intent_score(text, REVIEW_INTENT_PATTERNS)
-    workbook_score = _intent_score(text, WORKBOOK_INTENT_PATTERNS)
-    onboarding_score = _intent_score(text, ONBOARDING_INTENT_PATTERNS)
-
-    if offer_score == 0 and review_score == 0 and workbook_score == 0 and onboarding_score == 0:
-        return None
-
-    scores = [
-        ("offer_letter", offer_score),
-        ("review", review_score),
-        ("workbook", workbook_score),
-        ("onboarding", onboarding_score),
-    ]
-    scores.sort(key=lambda x: x[1], reverse=True)
-
-    # Return the winner if it's clear
-    if scores[0][1] > scores[1][1]:
-        return scores[0][0]
-
-    # Tie-breaking / explicit keywords
-    if re.search(r"\bonboard(?:ing)?\b|\bnew\s+(?:hire|employee)s?\b|\badd\s+employee\b|\bcreate\s+employee\b", text):
-        return "onboarding"
-    if re.search(r"\boffer letter\b|\bjob offer\b|\bemployment offer\b", text):
-        return "offer_letter"
-    if re.search(r"\bperformance review\b|\banonym(?:ous|ized)\s+review\b", text):
-        return "review"
-    if re.search(r"\bworkbook\b|\bhandbook\b|\bplaybook\b", text):
-        return "workbook"
-
-    return scores[0][0]
-
-
-def _thread_has_existing_work(thread: dict, prior_message_count: int = 0) -> bool:
-    return bool(thread.get("current_state")) or int(thread.get("version", 0)) > 0 or prior_message_count > 0
-
-
-async def _resolve_task_type_for_message(
-    thread: dict,
-    company_id: UUID,
-    content: str,
-    prior_message_count: int = 0,
-) -> tuple[Optional[str], dict, Optional[str]]:
-    current_task_type = _normalize_task_type(thread.get("task_type"))
-    requested_task_type = _detect_requested_task_type(content)
-    has_existing_work = _thread_has_existing_work(thread, prior_message_count=prior_message_count)
-
-    if requested_task_type is None:
-        return current_task_type, thread, None
-
-    if requested_task_type != current_task_type:
-        if has_existing_work:
-            return (
-                None,
-                thread,
-                THREAD_SCOPE_REPLY_TEMPLATE.format(
-                    current=_task_type_label(current_task_type),
-                    requested=_task_type_label(requested_task_type),
-                ),
-            )
-        switched = await doc_svc.set_thread_task_type(thread["id"], company_id, requested_task_type)
-        if switched is not None:
-            thread = switched
-        current_task_type = requested_task_type
-
-    return current_task_type, thread, None
 
 
 def _row_to_message(row: dict) -> MWMessageOut:
@@ -541,7 +392,6 @@ async def _apply_ai_updates_and_operations(
     *,
     thread_id: UUID,
     company_id: UUID,
-    task_type: str,
     ai_resp,
     current_state: dict,
     current_version: int,
@@ -549,7 +399,7 @@ async def _apply_ai_updates_and_operations(
     current_user_id: Optional[UUID] = None,
 ) -> tuple[dict, int, Optional[str], bool, str]:
     """Apply structured updates, execute supported operations, and return updated response state."""
-    normalized_task_type = _normalize_task_type(task_type)
+    skill = ai_resp.skill or _infer_skill_from_state(current_state)
     initial_version = int(current_version)
     pdf_url: Optional[str] = None
     assistant_reply = ai_resp.assistant_reply
@@ -560,20 +410,20 @@ async def _apply_ai_updates_and_operations(
         and (ai_resp.confidence >= 0.65 or not ai_resp.missing_fields)
     )
     force_send_draft = (
-        _is_offer_letter_task(normalized_task_type)
+        skill == "offer_letter"
         and _looks_like_send_draft_command(user_message)
     )
     can_execute_operation = should_execute_skill or force_send_draft
 
     if should_execute_skill and ai_resp.structured_update:
-        safe_updates = _validate_updates(normalized_task_type, ai_resp.structured_update)
+        safe_updates = _validate_updates_for_skill(skill, ai_resp.structured_update)
         if safe_updates:
             result = await doc_svc.apply_update(thread_id, safe_updates)
             current_version = result["version"]
             current_state = result["current_state"]
             changed = changed or current_version != initial_version
 
-            if _is_offer_letter_task(normalized_task_type):
+            if _infer_skill_from_state(current_state) == "offer_letter":
                 pdf_url = await doc_svc.generate_pdf(
                     current_state, thread_id, current_version, is_draft=True
                 )
@@ -586,13 +436,13 @@ async def _apply_ai_updates_and_operations(
         action_note: Optional[str] = None
         try:
             if operation == "save_draft":
-                if not _is_offer_letter_task(normalized_task_type):
+                if skill != "offer_letter":
                     action_note = "Save draft is only available for offer letters."
                 else:
                     saved = await doc_svc.save_offer_letter_draft(thread_id, company_id)
                     action_note = f"Saved draft successfully ({saved['offer_status']})."
             elif operation == "send_draft":
-                if not _is_offer_letter_task(normalized_task_type):
+                if skill != "offer_letter":
                     action_note = "Draft sending is only available for offer letters."
                 else:
                     recipients = _collect_offer_draft_recipients(
@@ -622,7 +472,7 @@ async def _apply_ai_updates_and_operations(
                         if failed_recipients:
                             action_note += f" Failed recipient(s): {', '.join(failed_recipients[:3])}."
             elif operation == "send_requests":
-                if normalized_task_type != "review":
+                if skill != "review":
                     action_note = "Sending review requests is only available in review threads."
                 else:
                     recipient_emails: list[str] = []
@@ -656,7 +506,7 @@ async def _apply_ai_updates_and_operations(
                     pdf_url = finalized["pdf_url"]
                 action_note = "Thread finalized."
             elif operation == "create_employees":
-                if normalized_task_type != "onboarding":
+                if skill != "onboarding":
                     action_note = "Employee creation is only available in onboarding threads."
                 else:
                     raw_employees = current_state.get("employees")
@@ -689,7 +539,7 @@ async def _apply_ai_updates_and_operations(
                             action_note += f", {errors} failed: " + "; ".join(error_names[:5])
                         action_note += "."
             elif operation == "generate_presentation":
-                if normalized_task_type != "workbook":
+                if skill != "workbook":
                     action_note = "Presentation generation is only available in workbook threads."
                 else:
                     generated = await doc_svc.generate_workbook_presentation(
@@ -732,18 +582,8 @@ async def create_thread(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with this account")
 
-    task_type = _normalize_task_type(body.task_type)
-    if task_type == "review":
-        default_title = "Untitled Review"
-    elif task_type == "workbook":
-        default_title = "Untitled Workbook"
-    elif task_type == "onboarding":
-        default_title = "New Onboarding"
-    else:
-        default_title = "Untitled Chat"
-
-    title = body.title or default_title
-    thread = await doc_svc.create_thread(company_id, current_user.id, title, task_type=task_type)
+    title = body.title or "New Chat"
+    thread = await doc_svc.create_thread(company_id, current_user.id, title)
     thread_id = thread["id"]
 
     assistant_reply = None
@@ -752,72 +592,55 @@ async def create_thread(
     if body.initial_message:
         # Save user message
         await doc_svc.add_message(thread_id, "user", body.initial_message)
-        resolved_task_type, thread, unsupported_reply = await _resolve_task_type_for_message(
-            thread,
-            company_id,
-            body.initial_message,
-            prior_message_count=0,
+
+        # Call AI
+        ai_provider = get_ai_provider()
+        messages = [{"role": "user", "content": body.initial_message}]
+        estimated_usage = await ai_provider.estimate_usage(messages, thread["current_state"])
+        ai_resp = await ai_provider.generate(messages, thread["current_state"])
+        final_usage = ai_resp.token_usage or estimated_usage
+
+        new_version = thread["version"]
+        (
+            updated_state,
+            new_version,
+            pdf_url,
+            changed,
+            assistant_reply_text,
+        ) = await _apply_ai_updates_and_operations(
+            thread_id=thread_id,
+            company_id=company_id,
+            ai_resp=ai_resp,
+            current_state=thread["current_state"],
+            current_version=new_version,
+            user_message=body.initial_message,
+            current_user_id=current_user.id,
         )
+        thread["current_state"] = updated_state
 
-        if unsupported_reply:
-            await doc_svc.add_message(thread_id, "assistant", unsupported_reply)
-            assistant_reply = unsupported_reply
-        else:
-            # Call AI
-            ai_provider = get_ai_provider()
-            messages = [{"role": "user", "content": body.initial_message}]
-            estimated_usage = await ai_provider.estimate_usage(
-                messages, thread["current_state"], task_type=resolved_task_type
-            )
-            ai_resp = await ai_provider.generate(
-                messages, thread["current_state"], task_type=resolved_task_type
-            )
-            final_usage = ai_resp.token_usage or estimated_usage
-
-            new_version = thread["version"]
-            (
-                updated_state,
-                new_version,
-                pdf_url,
-                changed,
-                assistant_reply_text,
-            ) = await _apply_ai_updates_and_operations(
-                thread_id=thread_id,
+        await doc_svc.add_message(
+            thread_id,
+            "assistant",
+            assistant_reply_text,
+            version_created=new_version if changed else None,
+        )
+        try:
+            await doc_svc.log_token_usage_event(
                 company_id=company_id,
-                task_type=resolved_task_type,
-                ai_resp=ai_resp,
-                current_state=thread["current_state"],
-                current_version=new_version,
-                user_message=body.initial_message,
-                current_user_id=current_user.id,
+                user_id=current_user.id,
+                thread_id=thread_id,
+                token_usage=final_usage,
+                operation="send_message",
             )
-            thread["current_state"] = updated_state
+        except Exception as e:
+            logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
 
-            await doc_svc.add_message(
-                thread_id,
-                "assistant",
-                assistant_reply_text,
-                version_created=new_version if changed else None,
-            )
-            try:
-                await doc_svc.log_token_usage_event(
-                    company_id=company_id,
-                    user_id=current_user.id,
-                    thread_id=thread_id,
-                    token_usage=final_usage,
-                    operation="send_message",
-                )
-            except Exception as e:
-                logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
-
-            thread["version"] = new_version
-            thread["task_type"] = resolved_task_type
-            assistant_reply = assistant_reply_text
+        thread["version"] = new_version
+        assistant_reply = assistant_reply_text
 
     return CreateThreadResponse(
         id=thread_id,
         title=thread["title"],
-        task_type=thread["task_type"],
         status=thread["status"],
         current_state=thread["current_state"],
         version=thread["version"],
@@ -843,7 +666,7 @@ async def upload_thread_logo(
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    if thread["task_type"] != "offer_letter":
+    if _infer_skill_from_state(thread.get("current_state") or {}) != "offer_letter":
         raise HTTPException(status_code=400, detail="Logo upload is only available for offer letters")
 
     # Validate file type
@@ -901,9 +724,6 @@ async def upload_thread_images(
     thread = await doc_svc.get_thread(thread_id, company_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if thread["task_type"] != "workbook":
-        raise HTTPException(status_code=400, detail="Image upload is only available for workbook threads")
-
     existing: list[str] = (thread.get("current_state") or {}).get("images") or []
     if len(existing) + len(files) > 4:
         raise HTTPException(
@@ -1020,7 +840,6 @@ async def get_thread(
     return ThreadDetailResponse(
         id=thread["id"],
         title=thread["title"],
-        task_type=thread["task_type"],
         status=thread["status"],
         current_state=thread["current_state"],
         version=thread["version"],
@@ -1059,41 +878,14 @@ async def send_message(
     # Fetch message history for context (sliding window handled by AI provider)
     messages = await doc_svc.get_thread_messages(thread_id)
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
-    prior_message_count = max(0, len(messages) - 1)
-    resolved_task_type, thread, unsupported_reply = await _resolve_task_type_for_message(
-        thread,
-        company_id,
-        body.content,
-        prior_message_count=prior_message_count,
-    )
-
-    if unsupported_reply:
-        assistant_msg = await doc_svc.add_message(
-            thread_id,
-            "assistant",
-            unsupported_reply,
-            version_created=None,
-        )
-        return SendMessageResponse(
-            user_message=_row_to_message(user_msg),
-            assistant_message=_row_to_message(assistant_msg),
-            current_state=thread["current_state"],
-            version=thread["version"],
-            pdf_url=None,
-            token_usage=None,
-        )
 
     if current_user.role != "admin":
         await billing_service.check_credits(company_id)
 
     # Call AI
     ai_provider = get_ai_provider()
-    estimated_usage = await ai_provider.estimate_usage(
-        msg_dicts, thread["current_state"], task_type=resolved_task_type
-    )
-    ai_resp = await ai_provider.generate(
-        msg_dicts, thread["current_state"], task_type=resolved_task_type
-    )
+    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"])
+    ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"])
     final_usage = ai_resp.token_usage or estimated_usage
 
     current_version = thread["version"]
@@ -1106,7 +898,6 @@ async def send_message(
     ) = await _apply_ai_updates_and_operations(
         thread_id=thread_id,
         company_id=company_id,
-        task_type=resolved_task_type,
         ai_resp=ai_resp,
         current_state=thread["current_state"],
         current_version=current_version,
@@ -1191,43 +982,12 @@ async def send_message_stream(
     # Fetch message history for context (sliding window handled by AI provider)
     messages = await doc_svc.get_thread_messages(thread_id)
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
-    prior_message_count = max(0, len(messages) - 1)
-    resolved_task_type, thread, unsupported_reply = await _resolve_task_type_for_message(
-        thread,
-        company_id,
-        body.content,
-        prior_message_count=prior_message_count,
-    )
-
-    if unsupported_reply:
-        assistant_msg = await doc_svc.add_message(
-            thread_id,
-            "assistant",
-            unsupported_reply,
-            version_created=None,
-        )
-        unsupported_response = SendMessageResponse(
-            user_message=_row_to_message(user_msg),
-            assistant_message=_row_to_message(assistant_msg),
-            current_state=thread["current_state"],
-            version=thread["version"],
-            pdf_url=None,
-            token_usage=None,
-        )
-
-        async def unsupported_stream():
-            yield _sse_data({"type": "complete", "data": unsupported_response.model_dump(mode="json")})
-            yield "data: [DONE]\n\n"
-
-        return StreamingResponse(unsupported_stream(), media_type="text/event-stream")
 
     if current_user.role != "admin":
         await billing_service.check_credits(company_id)
 
     ai_provider = get_ai_provider()
-    estimated_usage = await ai_provider.estimate_usage(
-        msg_dicts, thread["current_state"], task_type=resolved_task_type
-    )
+    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"])
 
     async def event_stream():
         try:
@@ -1241,9 +1001,7 @@ async def send_message_stream(
                 }
             )
 
-            ai_resp = await ai_provider.generate(
-                msg_dicts, thread["current_state"], task_type=resolved_task_type
-            )
+            ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"])
 
             current_version = thread["version"]
             (
@@ -1255,7 +1013,6 @@ async def send_message_stream(
             ) = await _apply_ai_updates_and_operations(
                 thread_id=thread_id,
                 company_id=company_id,
-                task_type=resolved_task_type,
                 ai_resp=ai_resp,
                 current_state=thread["current_state"],
                 current_version=current_version,
@@ -1425,7 +1182,7 @@ async def revert_thread(
     )
 
     pdf_url = None
-    if _is_offer_letter_task(thread["task_type"]):
+    if _infer_skill_from_state(new_state) == "offer_letter":
         pdf_url = await doc_svc.generate_pdf(new_state, thread_id, new_version, is_draft=True)
 
     return SendMessageResponse(
@@ -1468,7 +1225,7 @@ async def save_draft(
     thread = await doc_svc.get_thread(thread_id, company_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if not _is_offer_letter_task(thread["task_type"]):
+    if _infer_skill_from_state(thread.get("current_state") or {}) != "offer_letter":
         raise HTTPException(status_code=400, detail="Save draft is only available for offer letters")
 
     try:
@@ -1496,7 +1253,7 @@ async def get_pdf(
     thread = await doc_svc.get_thread(thread_id, company_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if not _is_offer_letter_task(thread["task_type"]):
+    if _infer_skill_from_state(thread.get("current_state") or {}) != "offer_letter":
         raise HTTPException(status_code=400, detail="PDF preview is only available for offer letters")
 
     target_version = version if version is not None else thread["version"]
@@ -1621,7 +1378,7 @@ async def send_handbook_signatures(
         raise HTTPException(status_code=404, detail="Thread not found")
     if thread["status"] == "archived":
         raise HTTPException(status_code=400, detail="Cannot send handbook signatures for an archived thread")
-    if _normalize_task_type(thread.get("task_type")) != "workbook":
+    if _infer_skill_from_state(thread.get("current_state") or {}) != "workbook":
         raise HTTPException(status_code=400, detail="Handbook signatures are only available for workbook threads")
 
     employee_ids = [str(employee_id) for employee_id in body.employee_ids] if body.employee_ids else None
@@ -1689,7 +1446,7 @@ async def update_thread_title(
             UPDATE mw_threads
             SET title=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, task_type, status, version, is_pinned, created_at, updated_at
+            RETURNING id, title, status, version, is_pinned, created_at, updated_at
             """,
             body.title,
             thread_id,

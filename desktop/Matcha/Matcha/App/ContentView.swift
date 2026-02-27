@@ -3,7 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppState.self) private var appState
     @State private var threadListVM = ThreadListViewModel()
-    @State private var showNewThread = false
+    @State private var isCreating = false
 
     var body: some View {
         @Bindable var appState = appState
@@ -27,21 +27,34 @@ struct ContentView: View {
                         Text("No thread selected")
                             .foregroundColor(.secondary)
                         Button {
-                            showNewThread = true
+                            guard !isCreating else { return }
+                            isCreating = true
+                            let dateStr = Date().formatted(date: .abbreviated, time: .omitted)
+                            Task {
+                                if let thread = await threadListVM.createThread(
+                                    title: "New Chat \(dateStr)",
+                                    initialMessage: nil
+                                ) {
+                                    await MainActor.run {
+                                        appState.selectedThreadId = thread.id
+                                        appState.showSkills = false
+                                    }
+                                }
+                                isCreating = false
+                            }
                         } label: {
-                            Label("New Chat", systemImage: "plus")
-                                .font(.system(size: 13, weight: .medium))
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
+                            if isCreating {
+                                ProgressView().controlSize(.small).tint(.white)
+                            } else {
+                                Label("New Chat", systemImage: "plus")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(Color.matcha600)
                         .keyboardShortcut("n", modifiers: .command)
+                        .disabled(isCreating)
                     }
-                }
-                .sheet(isPresented: $showNewThread) {
-                    NewThreadView(viewModel: threadListVM)
-                        .environment(appState)
                 }
             }
         }

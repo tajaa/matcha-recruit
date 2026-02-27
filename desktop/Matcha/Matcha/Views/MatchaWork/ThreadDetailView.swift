@@ -13,7 +13,6 @@ struct ThreadDetailView: View {
 
             if viewModel.hasPreviewContent || viewModel.isLoadingPDF {
                 PreviewPanelView(
-                    taskType: viewModel.thread?.taskType ?? "",
                     currentState: viewModel.currentState,
                     pdfData: viewModel.pdfData,
                     isLoading: viewModel.isLoadingPDF
@@ -30,7 +29,6 @@ struct ThreadDetailView: View {
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white)
                         VersionBadge(version: thread.version)
-                        TaskTypeBadge(taskType: thread.taskType)
                         StatusBadge(status: thread.status)
                     }
                 }

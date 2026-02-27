@@ -5,9 +5,6 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
-MatchaWorkTaskType = Literal["offer_letter", "review", "workbook", "onboarding"]
-
-
 class OnboardingEmployee(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -116,13 +113,11 @@ class WorkbookDocument(BaseModel):
 class CreateThreadRequest(BaseModel):
     title: Optional[str] = None
     initial_message: Optional[str] = None
-    task_type: MatchaWorkTaskType = "offer_letter"
 
 
 class CreateThreadResponse(BaseModel):
     id: UUID
     title: str
-    task_type: MatchaWorkTaskType
     status: str
     current_state: dict
     version: int
@@ -165,7 +160,6 @@ class SendMessageResponse(BaseModel):
 class ThreadListItem(BaseModel):
     id: UUID
     title: str
-    task_type: MatchaWorkTaskType
     status: str
     version: int
     is_pinned: bool = False
@@ -176,7 +170,7 @@ class ThreadListItem(BaseModel):
 class ElementListItem(BaseModel):
     id: UUID
     thread_id: UUID
-    element_type: MatchaWorkTaskType
+    element_type: str
     title: str
     status: str
     version: int
@@ -188,7 +182,6 @@ class ElementListItem(BaseModel):
 class ThreadDetailResponse(BaseModel):
     id: UUID
     title: str
-    task_type: MatchaWorkTaskType
     status: str
     current_state: dict
     version: int

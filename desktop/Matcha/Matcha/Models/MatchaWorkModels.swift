@@ -3,7 +3,6 @@ import Foundation
 struct MWThread: Codable, Identifiable {
     let id: String
     var title: String
-    let taskType: String
     var status: String
     var version: Int
     var isPinned: Bool
@@ -12,7 +11,6 @@ struct MWThread: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, version
-        case taskType = "task_type"
         case isPinned = "is_pinned"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -22,7 +20,6 @@ struct MWThread: Codable, Identifiable {
 struct MWCreateThreadResponse: Codable {
     let id: String
     let title: String
-    let taskType: String
     let status: String
     let version: Int
     let isPinned: Bool
@@ -32,7 +29,6 @@ struct MWCreateThreadResponse: Codable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, version
-        case taskType = "task_type"
         case isPinned = "is_pinned"
         case createdAt = "created_at"
         case assistantReply = "assistant_reply"
@@ -40,7 +36,7 @@ struct MWCreateThreadResponse: Codable {
     }
 
     func toThread() -> MWThread {
-        MWThread(id: id, title: title, taskType: taskType, status: status,
+        MWThread(id: id, title: title, status: status,
                  version: version, isPinned: isPinned, createdAt: createdAt, updatedAt: nil)
     }
 }
@@ -65,7 +61,6 @@ struct MWMessage: Codable, Identifiable {
 struct MWThreadDetail: Codable {
     let id: String
     let title: String
-    let taskType: String
     let status: String
     let version: Int
     let isPinned: Bool
@@ -75,13 +70,12 @@ struct MWThreadDetail: Codable {
     let currentState: [String: AnyCodable]
 
     var thread: MWThread {
-        MWThread(id: id, title: title, taskType: taskType, status: status,
+        MWThread(id: id, title: title, status: status,
                  version: version, isPinned: isPinned, createdAt: createdAt, updatedAt: updatedAt)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, version, messages
-        case taskType = "task_type"
         case isPinned = "is_pinned"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -130,11 +124,9 @@ struct MWDocumentVersion: Codable, Identifiable {
 
 struct MWCreateThreadRequest: Codable {
     let title: String?
-    let taskType: String
     let initialMessage: String?
     enum CodingKeys: String, CodingKey {
         case title
-        case taskType = "task_type"
         case initialMessage = "initial_message"
     }
 }

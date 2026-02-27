@@ -22,8 +22,8 @@ class MatchaWorkService {
         return try await client.request(method: "GET", path: "\(basePath)/threads/\(id)")
     }
 
-    func createThread(title: String?, taskType: String, initialMessage: String?) async throws -> MWThread {
-        let body = MWCreateThreadRequest(title: title, taskType: taskType, initialMessage: initialMessage)
+    func createThread(title: String?, initialMessage: String?) async throws -> MWThread {
+        let body = MWCreateThreadRequest(title: title, initialMessage: initialMessage)
         let response: MWCreateThreadResponse = try await client.request(method: "POST", path: "\(basePath)/threads", body: body)
         return response.toThread()
     }

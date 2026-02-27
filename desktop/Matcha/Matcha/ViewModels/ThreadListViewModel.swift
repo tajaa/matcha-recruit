@@ -32,11 +32,10 @@ class ThreadListViewModel {
         }
     }
 
-    func createThread(title: String?, taskType: String, initialMessage: String? = nil) async -> MWThread? {
+    func createThread(title: String?, initialMessage: String? = nil) async -> MWThread? {
         do {
             let thread = try await service.createThread(
                 title: title,
-                taskType: taskType,
                 initialMessage: initialMessage
             )
             await MainActor.run {

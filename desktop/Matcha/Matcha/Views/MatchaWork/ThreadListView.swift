@@ -3,7 +3,7 @@ import SwiftUI
 struct ThreadListView: View {
     @Environment(AppState.self) private var appState
     @Bindable var viewModel: ThreadListViewModel
-    @State private var showNewThread = false
+    @State private var isCreating = false
     @State private var threadToDelete: MWThread?
     @State private var showDeleteConfirm = false
 
@@ -25,16 +25,37 @@ struct ThreadListView: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 Button {
-                    showNewThread = true
+                    guard !isCreating else { return }
+                    isCreating = true
+                    let dateStr = Date().formatted(date: .abbreviated, time: .omitted)
+                    Task {
+                        if let thread = await viewModel.createThread(
+                            title: "New Chat \(dateStr)",
+                            initialMessage: nil
+                        ) {
+                            await MainActor.run {
+                                appState.selectedThreadId = thread.id
+                                appState.showSkills = false
+                            }
+                        }
+                        isCreating = false
+                    }
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
-                        .frame(width: 24, height: 24)
-                        .background(Color.zinc800)
-                        .cornerRadius(6)
+                    if isCreating {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .frame(width: 24, height: 24)
+                    } else {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .frame(width: 24, height: 24)
+                            .background(Color.zinc800)
+                            .cornerRadius(6)
+                    }
                 }
                 .buttonStyle(.plain)
+                .disabled(isCreating)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -47,7 +68,6 @@ struct ThreadListView: View {
                     ForEach(filterOptions, id: \.label) { option in
                         Button {
                             viewModel.filterStatus = option.value
-                            Task { await viewModel.loadThreads() }
                         } label: {
                             Text(option.label)
                                 .font(.system(size: 11, weight: .medium))
@@ -130,10 +150,6 @@ struct ThreadListView: View {
             }
         }
         .task { await viewModel.loadThreads() }
-        .sheet(isPresented: $showNewThread) {
-            NewThreadView(viewModel: viewModel)
-                .environment(appState)
-        }
         .confirmationDialog("Delete thread?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 if let thread = threadToDelete {
@@ -173,7 +189,6 @@ struct ThreadRowView: View {
                 }
             }
             HStack(spacing: 6) {
-                TaskTypeBadge(taskType: thread.taskType)
                 Spacer()
                 Text("v\(thread.version)")
                     .font(.system(size: 10, design: .monospaced))

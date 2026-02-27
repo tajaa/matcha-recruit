@@ -2,10 +2,19 @@ import SwiftUI
 import PDFKit
 
 struct PreviewPanelView: View {
-    let taskType: String
     let currentState: [String: AnyCodable]
     let pdfData: Data?
     let isLoading: Bool
+
+    private var inferredSkill: String {
+        if currentState["candidate_name"] != nil || currentState["position_title"] != nil ||
+           currentState["salary"] != nil {
+            return "offer_letter"
+        }
+        if currentState["overall_rating"] != nil || currentState["review_title"] != nil { return "review" }
+        if currentState["sections"] != nil || currentState["workbook_title"] != nil { return "workbook" }
+        return "chat"
+    }
 
     var body: some View {
         ZStack {
@@ -19,7 +28,7 @@ struct PreviewPanelView: View {
                         .foregroundColor(.secondary)
                 }
             } else {
-                switch taskType {
+                switch inferredSkill {
                 case "offer_letter":
                     OfferLetterPreview(pdfData: pdfData)
                 case "review":
@@ -51,6 +60,10 @@ struct OfferLetterPreview: View {
 struct PDFKitView: NSViewRepresentable {
     let data: Data
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> PDFView {
         let pdfView = PDFView()
         pdfView.autoScales = true
@@ -58,14 +71,26 @@ struct PDFKitView: NSViewRepresentable {
         pdfView.backgroundColor = NSColor(Color.zinc900)
         if let document = PDFDocument(data: data) {
             pdfView.document = document
+            context.coordinator.loadedDataID = dataIdentity(data)
         }
         return pdfView
     }
 
     func updateNSView(_ nsView: PDFView, context: Context) {
+        let newID = dataIdentity(data)
+        guard newID != context.coordinator.loadedDataID else { return }
         if let document = PDFDocument(data: data) {
             nsView.document = document
+            context.coordinator.loadedDataID = newID
         }
+    }
+
+    private func dataIdentity(_ data: Data) -> String {
+        "\(data.count)-\(data.prefix(64).hashValue)"
+    }
+
+    class Coordinator {
+        var loadedDataID: String?
     }
 }
 

@@ -29,20 +29,19 @@ def _parse_jsonb(value) -> dict:
     return {}
 
 
-def _default_state_for_task_type(task_type: str) -> dict:
-    if task_type == "review":
-        return {
-            "review_title": "Anonymous Performance Review",
-            "anonymized": True,
-            "recipient_emails": [],
-            "review_request_statuses": [],
-            "review_expected_responses": 0,
-            "review_received_responses": 0,
-            "review_pending_responses": 0,
-        }
-    if task_type == "workbook":
-        return {"sections": []}
-    return {}
+def _infer_skill_from_state(current_state: dict) -> str:
+    """Infer the active skill from current_state contents."""
+    if not current_state:
+        return "chat"
+    if any(k in current_state for k in ("candidate_name", "position_title", "salary", "salary_range_min")):
+        return "offer_letter"
+    if any(k in current_state for k in ("overall_rating", "review_title", "review_request_statuses", "review_expected_responses")):
+        return "review"
+    if "sections" in current_state or "workbook_title" in current_state:
+        return "workbook"
+    if any(k in current_state for k in ("employees", "batch_status")):
+        return "onboarding"
+    return "chat"
 
 
 def _strip_markdown_text(value: str) -> str:
@@ -444,44 +443,22 @@ def _build_offer_letter_payload(state: dict, fallback_company_name: str) -> dict
 async def create_thread(
     company_id: UUID,
     user_id: UUID,
-    title: str = "Untitled Chat",
-    task_type: str = "offer_letter",
+    title: str = "New Chat",
 ) -> dict:
-    if task_type == "review":
-        normalized_task_type = "review"
-    elif task_type == "workbook":
-        normalized_task_type = "workbook"
-    else:
-        normalized_task_type = "offer_letter"
-
-    default_state = _default_state_for_task_type(normalized_task_type)
     async with get_connection() as conn:
-        # Pre-populate company name and logo for offer letter threads
-        if normalized_task_type == "offer_letter":
-            company_row = await conn.fetchrow(
-                "SELECT name, logo_url FROM companies WHERE id = $1",
-                company_id,
-            )
-            if company_row:
-                if company_row["name"]:
-                    default_state["company_name"] = company_row["name"]
-                if company_row["logo_url"]:
-                    default_state["company_logo_url"] = company_row["logo_url"]
-
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                INSERT INTO mw_threads(company_id, created_by, title, task_type, current_state)
-                VALUES($1, $2, $3, $4, $5::jsonb)
-                RETURNING id, company_id, created_by, title, task_type, status,
+                INSERT INTO mw_threads(company_id, created_by, title, current_state)
+                VALUES($1, $2, $3, $4::jsonb)
+                RETURNING id, company_id, created_by, title, status,
                           current_state, version, is_pinned, linked_offer_letter_id,
                           created_at, updated_at
                 """,
                 company_id,
                 user_id,
                 title,
-                normalized_task_type,
-                json.dumps(default_state),
+                json.dumps({}),
             )
             await _upsert_element_from_thread_row(conn, dict(row))
         d = dict(row)
@@ -493,7 +470,7 @@ async def get_thread(thread_id: UUID, company_id: UUID) -> Optional[dict]:
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, company_id, created_by, title, task_type, status,
+            SELECT id, company_id, created_by, title, status,
                    current_state, version, is_pinned, linked_offer_letter_id,
                    created_at, updated_at
             FROM mw_threads
@@ -519,7 +496,7 @@ async def list_threads(
         if status:
             rows = await conn.fetch(
                 """
-                SELECT id, title, task_type, status, version, is_pinned, created_at, updated_at
+                SELECT id, title, status, version, is_pinned, created_at, updated_at
                 FROM mw_threads
                 WHERE company_id=$1 AND status=$2
                 ORDER BY is_pinned DESC, updated_at DESC
@@ -533,7 +510,7 @@ async def list_threads(
         else:
             rows = await conn.fetch(
                 """
-                SELECT id, title, task_type, status, version, is_pinned, created_at, updated_at
+                SELECT id, title, status, version, is_pinned, created_at, updated_at
                 FROM mw_threads
                 WHERE company_id=$1
                 ORDER BY is_pinned DESC, updated_at DESC
@@ -585,9 +562,16 @@ async def list_elements(
         return [dict(r) for r in rows]
 
 
+VALID_ELEMENT_TYPES = {"offer_letter", "review", "workbook"}
+
+
 async def _upsert_element_from_thread_row(conn, thread_row: dict) -> None:
     try:
         state_json = _parse_jsonb(thread_row.get("current_state"))
+        inferred_type = _infer_skill_from_state(state_json)
+        if inferred_type not in VALID_ELEMENT_TYPES:
+            # chat/onboarding threads don't get element records
+            return
         existing_is_materialized = await conn.fetchval(
             "SELECT is_materialized FROM mw_elements WHERE thread_id=$1",
             thread_row["id"],
@@ -629,7 +613,7 @@ async def _upsert_element_from_thread_row(conn, thread_row: dict) -> None:
             thread_row["id"],
             thread_row["company_id"],
             thread_row["created_by"],
-            thread_row.get("task_type") or "offer_letter",
+            inferred_type,
             thread_row["title"],
             thread_row["status"],
             json.dumps(state_json),
@@ -651,7 +635,7 @@ async def _sync_element_for_thread(conn, thread_id: UUID) -> None:
     try:
         row = await conn.fetchrow(
             """
-            SELECT id, company_id, created_by, task_type, title, status,
+            SELECT id, company_id, created_by, title, status,
                    current_state, version, linked_offer_letter_id,
                    created_at, updated_at
             FROM mw_threads
@@ -682,7 +666,7 @@ async def set_thread_pinned(
             UPDATE mw_threads
             SET is_pinned=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, task_type, status, version, is_pinned, created_at, updated_at
+            RETURNING id, title, status, version, is_pinned, created_at, updated_at
             """,
             is_pinned,
             thread_id,
@@ -694,40 +678,6 @@ async def set_thread_pinned(
         return dict(row)
 
 
-async def set_thread_task_type(
-    thread_id: UUID,
-    company_id: UUID,
-    task_type: str,
-) -> Optional[dict]:
-    if task_type == "review":
-        normalized_task_type = "review"
-    elif task_type == "workbook":
-        normalized_task_type = "workbook"
-    else:
-        normalized_task_type = "offer_letter"
-
-    default_state = _default_state_for_task_type(normalized_task_type)
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE mw_threads
-            SET task_type=$1, current_state=$2::jsonb, updated_at=NOW()
-            WHERE id=$3 AND company_id=$4
-            RETURNING id, company_id, created_by, title, task_type, status,
-                      current_state, version, is_pinned, linked_offer_letter_id,
-                      created_at, updated_at
-            """,
-            normalized_task_type,
-            json.dumps(default_state),
-            thread_id,
-            company_id,
-        )
-        if row is None:
-            return None
-        await _sync_element_for_thread(conn, thread_id)
-        d = dict(row)
-        d["current_state"] = _parse_jsonb(d["current_state"])
-        return d
 
 
 async def get_thread_messages(thread_id: UUID) -> list[dict]:
@@ -1290,7 +1240,7 @@ async def send_offer_letter_draft(
     async with get_connection() as conn:
         thread_row = await conn.fetchrow(
             """
-            SELECT t.title, t.task_type, t.status, t.current_state, t.version, c.name AS company_name
+            SELECT t.title, t.status, t.current_state, t.version, c.name AS company_name
             FROM mw_threads t
             JOIN companies c ON c.id = t.company_id
             WHERE t.id=$1 AND t.company_id=$2
@@ -1300,8 +1250,6 @@ async def send_offer_letter_draft(
         )
     if thread_row is None:
         raise ValueError("Thread not found")
-    if thread_row["task_type"] != "offer_letter":
-        raise ValueError("Draft sending is only available for offer letter threads")
     if thread_row["status"] == "archived":
         raise ValueError("Cannot send draft from an archived thread")
     if thread_row["status"] == "finalized":
@@ -1430,7 +1378,7 @@ async def generate_workbook_presentation(thread_id: UUID, company_id: UUID) -> d
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT current_state, version, task_type, status
+                SELECT current_state, version, status
                 FROM mw_threads
                 WHERE id=$1 AND company_id=$2
                 FOR UPDATE
@@ -1444,8 +1392,6 @@ async def generate_workbook_presentation(thread_id: UUID, company_id: UUID) -> d
                 raise ValueError("Cannot generate a presentation for an archived thread")
             if row["status"] == "finalized":
                 raise ValueError("Cannot generate a presentation for a finalized thread")
-            if row["task_type"] != "workbook":
-                raise ValueError("Presentation generation is only available for workbook threads")
 
             current_state = _parse_jsonb(row["current_state"])
             presentation = _build_workbook_presentation_state(current_state)
@@ -1499,7 +1445,7 @@ async def finalize_thread(thread_id: UUID, company_id: UUID) -> dict:
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT current_state, version, status, task_type
+                SELECT current_state, version, status
                 FROM mw_threads
                 WHERE id=$1 AND company_id=$2
                 FOR UPDATE
@@ -1521,10 +1467,9 @@ async def finalize_thread(thread_id: UUID, company_id: UUID) -> dict:
             await _sync_element_for_thread(conn, thread_id)
             current_state = _parse_jsonb(row["current_state"])
             version = row["version"]
-            task_type = row["task_type"]
 
     pdf_url = None
-    if task_type == "offer_letter":
+    if _infer_skill_from_state(current_state) == "offer_letter":
         # Generate final PDF outside the transaction (CPU-bound, may be slow)
         pdf_url = await generate_pdf(current_state, thread_id, version, is_draft=False)
 
@@ -1611,7 +1556,7 @@ async def send_review_requests(
     async with get_connection() as conn:
         thread_row = await conn.fetchrow(
             """
-            SELECT title, task_type, status, current_state, c.name AS company_name
+            SELECT title, status, current_state, c.name AS company_name
             FROM mw_threads t
             JOIN companies c ON c.id = t.company_id
             WHERE t.id=$1 AND t.company_id=$2
@@ -1622,8 +1567,6 @@ async def send_review_requests(
     if thread_row is None:
         raise ValueError("Thread not found")
 
-    if thread_row["task_type"] != "review":
-        raise ValueError("Review requests are only available for review threads")
     if thread_row["status"] == "archived":
         raise ValueError("Cannot send review requests for an archived thread")
 

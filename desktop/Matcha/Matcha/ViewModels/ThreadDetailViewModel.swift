@@ -14,21 +14,17 @@ class ThreadDetailViewModel {
     var streamingContent = ""
     var tokenUsage: MWTokenUsage?
     var errorMessage: String?
+    private var streamingTask: Task<Void, Never>?
 
     var hasPreviewContent: Bool {
-        guard let thread = thread else { return false }
-        switch thread.taskType {
-        case "offer_letter": return pdfData != nil
-        case "workbook":
-            return currentState["workbook_title"] != nil ||
-                   currentState["title"] != nil ||
-                   (currentState["sections"]?.value as? [AnyCodable])?.isEmpty == false
-        case "review":
-            return currentState["review_title"] != nil ||
-                   currentState["summary"] != nil ||
-                   currentState["strengths"] != nil
-        default: return false
-        }
+        if pdfData != nil { return true }
+        if currentState["workbook_title"] != nil || (currentState["sections"]?.value as? [AnyCodable])?.isEmpty == false { return true }
+        if currentState["review_title"] != nil || currentState["summary"] != nil || currentState["strengths"] != nil { return true }
+        return false
+    }
+
+    private func isOfferLetterState(_ state: [String: AnyCodable]) -> Bool {
+        return state["candidate_name"] != nil || state["position_title"] != nil || state["salary"] != nil
     }
 
     private let service = MatchaWorkService.shared
@@ -48,7 +44,7 @@ class ThreadDetailViewModel {
                 isLoadingThread = false
             }
             // Load PDF if offer letter
-            if detail.thread.taskType == "offer_letter" {
+            if isOfferLetterState(detail.currentState ?? [:]) {
                 await loadPDF()
             }
             await loadVersions()
@@ -63,6 +59,9 @@ class ThreadDetailViewModel {
     func sendMessage(content: String) async {
         guard let threadId = thread?.id else { return }
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        // Cancel any in-flight stream
+        streamingTask?.cancel()
 
         // Optimistically add user message
         let tempUserMsg = MWMessage(
@@ -87,7 +86,7 @@ class ThreadDetailViewModel {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        if let token = KeychainHelper.load(key: KeychainHelper.Keys.accessToken) {
+        if let token = APIClient.shared.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
@@ -96,29 +95,41 @@ class ThreadDetailViewModel {
         }
         request.httpBody = try? JSONEncoder().encode(SendBody(content: content))
 
-        do {
-            let (bytes, _) = try await URLSession.shared.bytes(for: request)
-            for try await line in bytes.lines {
-                guard line.hasPrefix("data: ") else { continue }
-                let jsonStr = String(line.dropFirst(6))
-                guard jsonStr != "[DONE]" else { break }
-                guard let data = jsonStr.data(using: .utf8) else { continue }
+        let task = Task {
+            do {
+                let (bytes, _) = try await URLSession.shared.bytes(for: request)
+                for try await line in bytes.lines {
+                    try Task.checkCancellation()
+                    guard line.hasPrefix("data: ") else { continue }
+                    let jsonStr = String(line.dropFirst(6))
+                    guard jsonStr != "[DONE]" else { break }
+                    guard let data = jsonStr.data(using: .utf8) else { continue }
 
-                if let event = try? JSONDecoder().decode(SSEEvent.self, from: data) {
-                    await MainActor.run {
-                        handleSSEEvent(event)
+                    if let event = try? JSONDecoder().decode(SSEEvent.self, from: data) {
+                        await MainActor.run {
+                            handleSSEEvent(event)
+                        }
                     }
                 }
+            } catch is CancellationError {
+                // Task was cancelled, no error needed
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Streaming failed: \(error.localizedDescription)"
+                }
             }
-        } catch {
-            await MainActor.run {
-                errorMessage = "Streaming failed: \(error.localizedDescription)"
-            }
-        }
 
-        await MainActor.run {
-            isStreaming = false
+            await MainActor.run {
+                isStreaming = false
+            }
         }
+        streamingTask = task
+        await task.value
+    }
+
+    func cancelStreaming() {
+        streamingTask?.cancel()
+        streamingTask = nil
     }
 
     @MainActor
@@ -135,8 +146,12 @@ class ThreadDetailViewModel {
                 currentState = state
             }
             streamingContent = ""
-            if thread?.taskType == "offer_letter" {
+            if isOfferLetterState(currentState) {
                 Task { await loadPDF() }
+            }
+        case "usage":
+            if let usage = event.data?.tokenUsage {
+                tokenUsage = usage
             }
         case "error":
             errorMessage = event.message ?? "Unknown streaming error"
@@ -158,9 +173,30 @@ class ThreadDetailViewModel {
         do {
             let updated = try await service.revertThread(id: threadId, version: version)
             await MainActor.run { thread = updated }
-            await loadThread(id: threadId)
+            // Reload data without setting isLoadingThread (avoids full-screen spinner flash)
+            await reloadThreadData(id: threadId)
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Reloads thread messages, state, versions, and PDF without showing the loading spinner.
+    private func reloadThreadData(id: String) async {
+        do {
+            let detail = try await service.getThread(id: id)
+            await MainActor.run {
+                thread = detail.thread
+                messages = detail.messages
+                currentState = detail.currentState ?? [:]
+            }
+            if isOfferLetterState(detail.currentState ?? [:]) {
+                await loadPDF()
+            }
+            await loadVersions()
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -233,6 +269,7 @@ struct SSEEventData: Codable {
     let currentState: [String: AnyCodable]?
     let version: Int?
     let pdfUrl: String?
+    let tokenUsage: MWTokenUsage?
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -240,6 +277,7 @@ struct SSEEventData: Codable {
         case assistantMessage = "assistant_message"
         case currentState = "current_state"
         case pdfUrl = "pdf_url"
+        case tokenUsage = "token_usage"
     }
 }
 
