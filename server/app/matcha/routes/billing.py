@@ -253,22 +253,22 @@ class AdminGrantRequest(BaseModel):
 @admin_router.get("/admin/companies", response_model=list[CompanyCreditSummary])
 async def admin_list_company_credits(
     current_user: CurrentUser = Depends(require_platform_admin),
-    conn=Depends(get_connection),
 ):
     """List all companies with their Matcha Work credit balances."""
-    rows = await conn.fetch(
-        """
-        SELECT
-            c.id, c.name, COALESCE(c.status, 'approved') AS status,
-            COALESCE(b.credits_remaining, 0)        AS credits_remaining,
-            COALESCE(b.total_credits_purchased, 0)  AS total_credits_purchased,
-            COALESCE(b.total_credits_granted, 0)    AS total_credits_granted,
-            b.updated_at
-        FROM companies c
-        LEFT JOIN mw_credit_balances b ON b.company_id = c.id
-        ORDER BY c.name
-        """
-    )
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                c.id, c.name, COALESCE(c.status, 'approved') AS status,
+                COALESCE(b.credits_remaining, 0)        AS credits_remaining,
+                COALESCE(b.total_credits_purchased, 0)  AS total_credits_purchased,
+                COALESCE(b.total_credits_granted, 0)    AS total_credits_granted,
+                b.updated_at
+            FROM companies c
+            LEFT JOIN mw_credit_balances b ON b.company_id = c.id
+            ORDER BY c.name
+            """
+        )
     return [
         CompanyCreditSummary(
             company_id=row["id"],
@@ -290,7 +290,6 @@ async def admin_grant_credits_endpoint(
     current_user: CurrentUser = Depends(require_platform_admin),
 ):
     """Grant or adjust credits for a company."""
-    company_exists = True
     async with get_connection() as conn:
         company_exists = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1)", company_id
