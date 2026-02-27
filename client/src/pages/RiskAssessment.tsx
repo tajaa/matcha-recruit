@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Sparkles } from 'lucide-react';
-import type { RiskAssessmentResult, DimensionResult, RiskRecommendation } from '../types';
+import type { RiskAssessmentResult, DimensionResult } from '../types';
 import { riskAssessment } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
