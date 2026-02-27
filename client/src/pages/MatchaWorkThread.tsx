@@ -284,6 +284,7 @@ export default function MatchaWorkThread() {
   const [versions, setVersions] = useState<MWDocumentVersion[]>([]);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
+  const [previewPanelOpen, setPreviewPanelOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [input, setInput] = useState('');
@@ -424,8 +425,10 @@ export default function MatchaWorkThread() {
           const hasOnboardingState = Array.isArray(resp.current_state?.employees) && resp.current_state.employees.length > 0;
           if (resp.pdf_url) {
             setPdfUrl(resp.pdf_url);
+            setPreviewPanelOpen(true);
             setActiveTab('preview');
           } else if (hasWorkbookState || hasReviewState || hasOnboardingState) {
+            setPreviewPanelOpen(true);
             setActiveTab('preview');
           }
           if (resp.token_usage) {
@@ -782,10 +785,10 @@ export default function MatchaWorkThread() {
     value == null ? '—' : value.toLocaleString();
 
   useEffect(() => {
-    if (!hasPreviewContent && activeTab === 'preview') {
+    if (!(previewPanelOpen && hasPreviewContent) && activeTab === 'preview') {
       setActiveTab('chat');
     }
-  }, [activeTab, hasPreviewContent]);
+  }, [activeTab, hasPreviewContent, previewPanelOpen]);
 
   if (loading) {
     return (
@@ -864,7 +867,7 @@ export default function MatchaWorkThread() {
           )}
 
           {/* Mobile preview toggle */}
-          {hasPreviewContent && (
+          {previewPanelOpen && hasPreviewContent && (
             <div className="flex md:hidden border border-white/10">
               <button
                 onClick={() => setActiveTab('chat')}
@@ -983,7 +986,7 @@ export default function MatchaWorkThread() {
         {/* Chat panel */}
         <div
           className={`flex flex-col flex-1 min-w-0 ${
-            hasPreviewContent ? 'md:max-w-[50%] border-r border-white/10' : ''
+            previewPanelOpen && hasPreviewContent ? 'md:max-w-[50%] border-r border-white/10' : ''
           } ${
             activeTab !== 'chat' ? 'hidden md:flex' : 'flex'
           }`}
@@ -1099,7 +1102,7 @@ export default function MatchaWorkThread() {
         {/* PDF preview panel */}
         <div
           className={`flex flex-col flex-1 min-w-0 ${
-            !hasPreviewContent
+            !(previewPanelOpen && hasPreviewContent)
               ? 'hidden'
               : activeTab !== 'preview'
               ? 'hidden md:flex'
