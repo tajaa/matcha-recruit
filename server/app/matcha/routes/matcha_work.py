@@ -46,7 +46,7 @@ from ..models.matcha_work import (
 )
 from ..services import matcha_work_document as doc_svc
 from ..services import billing_service
-from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state
+from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -593,11 +593,13 @@ async def create_thread(
         # Save user message
         await doc_svc.add_message(thread_id, "user", body.initial_message)
 
-        # Call AI
+        # Call AI with company context
         ai_provider = get_ai_provider()
+        profile = await doc_svc.get_company_profile_for_ai(company_id)
+        ctx = _build_company_context(profile)
         messages = [{"role": "user", "content": body.initial_message}]
-        estimated_usage = await ai_provider.estimate_usage(messages, thread["current_state"])
-        ai_resp = await ai_provider.generate(messages, thread["current_state"])
+        estimated_usage = await ai_provider.estimate_usage(messages, thread["current_state"], company_context=ctx)
+        ai_resp = await ai_provider.generate(messages, thread["current_state"], company_context=ctx)
         final_usage = ai_resp.token_usage or estimated_usage
 
         new_version = thread["version"]
@@ -882,10 +884,12 @@ async def send_message(
     if current_user.role != "admin":
         await billing_service.check_credits(company_id)
 
-    # Call AI
+    # Call AI with company context
     ai_provider = get_ai_provider()
-    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"])
-    ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"])
+    profile = await doc_svc.get_company_profile_for_ai(company_id)
+    ctx = _build_company_context(profile)
+    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx)
+    ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx)
     final_usage = ai_resp.token_usage or estimated_usage
 
     current_version = thread["version"]
@@ -987,7 +991,9 @@ async def send_message_stream(
         await billing_service.check_credits(company_id)
 
     ai_provider = get_ai_provider()
-    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"])
+    profile = await doc_svc.get_company_profile_for_ai(company_id)
+    ctx = _build_company_context(profile)
+    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx)
 
     async def event_stream():
         try:
@@ -1001,7 +1007,7 @@ async def send_message_stream(
                 }
             )
 
-            ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"])
+            ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx)
 
             current_version = thread["version"]
             (

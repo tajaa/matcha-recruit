@@ -183,6 +183,15 @@ async def init_db():
                 rejection_reason TEXT,
                 ir_guidance_blurb TEXT,
                 logo_url TEXT,
+                headquarters_state VARCHAR(50),
+                headquarters_city VARCHAR(100),
+                work_arrangement VARCHAR(30),
+                default_employment_type VARCHAR(30),
+                benefits_summary TEXT,
+                pto_policy_summary TEXT,
+                compensation_notes TEXT,
+                company_values TEXT,
+                ai_guidance_notes TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)

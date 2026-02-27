@@ -15,32 +15,79 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+PROFILE_FIELDS = [
+    "headquarters_state",
+    "headquarters_city",
+    "work_arrangement",
+    "default_employment_type",
+    "benefits_summary",
+    "pto_policy_summary",
+    "compensation_notes",
+    "company_values",
+    "ai_guidance_notes",
+]
+
+ALL_RETURNING = (
+    "id, name, industry, size, ir_guidance_blurb, logo_url, "
+    "headquarters_state, headquarters_city, work_arrangement, "
+    "default_employment_type, benefits_summary, pto_policy_summary, "
+    "compensation_notes, company_values, ai_guidance_notes, created_at"
+)
+
+
+def _row_to_response(row, *, culture_profile=None, interview_count=0):
+    return CompanyResponse(
+        id=row["id"],
+        name=row["name"],
+        industry=row["industry"],
+        size=row["size"],
+        ir_guidance_blurb=row.get("ir_guidance_blurb"),
+        logo_url=row.get("logo_url"),
+        headquarters_state=row.get("headquarters_state"),
+        headquarters_city=row.get("headquarters_city"),
+        work_arrangement=row.get("work_arrangement"),
+        default_employment_type=row.get("default_employment_type"),
+        benefits_summary=row.get("benefits_summary"),
+        pto_policy_summary=row.get("pto_policy_summary"),
+        compensation_notes=row.get("compensation_notes"),
+        company_values=row.get("company_values"),
+        ai_guidance_notes=row.get("ai_guidance_notes"),
+        created_at=row["created_at"],
+        culture_profile=culture_profile,
+        interview_count=interview_count,
+    )
+
 
 @router.post("", response_model=CompanyResponse)
 async def create_company(company: CompanyCreate):
     """Create a new company."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """
-            INSERT INTO companies (name, industry, size, ir_guidance_blurb)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, name, industry, size, ir_guidance_blurb, logo_url, created_at
+            f"""
+            INSERT INTO companies (
+                name, industry, size, ir_guidance_blurb,
+                headquarters_state, headquarters_city, work_arrangement,
+                default_employment_type, benefits_summary, pto_policy_summary,
+                compensation_notes, company_values, ai_guidance_notes
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            RETURNING {ALL_RETURNING}
             """,
             company.name,
             company.industry,
             company.size,
             company.ir_guidance_blurb,
+            company.headquarters_state,
+            company.headquarters_city,
+            company.work_arrangement,
+            company.default_employment_type,
+            company.benefits_summary,
+            company.pto_policy_summary,
+            company.compensation_notes,
+            company.company_values,
+            company.ai_guidance_notes,
         )
-        return CompanyResponse(
-            id=row["id"],
-            name=row["name"],
-            industry=row["industry"],
-            size=row["size"],
-            ir_guidance_blurb=row["ir_guidance_blurb"],
-            logo_url=row["logo_url"],
-            created_at=row["created_at"],
-            interview_count=0,
-        )
+        return _row_to_response(row)
 
 
 @router.get("", response_model=list[CompanyResponse])
@@ -57,16 +104,7 @@ async def list_companies():
             """
         )
         return [
-            CompanyResponse(
-                id=row["id"],
-                name=row["name"],
-                industry=row["industry"],
-                size=row["size"],
-                ir_guidance_blurb=row.get("ir_guidance_blurb"),
-                logo_url=row.get("logo_url"),
-                created_at=row["created_at"],
-                interview_count=row["interview_count"],
-            )
+            _row_to_response(row, interview_count=row["interview_count"])
             for row in rows
         ]
 
@@ -97,14 +135,8 @@ async def get_company(company_id: UUID):
         if profile_row and profile_row["profile_data"]:
             culture_profile = json.loads(profile_row["profile_data"]) if isinstance(profile_row["profile_data"], str) else profile_row["profile_data"]
 
-        return CompanyResponse(
-            id=row["id"],
-            name=row["name"],
-            industry=row["industry"],
-            size=row["size"],
-            ir_guidance_blurb=row.get("ir_guidance_blurb"),
-            logo_url=row.get("logo_url"),
-            created_at=row["created_at"],
+        return _row_to_response(
+            row,
             culture_profile=culture_profile,
             interview_count=row["interview_count"],
         )
@@ -119,25 +151,16 @@ async def update_company(company_id: UUID, company: CompanyUpdate):
         params = []
         param_idx = 1
 
-        if company.name is not None:
-            updates.append(f"name = ${param_idx}")
-            params.append(company.name)
-            param_idx += 1
-
-        if company.industry is not None:
-            updates.append(f"industry = ${param_idx}")
-            params.append(company.industry)
-            param_idx += 1
-
-        if company.size is not None:
-            updates.append(f"size = ${param_idx}")
-            params.append(company.size)
-            param_idx += 1
-
-        if company.ir_guidance_blurb is not None:
-            updates.append(f"ir_guidance_blurb = ${param_idx}")
-            params.append(company.ir_guidance_blurb)
-            param_idx += 1
+        updatable = [
+            "name", "industry", "size", "ir_guidance_blurb",
+            *PROFILE_FIELDS,
+        ]
+        for field_name in updatable:
+            value = getattr(company, field_name, None)
+            if value is not None:
+                updates.append(f"{field_name} = ${param_idx}")
+                params.append(value)
+                param_idx += 1
 
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
@@ -147,7 +170,7 @@ async def update_company(company_id: UUID, company: CompanyUpdate):
             UPDATE companies
             SET {', '.join(updates)}
             WHERE id = ${param_idx}
-            RETURNING id, name, industry, size, ir_guidance_blurb, logo_url, created_at
+            RETURNING {ALL_RETURNING}
         """
 
         row = await conn.fetchrow(query, *params)
@@ -169,14 +192,8 @@ async def update_company(company_id: UUID, company: CompanyUpdate):
         if profile_row and profile_row["profile_data"]:
             culture_profile = json.loads(profile_row["profile_data"]) if isinstance(profile_row["profile_data"], str) else profile_row["profile_data"]
 
-        return CompanyResponse(
-            id=row["id"],
-            name=row["name"],
-            industry=row["industry"],
-            size=row["size"],
-            ir_guidance_blurb=row["ir_guidance_blurb"],
-            logo_url=row.get("logo_url"),
-            created_at=row["created_at"],
+        return _row_to_response(
+            row,
             culture_profile=culture_profile,
             interview_count=interview_count,
         )

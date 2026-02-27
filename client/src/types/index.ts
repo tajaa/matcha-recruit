@@ -5,6 +5,15 @@ export interface Company {
   industry: string | null;
   size: string | null;
   ir_guidance_blurb: string | null;
+  headquarters_state: string | null;
+  headquarters_city: string | null;
+  work_arrangement: string | null;
+  default_employment_type: string | null;
+  benefits_summary: string | null;
+  pto_policy_summary: string | null;
+  compensation_notes: string | null;
+  company_values: string | null;
+  ai_guidance_notes: string | null;
   created_at: string;
   culture_profile: CultureProfile | null;
   interview_count: number;
@@ -15,6 +24,15 @@ export interface CompanyCreate {
   industry?: string;
   size?: string;
   ir_guidance_blurb?: string;
+  headquarters_state?: string;
+  headquarters_city?: string;
+  work_arrangement?: string;
+  default_employment_type?: string;
+  benefits_summary?: string;
+  pto_policy_summary?: string;
+  compensation_notes?: string;
+  company_values?: string;
+  ai_guidance_notes?: string;
 }
 
 export interface CompanyUpdate {
@@ -22,6 +40,15 @@ export interface CompanyUpdate {
   industry?: string;
   size?: string;
   ir_guidance_blurb?: string;
+  headquarters_state?: string;
+  headquarters_city?: string;
+  work_arrangement?: string;
+  default_employment_type?: string;
+  benefits_summary?: string;
+  pto_policy_summary?: string;
+  compensation_notes?: string;
+  company_values?: string;
+  ai_guidance_notes?: string;
 }
 
 // Business Location types

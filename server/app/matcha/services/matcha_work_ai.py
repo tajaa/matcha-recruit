@@ -44,7 +44,7 @@ Mission:
 2) Detect and execute supported Matcha Work skills from natural language.
 3) Ask concise clarifying questions when required inputs are missing.
 4) Never block normal Q&A just because no skill is invoked.
-
+{company_context}
 Current thread context:
 - current_skill (inferred from state): {current_skill}
 - current_state (JSON): {current_state}
@@ -101,6 +101,34 @@ Output constraints:
 """
 
 
+def _build_company_context(profile: dict) -> str:
+    """Format non-null company profile fields into a labeled block for the system prompt."""
+    if not profile:
+        return ""
+    lines = []
+    label_map = {
+        "name": "Company Name",
+        "industry": "Industry",
+        "size": "Company Size",
+        "headquarters_state": "Headquarters State",
+        "headquarters_city": "Headquarters City",
+        "work_arrangement": "Work Arrangement",
+        "default_employment_type": "Default Employment Type",
+        "benefits_summary": "Benefits Package",
+        "pto_policy_summary": "PTO Policy",
+        "compensation_notes": "Compensation Structure",
+        "company_values": "Company Values",
+        "ai_guidance_notes": "Special Instructions",
+    }
+    for key, label in label_map.items():
+        value = profile.get(key)
+        if value:
+            lines.append(f"- {label}: {value}")
+    if not lines:
+        return ""
+    return "\nCompany profile:\n" + "\n".join(lines) + "\n"
+
+
 def _clean_json_text(text: str) -> str:
     """Strip markdown code fences from model output."""
     text = text.strip()
@@ -148,6 +176,7 @@ class MatchaWorkAIProvider:
         self,
         messages: list[dict],
         current_state: dict,
+        company_context: str = "",
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -177,9 +206,10 @@ class GeminiProvider(MatchaWorkAIProvider):
         self,
         messages: list[dict],
         current_state: dict,
+        company_context: str = "",
     ) -> AIResponse:
         system_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
-            messages, current_state
+            messages, current_state, company_context=company_context
         )
         model = await _get_model(self.settings)
 
@@ -301,9 +331,10 @@ class GeminiProvider(MatchaWorkAIProvider):
         self,
         messages: list[dict],
         current_state: dict,
+        company_context: str = "",
     ) -> dict:
         system_prompt, _, _, _ = self._build_prompt_and_contents(
-            messages, current_state
+            messages, current_state, company_context=company_context
         )
         model = await _get_model(self.settings)
         windowed = messages[-20:]
@@ -321,6 +352,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         self,
         messages: list[dict],
         current_state: dict,
+        company_context: str = "",
     ) -> tuple[str, list, list[str], str]:
         windowed = messages[-20:]
         current_skill = _infer_skill_from_state(current_state)
@@ -339,6 +371,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             current_skill=current_skill,
             current_state=json.dumps(current_state, indent=2, default=str),
             valid_fields=", ".join(valid_fields),
+            company_context=company_context,
         )
 
         contents = []

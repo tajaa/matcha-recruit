@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building, Upload, Check, AlertTriangle, MapPin, Settings } from 'lucide-react';
+import { Building, Upload, Check, AlertTriangle, MapPin, Settings, Briefcase, Heart } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getAccessToken, provisioning } from '../api/client';
 import { FeatureGuideTrigger } from '../features/feature-guides';
@@ -20,12 +20,44 @@ const SIZES = [
   { value: 'enterprise', label: '500+ employees' },
 ];
 
+const US_STATES = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut',
+  'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa',
+  'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan',
+  'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire',
+  'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio',
+  'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
+  'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia',
+  'Wisconsin', 'Wyoming',
+];
+
+const WORK_ARRANGEMENTS = [
+  { value: 'remote', label: 'Remote' },
+  { value: 'hybrid', label: 'Hybrid' },
+  { value: 'in_office', label: 'In-Office' },
+];
+
+const EMPLOYMENT_TYPES = [
+  { value: 'at_will', label: 'At-Will' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'other', label: 'Other' },
+];
+
 interface CompanyData {
   id: string;
   name: string;
   industry: string | null;
   size: string | null;
   logo_url: string | null;
+  headquarters_state: string | null;
+  headquarters_city: string | null;
+  work_arrangement: string | null;
+  default_employment_type: string | null;
+  benefits_summary: string | null;
+  pto_policy_summary: string | null;
+  compensation_notes: string | null;
+  company_values: string | null;
+  ai_guidance_notes: string | null;
 }
 
 function getGoogleBadge(status: GoogleWorkspaceConnectionStatus | null, loading: boolean) {
@@ -44,6 +76,12 @@ function getGoogleBadge(status: GoogleWorkspaceConnectionStatus | null, loading:
   return { label: status.status.toUpperCase(), tone: 'border-amber-500/40 bg-amber-950/30 text-amber-200' };
 }
 
+const inputClass = "w-full bg-zinc-950 border border-white/10 px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition-colors";
+const selectClass = `${inputClass} appearance-none`;
+const textareaClass = `${inputClass} resize-none`;
+const labelClass = "block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-2";
+const helperClass = "text-[10px] text-zinc-600 mt-1.5";
+
 export function CompanyProfile() {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -59,10 +97,21 @@ export function CompanyProfile() {
   const [googleStatus, setGoogleStatus] = useState<GoogleWorkspaceConnectionStatus | null>(null);
   const [googleStatusError, setGoogleStatusError] = useState<string | null>(null);
 
-  // Form fields
+  // Form fields — existing
   const [name, setName] = useState('');
   const [industry, setIndustry] = useState('');
   const [size, setSize] = useState('');
+
+  // Form fields — new profile fields
+  const [headquartersState, setHeadquartersState] = useState('');
+  const [headquartersCity, setHeadquartersCity] = useState('');
+  const [workArrangement, setWorkArrangement] = useState('');
+  const [defaultEmploymentType, setDefaultEmploymentType] = useState('');
+  const [benefitsSummary, setBenefitsSummary] = useState('');
+  const [ptoPolicySummary, setPtoPolicySummary] = useState('');
+  const [compensationNotes, setCompensationNotes] = useState('');
+  const [companyValues, setCompanyValues] = useState('');
+  const [aiGuidanceNotes, setAiGuidanceNotes] = useState('');
 
   // Logo upload
   const [logoUploading, setLogoUploading] = useState(false);
@@ -120,6 +169,15 @@ export function CompanyProfile() {
       setName(data.name || '');
       setIndustry(data.industry || '');
       setSize(data.size || '');
+      setHeadquartersState(data.headquarters_state || '');
+      setHeadquartersCity(data.headquarters_city || '');
+      setWorkArrangement(data.work_arrangement || '');
+      setDefaultEmploymentType(data.default_employment_type || '');
+      setBenefitsSummary(data.benefits_summary || '');
+      setPtoPolicySummary(data.pto_policy_summary || '');
+      setCompensationNotes(data.compensation_notes || '');
+      setCompanyValues(data.company_values || '');
+      setAiGuidanceNotes(data.ai_guidance_notes || '');
       setLogoPreview(data.logo_url || null);
     } catch (err) {
       setError('Failed to load company profile');
@@ -140,6 +198,15 @@ export function CompanyProfile() {
       if (name !== (company?.name || '')) body.name = name;
       if (industry !== (company?.industry || '')) body.industry = industry;
       if (size !== (company?.size || '')) body.size = size;
+      if (headquartersState !== (company?.headquarters_state || '')) body.headquarters_state = headquartersState;
+      if (headquartersCity !== (company?.headquarters_city || '')) body.headquarters_city = headquartersCity;
+      if (workArrangement !== (company?.work_arrangement || '')) body.work_arrangement = workArrangement;
+      if (defaultEmploymentType !== (company?.default_employment_type || '')) body.default_employment_type = defaultEmploymentType;
+      if (benefitsSummary !== (company?.benefits_summary || '')) body.benefits_summary = benefitsSummary;
+      if (ptoPolicySummary !== (company?.pto_policy_summary || '')) body.pto_policy_summary = ptoPolicySummary;
+      if (compensationNotes !== (company?.compensation_notes || '')) body.compensation_notes = compensationNotes;
+      if (companyValues !== (company?.company_values || '')) body.company_values = companyValues;
+      if (aiGuidanceNotes !== (company?.ai_guidance_notes || '')) body.ai_guidance_notes = aiGuidanceNotes;
 
       if (Object.keys(body).length === 0) {
         setSaveSuccess(true);
@@ -226,7 +293,17 @@ export function CompanyProfile() {
   const hasChanges =
     name !== (company?.name || '') ||
     industry !== (company?.industry || '') ||
-    size !== (company?.size || '');
+    size !== (company?.size || '') ||
+    headquartersState !== (company?.headquarters_state || '') ||
+    headquartersCity !== (company?.headquarters_city || '') ||
+    workArrangement !== (company?.work_arrangement || '') ||
+    defaultEmploymentType !== (company?.default_employment_type || '') ||
+    benefitsSummary !== (company?.benefits_summary || '') ||
+    ptoPolicySummary !== (company?.pto_policy_summary || '') ||
+    compensationNotes !== (company?.compensation_notes || '') ||
+    companyValues !== (company?.company_values || '') ||
+    aiGuidanceNotes !== (company?.ai_guidance_notes || '');
+
   const googleBadge = getGoogleBadge(googleStatus, loadingGoogle);
 
   if (loading) {
@@ -254,8 +331,31 @@ export function CompanyProfile() {
             {company?.name || 'Company'}
           </h1>
         </div>
-        <div className="flex justify-center sm:justify-end" data-tour="company-setup-guide">
-          <FeatureGuideTrigger guideId="company-setup" />
+        <div className="flex items-center gap-3 justify-center sm:justify-end">
+          {hasChanges && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </button>
+          )}
+          {saveSuccess && (
+            <span className="flex items-center gap-1.5 text-emerald-400 text-xs uppercase tracking-wider">
+              <Check className="w-3.5 h-3.5" /> Saved
+            </span>
+          )}
+          <div data-tour="company-setup-guide">
+            <FeatureGuideTrigger guideId="company-setup" />
+          </div>
         </div>
       </div>
 
@@ -271,8 +371,9 @@ export function CompanyProfile() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Company Info */}
+        {/* Main column */}
         <div className="lg:col-span-2 space-y-8">
+          {/* Section 1: Company Information */}
           <div data-tour="company-info-form" className="border border-white/10 bg-zinc-900/30">
             <div className="p-6 border-b border-white/10 flex items-center gap-3">
               <Building className="w-4 h-4 text-zinc-500" />
@@ -281,76 +382,174 @@ export function CompanyProfile() {
             <div className="p-6 space-y-6">
               {/* Name */}
               <div>
-                <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-2">
-                  Company Name
-                </label>
+                <label className={labelClass}>Company Name</label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-zinc-950 border border-white/10 px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition-colors"
+                  className={inputClass}
                   placeholder="Enter company name"
                 />
               </div>
 
-              {/* Industry */}
-              <div>
-                <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-2">
-                  Industry
-                </label>
-                <select
-                  value={industry}
-                  onChange={(e) => setIndustry(e.target.value)}
-                  className="w-full bg-zinc-950 border border-white/10 px-4 py-3 text-sm text-white focus:outline-none focus:border-white/30 transition-colors appearance-none"
-                >
-                  <option value="">Select industry</option>
-                  {INDUSTRIES.map((ind) => (
-                    <option key={ind} value={ind}>{ind}</option>
-                  ))}
-                </select>
+              {/* Industry + Size row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div>
+                  <label className={labelClass}>Industry</label>
+                  <select value={industry} onChange={(e) => setIndustry(e.target.value)} className={selectClass}>
+                    <option value="">Select industry</option>
+                    {INDUSTRIES.map((ind) => (
+                      <option key={ind} value={ind}>{ind}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClass}>Company Size</label>
+                  <select value={size} onChange={(e) => setSize(e.target.value)} className={selectClass}>
+                    <option value="">Select size</option>
+                    {SIZES.map((s) => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
-              {/* Size */}
-              <div>
-                <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-2">
-                  Company Size
-                </label>
-                <select
-                  value={size}
-                  onChange={(e) => setSize(e.target.value)}
-                  className="w-full bg-zinc-950 border border-white/10 px-4 py-3 text-sm text-white focus:outline-none focus:border-white/30 transition-colors appearance-none"
-                >
-                  <option value="">Select size</option>
-                  {SIZES.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
+              {/* Headquarters row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div>
+                  <label className={labelClass}>Headquarters State</label>
+                  <select value={headquartersState} onChange={(e) => setHeadquartersState(e.target.value)} className={selectClass}>
+                    <option value="">Select state</option>
+                    {US_STATES.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <p className={helperClass}>Used for jurisdiction-aware legal guidance</p>
+                </div>
+                <div>
+                  <label className={labelClass}>Headquarters City</label>
+                  <input
+                    type="text"
+                    value={headquartersCity}
+                    onChange={(e) => setHeadquartersCity(e.target.value)}
+                    className={inputClass}
+                    placeholder="e.g. San Francisco"
+                  />
+                  <p className={helperClass}>City-level wage and tax guidance</p>
+                </div>
               </div>
 
-              {/* Save Button */}
-              <div className="flex items-center gap-4 pt-2">
-                <button
-                  onClick={handleSave}
-                  disabled={saving || !hasChanges}
-                  className="flex items-center gap-2 px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              {/* Work Arrangement */}
+              <div>
+                <label className={labelClass}>Work Arrangement</label>
+                <select value={workArrangement} onChange={(e) => setWorkArrangement(e.target.value)} className={selectClass}>
+                  <option value="">Select arrangement</option>
+                  {WORK_ARRANGEMENTS.map((w) => (
+                    <option key={w.value} value={w.value}>{w.label}</option>
+                  ))}
+                </select>
+                <p className={helperClass}>Affects offer letter and onboarding language</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Employment & Compensation */}
+          <div className="border border-white/10 bg-zinc-900/30">
+            <div className="p-6 border-b border-white/10 flex items-center gap-3">
+              <Briefcase className="w-4 h-4 text-zinc-500" />
+              <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Employment & Compensation</h2>
+            </div>
+            <div className="p-6 space-y-6">
+              {/* Default Employment Type */}
+              <div>
+                <label className={labelClass}>Default Employment Type</label>
+                <select
+                  value={defaultEmploymentType}
+                  onChange={(e) => setDefaultEmploymentType(e.target.value)}
+                  className={selectClass}
                 >
-                  {saving ? (
-                    <>
-                      <span className="w-3 h-3 border-2 border-black/20 border-t-black rounded-full animate-spin" />
-                      Saving...
-                    </>
-                  ) : saveSuccess ? (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      Saved
-                    </>
-                  ) : (
-                    'Save Changes'
-                  )}
-                </button>
-                {hasChanges && !saving && (
-                  <span className="text-[10px] text-amber-500 uppercase tracking-wider">Unsaved changes</span>
-                )}
+                  <option value="">Select type</option>
+                  {EMPLOYMENT_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+                <p className={helperClass}>Pre-fills offer letters with this employment type</p>
+              </div>
+
+              {/* Compensation Notes */}
+              <div>
+                <label className={labelClass}>Compensation Notes</label>
+                <textarea
+                  value={compensationNotes}
+                  onChange={(e) => setCompensationNotes(e.target.value)}
+                  className={textareaClass}
+                  rows={3}
+                  placeholder="e.g. Paid bi-weekly. Equity vesting over 4 years with 1-year cliff. Annual bonus target 10-15%."
+                />
+                <p className={helperClass}>Pay frequency, equity, and bonus structure for offer letter guidance</p>
+              </div>
+
+              {/* Benefits Summary */}
+              <div>
+                <label className={labelClass}>Benefits Summary</label>
+                <textarea
+                  value={benefitsSummary}
+                  onChange={(e) => setBenefitsSummary(e.target.value)}
+                  className={textareaClass}
+                  rows={4}
+                  placeholder="e.g. Medical, dental, vision (100% employee, 75% dependents). 401(k) with 4% match. $500/yr learning stipend."
+                />
+                <p className={helperClass}>Standard benefits package — pre-fills offer letters automatically</p>
+              </div>
+
+              {/* PTO Policy Summary */}
+              <div>
+                <label className={labelClass}>PTO Policy Summary</label>
+                <textarea
+                  value={ptoPolicySummary}
+                  onChange={(e) => setPtoPolicySummary(e.target.value)}
+                  className={textareaClass}
+                  rows={3}
+                  placeholder="e.g. Unlimited PTO with 2-week minimum. 10 company holidays. 12 weeks parental leave."
+                />
+                <p className={helperClass}>PTO overview for offer letters and onboarding documents</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Culture & AI Guidance */}
+          <div className="border border-white/10 bg-zinc-900/30">
+            <div className="p-6 border-b border-white/10 flex items-center gap-3">
+              <Heart className="w-4 h-4 text-zinc-500" />
+              <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Culture & AI Guidance</h2>
+            </div>
+            <div className="p-6 space-y-6">
+              {/* Company Values */}
+              <div>
+                <label className={labelClass}>Company Values</label>
+                <textarea
+                  value={companyValues}
+                  onChange={(e) => setCompanyValues(e.target.value)}
+                  className={textareaClass}
+                  rows={4}
+                  placeholder="e.g. Move fast, own outcomes. Default to transparency. Customers come first. Disagree and commit."
+                />
+                <p className={helperClass}>Sets the tone for reviews, workbooks, and onboarding content</p>
+              </div>
+
+              {/* AI Guidance Notes */}
+              <div>
+                <label className={labelClass}>AI Guidance Notes</label>
+                <textarea
+                  value={aiGuidanceNotes}
+                  onChange={(e) => setAiGuidanceNotes(e.target.value)}
+                  className={textareaClass}
+                  rows={4}
+                  placeholder='e.g. Always mention our 90-day review period in offer letters. Use "team member" instead of "employee". Include our diversity commitment in all onboarding documents.'
+                />
+                <p className={helperClass}>
+                  Special instructions for the AI — anything written here will be included in every AI-generated document
+                </p>
               </div>
             </div>
           </div>
@@ -410,6 +609,27 @@ export function CompanyProfile() {
               </button>
             </div>
           </div>
+
+          {/* Bottom save bar */}
+          {hasChanges && (
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-2 px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {saving ? (
+                  <>
+                    <span className="w-3 h-3 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </button>
+              <span className="text-[10px] text-amber-500 uppercase tracking-wider">Unsaved changes</span>
+            </div>
+          )}
         </div>
 
         {/* Logo Sidebar */}
@@ -464,6 +684,25 @@ export function CompanyProfile() {
                 PNG, JPG or SVG. Max 5MB.
               </p>
             </div>
+          </div>
+
+          {/* Profile completion sidebar hint */}
+          <div className="border border-white/10 bg-zinc-900/30 p-6">
+            <h3 className="text-xs font-bold text-white uppercase tracking-[0.2em] mb-3">AI Profile Tips</h3>
+            <ul className="space-y-2.5 text-[11px] text-zinc-400">
+              <li className="flex gap-2">
+                <span className="text-emerald-500 mt-0.5">&#x2022;</span>
+                <span>Add your <strong className="text-zinc-300">headquarters state</strong> so offer letters use the right legal defaults</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-emerald-500 mt-0.5">&#x2022;</span>
+                <span>Fill in <strong className="text-zinc-300">benefits</strong> and <strong className="text-zinc-300">PTO</strong> to skip repetitive questions in chat</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-emerald-500 mt-0.5">&#x2022;</span>
+                <span>Use <strong className="text-zinc-300">AI guidance notes</strong> for custom rules like probation periods or preferred terminology</span>
+              </li>
+            </ul>
           </div>
         </div>
       </div>

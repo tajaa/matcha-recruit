@@ -440,11 +440,45 @@ def _build_offer_letter_payload(state: dict, fallback_company_name: str) -> dict
     }
 
 
+async def get_company_profile_for_ai(company_id: UUID) -> dict:
+    """Fetch the company profile fields relevant to AI context."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT name, industry, size,
+                   headquarters_state, headquarters_city, work_arrangement,
+                   default_employment_type, benefits_summary, pto_policy_summary,
+                   compensation_notes, company_values, ai_guidance_notes
+            FROM companies
+            WHERE id = $1
+            """,
+            company_id,
+        )
+        if row is None:
+            return {}
+        return {k: v for k, v in dict(row).items() if v is not None}
+
+
 async def create_thread(
     company_id: UUID,
     user_id: UUID,
     title: str = "New Chat",
 ) -> dict:
+    # Pre-populate initial state with company profile hints
+    initial_state: dict = {}
+    try:
+        profile = await get_company_profile_for_ai(company_id)
+        if profile.get("name"):
+            initial_state["company_name"] = profile["name"]
+        if profile.get("industry"):
+            initial_state["industry"] = profile["industry"]
+        if profile.get("default_employment_type"):
+            initial_state["employment_type"] = profile["default_employment_type"]
+        if profile.get("headquarters_state"):
+            initial_state["work_state"] = profile["headquarters_state"]
+    except Exception:
+        logger.warning("Failed to fetch company profile for thread pre-population", exc_info=True)
+
     async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
@@ -458,7 +492,7 @@ async def create_thread(
                 company_id,
                 user_id,
                 title,
-                json.dumps({}),
+                json.dumps(initial_state),
             )
             await _upsert_element_from_thread_row(conn, dict(row))
         d = dict(row)
