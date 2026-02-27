@@ -637,6 +637,87 @@ async def get_calibration_stats_endpoint(
     return await get_calibration_stats(category, days)
 
 
+class LegislationAssignRequest(BaseModel):
+    location_id: str
+    action_owner_id: Optional[str] = None
+    action_due_date: Optional[date] = None
+
+
+@router.put("/legislation/{legislation_id}/assign")
+async def assign_legislation_endpoint(
+    legislation_id: str,
+    data: LegislationAssignRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    conn=Depends(get_connection),
+):
+    """Find or create a compliance_alerts record for a legislation item and set assignment."""
+    import json as _json
+
+    company_id = await get_client_company_id(current_user, conn)
+
+    try:
+        leg_uuid = UUID(legislation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid legislation_id")
+
+    leg_row = await conn.fetchrow(
+        "SELECT id, title, category FROM upcoming_legislation WHERE id = $1 AND company_id = $2",
+        leg_uuid, company_id,
+    )
+    if not leg_row:
+        raise HTTPException(status_code=404, detail="Legislation not found")
+
+    try:
+        location_id = UUID(data.location_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid location_id")
+
+    # Find existing alert for this legislation item
+    alert_id = await conn.fetchval(
+        """
+        SELECT id FROM compliance_alerts
+        WHERE company_id = $1
+          AND location_id = $2
+          AND alert_type = 'upcoming_legislation'
+          AND status <> 'dismissed'
+          AND metadata->>'legislation_id' = $3
+        LIMIT 1
+        """,
+        company_id, location_id, legislation_id,
+    )
+
+    # Create one on-demand if none exists yet
+    if not alert_id:
+        metadata = {"legislation_id": legislation_id}
+        alert_id = await conn.fetchval(
+            """
+            INSERT INTO compliance_alerts
+            (location_id, company_id, requirement_id, title, message, severity, status,
+             category, action_required, alert_type, metadata)
+            VALUES ($1, $2, NULL, $3, $4, 'info', 'unread', $5, 'Review upcoming legislation',
+                    'upcoming_legislation', $6::jsonb)
+            RETURNING id
+            """,
+            location_id, company_id,
+            leg_row["title"],
+            "Upcoming legislation requires review and assignment.",
+            leg_row["category"],
+            _json.dumps(metadata),
+        )
+
+    # Apply owner / due-date updates directly
+    updates = {}
+    if data.action_owner_id is not None:
+        updates["action_owner_id"] = data.action_owner_id or None
+    if data.action_due_date is not None:
+        updates["action_due_date"] = data.action_due_date.isoformat()
+
+    if updates:
+        await update_alert_action_plan(alert_id, company_id, updates)
+
+    return {"alert_id": str(alert_id)}
+
+
 @router.get("/assignable-users")
 async def get_assignable_users_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),

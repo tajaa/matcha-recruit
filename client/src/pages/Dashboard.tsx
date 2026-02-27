@@ -134,24 +134,48 @@ function ComplianceDashboardWidget() {
     setModalError(null);
   };
 
+  const ensureAlertId = async (item: ComplianceDashboardItem): Promise<string> => {
+    if (item.alert_id) return item.alert_id;
+    const result = await complianceAPI.assignLegislation(item.legislation_id, {
+      location_id: item.location_id,
+    });
+    setSelectedItem(prev => prev ? { ...prev, alert_id: result.alert_id } : prev);
+    return result.alert_id;
+  };
+
   const saveModalChanges = async () => {
-    if (!selectedItem?.alert_id) return;
+    if (!selectedItem) return;
     setModalSaving(true);
     setModalError(null);
     try {
-      const payload: ComplianceActionPlanUpdate = {};
-      if (modalOwnerId !== (selectedItem.action_owner_id ?? '')) {
-        payload.action_owner_id = modalOwnerId || null;
+      const ownerChanged = modalOwnerId !== (selectedItem.action_owner_id ?? '');
+      const hasTurnaround = modalTurnaround !== null;
+
+      if (!selectedItem.alert_id) {
+        // No alert yet — create it and apply owner/due-date in one call
+        const dueDate = hasTurnaround ? (() => {
+          const d = new Date();
+          d.setDate(d.getDate() + modalTurnaround!);
+          return d.toISOString().slice(0, 10);
+        })() : undefined;
+        await complianceAPI.assignLegislation(selectedItem.legislation_id, {
+          location_id: selectedItem.location_id,
+          action_owner_id: modalOwnerId || undefined,
+          action_due_date: dueDate,
+        });
+      } else {
+        const payload: ComplianceActionPlanUpdate = {};
+        if (ownerChanged) payload.action_owner_id = modalOwnerId || null;
+        if (hasTurnaround) {
+          const due = new Date();
+          due.setDate(due.getDate() + modalTurnaround!);
+          payload.action_due_date = due.toISOString().slice(0, 10);
+        }
+        if (Object.keys(payload).length > 0) {
+          await complianceAPI.updateAlertActionPlan(selectedItem.alert_id, payload);
+        }
       }
-      if (modalTurnaround !== null) {
-        const due = new Date();
-        due.setDate(due.getDate() + modalTurnaround);
-        payload.action_due_date = due.toISOString().slice(0, 10);
-      }
-      if (Object.keys(payload).length > 0) {
-        await complianceAPI.updateAlertActionPlan(selectedItem.alert_id, payload);
-        loadDashboard(horizon);
-      }
+      loadDashboard(horizon);
       closeModal();
     } catch {
       setModalError('Could not save changes');
@@ -161,11 +185,11 @@ function ComplianceDashboardWidget() {
   };
 
   const markActioned = async (item: ComplianceDashboardItem) => {
-    if (!item.alert_id) return;
     setModalSaving(true);
     setModalError(null);
     try {
-      await complianceAPI.updateAlertActionPlan(item.alert_id, { mark_actioned: true });
+      const alertId = await ensureAlertId(item);
+      await complianceAPI.updateAlertActionPlan(alertId, { mark_actioned: true });
       loadDashboard(horizon);
       closeModal();
     } catch {
@@ -542,54 +566,52 @@ function ComplianceDashboardWidget() {
               <div className="border-t border-white/5" />
 
               {/* Assign */}
-              {selectedItem.alert_id && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-[7px] uppercase tracking-widest text-zinc-500 mb-1.5">Assign To</label>
-                    <select
-                      value={modalOwnerId}
-                      onChange={(e) => setModalOwnerId(e.target.value)}
-                      className="w-full bg-zinc-900 border border-white/10 text-zinc-200 text-[10px] px-2 py-1.5 focus:outline-none focus:border-white/20"
-                    >
-                      <option value="">— Unassigned —</option>
-                      {assignableUsers.map(u => (
-                        <option key={u.id} value={u.id}>{u.name}{u.name !== u.email ? ` (${u.email})` : ''}</option>
-                      ))}
-                      {currentUser && !assignableUsers.find(u => u.id === currentUser.id) && (
-                        <option value={currentUser.id}>Me</option>
-                      )}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[7px] uppercase tracking-widest text-zinc-500 mb-1.5">Turnaround Time</label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {TURNAROUND_OPTIONS.map(opt => (
-                        <button
-                          key={opt.days}
-                          onClick={() => setModalTurnaround(modalTurnaround === opt.days ? null : opt.days)}
-                          className={`px-2 py-1 text-[8px] font-mono uppercase tracking-widest border transition-colors ${
-                            modalTurnaround === opt.days
-                              ? 'bg-white text-black border-white'
-                              : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-zinc-200'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                    {modalTurnaround !== null && (
-                      <p className="mt-1.5 text-[8px] text-zinc-500">
-                        Due date will be set to {(() => {
-                          const d = new Date();
-                          d.setDate(d.getDate() + modalTurnaround);
-                          return d.toLocaleDateString();
-                        })()} · reminder email sent when due approaches
-                      </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[7px] uppercase tracking-widest text-zinc-500 mb-1.5">Assign To</label>
+                  <select
+                    value={modalOwnerId}
+                    onChange={(e) => setModalOwnerId(e.target.value)}
+                    className="w-full bg-zinc-900 border border-white/10 text-zinc-200 text-[10px] px-2 py-1.5 focus:outline-none focus:border-white/20"
+                  >
+                    <option value="">— Unassigned —</option>
+                    {assignableUsers.map(u => (
+                      <option key={u.id} value={u.id}>{u.name}{u.name !== u.email ? ` (${u.email})` : ''}</option>
+                    ))}
+                    {currentUser && !assignableUsers.find(u => u.id === currentUser.id) && (
+                      <option value={currentUser.id}>Me</option>
                     )}
-                  </div>
+                  </select>
                 </div>
-              )}
+
+                <div>
+                  <label className="block text-[7px] uppercase tracking-widest text-zinc-500 mb-1.5">Turnaround Time</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {TURNAROUND_OPTIONS.map(opt => (
+                      <button
+                        key={opt.days}
+                        onClick={() => setModalTurnaround(modalTurnaround === opt.days ? null : opt.days)}
+                        className={`px-2 py-1 text-[8px] font-mono uppercase tracking-widest border transition-colors ${
+                          modalTurnaround === opt.days
+                            ? 'bg-white text-black border-white'
+                            : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-zinc-200'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {modalTurnaround !== null && (
+                    <p className="mt-1.5 text-[8px] text-zinc-500">
+                      Due date will be set to {(() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + modalTurnaround);
+                        return d.toLocaleDateString();
+                      })()} · reminder email sent when due approaches
+                    </p>
+                  )}
+                </div>
+              </div>
 
               {modalError && (
                 <p className="text-[8px] text-red-400 uppercase tracking-wider">{modalError}</p>
@@ -599,7 +621,7 @@ function ComplianceDashboardWidget() {
             {/* Modal footer */}
             <div className="p-4 border-t border-white/10 flex items-center justify-between gap-2 flex-shrink-0">
               <div className="flex items-center gap-2">
-                {selectedItem.action_status !== 'actioned' && selectedItem.alert_id && (
+                {selectedItem.action_status !== 'actioned' && (
                   <button
                     onClick={() => void markActioned(selectedItem)}
                     disabled={modalSaving}
@@ -625,15 +647,13 @@ function ComplianceDashboardWidget() {
                 >
                   Cancel
                 </button>
-                {selectedItem.alert_id && (
-                  <button
-                    onClick={() => void saveModalChanges()}
-                    disabled={modalSaving || (modalOwnerId === (selectedItem.action_owner_id ?? '') && modalTurnaround === null)}
-                    className="px-3 py-1.5 text-[8px] uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {modalSaving ? 'Saving…' : 'Save'}
-                  </button>
-                )}
+                <button
+                  onClick={() => void saveModalChanges()}
+                  disabled={modalSaving || (modalOwnerId === (selectedItem.action_owner_id ?? '') && modalTurnaround === null)}
+                  className="px-3 py-1.5 text-[8px] uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {modalSaving ? 'Saving…' : 'Save'}
+                </button>
               </div>
             </div>
           </div>

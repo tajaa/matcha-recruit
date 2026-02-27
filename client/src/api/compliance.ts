@@ -402,6 +402,22 @@ export const complianceAPI = {
         if (!response.ok) throw new Error('Failed to fetch assignable users');
         return response.json();
     },
+
+    async assignLegislation(
+        legislationId: string,
+        data: { location_id: string; action_owner_id?: string; action_due_date?: string },
+    ): Promise<{ alert_id: string }> {
+        const response = await fetch(`/api/compliance/legislation/${legislationId}/assign`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) throw new Error('Failed to assign legislation');
+        return response.json();
+    },
 };
 
 export const COMPLIANCE_CATEGORY_LABELS: Record<string, string> = {
