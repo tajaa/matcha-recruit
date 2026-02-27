@@ -90,6 +90,17 @@ async def get_billing_balance(
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No company associated with this account")
 
+    # Admins have unlimited credits — return a sentinel so the UI never shows warnings
+    if current_user.role == "admin":
+        return BillingBalanceResponse(
+            company_id=company_id,
+            credits_remaining=999999,
+            total_credits_purchased=0,
+            total_credits_granted=0,
+            updated_at=None,
+            recent_transactions=[],
+        )
+
     balance = await billing_service.get_credit_balance(company_id)
     history = await billing_service.get_transaction_history(company_id, limit=20, offset=0)
 

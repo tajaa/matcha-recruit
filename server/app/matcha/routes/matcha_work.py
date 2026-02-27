@@ -1001,7 +1001,8 @@ async def send_message(
             token_usage=None,
         )
 
-    await billing_service.check_credits(company_id)
+    if current_user.role != "admin":
+        await billing_service.check_credits(company_id)
 
     # Call AI
     ai_provider = get_ai_provider()
@@ -1050,23 +1051,24 @@ async def send_message(
     except Exception as e:
         logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
 
-    try:
-        async with get_connection() as conn:
-            async with conn.transaction():
-                await billing_service.deduct_credit(
-                    conn,
-                    company_id=company_id,
-                    thread_id=thread_id,
-                    user_id=current_user.id,
+    if current_user.role != "admin":
+        try:
+            async with get_connection() as conn:
+                async with conn.transaction():
+                    await billing_service.deduct_credit(
+                        conn,
+                        company_id=company_id,
+                        thread_id=thread_id,
+                        user_id=current_user.id,
+                    )
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED:
+                logger.warning(
+                    "Credits ran out before deduction could be recorded for thread %s",
+                    thread_id,
                 )
-    except HTTPException as exc:
-        if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED:
-            logger.warning(
-                "Credits ran out before deduction could be recorded for thread %s",
-                thread_id,
-            )
-        else:
-            logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
+            else:
+                logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
     except Exception as exc:
         logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
 
@@ -1137,7 +1139,8 @@ async def send_message_stream(
 
         return StreamingResponse(unsupported_stream(), media_type="text/event-stream")
 
-    await billing_service.check_credits(company_id)
+    if current_user.role != "admin":
+        await billing_service.check_credits(company_id)
 
     ai_provider = get_ai_provider()
     estimated_usage = await ai_provider.estimate_usage(
@@ -1198,25 +1201,26 @@ async def send_message_stream(
             except Exception as e:
                 logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
 
-            try:
-                async with get_connection() as conn:
-                    async with conn.transaction():
-                        await billing_service.deduct_credit(
-                            conn,
-                            company_id=company_id,
-                            thread_id=thread_id,
-                            user_id=current_user.id,
+            if current_user.role != "admin":
+                try:
+                    async with get_connection() as conn:
+                        async with conn.transaction():
+                            await billing_service.deduct_credit(
+                                conn,
+                                company_id=company_id,
+                                thread_id=thread_id,
+                                user_id=current_user.id,
+                            )
+                except HTTPException as exc:
+                    if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED:
+                        logger.warning(
+                            "Credits ran out before stream deduction could be recorded for thread %s",
+                            thread_id,
                         )
-            except HTTPException as exc:
-                if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED:
-                    logger.warning(
-                        "Credits ran out before stream deduction could be recorded for thread %s",
-                        thread_id,
-                    )
-                else:
+                    else:
+                        logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
+                except Exception as exc:
                     logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
-            except Exception as exc:
-                logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
 
             if final_usage:
                 yield _sse_data(
