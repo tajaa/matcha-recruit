@@ -137,136 +137,118 @@ function AdminBillingView() {
   const amountIsValid   = !isNaN(parsedAmount) && parsedAmount !== 0;
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="max-w-6xl mx-auto px-6 py-10 space-y-8">
+    <div className="max-w-5xl mx-auto space-y-12">
 
-        {/* Header */}
-        <div className="border-b border-zinc-800 pb-6">
-          <p className="text-xs uppercase tracking-widest text-zinc-500 mb-1">Matcha Work</p>
-          <h1 className="text-2xl font-semibold text-zinc-100">Billing & Credits</h1>
-          <p className="text-sm text-zinc-400 mt-1">
-            Manage credit balances across all customer accounts.
-          </p>
-        </div>
-
-        {notice && (
-          <div className="flex items-start gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-            <span className="text-emerald-400 mt-0.5">✓</span>
-            <p className="text-sm text-emerald-300">{notice}</p>
-            <button onClick={() => setNotice(null)} className="ml-auto text-zinc-500 hover:text-zinc-300">✕</button>
-          </div>
-        )}
-        {error && (
-          <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-300">{error}</div>
-        )}
-
-        {/* Platform totals */}
-        {!loading && (
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { label: 'Credits in Use', value: totalRemaining.toLocaleString(), sub: 'across all accounts' },
-              { label: 'Total Purchased', value: totalPurchased.toLocaleString(), sub: 'via Stripe' },
-              { label: 'Total Granted', value: totalGranted.toLocaleString(), sub: 'manual grants' },
-            ].map(s => (
-              <div key={s.label} className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-5 py-4">
-                <p className="text-xs uppercase tracking-widest text-zinc-500 mb-2">{s.label}</p>
-                <p className="text-3xl font-semibold tabular-nums text-zinc-100">{s.value}</p>
-                <p className="text-xs text-zinc-600 mt-1">{s.sub}</p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Company table */}
+      <div className="flex justify-between items-start border-b border-white/10 pb-8">
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-400">Customer Accounts</h2>
-            <span className="text-xs text-zinc-600">{companies.length} companies</span>
-          </div>
-
-          <div className="rounded-xl border border-zinc-800 overflow-hidden">
-            <table className="min-w-full">
-              <thead>
-                <tr className="border-b border-zinc-800 bg-zinc-900/80">
-                  {['Company', 'Credits Remaining', 'Purchased', 'Granted', 'Last Activity', ''].map(h => (
-                    <th key={h} className={`px-5 py-3 text-[10px] uppercase tracking-widest text-zinc-500 font-medium ${h === 'Company' || h === '' ? 'text-left' : 'text-right'}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/60">
-                {loading && (
-                  <tr><td colSpan={6} className="px-5 py-12 text-center text-sm text-zinc-600">Loading…</td></tr>
-                )}
-                {!loading && companies.length === 0 && (
-                  <tr><td colSpan={6} className="px-5 py-12 text-center text-sm text-zinc-600">No companies found.</td></tr>
-                )}
-                {companies.map(c => {
-                  const low = c.credits_remaining > 0 && c.credits_remaining < 20;
-                  const empty = c.credits_remaining <= 0;
-                  return (
-                    <tr key={c.company_id} className="bg-zinc-950 hover:bg-zinc-900/40 transition-colors">
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-md bg-zinc-800 flex items-center justify-center text-xs font-semibold text-zinc-400 flex-shrink-0">
-                            {c.company_name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-zinc-200">{c.company_name}</p>
-                            {c.company_status === 'pending' && (
-                              <p className="text-[10px] text-amber-500 uppercase tracking-wider">Pending approval</p>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 text-right">
-                        <span className={`text-sm font-semibold tabular-nums ${empty ? 'text-red-400' : low ? 'text-amber-400' : 'text-zinc-100'}`}>
-                          {c.credits_remaining.toLocaleString()}
-                        </span>
-                        {(empty || low) && (
-                          <p className="text-[10px] text-zinc-600 mt-0.5">{empty ? 'out of credits' : 'running low'}</p>
-                        )}
-                      </td>
-                      <td className="px-5 py-3.5 text-right text-sm tabular-nums text-zinc-400">{c.total_credits_purchased.toLocaleString()}</td>
-                      <td className="px-5 py-3.5 text-right text-sm tabular-nums text-zinc-400">{c.total_credits_granted.toLocaleString()}</td>
-                      <td className="px-5 py-3.5 text-right text-xs text-zinc-600">{c.updated_at ? formatDate(c.updated_at) : '—'}</td>
-                      <td className="px-5 py-3.5 text-right">
-                        <button
-                          onClick={() => openGrant(c)}
-                          className="px-3 py-1.5 text-xs font-medium rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-zinc-100 border border-zinc-700 hover:border-zinc-600 transition-all"
-                        >
-                          Grant Credits
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Billing & Credits</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Manage credit balances across all customer accounts</p>
         </div>
       </div>
 
-      {/* Grant modal */}
+      {notice && (
+        <div className="border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-xs text-emerald-400 flex items-center justify-between">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="text-zinc-600 hover:text-zinc-300 ml-4">✕</button>
+        </div>
+      )}
+      {error && (
+        <div className="border border-red-500/20 bg-red-500/5 px-4 py-3 text-xs text-red-400">{error}</div>
+      )}
+
+      {!loading && (
+        <div className="grid grid-cols-3 gap-px bg-white/10 border border-white/10">
+          {[
+            { label: 'Credits in Use', value: totalRemaining.toLocaleString(), sub: 'across all accounts' },
+            { label: 'Total Purchased', value: totalPurchased.toLocaleString(), sub: 'via Stripe' },
+            { label: 'Total Granted', value: totalGranted.toLocaleString(), sub: 'manual grants' },
+          ].map(s => (
+            <div key={s.label} className="bg-zinc-950 px-6 py-6">
+              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-3">{s.label}</div>
+              <div className="text-4xl font-light font-mono text-white">{s.value}</div>
+              <div className="text-[10px] text-zinc-600 mt-2 font-mono">{s.sub}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Customer Accounts</div>
+          <span className="text-[10px] text-zinc-600 font-mono">{companies.length} companies</span>
+        </div>
+        <div className="border border-white/10">
+          <table className="min-w-full">
+            <thead>
+              <tr className="border-b border-white/10">
+                {['Company', 'Credits Remaining', 'Purchased', 'Granted', 'Last Activity', ''].map(h => (
+                  <th key={h} className={`px-5 py-3 text-[10px] uppercase tracking-widest text-zinc-600 font-bold ${h === 'Company' || h === '' ? 'text-left' : 'text-right'}`}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {loading && (
+                <tr><td colSpan={6} className="px-5 py-12 text-center text-xs text-zinc-600 animate-pulse">Loading…</td></tr>
+              )}
+              {!loading && companies.length === 0 && (
+                <tr><td colSpan={6} className="px-5 py-12 text-center text-xs text-zinc-600">No companies found.</td></tr>
+              )}
+              {companies.map(c => {
+                const low = c.credits_remaining > 0 && c.credits_remaining < 20;
+                const empty = c.credits_remaining <= 0;
+                return (
+                  <tr key={c.company_id} className="bg-zinc-950 hover:bg-zinc-900/30 transition-colors">
+                    <td className="px-5 py-4">
+                      <div className="text-sm text-zinc-200">{c.company_name}</div>
+                      {c.company_status === 'pending' && (
+                        <div className="text-[10px] text-amber-500 uppercase tracking-wider mt-0.5">Pending approval</div>
+                      )}
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <span className={`text-sm font-mono ${empty ? 'text-red-400' : low ? 'text-amber-400' : 'text-zinc-100'}`}>
+                        {c.credits_remaining.toLocaleString()}
+                      </span>
+                      {(empty || low) && (
+                        <div className="text-[10px] text-zinc-600 mt-0.5 font-mono">{empty ? 'out of credits' : 'running low'}</div>
+                      )}
+                    </td>
+                    <td className="px-5 py-4 text-right text-sm font-mono text-zinc-500">{c.total_credits_purchased.toLocaleString()}</td>
+                    <td className="px-5 py-4 text-right text-sm font-mono text-zinc-500">{c.total_credits_granted.toLocaleString()}</td>
+                    <td className="px-5 py-4 text-right text-[11px] text-zinc-600 font-mono">{c.updated_at ? formatDate(c.updated_at) : '—'}</td>
+                    <td className="px-5 py-4 text-right">
+                      <button
+                        onClick={() => openGrant(c)}
+                        className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-zinc-400 hover:text-white border border-white/10 hover:border-white/30 transition-all"
+                      >
+                        Grant
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {grantTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
           onClick={e => { if (e.target === e.currentTarget) setGrantTarget(null); }}
         >
-          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-sm mx-4 shadow-2xl">
-            <div className="px-6 py-5 border-b border-zinc-800">
-              <h3 className="text-base font-semibold text-zinc-100">Grant Credits</h3>
-              <p className="text-xs text-zinc-500 mt-0.5">{grantTarget.company_name}</p>
+          <div className="bg-zinc-950 border border-white/10 w-full max-w-sm mx-4">
+            <div className="px-6 py-5 border-b border-white/10">
+              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Grant Credits</div>
+              <div className="text-base text-white mt-1">{grantTarget.company_name}</div>
             </div>
-
             <div className="px-6 py-5 space-y-4">
-              <div className="flex items-center justify-between rounded-lg bg-zinc-900 border border-zinc-800 px-4 py-3">
-                <span className="text-xs text-zinc-500 uppercase tracking-wider">Current balance</span>
-                <span className="text-sm font-semibold text-zinc-200 tabular-nums">{grantTarget.credits_remaining.toLocaleString()}</span>
+              <div className="flex items-center justify-between border border-white/10 px-4 py-3">
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Current balance</span>
+                <span className="text-sm font-mono text-zinc-200">{grantTarget.credits_remaining.toLocaleString()}</span>
               </div>
-
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                  Credits <span className="text-zinc-600 font-normal">(negative to deduct)</span>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">
+                  Credits <span className="text-zinc-600 normal-case font-normal">(negative to deduct)</span>
                 </label>
                 <input
                   type="number"
@@ -274,47 +256,44 @@ function AdminBillingView() {
                   onChange={e => setGrantAmount(e.target.value)}
                   placeholder="500"
                   autoFocus
-                  className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-sm px-3.5 py-2.5 rounded-lg focus:outline-none focus:border-zinc-500 placeholder:text-zinc-700 transition-colors"
+                  className="w-full bg-zinc-900 border border-white/10 text-zinc-100 text-sm px-3.5 py-2.5 focus:outline-none focus:border-white/30 placeholder:text-zinc-700 transition-colors"
                 />
                 {amountIsValid && (
-                  <p className="mt-1.5 text-xs text-zinc-500">
-                    New balance: <span className="text-zinc-300 font-medium">{Math.max(0, grantTarget.credits_remaining + parsedAmount).toLocaleString()}</span>
+                  <p className="mt-1.5 text-[11px] text-zinc-500 font-mono">
+                    New balance: <span className="text-zinc-300">{Math.max(0, grantTarget.credits_remaining + parsedAmount).toLocaleString()}</span>
                   </p>
                 )}
               </div>
-
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                  Note <span className="text-zinc-600 font-normal">(optional)</span>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">
+                  Note <span className="text-zinc-600 normal-case font-normal">(optional)</span>
                 </label>
                 <input
                   type="text"
                   value={grantNote}
                   onChange={e => setGrantNote(e.target.value)}
                   placeholder="e.g. Courtesy credits for onboarding"
-                  className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-sm px-3.5 py-2.5 rounded-lg focus:outline-none focus:border-zinc-500 placeholder:text-zinc-700 transition-colors"
+                  className="w-full bg-zinc-900 border border-white/10 text-zinc-100 text-sm px-3.5 py-2.5 focus:outline-none focus:border-white/30 placeholder:text-zinc-700 transition-colors"
                 />
               </div>
-
               {grantError && <p className="text-xs text-red-400">{grantError}</p>}
             </div>
-
-            <div className="px-6 py-4 border-t border-zinc-800 flex items-center justify-end gap-3">
+            <div className="px-6 py-4 border-t border-white/10 flex items-center justify-end gap-3">
               <button
                 onClick={() => setGrantTarget(null)}
-                className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+                className="px-4 py-2 text-xs uppercase tracking-wider text-zinc-500 hover:text-zinc-200 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => void submitGrant()}
                 disabled={granting || !amountIsValid}
-                className="px-5 py-2 text-sm font-medium rounded-lg bg-zinc-100 text-zinc-950 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                className="px-5 py-2 text-xs uppercase tracking-wider font-bold bg-white text-zinc-950 hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
                 {granting
                   ? 'Applying…'
                   : amountIsValid
-                    ? `Apply ${parsedAmount > 0 ? '+' : ''}${parsedAmount.toLocaleString()} credits`
+                    ? `Apply ${parsedAmount > 0 ? '+' : ''}${parsedAmount.toLocaleString()}`
                     : 'Apply Credits'}
               </button>
             </div>
@@ -410,211 +389,199 @@ function ClientBillingView() {
   const activeSub = subscription?.active ? subscription : null;
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="max-w-4xl mx-auto px-6 py-10 space-y-10">
+    <div className="max-w-4xl mx-auto space-y-12">
 
-        {/* Header */}
-        <div className="border-b border-zinc-800 pb-6">
-          <p className="text-xs uppercase tracking-widest text-zinc-500 mb-1">Matcha Work</p>
-          <h1 className="text-2xl font-semibold text-zinc-100">Billing & Credits</h1>
-          <p className="text-sm text-zinc-400 mt-1">Credits are shared across all admins in your organization.</p>
+      <div className="flex justify-between items-start border-b border-white/10 pb-8">
+        <div>
+          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Billing & Credits</h1>
+          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Credits are shared across all admins in your organization</p>
+        </div>
+      </div>
+
+      {notice && (
+        <div className="border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-xs text-emerald-400 flex items-center justify-between">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="text-zinc-600 hover:text-zinc-300 ml-4">✕</button>
+        </div>
+      )}
+      {error && (
+        <div className="border border-red-500/20 bg-red-500/5 px-4 py-3 text-xs text-red-400">{error}</div>
+      )}
+
+      {/* Balance + subscription */}
+      <div className="grid grid-cols-2 gap-px bg-white/10 border border-white/10">
+        <div className="bg-zinc-950 p-8">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Credits Remaining</div>
+          <div className={`text-6xl font-light font-mono ${credits <= 0 ? 'text-red-400' : low ? 'text-amber-400' : 'text-white'}`}>
+            {credits.toLocaleString()}
+          </div>
+          <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Purchased</div>
+              <div className="text-sm font-mono text-zinc-300">{(balance?.total_credits_purchased ?? 0).toLocaleString()}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Granted</div>
+              <div className="text-sm font-mono text-zinc-300">{(balance?.total_credits_granted ?? 0).toLocaleString()}</div>
+            </div>
+          </div>
+          {credits <= 0 && <div className="mt-4 text-xs text-red-400">Out of credits — purchase a pack below to continue.</div>}
+          {low && <div className="mt-4 text-xs text-amber-400">Running low — fewer than 10 credits remaining.</div>}
         </div>
 
-        {notice && (
-          <div className="flex items-start gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-            <span className="text-emerald-400 mt-0.5 text-sm">✓</span>
-            <p className="text-sm text-emerald-300 flex-1">{notice}</p>
-            <button onClick={() => setNotice(null)} className="text-zinc-500 hover:text-zinc-300 text-xs">✕</button>
+        {activeSub ? (
+          <div className="bg-zinc-950 p-8">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-1.5 h-1.5 bg-emerald-400 animate-pulse" />
+              <div className="text-[10px] text-emerald-400 uppercase tracking-widest font-bold">Auto-Renew Active</div>
+            </div>
+            <div className="text-4xl font-light font-mono text-white">{activeSub.credits_per_cycle?.toLocaleString()}</div>
+            <div className="text-[10px] text-zinc-500 mt-1 font-mono uppercase tracking-wider">credits / month</div>
+            <div className="mt-6 pt-6 border-t border-white/10 space-y-2 text-[11px] text-zinc-500 font-mono">
+              {activeSub.amount_cents && <div>{formatCents(activeSub.amount_cents)} billed monthly</div>}
+              {activeSub.current_period_end && <div>Renews {formatDate(activeSub.current_period_end)}</div>}
+            </div>
+            {activeSub.canceled_at ? (
+              <div className="mt-4 text-[11px] text-amber-400">Cancels at period end</div>
+            ) : (
+              <button
+                onClick={() => void handleCancelSub()}
+                disabled={cancelingSub}
+                className="mt-4 text-[11px] text-zinc-600 hover:text-red-400 uppercase tracking-wider transition-colors disabled:opacity-50"
+              >
+                {cancelingSub ? 'Canceling…' : 'Cancel subscription'}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="bg-zinc-950 p-8 flex flex-col items-center justify-center text-center">
+            <div className="text-xs text-zinc-500 uppercase tracking-wider mb-1">No active subscription</div>
+            <div className="text-[10px] text-zinc-600 font-mono">Enable auto-renew on any pack below to subscribe.</div>
           </div>
         )}
-        {error && (
-          <div className="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-300">{error}</div>
-        )}
+      </div>
 
-        {/* Balance + subscription */}
-        <div className="grid sm:grid-cols-2 gap-4">
-          {/* Balance */}
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 px-6 py-5">
-            <p className="text-xs uppercase tracking-widest text-zinc-500 mb-3">Credits Remaining</p>
-            <p className={`text-5xl font-semibold tabular-nums ${credits <= 0 ? 'text-red-400' : low ? 'text-amber-400' : 'text-zinc-100'}`}>
-              {credits.toLocaleString()}
-            </p>
-            <div className="mt-4 pt-4 border-t border-zinc-800 grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <p className="text-zinc-600 mb-0.5">Purchased</p>
-                <p className="text-zinc-300 font-medium tabular-nums">{(balance?.total_credits_purchased ?? 0).toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-zinc-600 mb-0.5">Granted</p>
-                <p className="text-zinc-300 font-medium tabular-nums">{(balance?.total_credits_granted ?? 0).toLocaleString()}</p>
-              </div>
-            </div>
-            {credits <= 0 && <p className="mt-3 text-xs text-red-400">Out of credits — purchase a pack below to continue.</p>}
-            {low && <p className="mt-3 text-xs text-amber-400">Running low — fewer than 10 credits remaining.</p>}
-          </div>
+      {/* Credit packs */}
+      <div>
+        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-1">Top Up Credits</div>
+        <div className="text-[10px] text-zinc-600 font-mono mb-6">All credits go into a shared pool. A $2.50 processing fee applies.</div>
+        <div className="grid grid-cols-2 gap-px bg-white/10 border border-white/10">
+          {packs.map(pack => {
+            const autoRenew  = autoRenewFlags[pack.pack_id] ?? false;
+            const isBuying   = buyingPackId === pack.pack_id;
+            const isBlocked  = Boolean(buyingPackId) && !isBuying;
+            const hasThisSub = activeSub?.pack_id === pack.pack_id && !activeSub.canceled_at;
 
-          {/* Subscription or placeholder */}
-          {activeSub ? (
-            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-6 py-5">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <p className="text-xs font-semibold uppercase tracking-widest text-emerald-400">Auto-Renew Active</p>
+            return (
+              <div key={pack.pack_id} className="bg-zinc-950 p-8 flex flex-col gap-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">{pack.label}</div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-5xl font-light font-mono text-white">{pack.credits.toLocaleString()}</span>
+                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider">credits</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-light font-mono text-white">{formatCents(pack.amount_cents)}</div>
+                    <div className="text-[10px] text-zinc-600 mt-1 font-mono">incl. {formatCents(pack.fee_cents)} fee</div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-4 border border-white/10 px-4 py-3">
+                  <div>
+                    <div className="text-[10px] text-zinc-400 uppercase tracking-wider font-bold">Auto-renew monthly</div>
+                    <div className="text-[10px] text-zinc-600 mt-0.5 font-mono">
+                      {autoRenew ? `${formatCents(pack.amount_cents)}/mo · renews automatically` : 'One-time purchase'}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setAutoRenewFlags(p => ({ ...p, [pack.pack_id]: !p[pack.pack_id] }))}
+                    role="switch"
+                    aria-checked={autoRenew}
+                    className={`relative w-10 h-[22px] transition-colors flex-shrink-0 focus:outline-none ${autoRenew ? 'bg-emerald-500' : 'bg-zinc-700'}`}
+                  >
+                    <span className={`absolute top-[3px] left-[3px] w-4 h-4 bg-white shadow-sm transition-transform ${autoRenew ? 'translate-x-[18px]' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+
+                {hasThisSub && !autoRenew ? (
+                  <div className="flex items-center justify-center gap-1.5 py-2 text-[11px] text-emerald-400 uppercase tracking-wider">
+                    <span>✓</span> <span>Auto-renewing</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => void handleBuy(pack.pack_id)}
+                    disabled={isBuying || isBlocked}
+                    className="w-full py-3 bg-white text-zinc-950 text-xs font-bold uppercase tracking-widest hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    {isBuying
+                      ? 'Redirecting…'
+                      : autoRenew
+                        ? `Subscribe · ${formatCents(pack.amount_cents)}/mo`
+                        : `Buy once · ${formatCents(pack.amount_cents)}`}
+                  </button>
+                )}
               </div>
-              <p className="text-3xl font-semibold tabular-nums text-zinc-100">{activeSub.credits_per_cycle?.toLocaleString()}</p>
-              <p className="text-sm text-zinc-400 mt-1">credits / month</p>
-              <div className="mt-4 pt-4 border-t border-emerald-500/10 space-y-1 text-xs text-zinc-500">
-                {activeSub.amount_cents && <p>{formatCents(activeSub.amount_cents)} billed monthly</p>}
-                {activeSub.current_period_end && <p>Next renewal {formatDate(activeSub.current_period_end)}</p>}
-              </div>
-              {activeSub.canceled_at ? (
-                <p className="mt-3 text-xs text-amber-400">Cancels at period end</p>
-              ) : (
-                <button
-                  onClick={() => void handleCancelSub()}
-                  disabled={cancelingSub}
-                  className="mt-4 text-xs text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-50"
-                >
-                  {cancelingSub ? 'Canceling…' : 'Cancel subscription'}
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-zinc-800 border-dashed bg-transparent px-6 py-5 flex flex-col items-center justify-center text-center gap-2">
-              <p className="text-sm font-medium text-zinc-400">No active subscription</p>
-              <p className="text-xs text-zinc-600">Enable auto-renew on any pack below to subscribe.</p>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Transaction history */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Transaction History</div>
+          {transactions && transactions.total > PAGE_SIZE && (
+            <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+              <button
+                onClick={() => void loadData(Math.max(0, offset - PAGE_SIZE))}
+                disabled={loading || offset <= 0}
+                className="px-3 py-1 border border-white/10 hover:border-white/20 disabled:opacity-40 uppercase tracking-wider transition-colors"
+              >← Prev</button>
+              <span className="font-mono">{currentPage} / {totalPages}</span>
+              <button
+                onClick={() => void loadData(offset + PAGE_SIZE)}
+                disabled={loading || !transactions || offset + PAGE_SIZE >= transactions.total}
+                className="px-3 py-1 border border-white/10 hover:border-white/20 disabled:opacity-40 uppercase tracking-wider transition-colors"
+              >Next →</button>
             </div>
           )}
         </div>
 
-        {/* Credit packs */}
-        <section>
-          <div className="mb-5">
-            <h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-400">Top Up Credits</h2>
-            <p className="text-xs text-zinc-600 mt-1">All credits go into a shared pool. A $2.50 processing fee applies.</p>
-          </div>
-
-          <div className="grid sm:grid-cols-2 gap-4">
-            {packs.map(pack => {
-              const autoRenew  = autoRenewFlags[pack.pack_id] ?? false;
-              const isBuying   = buyingPackId === pack.pack_id;
-              const isBlocked  = Boolean(buyingPackId) && !isBuying;
-              const hasThisSub = activeSub?.pack_id === pack.pack_id && !activeSub.canceled_at;
-
-              return (
-                <div key={pack.pack_id} className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6 flex flex-col gap-5">
-                  <div>
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-xs uppercase tracking-widest text-zinc-500 mb-1">{pack.label}</p>
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-4xl font-semibold tabular-nums text-zinc-100">{pack.credits.toLocaleString()}</span>
-                          <span className="text-sm text-zinc-500">credits</span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xl font-semibold text-zinc-100">{formatCents(pack.amount_cents)}</p>
-                        <p className="text-xs text-zinc-600 mt-0.5">incl. {formatCents(pack.fee_cents)} fee</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Auto-renew toggle */}
-                  <div className="flex items-center justify-between gap-4 rounded-xl bg-zinc-800/50 border border-zinc-800 px-4 py-3">
-                    <div>
-                      <p className="text-xs font-medium text-zinc-300">Auto-renew monthly</p>
-                      <p className="text-[11px] text-zinc-600 mt-0.5">
-                        {autoRenew ? `${formatCents(pack.amount_cents)}/mo · renews automatically` : 'One-time purchase'}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setAutoRenewFlags(p => ({ ...p, [pack.pack_id]: !p[pack.pack_id] }))}
-                      role="switch"
-                      aria-checked={autoRenew}
-                      className={`relative w-10 h-[22px] rounded-full transition-colors flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${autoRenew ? 'bg-emerald-500' : 'bg-zinc-700'}`}
-                    >
-                      <span className={`absolute top-[3px] left-[3px] w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${autoRenew ? 'translate-x-[18px]' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  {hasThisSub && !autoRenew ? (
-                    <div className="flex items-center justify-center gap-1.5 py-2 text-xs text-emerald-400">
-                      <span>✓</span> <span>Auto-renewing — manage above</span>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => void handleBuy(pack.pack_id)}
-                      disabled={isBuying || isBlocked}
-                      className="w-full py-3 rounded-xl bg-zinc-100 text-zinc-950 text-sm font-semibold hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                    >
-                      {isBuying
-                        ? 'Redirecting…'
-                        : autoRenew
-                          ? `Subscribe · ${formatCents(pack.amount_cents)}/mo`
-                          : `Buy once · ${formatCents(pack.amount_cents)}`}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Transaction history */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-400">Transaction History</h2>
-            {transactions && transactions.total > PAGE_SIZE && (
-              <div className="flex items-center gap-2 text-xs text-zinc-500">
-                <button
-                  onClick={() => void loadData(Math.max(0, offset - PAGE_SIZE))}
-                  disabled={loading || offset <= 0}
-                  className="px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 hover:border-zinc-700 disabled:opacity-40 transition-colors"
-                >← Prev</button>
-                <span>{currentPage} / {totalPages}</span>
-                <button
-                  onClick={() => void loadData(offset + PAGE_SIZE)}
-                  disabled={loading || !transactions || offset + PAGE_SIZE >= transactions.total}
-                  className="px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 hover:border-zinc-700 disabled:opacity-40 transition-colors"
-                >Next →</button>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 overflow-hidden">
-            <table className="min-w-full">
-              <thead>
-                <tr className="border-b border-zinc-800 bg-zinc-900/80">
-                  {['Type', 'Amount', 'Balance After', 'Description', 'Date'].map((h, i) => (
-                    <th key={h} className={`px-5 py-3 text-[10px] uppercase tracking-widest text-zinc-500 font-medium ${i === 0 ? 'text-left' : i >= 1 && i <= 2 ? 'text-right' : 'text-left'}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/60">
-                {(transactions?.items ?? []).map(tx => (
-                  <tr key={tx.id} className="bg-zinc-950 hover:bg-zinc-900/40 transition-colors">
-                    <td className="px-5 py-3.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium uppercase tracking-wider border ${txBadgeClass(tx.transaction_type)}`}>
-                        {txLabel(tx.transaction_type)}
-                      </span>
-                    </td>
-                    <td className={`px-5 py-3.5 text-right text-sm font-semibold tabular-nums ${tx.credits_delta >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                      {tx.credits_delta >= 0 ? '+' : ''}{tx.credits_delta.toLocaleString()}
-                    </td>
-                    <td className="px-5 py-3.5 text-right text-sm tabular-nums text-zinc-400">{tx.credits_after.toLocaleString()}</td>
-                    <td className="px-5 py-3.5 text-sm text-zinc-500 max-w-xs truncate">{tx.description || '—'}</td>
-                    <td className="px-5 py-3.5 text-xs text-zinc-600 whitespace-nowrap">{formatTs(tx.created_at)}</td>
-                  </tr>
+        <div className="border border-white/10">
+          <table className="min-w-full">
+            <thead>
+              <tr className="border-b border-white/10">
+                {['Type', 'Amount', 'Balance After', 'Description', 'Date'].map((h, i) => (
+                  <th key={h} className={`px-5 py-3 text-[10px] uppercase tracking-widest text-zinc-600 font-bold ${i === 0 ? 'text-left' : i >= 1 && i <= 2 ? 'text-right' : 'text-left'}`}>{h}</th>
                 ))}
-                {!loading && (transactions?.items.length ?? 0) === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-5 py-12 text-center text-sm text-zinc-600">No transactions yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {(transactions?.items ?? []).map(tx => (
+                <tr key={tx.id} className="bg-zinc-950 hover:bg-zinc-900/30 transition-colors">
+                  <td className="px-5 py-3.5">
+                    <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest border ${txBadgeClass(tx.transaction_type)}`}>
+                      {txLabel(tx.transaction_type)}
+                    </span>
+                  </td>
+                  <td className={`px-5 py-3.5 text-right text-sm font-mono ${tx.credits_delta >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {tx.credits_delta >= 0 ? '+' : ''}{tx.credits_delta.toLocaleString()}
+                  </td>
+                  <td className="px-5 py-3.5 text-right text-sm font-mono text-zinc-500">{tx.credits_after.toLocaleString()}</td>
+                  <td className="px-5 py-3.5 text-sm text-zinc-500 max-w-xs truncate">{tx.description || '—'}</td>
+                  <td className="px-5 py-3.5 text-[11px] text-zinc-600 whitespace-nowrap font-mono">{formatTs(tx.created_at)}</td>
+                </tr>
+              ))}
+              {!loading && (transactions?.items.length ?? 0) === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-5 py-12 text-center text-xs text-zinc-600">No transactions yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
