@@ -164,6 +164,16 @@ export interface ComplianceDashboardItem {
     /** Precision level — 'state_estimate' until Phase 2 exact FK is wired */
     impact_basis: 'state_estimate' | 'exact';
     source_url: string | null;
+    alert_id: string | null;
+    action_status: 'unread' | 'read' | 'dismissed' | 'actioned' | 'untracked';
+    next_action: string | null;
+    action_owner_id: string | null;
+    action_owner_name: string | null;
+    action_due_date: string | null;
+    is_overdue: boolean;
+    sla_state: 'overdue' | 'due_soon' | 'on_track' | 'unassigned' | 'completed';
+    recommended_playbook: string | null;
+    estimated_financial_impact: string | null;
 }
 
 export interface ComplianceDashboard {
@@ -172,8 +182,20 @@ export interface ComplianceDashboard {
         unread_alerts: number;
         critical_alerts: number;
         employees_at_risk: number;
+        overdue_actions: number;
+        assigned_actions: number;
+        unassigned_actions: number;
     };
     coming_up: ComplianceDashboardItem[];
+}
+
+export interface ComplianceActionPlanUpdate {
+    action_owner_id?: string | null;
+    next_action?: string | null;
+    action_due_date?: string | null;
+    recommended_playbook?: string | null;
+    estimated_financial_impact?: string | null;
+    mark_actioned?: boolean;
 }
 
 import { getAccessToken } from './client';
@@ -296,6 +318,18 @@ export const complianceAPI = {
             },
         });
         if (!response.ok) throw new Error('Failed to dismiss alert');
+    },
+
+    async updateAlertActionPlan(alertId: string, data: ComplianceActionPlanUpdate, companyId?: string): Promise<void> {
+        const response = await fetch(companyParam(`/api/compliance/alerts/${alertId}/action-plan`, companyId), {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) throw new Error('Failed to update alert action plan');
     },
 
     async getSummary(companyId?: string): Promise<ComplianceSummary> {

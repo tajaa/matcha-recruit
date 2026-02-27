@@ -4095,29 +4095,60 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
 
 async def get_compliance_dashboard(company_id: UUID, horizon_days: int = 90) -> dict:
     """
-    Return a rich compliance impact dashboard for client admins.
-
-    Aggregates upcoming legislation across all company locations, enriched with
-    affected-employee counts derived from employees.work_state == location.state.
-    Impact basis is flagged as 'state_estimate' so users know precision is approximate
-    until Phase 2 (work_location_id FK) is wired up.
-
-    Returns:
-        {
-          kpis: { total_locations, unread_alerts, critical_alerts, employees_at_risk },
-          coming_up: [
-            {
-              legislation_id, title, description, category, severity,
-              effective_date, days_until, status,
-              location_id, location_name, location_state,
-              affected_employee_count, affected_employee_sample,  # up to 5 names
-              impact_basis: "state_estimate",
-              source_url,
-            }
-          ]
-        }
+    Return a compliance dashboard with actionable tasks for each upcoming change.
     """
     from ...database import get_connection
+
+    def _parse_metadata(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return {}
+
+    def _parse_iso_date(value: Any) -> Optional[date]:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return None
+            try:
+                return date.fromisoformat(raw[:10])
+            except ValueError:
+                return None
+        return None
+
+    def _derive_sla_state(
+        action_status: Optional[str],
+        due_date: Optional[date],
+        has_owner: bool,
+        today: date,
+    ) -> str:
+        if action_status == "actioned":
+            return "completed"
+        if due_date and due_date < today:
+            return "overdue"
+        if due_date and (due_date - today).days <= 7:
+            return "due_soon"
+        if not has_owner:
+            return "unassigned"
+        return "on_track"
+
+    default_playbooks = {
+        "minimum_wage": "Audit pay bands and update payroll before the effective date.",
+        "sick_leave": "Update sick leave policy language and accrual settings.",
+        "overtime": "Review exempt/non-exempt classifications and overtime rules.",
+        "pay_frequency": "Confirm payroll schedule and notice requirements.",
+        "final_pay": "Align offboarding checklist with final pay timing rules.",
+        "posting_requirements": "Refresh workplace posting packets and manager notices.",
+    }
 
     async with get_connection() as conn:
         # ── 1. Fetch all company locations ──────────────────────────────────
@@ -4138,6 +4169,9 @@ async def get_compliance_dashboard(company_id: UUID, horizon_days: int = 90) -> 
                     "unread_alerts": 0,
                     "critical_alerts": 0,
                     "employees_at_risk": 0,
+                    "overdue_actions": 0,
+                    "assigned_actions": 0,
+                    "unassigned_actions": 0,
                 },
                 "coming_up": [],
             }
@@ -4148,14 +4182,37 @@ async def get_compliance_dashboard(company_id: UUID, horizon_days: int = 90) -> 
             """
             SELECT ul.id, ul.location_id, ul.title, ul.description, ul.category,
                    ul.current_status, ul.expected_effective_date, ul.impact_summary,
-                   ul.source_url, ul.confidence,
-                   ca.severity
+                   ul.source_url, ul.confidence, ul.created_at,
+                   ca.id AS alert_id,
+                   ca.severity,
+                   ca.status AS alert_status,
+                   ca.action_required,
+                   ca.deadline AS alert_deadline,
+                   ca.metadata AS alert_metadata
             FROM upcoming_legislation ul
-            LEFT JOIN compliance_alerts ca
-                   ON ca.location_id = ul.location_id
+            LEFT JOIN LATERAL (
+                SELECT ca.id, ca.severity, ca.status, ca.action_required, ca.deadline, ca.metadata, ca.created_at
+                FROM compliance_alerts ca
+                WHERE ca.company_id = ul.company_id
+                  AND ca.location_id = ul.location_id
                   AND ca.alert_type = 'upcoming_legislation'
-                  AND ca.status NOT IN ('dismissed', 'actioned')
-                  AND (ca.metadata->>'legislation_id')::text = ul.id::text
+                  AND ca.status <> 'dismissed'
+                  AND ca.metadata->>'legislation_id' = ul.id::text
+                ORDER BY
+                    CASE ca.status
+                        WHEN 'unread' THEN 0
+                        WHEN 'read' THEN 1
+                        WHEN 'actioned' THEN 2
+                        ELSE 3
+                    END,
+                    CASE ca.severity
+                        WHEN 'critical' THEN 0
+                        WHEN 'warning' THEN 1
+                        ELSE 2
+                    END,
+                    ca.created_at DESC
+                LIMIT 1
+            ) ca ON true
             WHERE ul.company_id = $1
               AND ul.current_status NOT IN ('effective', 'dismissed')
               AND (
@@ -4217,6 +4274,35 @@ async def get_compliance_dashboard(company_id: UUID, horizon_days: int = 90) -> 
             for emp in state_employee_map.get(st, []):
                 employees_at_risk.add(emp["id"])
 
+        # Resolve action owner display names for any owner IDs carried in alert metadata.
+        owner_ids: set[UUID] = set()
+        for row in legislation_rows:
+            metadata = _parse_metadata(row.get("alert_metadata"))
+            owner_id_raw = metadata.get("action_owner_id")
+            if isinstance(owner_id_raw, str) and owner_id_raw.strip():
+                try:
+                    owner_ids.add(UUID(owner_id_raw))
+                except ValueError:
+                    continue
+
+        owner_name_map: dict[str, str] = {}
+        if owner_ids:
+            owner_rows = await conn.fetch(
+                """
+                SELECT u.id,
+                       COALESCE(c.name, a.name, u.email) AS display_name
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id AND c.company_id = $2
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE u.id = ANY($1::uuid[])
+                """,
+                list(owner_ids),
+                company_id,
+            )
+            owner_name_map = {
+                str(row["id"]): row["display_name"] for row in owner_rows if row["id"]
+            }
+
         # ── 5. Deduplicate + enrich legislation items ────────────────────────
         now = datetime.utcnow().date()
         seen_leg_ids: set = set()
@@ -4237,6 +4323,63 @@ async def get_compliance_dashboard(company_id: UUID, horizon_days: int = 90) -> 
 
             effective_date = row["expected_effective_date"]
             days_until = (effective_date - now).days if effective_date else None
+
+            alert_metadata = _parse_metadata(row.get("alert_metadata"))
+            owner_id_raw = alert_metadata.get("action_owner_id")
+            owner_id = None
+            if isinstance(owner_id_raw, str) and owner_id_raw.strip():
+                try:
+                    owner_id = str(UUID(owner_id_raw))
+                except ValueError:
+                    owner_id = None
+
+            owner_name_raw = alert_metadata.get("action_owner_name")
+            owner_name = (
+                owner_name_raw.strip()
+                if isinstance(owner_name_raw, str) and owner_name_raw.strip()
+                else (owner_name_map.get(owner_id) if owner_id else None)
+            )
+
+            action_due_date = (
+                _parse_iso_date(alert_metadata.get("action_due_date"))
+                or row.get("alert_deadline")
+                or effective_date
+            )
+            next_action = (
+                (alert_metadata.get("next_action") or "").strip()
+                if isinstance(alert_metadata.get("next_action"), str)
+                else None
+            ) or row.get("action_required")
+            if not next_action:
+                next_action = "Review legal impact and confirm operational changes."
+
+            recommended_playbook = (
+                (alert_metadata.get("recommended_playbook") or "").strip()
+                if isinstance(alert_metadata.get("recommended_playbook"), str)
+                else ""
+            )
+            if not recommended_playbook:
+                recommended_playbook = default_playbooks.get(
+                    row["category"], "Review impact, assign owner, and track completion."
+                )
+
+            estimated_financial_impact_raw = alert_metadata.get(
+                "estimated_financial_impact"
+            )
+            estimated_financial_impact = None
+            if isinstance(estimated_financial_impact_raw, (str, int, float)):
+                estimated_financial_impact = str(estimated_financial_impact_raw).strip()
+                if not estimated_financial_impact:
+                    estimated_financial_impact = None
+
+            action_status = row.get("alert_status") or "untracked"
+            sla_state = _derive_sla_state(
+                action_status=action_status,
+                due_date=action_due_date,
+                has_owner=owner_id is not None,
+                today=now,
+            )
+            is_overdue = sla_state == "overdue"
 
             # Infer severity bucket if no linked alert found
             raw_severity = row["severity"]
@@ -4263,6 +4406,18 @@ async def get_compliance_dashboard(company_id: UUID, horizon_days: int = 90) -> 
                     "location_id": str(row["location_id"]),
                     "location_name": loc["name"] or f"{loc['city']}, {loc['state']}",
                     "location_state": loc_state,
+                    "alert_id": str(row["alert_id"]) if row.get("alert_id") else None,
+                    "action_status": action_status,
+                    "next_action": next_action,
+                    "action_owner_id": owner_id,
+                    "action_owner_name": owner_name,
+                    "action_due_date": action_due_date.isoformat()
+                    if action_due_date
+                    else None,
+                    "is_overdue": is_overdue,
+                    "sla_state": sla_state,
+                    "recommended_playbook": recommended_playbook,
+                    "estimated_financial_impact": estimated_financial_impact,
                     "affected_employee_count": len(affected),
                     "affected_employee_sample": [e["name"] for e in affected[:5]],
                     "impact_basis": "state_estimate",
@@ -4270,14 +4425,166 @@ async def get_compliance_dashboard(company_id: UUID, horizon_days: int = 90) -> 
                 }
             )
 
+        overdue_actions = 0
+        assigned_actions = 0
+        unassigned_actions = 0
+        for item in coming_up:
+            if item.get("action_status") == "actioned":
+                continue
+            if item.get("is_overdue"):
+                overdue_actions += 1
+            if item.get("action_owner_id"):
+                assigned_actions += 1
+            else:
+                unassigned_actions += 1
+
         return {
             "kpis": {
                 "total_locations": len(location_map),
                 "unread_alerts": unread_alerts,
                 "critical_alerts": critical_alerts,
                 "employees_at_risk": len(employees_at_risk),
+                "overdue_actions": overdue_actions,
+                "assigned_actions": assigned_actions,
+                "unassigned_actions": unassigned_actions,
             },
             "coming_up": coming_up,
+        }
+
+
+async def update_alert_action_plan(
+    alert_id: UUID,
+    company_id: UUID,
+    updates: Dict[str, Any],
+    actor_user_id: Optional[UUID] = None,
+) -> Optional[dict]:
+    """Update alert action-plan metadata and optionally mark the alert as actioned."""
+    from ...database import get_connection
+
+    def _parse_metadata(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return {}
+
+    def _set_metadata_value(target: dict[str, Any], key: str, value: Any) -> None:
+        if value is None:
+            target.pop(key, None)
+            return
+        if isinstance(value, str) and not value.strip():
+            target.pop(key, None)
+            return
+        target[key] = value
+
+    if not updates:
+        return None
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, status, metadata, action_required, deadline
+            FROM compliance_alerts
+            WHERE id = $1 AND company_id = $2
+            """,
+            alert_id,
+            company_id,
+        )
+        if not row:
+            return None
+
+        metadata = _parse_metadata(row.get("metadata"))
+
+        if "action_owner_id" in updates:
+            owner = updates.get("action_owner_id")
+            _set_metadata_value(
+                metadata, "action_owner_id", str(owner) if owner is not None else None
+            )
+
+        if "next_action" in updates:
+            _set_metadata_value(metadata, "next_action", updates.get("next_action"))
+
+        if "action_due_date" in updates:
+            due_date = updates.get("action_due_date")
+            _set_metadata_value(
+                metadata,
+                "action_due_date",
+                due_date.isoformat() if isinstance(due_date, date) else None,
+            )
+
+        if "recommended_playbook" in updates:
+            _set_metadata_value(
+                metadata, "recommended_playbook", updates.get("recommended_playbook")
+            )
+
+        if "estimated_financial_impact" in updates:
+            _set_metadata_value(
+                metadata,
+                "estimated_financial_impact",
+                updates.get("estimated_financial_impact"),
+            )
+
+        metadata["action_plan_updated_at"] = datetime.utcnow().isoformat()
+        if actor_user_id is not None:
+            metadata["action_plan_updated_by"] = str(actor_user_id)
+
+        new_status = row["status"]
+        if "mark_actioned" in updates:
+            should_mark_actioned = bool(updates.get("mark_actioned"))
+            if should_mark_actioned:
+                new_status = "actioned"
+            elif row["status"] == "actioned":
+                new_status = "read"
+
+        next_action_value = row["action_required"]
+        if "next_action" in updates:
+            raw_next_action = updates.get("next_action")
+            if isinstance(raw_next_action, str):
+                raw_next_action = raw_next_action.strip()
+            next_action_value = raw_next_action or None
+
+        deadline_value = row["deadline"]
+        if "action_due_date" in updates:
+            action_due_date = updates.get("action_due_date")
+            deadline_value = action_due_date if isinstance(action_due_date, date) else None
+
+        updated = await conn.fetchrow(
+            """
+            UPDATE compliance_alerts
+            SET metadata = $3::jsonb,
+                status = $4,
+                action_required = $5,
+                deadline = $6,
+                read_at = CASE
+                    WHEN $4 IN ('read', 'actioned') THEN COALESCE(read_at, NOW())
+                    ELSE read_at
+                END
+            WHERE id = $1 AND company_id = $2
+            RETURNING id, status, action_required, deadline, metadata
+            """,
+            alert_id,
+            company_id,
+            json.dumps(metadata),
+            new_status,
+            next_action_value,
+            deadline_value,
+        )
+        if not updated:
+            return None
+
+        updated_metadata = _parse_metadata(updated["metadata"])
+        return {
+            "alert_id": str(updated["id"]),
+            "status": updated["status"],
+            "next_action": updated["action_required"],
+            "action_due_date": updated["deadline"].isoformat()
+            if updated["deadline"]
+            else None,
+            "metadata": updated_metadata,
         }
 
 

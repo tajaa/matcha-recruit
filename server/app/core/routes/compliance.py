@@ -3,6 +3,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from datetime import date
 from typing import List, Optional
 from uuid import UUID
 
@@ -36,6 +37,7 @@ from ..services.compliance_service import (
     dismiss_alert,
     get_compliance_summary,
     get_compliance_dashboard,
+    update_alert_action_plan,
     run_compliance_check_background,
     run_compliance_check_stream,
     get_check_log,
@@ -457,6 +459,15 @@ class DismissAlertRequest(BaseModel):
     admin_notes: Optional[str] = None
 
 
+class ActionPlanUpdateRequest(BaseModel):
+    action_owner_id: Optional[str] = None
+    next_action: Optional[str] = None
+    action_due_date: Optional[date] = None
+    recommended_playbook: Optional[str] = None
+    estimated_financial_impact: Optional[str] = None
+    mark_actioned: Optional[bool] = None
+
+
 @router.put("/alerts/{alert_id}/dismiss")
 async def dismiss_alert_endpoint(
     alert_id: str,
@@ -489,6 +500,44 @@ async def dismiss_alert_endpoint(
         raise HTTPException(status_code=404, detail="Alert not found")
 
     return {"message": "Alert dismissed", "feedback_recorded": data is not None}
+
+
+@router.put("/alerts/{alert_id}/action-plan")
+async def update_alert_action_plan_endpoint(
+    alert_id: str,
+    data: ActionPlanUpdateRequest,
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        alert_uuid = UUID(alert_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid alert ID")
+
+    updates = data.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields supplied for update")
+
+    if "action_owner_id" in updates and updates["action_owner_id"] is not None:
+        try:
+            updates["action_owner_id"] = UUID(updates["action_owner_id"])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid action_owner_id")
+
+    updated = await update_alert_action_plan(
+        alert_uuid,
+        company_id,
+        updates,
+        actor_user_id=current_user.user_id,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    return {"message": "Action plan updated", **updated}
 
 
 @router.get("/summary", response_model=ComplianceSummary)

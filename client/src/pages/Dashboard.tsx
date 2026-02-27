@@ -7,7 +7,7 @@ import { Collapsible } from '../components/Collapsible';
 import { Tabs } from '../components/Tabs';
 import { WidgetContainer } from '../components/WidgetContainer';
 import { complianceAPI, COMPLIANCE_CATEGORY_LABELS } from '../api/compliance';
-import type { ComplianceDashboard, ComplianceDashboardItem } from '../api/compliance';
+import type { ComplianceDashboard, ComplianceDashboardItem, ComplianceActionPlanUpdate } from '../api/compliance';
 import { useAuth } from '../context/AuthContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -74,17 +74,30 @@ const SEVERITY_STYLES: Record<string, { dot: string; border: string; badge: stri
 
 function ComplianceDashboardWidget() {
   const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
   const [horizon, setHorizon] = useState<HorizonDays>(90);
   const [data, setData] = useState<ComplianceDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [savingAlertId, setSavingAlertId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadDashboard = (windowDays: HorizonDays) => {
     setLoading(true);
     setError(false);
-    complianceAPI.getDashboard(horizon)
-      .then(d => { setData(d); setLoading(false); })
-      .catch(() => { setError(true); setLoading(false); });
+    complianceAPI.getDashboard(windowDays)
+      .then(d => {
+        setData(d);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError(true);
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    loadDashboard(horizon);
   }, [horizon]);
 
   const handleItemClick = (item: ComplianceDashboardItem) => {
@@ -94,6 +107,63 @@ function ComplianceDashboardWidget() {
       legislation_id: item.legislation_id,
     });
     navigate(`/app/matcha/compliance?${params.toString()}`);
+  };
+
+  const formatDateLabel = (isoDate: string | null): string => {
+    if (!isoDate) return 'No due date';
+    const parsed = new Date(`${isoDate}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return isoDate;
+    return parsed.toLocaleDateString();
+  };
+
+  const getSlaStyle = (slaState: ComplianceDashboardItem['sla_state']) => {
+    if (slaState === 'overdue') {
+      return {
+        label: 'Overdue',
+        badge: 'bg-red-500/10 text-red-400 border border-red-500/20',
+        dueText: 'text-red-400',
+      };
+    }
+    if (slaState === 'due_soon') {
+      return {
+        label: 'Due Soon',
+        badge: 'bg-amber-500/10 text-amber-400 border border-amber-500/20',
+        dueText: 'text-amber-400',
+      };
+    }
+    if (slaState === 'completed') {
+      return {
+        label: 'Completed',
+        badge: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
+        dueText: 'text-emerald-400',
+      };
+    }
+    if (slaState === 'unassigned') {
+      return {
+        label: 'Unassigned',
+        badge: 'bg-zinc-700/50 text-zinc-300 border border-zinc-600',
+        dueText: 'text-zinc-400',
+      };
+    }
+    return {
+      label: 'On Track',
+      badge: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
+      dueText: 'text-zinc-400',
+    };
+  };
+
+  const updateActionPlan = async (item: ComplianceDashboardItem, payload: ComplianceActionPlanUpdate) => {
+    if (!item.alert_id) return;
+    try {
+      setActionError(null);
+      setSavingAlertId(item.alert_id);
+      await complianceAPI.updateAlertActionPlan(item.alert_id, payload);
+      loadDashboard(horizon);
+    } catch {
+      setActionError('Could not update action plan');
+    } finally {
+      setSavingAlertId(null);
+    }
   };
 
   const criticalCount = data?.coming_up.filter(i => i.severity === 'critical').length ?? 0;
@@ -132,12 +202,15 @@ function ComplianceDashboardWidget() {
 
       {/* KPI row */}
       {data && (
-        <div className="grid grid-cols-4 gap-px bg-white/5 border-b border-white/10">
+        <div className="grid grid-cols-3 md:grid-cols-7 gap-px bg-white/5 border-b border-white/10">
           {[
             { label: 'Locations', value: data.kpis.total_locations, color: 'text-white' },
             { label: 'Unread Alerts', value: data.kpis.unread_alerts, color: data.kpis.unread_alerts > 0 ? 'text-amber-400' : 'text-white' },
             { label: 'Critical', value: data.kpis.critical_alerts, color: data.kpis.critical_alerts > 0 ? 'text-red-400' : 'text-white' },
             { label: 'At Risk', value: data.kpis.employees_at_risk, color: data.kpis.employees_at_risk > 0 ? 'text-amber-400' : 'text-zinc-500' },
+            { label: 'Overdue', value: data.kpis.overdue_actions, color: data.kpis.overdue_actions > 0 ? 'text-red-400' : 'text-zinc-500' },
+            { label: 'Assigned', value: data.kpis.assigned_actions, color: data.kpis.assigned_actions > 0 ? 'text-emerald-400' : 'text-zinc-500' },
+            { label: 'Unassigned', value: data.kpis.unassigned_actions, color: data.kpis.unassigned_actions > 0 ? 'text-amber-400' : 'text-zinc-500' },
           ].map(kpi => (
             <div key={kpi.label} className="bg-zinc-950 p-2 text-center">
               <div className={`text-lg font-light tabular-nums ${kpi.color}`}>{kpi.value}</div>
@@ -149,6 +222,12 @@ function ComplianceDashboardWidget() {
 
       {/* Coming up list */}
       <div className="divide-y divide-white/5">
+        {actionError && (
+          <div className="p-2 border-b border-red-500/20 bg-red-500/10">
+            <p className="text-[8px] text-red-300 uppercase tracking-wider">{actionError}</p>
+          </div>
+        )}
+
         {loading && (
           <div className="p-6 text-center">
             <div className="w-4 h-4 border border-zinc-700 border-t-white rounded-full animate-spin mx-auto mb-2" />
@@ -181,11 +260,22 @@ function ComplianceDashboardWidget() {
             : item.days_until != null && item.days_until <= 60
             ? 'text-amber-400'
             : 'text-zinc-400';
+          const sla = getSlaStyle(item.sla_state);
+          const dueLabel = formatDateLabel(item.action_due_date);
+          const isSaving = item.alert_id !== null && savingAlertId === item.alert_id;
 
           return (
-            <button
+            <div
               key={item.legislation_id}
               onClick={() => handleItemClick(item)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleItemClick(item);
+                }
+              }}
+              role="button"
+              tabIndex={0}
               className={`w-full text-left p-3 border-l-2 ${sev.border} bg-zinc-950 hover:bg-zinc-900 transition-all group`}
             >
               <div className="flex items-start gap-2.5">
@@ -215,29 +305,91 @@ function ComplianceDashboardWidget() {
                     <span className={`text-[7px] font-mono uppercase tracking-widest px-1 py-px ${sev.badge}`}>
                       {sev.label}
                     </span>
+                    <span className={`text-[7px] font-mono uppercase tracking-widest px-1 py-px ${sla.badge}`}>
+                      {sla.label}
+                    </span>
                   </div>
 
-                  {/* Affected employees */}
-                  {item.affected_employee_count > 0 && (
-                    <div className="mt-1.5 flex items-center gap-1.5">
-                      <Users className="w-2.5 h-2.5 text-zinc-600" />
-                      <span className="text-[8px] text-zinc-500">
-                        {item.affected_employee_count} employee{item.affected_employee_count !== 1 ? 's' : ''}
-                        {item.affected_employee_sample.length > 0 && (
-                          <span className="text-zinc-600">
-                            {' '}— {item.affected_employee_sample.slice(0, 3).join(', ')}
-                            {item.affected_employee_count > 3 ? ` +${item.affected_employee_count - 3} more` : ''}
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-[7px] text-zinc-700 font-mono">~est</span>
+                  <div className="mt-1.5 space-y-1">
+                    <div className="text-[9px] text-zinc-400">
+                      <span className="text-zinc-600">Next:</span> {item.next_action || 'Review legal impact and assign an owner.'}
                     </div>
-                  )}
+                    <div className="flex items-center gap-3 flex-wrap text-[8px] text-zinc-500">
+                      <span>Owner: <span className="text-zinc-300">{item.action_owner_name || 'Unassigned'}</span></span>
+                      <span className={sla.dueText}>Due: {dueLabel}</span>
+                    </div>
+
+                    {item.estimated_financial_impact && (
+                      <div className="text-[8px] text-red-300/80">
+                        Exposure: {item.estimated_financial_impact}
+                      </div>
+                    )}
+
+                    {item.affected_employee_count > 0 && (
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <Users className="w-2.5 h-2.5 text-zinc-600" />
+                        <span className="text-[8px] text-zinc-500">
+                          {item.affected_employee_count} employee{item.affected_employee_count !== 1 ? 's' : ''}
+                          {item.affected_employee_sample.length > 0 && (
+                            <span className="text-zinc-600">
+                              {' '}— {item.affected_employee_sample.slice(0, 3).join(', ')}
+                              {item.affected_employee_count > 3 ? ` +${item.affected_employee_count - 3} more` : ''}
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-[7px] text-zinc-700 font-mono">~est</span>
+                      </div>
+                    )}
+
+                    {item.alert_id && (
+                      <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                        {!item.action_owner_id && currentUser?.id && (
+                          <button
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              void updateActionPlan(item, { action_owner_id: currentUser.id });
+                            }}
+                            disabled={isSaving}
+                            className="px-1.5 py-0.5 text-[7px] uppercase tracking-widest border border-white/20 text-zinc-300 hover:text-white hover:border-white/40 disabled:opacity-50"
+                          >
+                            Assign Me
+                          </button>
+                        )}
+                        <button
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const targetDueDate = new Date();
+                            targetDueDate.setDate(targetDueDate.getDate() + 7);
+                            void updateActionPlan(item, { action_due_date: targetDueDate.toISOString().slice(0, 10) });
+                          }}
+                          disabled={isSaving}
+                          className="px-1.5 py-0.5 text-[7px] uppercase tracking-widest border border-amber-500/30 text-amber-300 hover:text-amber-200 hover:border-amber-400/50 disabled:opacity-50"
+                        >
+                          Due +7d
+                        </button>
+                        {item.action_status !== 'actioned' && (
+                          <button
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              void updateActionPlan(item, { mark_actioned: true });
+                            }}
+                            disabled={isSaving}
+                            className="px-1.5 py-0.5 text-[7px] uppercase tracking-widest border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 hover:border-emerald-400/50 disabled:opacity-50"
+                          >
+                            Mark Actioned
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <ChevronRight className="w-3 h-3 text-zinc-600 group-hover:text-zinc-400 transition-colors flex-shrink-0 mt-0.5" />
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -269,6 +421,7 @@ export function Dashboard() {
   const { user, hasFeature } = useAuth();
   const [ptoSummary, setPtoSummary] = useState<PTOSummary | null>(null);
   const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
+  const [compliancePendingActions, setCompliancePendingActions] = useState<ComplianceDashboardItem[]>([]);
 
   useEffect(() => {
     const token = getAccessToken();
@@ -284,6 +437,48 @@ export function Dashboard() {
       .then(data => data && setDashStats(data))
       .catch(err => console.error('Failed to fetch dashboard stats:', err));
   }, []);
+
+  const showComplianceImpact = user?.role === 'client' && hasFeature('compliance');
+
+  useEffect(() => {
+    if (!showComplianceImpact) {
+      setCompliancePendingActions([]);
+      return;
+    }
+
+    complianceAPI.getDashboard(90)
+      .then((dashboardData) => {
+        const severityScore: Record<ComplianceDashboardItem['severity'], number> = {
+          critical: 50,
+          warning: 20,
+          info: 5,
+        };
+        const slaScore: Record<ComplianceDashboardItem['sla_state'], number> = {
+          overdue: 100,
+          due_soon: 50,
+          unassigned: 30,
+          on_track: 10,
+          completed: 0,
+        };
+
+        const prioritized = [...dashboardData.coming_up]
+          .filter(item => item.sla_state !== 'completed')
+          .sort((a, b) => {
+            const aTime = a.days_until ?? 365;
+            const bTime = b.days_until ?? 365;
+            const aScore = (severityScore[a.severity] ?? 0) + (slaScore[a.sla_state] ?? 0) + Math.max(0, 30 - aTime);
+            const bScore = (severityScore[b.severity] ?? 0) + (slaScore[b.sla_state] ?? 0) + Math.max(0, 30 - bTime);
+            return bScore - aScore;
+          })
+          .slice(0, 3);
+
+        setCompliancePendingActions(prioritized);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch compliance pending actions:', err);
+        setCompliancePendingActions([]);
+      });
+  }, [showComplianceImpact]);
 
   const stats = [
     {
@@ -311,7 +506,7 @@ export function Dashboard() {
       path: '/app/matcha/employees'
     },
     {
-      label: 'Compliance Rate',
+      label: 'Policy Signature Rate',
       value: dashStats ? `${dashStats.compliance_rate}%` : '-',
       change: dashStats?.compliance_rate === 0 ? 'No data yet' : 'Current',
       icon: CheckCircle2,
@@ -321,8 +516,6 @@ export function Dashboard() {
   ];
 
   const complianceRate = dashStats?.compliance_rate ?? 0;
-
-  const showComplianceImpact = user?.role === 'client' && hasFeature('compliance');
 
   const dashboardWidgets = [
     { id: 'stats', label: 'Key Metrics', icon: Activity },
@@ -481,7 +674,39 @@ export function Dashboard() {
                                     <ArrowUpRight className="w-3 h-3 text-amber-500 ml-auto" />
                                 </div>
                               ))}
-                              {(!ptoSummary || ptoSummary.pending_count === 0) && (!dashStats || dashStats.pending_incidents.length === 0) && (
+                              {showComplianceImpact && compliancePendingActions.map((item) => {
+                                const isCritical = item.severity === 'critical' || item.sla_state === 'overdue';
+                                return (
+                                  <div
+                                    key={`compliance-action-${item.legislation_id}`}
+                                    onClick={() => {
+                                      const params = new URLSearchParams({
+                                        location_id: item.location_id,
+                                        tab: 'upcoming',
+                                        legislation_id: item.legislation_id,
+                                      });
+                                      navigate(`/app/matcha/compliance?${params.toString()}`);
+                                    }}
+                                    className={`p-2.5 border flex items-start gap-3 cursor-pointer transition-colors ${
+                                      isCritical
+                                        ? 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20'
+                                        : 'bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/20'
+                                    }`}
+                                  >
+                                      <div className={`mt-1.5 w-1 h-1 rounded-full ${isCritical ? 'bg-red-500 animate-pulse' : 'bg-amber-500'}`} />
+                                      <div className="flex-1">
+                                        <div className={`text-[11px] font-medium mb-0.5 ${isCritical ? 'text-red-200' : 'text-amber-200'}`}>{item.title}</div>
+                                        <div className={`text-[9px] ${isCritical ? 'text-red-300/70' : 'text-amber-500/70'}`}>
+                                          Compliance &bull; {item.action_owner_name || 'Unassigned'} &bull; {item.sla_state.replace('_', ' ')}
+                                        </div>
+                                      </div>
+                                      <ArrowUpRight className={`w-3 h-3 ml-auto ${isCritical ? 'text-red-400' : 'text-amber-500'}`} />
+                                  </div>
+                                );
+                              })}
+                              {(!ptoSummary || ptoSummary.pending_count === 0)
+                                && (!dashStats || dashStats.pending_incidents.length === 0)
+                                && (!showComplianceImpact || compliancePendingActions.length === 0) && (
                                 <div className="p-3 text-center">
                                   <CheckCircle2 className="w-4 h-4 text-zinc-700 mx-auto mb-1.5" />
                                   <p className="text-[9px] text-zinc-500 uppercase tracking-wider">All caught up</p>
@@ -515,7 +740,7 @@ export function Dashboard() {
                             <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-[40px] pointer-events-none" />
 
                             <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">Compliance</h2>
+                                <h2 className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">Policy Signature Coverage</h2>
                                 <ShieldAlert className="w-3.5 h-3.5 text-emerald-500" />
                             </div>
 
@@ -530,7 +755,7 @@ export function Dashboard() {
                                 </svg>
                                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                                   <span className="text-2xl font-light text-white">{complianceRate > 0 ? `${complianceRate}%` : '--'}</span>
-                                  <span className="text-[8px] uppercase tracking-widest text-zinc-500 mt-0.5">{complianceRate > 0 ? 'Compliant' : 'No data'}</span>
+                                  <span className="text-[8px] uppercase tracking-widest text-zinc-500 mt-0.5">{complianceRate > 0 ? 'Signed' : 'No data'}</span>
                                 </div>
                             </div>
 
@@ -668,4 +893,3 @@ export function Dashboard() {
 }
 
 export default Dashboard;
-
