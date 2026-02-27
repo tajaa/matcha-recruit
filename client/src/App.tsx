@@ -11,6 +11,7 @@ import { Register } from './pages/Register';
 const RegisterInvite = lazy(() => import('./pages/RegisterInvite'));
 import { Unauthorized } from './pages/Unauthorized';
 import { ForCandidates } from './pages/ForCandidates';
+import { TopangaResearch } from './pages/TopangaResearch';
 import { WorkWithUs } from './pages/WorkWithUs';
 import { ResumeOnboarding } from './pages/ResumeOnboarding';
 import { OutreachLanding } from './pages/OutreachLanding';
@@ -174,6 +175,7 @@ function App() {
               {/* Public routes */}
               <Route path="/" element={<Landing />} />
               <Route path="/for-candidates" element={<ForCandidates />} />
+              <Route path="/topanga" element={<TopangaResearch />} />
               <Route path="/work-with-us" element={<WorkWithUs />} />
               <Route path="/login" element={<Login />} />
               <Route path="/login/:brokerSlug" element={<Login />} />
