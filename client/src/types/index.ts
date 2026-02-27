@@ -2620,3 +2620,24 @@ export interface PosterOrderUpdate {
   quote_amount?: number;
   tracking_number?: string;
 }
+
+// Risk Assessment
+export interface DimensionResult {
+  score: number;
+  band: 'low' | 'moderate' | 'high' | 'critical';
+  factors: string[];
+  raw_data: Record<string, unknown>;
+}
+
+export interface RiskAssessmentResult {
+  overall_score: number;
+  overall_band: 'low' | 'moderate' | 'high' | 'critical';
+  dimensions: {
+    compliance: DimensionResult;
+    incidents: DimensionResult;
+    er_cases: DimensionResult;
+    workforce: DimensionResult;
+    legislative: DimensionResult;
+  };
+  computed_at: string;
+}

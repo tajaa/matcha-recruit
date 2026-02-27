@@ -7,6 +7,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "handbooks": True,
     "internal_mobility": False,
     "matcha_work": False,
+    "risk_assessment": True,
 }
 
 

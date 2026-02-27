@@ -42,7 +42,7 @@ KNOWN_PLATFORM_ITEMS = {
     "admin_overview", "client_management", "company_features", "industry_handbooks", "admin_import",
     "projects", "interviewer", "candidate_metrics", "interview_prep", "test_bot",
     "onboarding", "employees", "offer_letters", "policies", "handbooks", "time_off",
-    "accommodations", "internal_mobility", "er_copilot", "incidents",
+    "accommodations", "internal_mobility", "er_copilot", "incidents", "risk_assessment",
     "xp_dashboard", "vibe_checks", "enps", "performance_reviews",
     "compliance", "jurisdictions", "blog", "hr_news", "matcha_work",
 }

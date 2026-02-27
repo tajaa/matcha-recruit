@@ -18,6 +18,7 @@ const FEATURE_CONFIG: { key: string; label: string; section: string }[] = [
   { key: 'performance_reviews', label: 'Performance Reviews', section: 'Employee Experience' },
   { key: 'er_copilot', label: 'ER Copilot', section: 'HR Tools' },
   { key: 'incidents', label: 'Incidents', section: 'HR Tools' },
+  { key: 'risk_assessment', label: 'Risk Assessment', section: 'HR Tools' },
   { key: 'time_off', label: 'Time Off', section: 'HR Tools' },
   { key: 'accommodations', label: 'Accommodations', section: 'HR Tools' },
   { key: 'interview_prep', label: 'Tutor', section: 'HR Tools' },

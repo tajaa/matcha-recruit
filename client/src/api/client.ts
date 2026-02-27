@@ -159,6 +159,7 @@ import type {
   PosterOrderCreate,
   PosterOrderUpdate,
   AvailablePoster,
+  RiskAssessmentResult,
   } from '../types';
 import type {
   Lead,
@@ -3417,6 +3418,12 @@ export const matchaWorkPublic = {
   },
 };
 
+// Risk Assessment API
+export const riskAssessment = {
+  get: (): Promise<RiskAssessmentResult> =>
+    request('/risk-assessment'),
+};
+
 // Combined API object for convenient imports
 export const api = {
   auth,
@@ -3456,6 +3463,7 @@ export const api = {
   posters,
   internalMobilityAdmin,
   adminNews,
+  riskAssessment,
 };
 
 export const onboardingDraft = {

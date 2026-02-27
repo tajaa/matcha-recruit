@@ -72,6 +72,7 @@ const MatchaWorkElements = lazy(() => import('./pages/MatchaWorkElements'));
 const MatchaWorkBilling = lazy(() => import('./pages/MatchaWorkBilling'));
 const MatchaWorkThread = lazy(() => import('./pages/MatchaWorkThread'));
 const MatchaWorkReviewRequest = lazy(() => import('./pages/MatchaWorkReviewRequest'));
+const RiskAssessment = lazy(() => import('./pages/RiskAssessment'));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -487,6 +488,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="internal_mobility">
                     <InternalMobility />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/risk-assessment"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="risk_assessment">
+                    <RiskAssessment />
                   </ProtectedRoute>
                 }
               />
