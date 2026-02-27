@@ -21,3 +21,4 @@ redis>=5.0.0
 alembic>=1.13.0
 greenlet>=3.0.0
 feedparser>=6.0.0
+stripe>=8.0.0

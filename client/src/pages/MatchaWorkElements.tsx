@@ -81,6 +81,12 @@ export default function MatchaWorkElements() {
             <button className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-100">
               Matcha Elements
             </button>
+            <button
+              onClick={() => navigate('/app/matcha/work/billing')}
+              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Billing
+            </button>
           </div>
           <h1 className="text-xl font-semibold text-zinc-100">Matcha Elements</h1>
           <p className="text-sm text-zinc-400 mt-0.5">

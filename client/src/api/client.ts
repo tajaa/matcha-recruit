@@ -187,6 +187,18 @@ type ApiErrorPayload = {
   error?: unknown;
 };
 
+export class ApiRequestError extends Error {
+  status: number;
+  payload: unknown;
+
+  constructor(message: string, status: number, payload: unknown) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 function detailToMessage(detail: unknown): string | null {
   if (!detail) return null;
   if (typeof detail === 'string') return detail;
@@ -304,7 +316,11 @@ async function request<T>(
       });
       if (!retryResponse.ok) {
         const error = await retryResponse.json().catch(() => ({ detail: 'Request failed' }));
-        throw new Error(extractErrorMessage(error, 'Request failed'));
+        throw new ApiRequestError(
+          extractErrorMessage(error, 'Request failed'),
+          retryResponse.status,
+          error
+        );
       }
       if (retryResponse.status === 204 || retryResponse.status === 205) {
         return undefined as T;
@@ -319,7 +335,11 @@ async function request<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(extractErrorMessage(error, 'Request failed'));
+    throw new ApiRequestError(
+      extractErrorMessage(error, 'Request failed'),
+      response.status,
+      error
+    );
   }
 
   if (response.status === 204 || response.status === 205) {
@@ -3033,6 +3053,10 @@ import type {
   MWTaskType,
   MWThread,
   MWThreadDetail,
+  MWBillingBalanceResponse,
+  MWBillingTransactionsResponse,
+  MWCheckoutResponse,
+  MWCreditPack,
   MWCreateThreadResponse,
   MWSendMessageResponse,
   MWDocumentVersion,
@@ -3116,7 +3140,11 @@ export const matchaWork = {
 
     if (!response.ok || !response.body) {
       const error = await response.json().catch(() => ({ detail: 'Failed to stream message' }));
-      throw new Error(extractErrorMessage(error, 'Failed to stream message'));
+      throw new ApiRequestError(
+        extractErrorMessage(error, 'Failed to stream message'),
+        response.status,
+        error
+      );
     }
 
     const reader = response.body.getReader();
@@ -3181,6 +3209,34 @@ export const matchaWork = {
 
   getUsageSummary: (periodDays = 30): Promise<MWUsageSummaryResponse> =>
     request<MWUsageSummaryResponse>(`/matcha-work/usage/summary?period_days=${periodDays}`),
+
+  getBillingBalance: (): Promise<MWBillingBalanceResponse> =>
+    request<MWBillingBalanceResponse>('/matcha-work/billing/balance'),
+
+  getCreditPacks: (): Promise<MWCreditPack[]> =>
+    request<MWCreditPack[]>('/matcha-work/billing/packs'),
+
+  createCheckout: (
+    packId: string,
+    successUrl?: string,
+    cancelUrl?: string
+  ): Promise<MWCheckoutResponse> =>
+    request<MWCheckoutResponse>('/matcha-work/billing/checkout', {
+      method: 'POST',
+      body: JSON.stringify({
+        pack_id: packId,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+      }),
+    }),
+
+  getBillingTransactions: (params?: { limit?: number; offset?: number }): Promise<MWBillingTransactionsResponse> => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.append('limit', String(params.limit));
+    if (params?.offset) searchParams.append('offset', String(params.offset));
+    const query = searchParams.toString();
+    return request<MWBillingTransactionsResponse>(`/matcha-work/billing/transactions${query ? `?${query}` : ''}`);
+  },
 
   listReviewRequests: (threadId: string): Promise<MWReviewRequestStatus[]> =>
     request<MWReviewRequestStatus[]>(`/matcha-work/threads/${threadId}/review-requests`),

@@ -101,6 +101,12 @@ export default function MatchaWorkChats() {
             >
               Matcha Elements
             </button>
+            <button
+              onClick={() => navigate('/app/matcha/work/billing')}
+              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Billing
+            </button>
           </div>
           <h1 className="text-xl font-semibold text-zinc-100">Chat History</h1>
           <p className="text-sm text-zinc-400 mt-0.5">

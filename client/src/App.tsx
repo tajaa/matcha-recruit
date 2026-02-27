@@ -69,6 +69,7 @@ const InternalMobility = lazy(() => import('./pages/InternalMobility'));
 const MatchaWork = lazy(() => import('./pages/MatchaWork'));
 const MatchaWorkChats = lazy(() => import('./pages/MatchaWorkChats'));
 const MatchaWorkElements = lazy(() => import('./pages/MatchaWorkElements'));
+const MatchaWorkBilling = lazy(() => import('./pages/MatchaWorkBilling'));
 const MatchaWorkThread = lazy(() => import('./pages/MatchaWorkThread'));
 const MatchaWorkReviewRequest = lazy(() => import('./pages/MatchaWorkReviewRequest'));
 
@@ -305,6 +306,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="matcha_work">
                     <MatchaWorkElements />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/work/billing"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="matcha_work">
+                    <MatchaWorkBilling />
                   </ProtectedRoute>
                 }
               />

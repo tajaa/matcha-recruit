@@ -75,11 +75,13 @@ app.add_middleware(
 
 # Import and include domain routers
 from .core.routes import core_router, chat_ws_router
+from .core.routes.stripe_webhook import router as stripe_webhook_router
 from .matcha.routes import matcha_router
 
 # Mount domain routers
 app.include_router(core_router, prefix="/api")
 app.include_router(matcha_router, prefix="/api")
+app.include_router(stripe_webhook_router)
 
 # WebSocket routes (separate prefix)
 app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])

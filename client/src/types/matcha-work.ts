@@ -224,6 +224,55 @@ export interface MWSendHandbookSignaturesResponse {
   distributed_at: string;
 }
 
+export type MWCreditTransactionType =
+  | 'purchase'
+  | 'grant'
+  | 'deduction'
+  | 'refund'
+  | 'adjustment';
+
+export interface MWCreditTransaction {
+  id: string;
+  company_id: string;
+  transaction_type: MWCreditTransactionType;
+  credits_delta: number;
+  credits_after: number;
+  description: string | null;
+  reference_id: string | null;
+  created_by: string | null;
+  created_by_email: string | null;
+  created_at: string;
+}
+
+export interface MWBillingBalanceResponse {
+  company_id: string;
+  credits_remaining: number;
+  total_credits_purchased: number;
+  total_credits_granted: number;
+  updated_at: string | null;
+  recent_transactions: MWCreditTransaction[];
+}
+
+export interface MWCreditPack {
+  pack_id: string;
+  credits: number;
+  amount_cents: number;
+  label: string;
+  currency: string;
+}
+
+export interface MWCheckoutResponse {
+  checkout_url: string;
+  stripe_session_id: string;
+}
+
+export interface MWBillingTransactionsResponse {
+  items: MWCreditTransaction[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface MWPublicReviewRequest {
   token: string;
   review_title: string;

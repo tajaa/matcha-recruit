@@ -33,6 +33,7 @@ from ..services.platform_settings import (
     get_matcha_work_model_mode, prime_matcha_work_model_mode_cache,
     get_jurisdiction_research_model_mode, prime_jurisdiction_research_model_mode_cache,
 )
+from ...matcha.services import billing_service as mw_billing_service
 from ...config import get_settings
 
 router = APIRouter()
@@ -749,6 +750,11 @@ class FeatureToggleRequest(BaseModel):
     enabled: bool
 
 
+class CompanyCreditsAdjustRequest(BaseModel):
+    credits: int
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
 @router.get("/company-features", dependencies=[Depends(require_admin)])
 async def list_company_features():
     """List all companies with their enabled features."""
@@ -811,6 +817,38 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
             )
 
         return {"enabled_features": features}
+
+
+@router.post("/companies/{company_id}/credits", dependencies=[Depends(require_admin)])
+async def adjust_company_credits(
+    company_id: UUID,
+    request: CompanyCreditsAdjustRequest,
+    current_user=Depends(require_admin),
+):
+    """Grant or adjust Matcha Work credits for a company."""
+    result = await mw_billing_service.grant_credits(
+        company_id=company_id,
+        credits=int(request.credits),
+        description=request.description,
+        granted_by=current_user.id,
+    )
+    balance = result["balance"]
+    transaction = result["transaction"]
+    return {
+        "company_id": str(company_id),
+        "credits_remaining": balance["credits_remaining"],
+        "total_credits_purchased": balance["total_credits_purchased"],
+        "total_credits_granted": balance["total_credits_granted"],
+        "transaction": {
+            "id": str(transaction["id"]),
+            "transaction_type": transaction["transaction_type"],
+            "credits_delta": transaction["credits_delta"],
+            "credits_after": transaction["credits_after"],
+            "description": transaction["description"],
+            "created_at": transaction["created_at"].isoformat() if transaction["created_at"] else None,
+            "created_by": str(transaction["created_by"]) if transaction["created_by"] else None,
+        },
+    }
 
 
 # =============================================================================

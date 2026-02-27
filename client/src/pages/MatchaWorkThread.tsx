@@ -11,7 +11,7 @@ import type {
   MWReviewRequestStatus,
 } from '../types/matcha-work';
 import type { HandbookListItem } from '../types';
-import { handbooks, matchaWork, adminPlatformSettings } from '../api/client';
+import { ApiRequestError, handbooks, matchaWork, adminPlatformSettings } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { LogoUpload } from '../components/matcha-work/LogoUpload';
 import HandbookDistributeModal from '../components/HandbookDistributeModal';
@@ -108,6 +108,11 @@ function parseEmailList(input: string): string[] {
   return normalized;
 }
 
+function isInsufficientCreditsMessage(value: string): boolean {
+  const text = value.toLowerCase();
+  return text.includes('insufficient credits') || text.includes('out of credits');
+}
+
 function MessageBubble({ msg }: { msg: MWMessage }) {
   const isUser = msg.role === 'user';
   const isSystem = msg.role === 'system';
@@ -169,6 +174,7 @@ export default function MatchaWorkThread() {
   const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<(MWTokenUsage & { stage: 'estimate' | 'final' }) | null>(null);
   const [usageSummary, setUsageSummary] = useState<MWUsageSummaryResponse | null>(null);
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [showReviewRequestsModal, setShowReviewRequestsModal] = useState(false);
   const [sendingReviewRequests, setSendingReviewRequests] = useState(false);
   const [reviewRecipientInput, setReviewRecipientInput] = useState('');
@@ -196,15 +202,17 @@ export default function MatchaWorkThread() {
     try {
       setLoading(true);
       setTokenUsage(null);
-      const [threadData, verData, usageData] = await Promise.all([
+      const [threadData, verData, usageData, billingData] = await Promise.all([
         matchaWork.getThread(threadId),
         matchaWork.getVersions(threadId),
         matchaWork.getUsageSummary(30).catch(() => null),
+        matchaWork.getBillingBalance().catch(() => null),
       ]);
       setThread(threadData);
       setMessages(threadData.messages);
       setVersions(verData);
       setUsageSummary(usageData);
+      setCreditBalance(typeof billingData?.credits_remaining === 'number' ? billingData.credits_remaining : null);
       // Offer-letter threads render a PDF preview.
       if (threadData.task_type === 'offer_letter' && threadData.version > 0) {
         const pdfData = await matchaWork.getPdf(threadId);
@@ -245,7 +253,7 @@ export default function MatchaWorkThread() {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || !threadId || sending) return;
+    if (!input.trim() || !threadId || sending || isOutOfCredits) return;
 
     const content = input.trim();
     setInput('');
@@ -350,11 +358,21 @@ export default function MatchaWorkThread() {
               };
             });
           }
+          void matchaWork
+            .getBillingBalance()
+            .then((data) => setCreditBalance(data.credits_remaining))
+            .catch(() => {});
           return;
         }
 
         if (event.type === 'error') {
-          streamError = event.message || 'Failed to send message';
+          const message = event.message || 'Failed to send message';
+          if (isInsufficientCreditsMessage(message)) {
+            setCreditBalance(0);
+            streamError = 'Out of credits. Purchase more credits to continue using Matcha Work.';
+          } else {
+            streamError = message;
+          }
         }
       });
 
@@ -369,7 +387,18 @@ export default function MatchaWorkThread() {
         setVersions(verData);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message');
+      if (err instanceof ApiRequestError && err.status === 402) {
+        setCreditBalance(0);
+        setError('Out of credits. Purchase more credits to continue using Matcha Work.');
+      } else {
+        const message = err instanceof Error ? err.message : 'Failed to send message';
+        if (isInsufficientCreditsMessage(message)) {
+          setCreditBalance(0);
+          setError('Out of credits. Purchase more credits to continue using Matcha Work.');
+        } else {
+          setError(message);
+        }
+      }
     } finally {
       setSending(false);
       inputRef.current?.focus();
@@ -601,7 +630,9 @@ export default function MatchaWorkThread() {
     (isWorkbook && hasWorkbookPreviewContent) ||
     (isReview && hasReviewPreviewContent)
   );
-  const inputDisabled = isFinalized || isArchived || sending;
+  const isOutOfCredits = creditBalance !== null && creditBalance <= 0;
+  const isLowCredits = creditBalance !== null && creditBalance > 0 && creditBalance < 10;
+  const inputDisabled = isFinalized || isArchived || sending || isOutOfCredits;
   const formatTokenCount = (value: number | null | undefined) =>
     value == null ? '—' : value.toLocaleString();
 
@@ -733,6 +764,12 @@ export default function MatchaWorkThread() {
             >
               Matcha Elements
             </button>
+            <button
+              onClick={() => navigate('/app/matcha/work/billing')}
+              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Billing
+            </button>
           </div>
 
           {/* Mobile tabs */}
@@ -770,6 +807,12 @@ export default function MatchaWorkThread() {
               className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
             >
               Chats
+            </button>
+            <button
+              onClick={() => navigate('/app/matcha/work/billing')}
+              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Billing
             </button>
           </div>
 
@@ -836,6 +879,30 @@ export default function MatchaWorkThread() {
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
+          </button>
+        </div>
+      )}
+
+      {isOutOfCredits && (
+        <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-300 text-xs flex items-center justify-between gap-3">
+          <span>Out of credits. Purchase more credits to continue using Matcha Work.</span>
+          <button
+            onClick={() => navigate('/app/matcha/work/billing')}
+            className="px-2 py-1 rounded bg-red-600/30 hover:bg-red-600/50 text-red-100 transition-colors"
+          >
+            Open Billing
+          </button>
+        </div>
+      )}
+
+      {!isOutOfCredits && isLowCredits && (
+        <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-300 text-xs flex items-center justify-between gap-3">
+          <span>Low credit warning: {creditBalance} credits remaining.</span>
+          <button
+            onClick={() => navigate('/app/matcha/work/billing')}
+            className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 transition-colors"
+          >
+            Buy Credits
           </button>
         </div>
       )}
