@@ -14,6 +14,7 @@ export interface MWPresentation {
   generated_at: string;
   slides: MWPresentationSlide[];
   slide_count: number;
+  cover_image_url?: string | null;
 }
 
 export interface MWThread {

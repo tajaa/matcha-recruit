@@ -1564,6 +1564,7 @@ export interface ERCaseIntakeContext {
     last_reviewed_at?: string;
     last_run_status?: 'completed' | 'partial' | 'failed';
     guidance_state?: Record<string, { status: 'pending' | 'done' | 'dismissed'; updated_at: string }>;
+    determination_dismissed?: boolean;
   };
   answers?: {
     immediate_risk?: ERIntakeImmediateRisk;

@@ -9,7 +9,6 @@ import type {
   MWTokenUsage,
   MWUsageSummaryResponse,
   MWReviewRequestStatus,
-  MWPresentation,
 } from '../types/matcha-work';
 import type { HandbookListItem } from '../types';
 import { ApiRequestError, handbooks, matchaWork, adminPlatformSettings } from '../api/client';
@@ -557,6 +556,7 @@ export default function MatchaWorkThread() {
               const completionTokens = resp.token_usage.completion_tokens ?? 0;
               const totalTokens =
                 resp.token_usage.total_tokens ?? promptTokens + completionTokens;
+              const costDollars = resp.token_usage.cost_dollars ?? 0;
               const model = resp.token_usage.model;
               const nowIso = new Date().toISOString();
 
@@ -569,6 +569,7 @@ export default function MatchaWorkThread() {
                   prompt_tokens: row.prompt_tokens + promptTokens,
                   completion_tokens: row.completion_tokens + completionTokens,
                   total_tokens: row.total_tokens + totalTokens,
+                  total_cost_dollars: row.total_cost_dollars + costDollars,
                   operation_count: row.operation_count + 1,
                   estimated_operations: row.estimated_operations + (resp.token_usage?.estimated ? 1 : 0),
                   last_seen_at: nowIso,
@@ -581,6 +582,7 @@ export default function MatchaWorkThread() {
                   prompt_tokens: promptTokens,
                   completion_tokens: completionTokens,
                   total_tokens: totalTokens,
+                  total_cost_dollars: costDollars,
                   operation_count: 1,
                   estimated_operations: resp.token_usage?.estimated ? 1 : 0,
                   first_seen_at: nowIso,
@@ -596,6 +598,7 @@ export default function MatchaWorkThread() {
                   prompt_tokens: prev.totals.prompt_tokens + promptTokens,
                   completion_tokens: prev.totals.completion_tokens + completionTokens,
                   total_tokens: prev.totals.total_tokens + totalTokens,
+                  total_cost_dollars: prev.totals.total_cost_dollars + costDollars,
                   operation_count: prev.totals.operation_count + 1,
                   estimated_operations: prev.totals.estimated_operations + (resp.token_usage?.estimated ? 1 : 0),
                 },
