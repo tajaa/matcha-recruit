@@ -393,6 +393,28 @@ async def _create_onboarding_employees(
     return results
 
 
+def _scope_slide_update(ai_resp, current_state: dict, slide_index: Optional[int]) -> None:
+    """When a specific slide was targeted, restrict the AI's slides update to only that slide.
+
+    The AI is instructed to return the full slides array, but it may inadvertently modify
+    other slides. This merges only the targeted slide from the AI response back into the
+    existing slides array, leaving all other slides untouched.
+    """
+    if slide_index is None:
+        return
+    if not isinstance(ai_resp.structured_update, dict):
+        return
+    ai_slides = ai_resp.structured_update.get("slides")
+    if not isinstance(ai_slides, list):
+        return
+    current_slides = list(current_state.get("slides") or [])
+    if not (0 <= slide_index < len(ai_slides) and 0 <= slide_index < len(current_slides)):
+        return
+    merged = list(current_slides)
+    merged[slide_index] = ai_slides[slide_index]
+    ai_resp.structured_update["slides"] = merged
+
+
 async def _apply_ai_updates_and_operations(
     *,
     thread_id: UUID,
@@ -922,6 +944,7 @@ async def send_message(
     ctx = _build_company_context(profile)
     estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
     ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
+    _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
     final_usage = ai_resp.token_usage or estimated_usage
 
     current_version = thread["version"]
@@ -1052,6 +1075,7 @@ async def send_message_stream(
             )
 
             ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
+            _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
 
             current_version = thread["version"]
             (
