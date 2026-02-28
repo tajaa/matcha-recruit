@@ -21,6 +21,7 @@ class ThreadDetailViewModel {
         if currentState["workbook_title"] != nil || (currentState["sections"]?.value as? [AnyCodable])?.isEmpty == false { return true }
         if currentState["review_title"] != nil || currentState["summary"] != nil || currentState["strengths"] != nil { return true }
         if currentState["employees"] != nil { return true }
+        if currentState["presentation_title"] != nil || currentState["slides"] != nil { return true }
         return false
     }
 

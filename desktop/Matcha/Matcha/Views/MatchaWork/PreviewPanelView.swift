@@ -13,6 +13,7 @@ struct PreviewPanelView: View {
         }
         if currentState["overall_rating"] != nil || currentState["review_title"] != nil { return "review" }
         if currentState["sections"] != nil || currentState["workbook_title"] != nil { return "workbook" }
+        if currentState["presentation_title"] != nil || currentState["slides"] != nil { return "presentation" }
         if currentState["employees"] != nil { return "onboarding" }
         return "chat"
     }
@@ -36,6 +37,8 @@ struct PreviewPanelView: View {
                     ReviewPreview(state: currentState)
                 case "workbook":
                     WorkbookPreview(state: currentState)
+                case "presentation":
+                    PresentationPreview(state: currentState)
                 case "onboarding":
                     OnboardingPreview(state: currentState)
                 default:
@@ -251,6 +254,111 @@ struct WorkbookPreview: View {
                                 .font(.system(size: 13))
                                 .foregroundColor(.white.opacity(0.8))
                                 .lineSpacing(4)
+                        }
+                        .padding(12)
+                        .background(Color.zinc800)
+                        .cornerRadius(8)
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }
+}
+
+// MARK: - Presentation Preview
+
+struct PresentationPreview: View {
+    let state: [String: AnyCodable]
+
+    struct SlideEntry: Identifiable {
+        let id = UUID()
+        let index: Int
+        let title: String
+        let bullets: [String]
+    }
+
+    var presentationTitle: String { (state["presentation_title"]?.value as? String) ?? "Presentation" }
+    var subtitle: String { (state["subtitle"]?.value as? String) ?? "" }
+    var coverImageUrl: String? { state["cover_image_url"]?.value as? String }
+
+    var slides: [SlideEntry] {
+        guard let raw = state["slides"]?.value as? [AnyCodable] else { return [] }
+        return raw.enumerated().compactMap { index, item -> SlideEntry? in
+            guard let dict = item.value as? [String: AnyCodable] else { return nil }
+            let title = (dict["title"]?.value as? String) ?? ""
+            let bullets = (dict["bullets"]?.value as? [AnyCodable])?.compactMap { $0.value as? String } ?? []
+            return SlideEntry(index: index + 1, title: title, bullets: bullets)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Cover image
+                if let urlStr = coverImageUrl, let url = URL(string: urlStr) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(maxHeight: 180)
+                                .clipped()
+                                .cornerRadius(8)
+                        default:
+                            EmptyView()
+                        }
+                    }
+                }
+
+                // Title
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(presentationTitle)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if slides.isEmpty {
+                    EmptyPreviewView(message: "Slides in progress...", icon: "rectangle.on.rectangle")
+                } else {
+                    // Slide count
+                    Text("\(slides.count) slides")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+
+                    ForEach(slides) { slide in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Text("\(slide.index)")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.5))
+                                    .frame(width: 20, alignment: .center)
+                                Text(slide.title)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                            if !slide.bullets.isEmpty {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    ForEach(slide.bullets, id: \.self) { bullet in
+                                        HStack(alignment: .top, spacing: 6) {
+                                            Text("•")
+                                                .font(.system(size: 12))
+                                                .foregroundColor(.secondary)
+                                            Text(bullet)
+                                                .font(.system(size: 12))
+                                                .foregroundColor(.white.opacity(0.75))
+                                                .lineSpacing(2)
+                                        }
+                                    }
+                                }
+                                .padding(.leading, 26)
+                            }
                         }
                         .padding(12)
                         .background(Color.zinc800)
