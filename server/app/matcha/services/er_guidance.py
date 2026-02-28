@@ -191,15 +191,15 @@ def _build_fallback_guidance_payload(
             {
                 "id": "timeline-gaps",
                 "title": "Close timeline gaps",
-                "recommendation": "Collect targeted evidence and rerun timeline reconstruction to resolve missing windows.",
+                "recommendation": "Interview witnesses and gather records (timecards, emails, access logs) to fill the missing timeline windows.",
                 "rationale": f"{len(timeline_gaps)} timeline gap(s) still block a confident sequence of events.",
                 "priority": "high",
                 "blockers": timeline_gaps[:2],
                 "action": {
-                    "type": "run_analysis",
-                    "label": "Regenerate Timeline",
+                    "type": "open_tab",
+                    "label": "View Timeline",
                     "tab": "timeline",
-                    "analysis_type": "timeline",
+                    "analysis_type": None,
                     "search_query": None,
                 },
             }
@@ -247,15 +247,15 @@ def _build_fallback_guidance_payload(
             {
                 "id": "policy-risk",
                 "title": "Document policy risk findings",
-                "recommendation": "Validate each potential policy finding with linked quotes and rerun policy check after new evidence.",
+                "recommendation": "Review each flagged violation, gather supporting documentation, and note whether corrective action has already been taken.",
                 "rationale": f"{len(policy_violations)} potential policy violation(s) were identified.",
                 "priority": "high",
                 "blockers": [],
                 "action": {
-                    "type": "run_analysis",
-                    "label": "Run Policy Check",
+                    "type": "open_tab",
+                    "label": "View Policy Findings",
                     "tab": "policy",
-                    "analysis_type": "policy",
+                    "analysis_type": None,
                     "search_query": None,
                 },
             }
@@ -280,21 +280,6 @@ def _build_fallback_guidance_payload(
             }
         )
 
-    # Determination readiness heuristic
-    has_evidence = doc_count >= 1
-    analyses_completed = 0
-    timeline_events = timeline_data.get("events") or []
-    if timeline_events or timeline_data.get("generated_at"):
-        analyses_completed += 1
-    disc_items = discrepancies_data.get("discrepancies") or []
-    if disc_items or discrepancies_data.get("generated_at"):
-        analyses_completed += 1
-    policy_viols = policy_data.get("violations") or []
-    if policy_viols or policy_data.get("generated_at"):
-        analyses_completed += 1
-    has_high_priority_cards = any(c.get("priority") == "high" for c in cards)
-    determination_suggested = has_evidence and analyses_completed >= 2 and not has_high_priority_cards
-
     objective_fragment = f" Objective focus: {objective}." if objective and objective != "general" else ""
     immediate_risk_fragment = (
         " Immediate risk was flagged at intake; prioritize retaliation/safety follow-up."
@@ -312,7 +297,6 @@ def _build_fallback_guidance_payload(
         "generated_at": datetime.now(timezone.utc),
         "model": "deterministic-fallback",
         "fallback_used": True,
-        "determination_suggested": determination_suggested,
     }
 
 
@@ -344,13 +328,10 @@ def _normalize_suggested_guidance_payload(
     elif not isinstance(generated_at, datetime):
         generated_at = datetime.now(timezone.utc)
 
-    determination_suggested = bool(raw_payload.get("determination_suggested", False))
-
     return {
         "summary": summary,
         "cards": cards,
         "generated_at": generated_at,
         "model": model_name,
         "fallback_used": False,
-        "determination_suggested": determination_suggested,
     }

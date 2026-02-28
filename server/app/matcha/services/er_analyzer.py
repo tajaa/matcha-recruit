@@ -231,25 +231,38 @@ EVIDENCE OVERVIEW:
 ANALYSIS RESULTS:
 {analysis_results}
 
-Generate practical, concrete recommendations for an investigator. Recommendations must be realistic for the current evidence.
+ANALYSES ALREADY COMPLETED: {analyses_completed}
+
+IMPORTANT: The system automatically handles timeline reconstruction, policy checking,
+and discrepancy detection. Do NOT suggest cards that trigger these system features.
+Instead, tell the HUMAN INVESTIGATOR what to do outside this system:
+- Conduct witness interviews (who specifically, what to ask)
+- Gather physical/electronic evidence (timecards, emails, safety logs, CCTV)
+- Request records from other departments (payroll, facilities, IT, legal)
+- Contact regulatory agencies (OSHA, EEOC, etc.) when warranted
+- Review/search specific evidence already uploaded for missing context
+
+Use "run_analysis" ONLY if a specific analysis failed and should be retried, never as a primary recommendation.
+Prefer action types: "upload_document", "search_evidence", "open_tab".
+
+Generate practical, concrete recommendations for the human investigator. Recommendations must be realistic for the current evidence.
 
 Return ONLY a JSON object with this structure:
 {{
   "summary": "2-3 sentence executive guidance summary",
-  "determination_suggested": false,
   "cards": [
     {{
-      "id": "timeline-gap-1",
-      "title": "Resolve missing timeline window",
-      "recommendation": "Interview X and collect email thread Y to close the gap between ...",
-      "rationale": "Timeline has unresolved period that blocks confidence in final determination",
+      "id": "witness-interview-1",
+      "title": "Interview named witnesses about gap period",
+      "recommendation": "Schedule interviews with witnesses mentioned in existing statements to clarify events during the unresolved window.",
+      "rationale": "Direct witness accounts are needed to corroborate or refute the reported sequence of events.",
       "priority": "high",
-      "blockers": ["Need one additional witness interview"],
+      "blockers": ["Witness availability must be confirmed"],
       "action": {{
-        "type": "run_analysis",
-        "label": "Regenerate Timeline",
-        "tab": "timeline",
-        "analysis_type": "timeline",
+        "type": "upload_document",
+        "label": "Upload Interview Notes",
+        "tab": null,
+        "analysis_type": null,
         "search_query": null
       }}
     }}
@@ -260,14 +273,12 @@ Constraints:
 1. Provide 3 to 4 cards, sorted by urgency.
 2. Allowed action.type values: "run_analysis", "open_tab", "search_evidence", "upload_document".
 3. Allowed action.tab values: "timeline", "discrepancies", "policy", "search".
-4. If action.type is "run_analysis", action.analysis_type must be "timeline", "discrepancies", or "policy".
+4. If action.type is "run_analysis", action.analysis_type must be "timeline", "discrepancies", or "policy". Only use this to retry a failed analysis.
 5. If action.type is "search_evidence", include a concise action.search_query.
 6. Keep recommendation and rationale concise (1-2 sentences each).
 7. Keep tone neutral and investigation-focused.
 8. Never include legal conclusions; focus on next investigative steps.
-9. Set "determination_suggested" to true ONLY when the investigation appears substantially complete:
-   at least one evidence document, at least two of three analyses (timeline, discrepancies, policy)
-   completed, and no high-priority blockers remain. Never suggest determination prematurely.
+9. Focus on what the HUMAN must do: interview people, collect records, request documents. Do NOT recommend running system analyses that are already completed.
 """
 
 
@@ -554,11 +565,13 @@ class ERAnalyzer:
         Returns:
             Dict with summary + cards payload.
         """
+        analyses_completed = evidence_overview.pop("analyses_completed", {})
         prompt = SUGGESTED_GUIDANCE_PROMPT.format(
             case_info=json.dumps(case_info, indent=2),
             intake_context=json.dumps(intake_context or {}, indent=2),
             evidence_overview=json.dumps(evidence_overview, indent=2),
             analysis_results=json.dumps(analysis_results, indent=2),
+            analyses_completed=json.dumps(analyses_completed, indent=2),
         )
 
         text = await self._generate_content_async(prompt)

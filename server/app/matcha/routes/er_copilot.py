@@ -1518,10 +1518,22 @@ async def generate_suggested_guidance(
         "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
         "updated_at": case_row["updated_at"].isoformat() if case_row["updated_at"] else None,
     }
+    analyses_completed = {
+        "timeline": "timeline" in analysis_map and bool(
+            timeline_data.get("events") or timeline_data.get("timeline_summary")
+        ),
+        "discrepancies": "discrepancies" in analysis_map and bool(
+            discrepancies_data.get("discrepancies") or discrepancies_data.get("summary")
+        ),
+        "policy_check": "policy_check" in analysis_map and bool(
+            policy_data.get("violations") or policy_data.get("summary")
+        ),
+    }
     evidence_overview = {
         "completed_non_policy_doc_count": len(completed_non_policy_docs),
         "completed_non_policy_doc_names": [doc["filename"] for doc in completed_non_policy_docs[:12]],
         "can_run_discrepancies": can_run_discrepancies,
+        "analyses_completed": analyses_completed,
     }
     analysis_results = {
         "timeline": timeline_data,
