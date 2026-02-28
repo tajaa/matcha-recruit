@@ -856,7 +856,11 @@ export default function MatchaWorkThread() {
       Object.keys(thread.current_state || {}).length === 0
     : false;
   const hasOfferLetterPreviewContent = Boolean(pdfUrl);
-  const hasWorkbookPreviewContent = Boolean(
+  const hasPresentationPreviewContent = Boolean(
+    thread?.current_state.presentation_title ||
+    (thread?.current_state.slides && (thread.current_state.slides as unknown[]).length > 0)
+  );
+  const hasWorkbookPreviewContent = !isPresentation && !hasPresentationPreviewContent && Boolean(
     thread?.current_state.workbook_title ||
     thread?.current_state.company_name ||
     thread?.current_state.objective ||
@@ -876,10 +880,6 @@ export default function MatchaWorkThread() {
   );
   const hasOnboardingPreviewContent = Boolean(
     thread?.current_state.employees && (thread.current_state.employees as unknown[]).length > 0
-  );
-  const hasPresentationPreviewContent = Boolean(
-    thread?.current_state.presentation_title ||
-    (thread?.current_state.slides && (thread.current_state.slides as unknown[]).length > 0)
   );
   const hasPreviewContent = !isUnscopedChat && (
     hasOfferLetterPreviewContent ||
@@ -1339,10 +1339,10 @@ export default function MatchaWorkThread() {
                   </p>
                 </div>
               )
+            ) : (isPresentation || hasPresentationPreviewContent) ? (
+              <PresentationPreview state={thread.current_state} threadId={thread.id} />
             ) : (isWorkbook || hasWorkbookPreviewContent) ? (
               <WorkbookPreview state={thread.current_state} threadId={thread.id} />
-            ) : hasPresentationPreviewContent ? (
-              <PresentationPreview state={thread.current_state} threadId={thread.id} />
             ) : hasOnboardingPreviewContent ? (
               <div className="h-full overflow-y-auto p-4">
                 <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 p-4 space-y-3">
