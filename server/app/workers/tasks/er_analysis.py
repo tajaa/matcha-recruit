@@ -594,23 +594,37 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
         applicable_policies: list[str] = []
         policy_summaries: list[str] = []
 
-        # Analyze each policy source individually so all available inputs are checked.
-        for idx, policy in enumerate(policies):
-            _safe_publish_progress(
-                channel=f"er_case:{case_id}",
-                task_type="policy_check",
-                entity_id=case_id,
-                progress=3 + idx,
-                total=total_steps,
-                message=f"Checking source {idx + 1}/{len(policies)}: {policy['title']}",
-            )
+        # Analyze all policy sources concurrently to avoid sequential timeout.
+        _safe_publish_progress(
+            channel=f"er_case:{case_id}",
+            task_type="policy_check",
+            entity_id=case_id,
+            progress=3,
+            total=total_steps,
+            message=f"Checking {len(policies)} policy source(s) against evidence...",
+        )
 
+        async def _check_single_policy(policy: dict) -> dict[str, Any]:
             policy_doc = {
                 "id": policy["id"],
                 "filename": policy["title"],
                 "text": policy["text"],
             }
-            policy_result = await analyzer.check_policy_violations(policy_doc, evidence_docs)
+            return await analyzer.check_policy_violations(policy_doc, evidence_docs)
+
+        policy_results = await asyncio.gather(
+            *[_check_single_policy(p) for p in policies],
+            return_exceptions=True,
+        )
+
+        for idx, policy_result in enumerate(policy_results):
+            if isinstance(policy_result, Exception):
+                logger.warning(
+                    "Policy check failed for source '%s': %s",
+                    policies[idx]["title"],
+                    policy_result,
+                )
+                continue
 
             violations = policy_result.get("violations", [])
             if isinstance(violations, list):
@@ -624,7 +638,7 @@ async def _run_policy_check(case_id: str) -> dict[str, Any]:
 
             summary = policy_result.get("summary")
             if isinstance(summary, str) and summary.strip():
-                policy_summaries.append(f"{policy['title']}: {summary.strip()}")
+                policy_summaries.append(f"{policies[idx]['title']}: {summary.strip()}")
 
         if all_violations:
             summary_text = (
