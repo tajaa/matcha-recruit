@@ -34,40 +34,10 @@ function toItemList(value: unknown): string[] {
   return [];
 }
 
-function WorkbookPreview({ state }: { state: MWDocumentState }) {
+function WorkbookPreview({ state, threadId }: { state: MWDocumentState; threadId?: string }) {
   const [activeView, setActiveView] = useState<'workbook' | 'presentation'>('workbook');
   const sections = state.sections || [];
   const presentation = state.presentation;
-
-  const presentationMarkdown = useCallback((deck: MWPresentation): string => {
-    const lines: string[] = [];
-    lines.push(`# ${deck.title}`);
-    if (deck.subtitle) lines.push('', `_${deck.subtitle}_`);
-    lines.push('', `Generated: ${new Date(deck.generated_at).toLocaleString()}`);
-    deck.slides.forEach((slide, idx) => {
-      lines.push('', `## Slide ${idx + 1}: ${slide.title}`);
-      (slide.bullets || []).forEach((bullet) => lines.push(`- ${bullet}`));
-      if (slide.speaker_notes) {
-        lines.push('', `Notes: ${slide.speaker_notes}`);
-      }
-    });
-    return lines.join('\n');
-  }, []);
-
-  const handleDownloadPresentation = useCallback(() => {
-    if (!presentation) return;
-    const markdown = presentationMarkdown(presentation);
-    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    const safeTitle = (presentation.title || 'presentation').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    anchor.href = url;
-    anchor.download = `${safeTitle || 'presentation'}.md`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-  }, [presentation, presentationMarkdown]);
 
   return (
     <div className="h-full overflow-y-auto p-4">
@@ -95,13 +65,15 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
               Presentation
             </button>
           </div>
-          {activeView === 'presentation' && presentation && (
-            <button
-              onClick={handleDownloadPresentation}
+          {activeView === 'presentation' && presentation && threadId && (
+            <a
+              href={`/api/matcha-work/threads/${threadId}/presentation/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] border border-white/10 text-zinc-300 hover:text-zinc-100 hover:border-white/20 uppercase tracking-wider transition-colors"
             >
-              Download Slides
-            </button>
+              Download PDF
+            </a>
           )}
         </div>
 
@@ -210,6 +182,76 @@ function WorkbookPreview({ state }: { state: MWDocumentState }) {
               </>
             )}
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PresentationPreview({ state, threadId }: { state: MWDocumentState; threadId?: string }) {
+  const slides = state.slides || [];
+  const title = state.presentation_title || 'Presentation';
+  const subtitle = state.subtitle;
+  const coverImageUrl = state.cover_image_url;
+
+  return (
+    <div className="h-full overflow-y-auto p-4">
+      <div className="max-w-2xl mx-auto space-y-4">
+        {/* Cover */}
+        <div className="bg-zinc-950 border border-white/10 overflow-hidden">
+          {coverImageUrl && (
+            <img src={coverImageUrl} alt="Cover" className="w-full h-48 object-cover" />
+          )}
+          <div className="p-6">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 mb-1">Presentation</p>
+            <h2 className="text-xl font-bold text-white tracking-tight">{title}</h2>
+            {subtitle && <p className="text-sm text-zinc-400 mt-1">{subtitle}</p>}
+            <div className="flex items-center gap-3 mt-4">
+              <span className="text-xs text-zinc-500">{slides.length} slide{slides.length !== 1 ? 's' : ''}</span>
+              {threadId && slides.length > 0 && (
+                <a
+                  href={`/api/matcha-work/threads/${threadId}/presentation/pdf`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] border border-white/10 text-zinc-300 hover:text-zinc-100 uppercase tracking-wider transition-colors"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download PDF
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Slides */}
+        {slides.length === 0 ? (
+          <div className="border border-white/10 border-dashed p-12 text-center">
+            <p className="text-zinc-500 text-sm italic font-mono">Generating slides...</p>
+          </div>
+        ) : (
+          slides.map((slide, idx) => (
+            <div key={idx} className="bg-zinc-950 border border-white/10 overflow-hidden">
+              <div className="px-5 py-3 border-b border-white/10 bg-zinc-900/30 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-zinc-200 tracking-wide uppercase">{slide.title}</h3>
+                <span className="text-[10px] text-zinc-500">Slide {idx + 1}</span>
+              </div>
+              <div className="px-5 py-4">
+                <ul className="space-y-1.5">
+                  {(slide.bullets || []).map((bullet, bulletIdx) => (
+                    <li key={bulletIdx} className="text-sm text-zinc-300 leading-relaxed">• {bullet}</li>
+                  ))}
+                </ul>
+                {slide.speaker_notes && (
+                  <div className="mt-4 p-3 bg-zinc-900 border border-white/10">
+                    <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Speaker Notes</p>
+                    <p className="text-xs text-zinc-400 whitespace-pre-wrap">{slide.speaker_notes}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
         )}
       </div>
     </div>
@@ -423,11 +465,13 @@ export default function MatchaWorkThread() {
             toItemList(resp.current_state?.growth_areas).length > 0 ||
             (Array.isArray(resp.current_state?.review_request_statuses) && resp.current_state.review_request_statuses.length > 0);
           const hasOnboardingState = Array.isArray(resp.current_state?.employees) && resp.current_state.employees.length > 0;
+          const hasPresentationState = Boolean(resp.current_state?.presentation_title) ||
+            (Array.isArray(resp.current_state?.slides) && (resp.current_state.slides as unknown[]).length > 0);
           if (resp.pdf_url) {
             setPdfUrl(resp.pdf_url);
             setPreviewPanelOpen(true);
             setActiveTab('preview');
-          } else if (hasWorkbookState || hasReviewState || hasOnboardingState) {
+          } else if (hasWorkbookState || hasReviewState || hasOnboardingState || hasPresentationState) {
             setPreviewPanelOpen(true);
             setActiveTab('preview');
           }
@@ -738,6 +782,7 @@ export default function MatchaWorkThread() {
   const isReview = thread?.task_type === 'review';
   const isWorkbook = thread?.task_type === 'workbook';
   const isOnboarding = thread?.task_type === 'onboarding';
+  const isPresentation = thread?.task_type === 'presentation';
   const reviewStatuses: MWReviewRequestStatus[] = (thread?.current_state.review_request_statuses || [])
     .filter((row): row is MWReviewRequestStatus => Boolean(row && typeof row === 'object' && row.email));
   const reviewStrengths = toItemList(thread?.current_state.strengths);
@@ -772,11 +817,16 @@ export default function MatchaWorkThread() {
   const hasOnboardingPreviewContent = Boolean(
     thread?.current_state.employees && (thread.current_state.employees as unknown[]).length > 0
   );
+  const hasPresentationPreviewContent = Boolean(
+    thread?.current_state.presentation_title ||
+    (thread?.current_state.slides && (thread.current_state.slides as unknown[]).length > 0)
+  );
   const hasPreviewContent = !isUnscopedChat && (
     hasOfferLetterPreviewContent ||
     hasWorkbookPreviewContent ||
     hasReviewPreviewContent ||
-    hasOnboardingPreviewContent
+    hasOnboardingPreviewContent ||
+    hasPresentationPreviewContent
   );
   const isOutOfCredits = creditBalance !== null && creditBalance <= 0;
   const isLowCredits = creditBalance !== null && creditBalance > 0 && creditBalance < 10;
@@ -837,7 +887,7 @@ export default function MatchaWorkThread() {
                 v{thread.version}
               </span>
               <span className="hidden sm:inline text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">
-                {isUnscopedChat || thread.task_type === 'chat' ? 'chat' : thread.task_type === 'review' ? 'review' : thread.task_type === 'workbook' ? 'workbook' : thread.task_type === 'onboarding' ? 'onboarding' : 'offer letter'}
+                {isUnscopedChat || thread.task_type === 'chat' ? 'chat' : thread.task_type === 'review' ? 'review' : thread.task_type === 'workbook' ? 'workbook' : thread.task_type === 'onboarding' ? 'onboarding' : thread.task_type === 'presentation' ? 'presentation' : 'offer letter'}
               </span>
               {isFinalized && <span className="text-[10px] text-blue-400 border border-blue-500/20 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Finalized</span>}
               {isArchived && <span className="text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Archived</span>}
@@ -876,7 +926,7 @@ export default function MatchaWorkThread() {
               <button
                 onClick={() => setActiveTab('preview')}
                 className={`px-3 py-1 text-xs uppercase tracking-wider transition-colors border-l border-white/10 ${activeTab === 'preview' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >{(isOfferLetter || hasOfferLetterPreviewContent) ? 'Preview' : (isWorkbook || hasWorkbookPreviewContent) ? 'Workbook' : hasOnboardingPreviewContent ? 'Onboarding' : 'Summary'}</button>
+              >{(isOfferLetter || hasOfferLetterPreviewContent) ? 'Preview' : (isWorkbook || hasWorkbookPreviewContent) ? 'Workbook' : (isPresentation || hasPresentationPreviewContent) ? 'Presentation' : hasOnboardingPreviewContent ? 'Onboarding' : 'Summary'}</button>
             </div>
           )}
 
@@ -1140,6 +1190,19 @@ export default function MatchaWorkThread() {
                   Download
                 </a>
               )}
+              {hasPresentationPreviewContent && (
+                <a
+                  href={`/api/matcha-work/threads/${thread.id}/presentation/pdf`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download PDF
+                </a>
+              )}
             </div>
           </div>
 
@@ -1199,7 +1262,9 @@ export default function MatchaWorkThread() {
                 </div>
               )
             ) : (isWorkbook || hasWorkbookPreviewContent) ? (
-              <WorkbookPreview state={thread.current_state} />
+              <WorkbookPreview state={thread.current_state} threadId={thread.id} />
+            ) : hasPresentationPreviewContent ? (
+              <PresentationPreview state={thread.current_state} threadId={thread.id} />
             ) : hasOnboardingPreviewContent ? (
               <div className="h-full overflow-y-auto p-4">
                 <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 p-4 space-y-3">

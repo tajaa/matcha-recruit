@@ -3348,6 +3348,9 @@ export const matchaWork = {
       method: 'POST',
     }),
 
+  getPresentationPdfUrl: (threadId: string): string =>
+    `/api/matcha-work/threads/${threadId}/presentation/pdf`,
+
   archiveThread: (threadId: string): Promise<void> =>
     request<void>(`/matcha-work/threads/${threadId}`, { method: 'DELETE' }),
 

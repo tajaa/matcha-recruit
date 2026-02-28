@@ -110,6 +110,23 @@ class WorkbookDocument(BaseModel):
     images: Optional[list[str]] = None  # S3/CDN URLs for presentation images
 
 
+class PresentationSlide(BaseModel):
+    title: str
+    bullets: Optional[list[str]] = None
+    speaker_notes: Optional[str] = None
+
+
+class PresentationDocument(BaseModel):
+    """Standalone presentation/report state — AI generates slides directly."""
+
+    presentation_title: Optional[str] = None
+    subtitle: Optional[str] = None
+    theme: Optional[str] = None  # professional, minimal, bold
+    slides: Optional[list[PresentationSlide]] = None
+    cover_image_url: Optional[str] = None
+    generated_at: Optional[str] = None
+
+
 class CreateThreadRequest(BaseModel):
     title: Optional[str] = None
     initial_message: Optional[str] = None

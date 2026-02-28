@@ -22,6 +22,7 @@ from ..models.matcha_work import (
     FinalizeResponse,
     MWMessageOut,
     OnboardingDocument,
+    PresentationDocument,
     ReviewDocument,
     RevertRequest,
     SaveDraftResponse,
@@ -65,6 +66,7 @@ VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys())
 VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
 VALID_WORKBOOK_FIELDS = set(WorkbookDocument.model_fields.keys())
 VALID_ONBOARDING_FIELDS = set(OnboardingDocument.model_fields.keys())
+VALID_PRESENTATION_FIELDS = set(PresentationDocument.model_fields.keys())
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 
@@ -79,6 +81,8 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
         valid_fields = VALID_ONBOARDING_FIELDS
     elif skill == "workbook":
         valid_fields = VALID_WORKBOOK_FIELDS
+    elif skill == "presentation":
+        valid_fields = VALID_PRESENTATION_FIELDS
     else:
         return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -403,7 +407,7 @@ async def _apply_ai_updates_and_operations(
     # If skill is not a known document type (e.g. "none" or "chat"), fall back to
     # inferring from the update keys themselves so workbook/review/etc. updates
     # created on a fresh thread aren't silently dropped.
-    if skill not in ("offer_letter", "review", "workbook", "onboarding") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
+    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
         skill_from_updates = _infer_skill_from_state(ai_resp.structured_update)
         if skill_from_updates != "chat":
             skill = skill_from_updates
@@ -437,10 +441,21 @@ async def _apply_ai_updates_and_operations(
             current_state = result["current_state"]
             changed = changed or current_version != initial_version
 
-            if _infer_skill_from_state(current_state) == "offer_letter":
+            inferred = _infer_skill_from_state(current_state)
+            if inferred == "offer_letter":
                 pdf_url = await doc_svc.generate_pdf(
                     current_state, thread_id, current_version, is_draft=True
                 )
+            elif inferred == "presentation" and not current_state.get("cover_image_url"):
+                # Generate a cover image the first time slides are created
+                cover_url = await doc_svc.generate_cover_image(
+                    presentation_title=str(current_state.get("presentation_title") or "Presentation"),
+                    subtitle=current_state.get("subtitle"),
+                )
+                if cover_url:
+                    cover_result = await doc_svc.apply_update(thread_id, {"cover_image_url": cover_url})
+                    current_version = cover_result["version"]
+                    current_state = cover_result["current_state"]
 
     operation = str(ai_resp.operation or "none").strip().lower()
     if force_send_draft and operation in {"none", "create", "update", "track"}:
@@ -1449,6 +1464,46 @@ async def generate_workbook_presentation(
         raise HTTPException(status_code=400, detail=detail)
 
     return GeneratePresentationResponse(**result)
+
+
+@router.get("/threads/{thread_id}/presentation/pdf")
+async def get_presentation_pdf(
+    thread_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return a redirect to the presentation PDF, generating it on demand."""
+    from fastapi.responses import RedirectResponse
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    state = thread.get("current_state") or {}
+    if _infer_skill_from_state(state) not in ("presentation", "workbook"):
+        raise HTTPException(status_code=400, detail="Presentation PDF is only available for presentation and workbook threads")
+
+    version = int(thread.get("version") or 0)
+    # For workbook threads, use the nested presentation; for standalone presentations, use top-level state
+    if _infer_skill_from_state(state) == "workbook":
+        pres = state.get("presentation")
+        if not pres or not pres.get("slides"):
+            raise HTTPException(status_code=400, detail="No presentation slides found. Generate a presentation first.")
+        pdf_state = {
+            "presentation_title": pres.get("title"),
+            "subtitle": pres.get("subtitle"),
+            "slides": pres.get("slides", []),
+        }
+    else:
+        pdf_state = state
+
+    pdf_url = await doc_svc.generate_presentation_pdf(pdf_state, thread_id, version)
+    if not pdf_url:
+        raise HTTPException(status_code=500, detail="Failed to generate presentation PDF")
+
+    return RedirectResponse(url=pdf_url, status_code=302)
 
 
 @router.patch("/threads/{thread_id}", response_model=ThreadListItem)

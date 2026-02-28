@@ -41,6 +41,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
         return "workbook"
     if any(k in current_state for k in ("employees", "batch_status")):
         return "onboarding"
+    if any(k in current_state for k in ("presentation_title", "slides")):
+        return "presentation"
     return "chat"
 
 
@@ -1076,6 +1078,201 @@ async def generate_pdf(
 
     await _cache_pdf_url(thread_id, version, pdf_url, is_draft=is_draft)
     return pdf_url
+
+
+def _render_presentation_html(state: dict) -> str:
+    """Build HTML for a presentation PDF (slides → printable pages)."""
+    title = html.escape(str(state.get("presentation_title") or "Presentation"))
+    subtitle = html.escape(str(state.get("subtitle") or ""))
+    theme = str(state.get("theme") or "professional").lower()
+    slides = state.get("slides") or []
+
+    # Theme-based color palette
+    themes = {
+        "professional": {"bg": "#1a1a2e", "accent": "#4ade80", "text": "#f1f5f9", "slide_bg": "#16213e"},
+        "minimal": {"bg": "#ffffff", "accent": "#334155", "text": "#0f172a", "slide_bg": "#f8fafc"},
+        "bold": {"bg": "#0f172a", "accent": "#f59e0b", "text": "#f8fafc", "slide_bg": "#1e293b"},
+    }
+    colors = themes.get(theme, themes["professional"])
+
+    slides_html = []
+    # Cover slide
+    subtitle_html = f"<p class='subtitle'>{subtitle}</p>" if subtitle else ""
+    slides_html.append(f"""
+        <div class="slide cover-slide">
+          <div class="cover-content">
+            <h1 class="cover-title">{title}</h1>
+            {subtitle_html}
+          </div>
+        </div>""")
+
+    for slide in slides:
+        if not isinstance(slide, dict):
+            continue
+        slide_title = html.escape(str(slide.get("title") or ""))
+        bullets = slide.get("bullets") or []
+        if not slide_title and not bullets:
+            continue
+        bullets_html = "".join(
+            f"<li>{html.escape(str(b))}</li>"
+            for b in bullets
+            if str(b).strip()
+        )
+        slides_html.append(f"""
+        <div class="slide content-slide">
+          <h2 class="slide-title">{slide_title}</h2>
+          <ul class="bullets">{bullets_html}</ul>
+        </div>""")
+
+    slides_block = "\n".join(slides_html)
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {{ size: 1280px 720px; margin: 0; }}
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; background: {colors['bg']}; color: {colors['text']}; }}
+  .slide {{
+    width: 1280px; height: 720px;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 60px 80px;
+    page-break-after: always;
+    background: {colors['slide_bg']};
+    border-top: 6px solid {colors['accent']};
+  }}
+  .cover-slide {{
+    background: {colors['bg']};
+    border-top: none;
+    align-items: flex-start;
+    border-left: 8px solid {colors['accent']};
+    padding-left: 72px;
+  }}
+  .cover-content {{ max-width: 800px; }}
+  .cover-title {{
+    font-size: 52px; font-weight: 800; line-height: 1.15;
+    color: {colors['text']}; margin-bottom: 20px; letter-spacing: -1px;
+  }}
+  .subtitle {{
+    font-size: 24px; color: {colors['accent']}; font-weight: 500;
+  }}
+  .slide-title {{
+    font-size: 34px; font-weight: 700; color: {colors['accent']};
+    margin-bottom: 32px; letter-spacing: -0.5px;
+  }}
+  .bullets {{
+    list-style: none; padding: 0;
+  }}
+  .bullets li {{
+    font-size: 22px; line-height: 1.5; padding: 8px 0 8px 28px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    position: relative;
+  }}
+  .bullets li:last-child {{ border-bottom: none; }}
+  .bullets li::before {{
+    content: '▸';
+    position: absolute; left: 0;
+    color: {colors['accent']}; font-size: 16px;
+  }}
+</style>
+</head>
+<body>
+{slides_block}
+</body>
+</html>"""
+
+
+async def generate_presentation_pdf(
+    state: dict,
+    thread_id: UUID,
+    version: int,
+) -> Optional[str]:
+    """Render presentation slides to PDF via WeasyPrint and upload to S3."""
+    cache_key = f"pres_{version}"
+    cached = await _get_cached_pdf_url(thread_id, version, is_draft=False)
+    if cached:
+        return cached
+
+    def _render() -> Optional[bytes]:
+        try:
+            from weasyprint import HTML, CSS
+            html_content = _render_presentation_html(state)
+            return HTML(string=html_content).write_pdf(
+                stylesheets=[CSS(string="@page { size: 1280px 720px; margin: 0; }")]
+            )
+        except ImportError:
+            logger.error("WeasyPrint not installed — presentation PDF skipped")
+            return None
+        except Exception as e:
+            logger.error("Presentation PDF render failed: %s", e, exc_info=True)
+            return None
+
+    pdf_bytes = await asyncio.to_thread(_render)
+    if pdf_bytes is None:
+        return None
+
+    filename = f"presentation_v{version}.pdf"
+    try:
+        pdf_url = await get_storage().upload_file(
+            pdf_bytes,
+            filename,
+            prefix=f"matcha-work/{thread_id}",
+            content_type="application/pdf",
+        )
+    except Exception as e:
+        logger.error("Failed to upload presentation PDF: %s", e, exc_info=True)
+        return None
+
+    await _cache_pdf_url(thread_id, version, pdf_url, is_draft=False)
+    return pdf_url
+
+
+async def generate_cover_image(presentation_title: str, subtitle: Optional[str] = None) -> Optional[str]:
+    """Generate a cover image via Gemini Imagen and upload to S3."""
+    import os
+    try:
+        from google import genai as _genai
+        from ...config import get_settings
+        settings = get_settings()
+        api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+        if not api_key:
+            return None
+        client = _genai.Client(api_key=api_key)
+        prompt_parts = [f"Professional corporate presentation cover slide illustration for: {presentation_title}"]
+        if subtitle:
+            prompt_parts.append(f"Subtitle: {subtitle}")
+        prompt_parts.append("Clean, modern, abstract data visualization, dark background with green accents, no text, high quality")
+        prompt = ". ".join(prompt_parts)
+
+        def _call() -> Optional[bytes]:
+            try:
+                result = client.models.generate_images(
+                    model="imagen-3.0-generate-001",
+                    prompt=prompt,
+                    config={"number_of_images": 1, "aspect_ratio": "16:9"},
+                )
+                if result.generated_images:
+                    return result.generated_images[0].image.image_bytes
+            except Exception as e:
+                logger.warning("Imagen call failed: %s", e)
+            return None
+
+        image_bytes = await asyncio.to_thread(_call)
+        if image_bytes is None:
+            return None
+
+        filename = f"cover_{secrets.token_hex(8)}.png"
+        url = await get_storage().upload_file(
+            image_bytes,
+            filename,
+            prefix="matcha-work/covers",
+            content_type="image/png",
+        )
+        return url
+    except Exception as e:
+        logger.warning("Cover image generation failed: %s", e)
+        return None
 
 
 async def save_offer_letter_draft(thread_id: UUID, company_id: UUID) -> dict:

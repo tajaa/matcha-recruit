@@ -12,7 +12,7 @@ from google.genai import types
 
 from ...config import get_settings
 from ...core.services.platform_settings import get_matcha_work_model_mode
-from ..models.matcha_work import OfferLetterDocument, OnboardingDocument, ReviewDocument, WorkbookDocument
+from ..models.matcha_work import OfferLetterDocument, OnboardingDocument, PresentationDocument, ReviewDocument, WorkbookDocument
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +22,10 @@ OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
 REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())
 WORKBOOK_FIELDS = list(WorkbookDocument.model_fields.keys())
 ONBOARDING_FIELDS = list(OnboardingDocument.model_fields.keys())
+PRESENTATION_FIELDS = list(PresentationDocument.model_fields.keys())
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
-SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "none"}
+SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "none"}
 SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
@@ -57,6 +58,11 @@ Supported skills:
 - offer_letter: create/update offer letter content, save_draft, send_draft, finalize
 - review: create/update anonymized review content, collect recipient_emails, send review requests, track responses
 - workbook: create/update HR workbook documents and section content, generate_presentation
+- presentation: create standalone slide decks, reports, or presentations that are NOT workbooks.
+  Use this when the user asks for a "presentation", "report", "slide deck", "deck", or "slides".
+  Fields: presentation_title (string), subtitle (string), theme (string: professional/minimal/bold),
+  slides (array of {title, bullets: [string], speaker_notes}). Generate full slides array upfront.
+  Aim for 5-12 slides. Each slide: 1 title + 3-6 bullet points. Speaker notes optional.
 - onboarding: collect employee details and create employee records with automatic provisioning.
   Required per employee: first_name, last_name, work_email.
   Optional per employee: personal_email, work_state, employment_type, start_date, address.
@@ -99,8 +105,10 @@ Output constraints:
 - For offer_letter send_draft, include recipient_emails (or candidate_email) when the target email is provided.
 - overall_rating must be an integer 1-5.
 - For workbook "sections", ALWAYS return the full sections list (not a partial patch).
+- For presentation "slides", ALWAYS return the full slides array (not a partial patch).
 - start_date and expiration_date must be ISO 8601 strings (YYYY-MM-DD). Always capture dates mentioned by the user.
 - company_logo_url must NOT be set by AI — it is managed via file upload only.
+- cover_image_url must NOT be set by AI — it is generated automatically.
 """
 
 
@@ -152,6 +160,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
         return "workbook"
     if any(k in current_state for k in ("employees", "batch_status")):
         return "onboarding"
+    if any(k in current_state for k in ("presentation_title", "slides")):
+        return "presentation"
     return "chat"
 
 
@@ -367,9 +377,11 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields = WORKBOOK_FIELDS
         elif current_skill == "onboarding":
             valid_fields = ONBOARDING_FIELDS
+        elif current_skill == "presentation":
+            valid_fields = PRESENTATION_FIELDS
         else:
             # No active skill yet — allow any skill to be initiated
-            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS
+            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS
 
         system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
             today=date.today().isoformat(),
