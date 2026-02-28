@@ -1340,6 +1340,53 @@ async def get_pdf(
     return {"pdf_url": pdf_url, "version": target_version}
 
 
+@router.get("/threads/{thread_id}/pdf/proxy")
+async def proxy_pdf(
+    thread_id: UUID,
+    version: Optional[int] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Stream PDF bytes for same-origin iframe embedding (avoids cross-origin iframe blocking)."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if _infer_skill_from_state(thread.get("current_state") or {}) != "offer_letter":
+        raise HTTPException(status_code=400, detail="PDF preview is only available for offer letters")
+
+    target_version = version if version is not None else thread["version"]
+    state = thread["current_state"]
+
+    if version is not None and version != thread["version"]:
+        versions = await doc_svc.list_versions(thread_id)
+        ver_map = {v["version"]: v for v in versions}
+        if target_version not in ver_map:
+            raise HTTPException(status_code=404, detail=f"Version {target_version} not found")
+        state = ver_map[target_version]["state_json"]
+
+    is_draft = thread["status"] != "finalized"
+    pdf_url = await doc_svc.generate_pdf(state, thread_id, target_version, is_draft=is_draft)
+
+    if pdf_url is None:
+        raise HTTPException(status_code=503, detail="PDF generation unavailable")
+
+    try:
+        pdf_bytes = await get_storage().download_file(pdf_url)
+    except Exception as e:
+        logger.error("Failed to fetch PDF for proxy: %s", e)
+        raise HTTPException(status_code=503, detail="Failed to load PDF")
+
+    safe_title = re.sub(r"[^\w\s-]", "", thread.get("title") or "offer-letter").strip().replace(" ", "-") or "offer-letter"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{safe_title}.pdf"'},
+    )
+
+
 @router.delete("/threads/{thread_id}", status_code=204)
 async def archive_thread(
     thread_id: UUID,

@@ -11,7 +11,7 @@ import type {
   MWReviewRequestStatus,
 } from '../types/matcha-work';
 import type { HandbookListItem } from '../types';
-import { ApiRequestError, handbooks, matchaWork, adminPlatformSettings } from '../api/client';
+import { ApiRequestError, handbooks, matchaWork, adminPlatformSettings, getAccessToken } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { LogoUpload } from '../components/matcha-work/LogoUpload';
 import HandbookDistributeModal from '../components/HandbookDistributeModal';
@@ -395,6 +395,7 @@ export default function MatchaWorkThread() {
   const [messages, setMessages] = useState<MWMessage[]>([]);
   const [versions, setVersions] = useState<MWDocumentVersion[]>([]);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
   const [previewPanelOpen, setPreviewPanelOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -529,6 +530,37 @@ export default function MatchaWorkThread() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  // Load PDF as blob URL to avoid cross-origin iframe restrictions
+  useEffect(() => {
+    if (!pdfUrl) {
+      setPdfBlobUrl(null);
+      return;
+    }
+    let revoked = false;
+    let blobUrl: string | null = null;
+    const token = getAccessToken();
+    fetch(`/api/matcha-work/threads/${threadId}/pdf/proxy`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then(r => {
+        if (!r.ok) throw new Error(`PDF proxy returned ${r.status}`);
+        return r.blob();
+      })
+      .then(blob => {
+        if (revoked) return;
+        blobUrl = URL.createObjectURL(blob);
+        setPdfBlobUrl(blobUrl);
+      })
+      .catch(() => {
+        // fall back to direct URL if proxy fails
+        if (!revoked) setPdfBlobUrl(pdfUrl);
+      });
+    return () => {
+      revoked = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [pdfUrl, threadId]);
 
   const handleToggleModel = async () => {
     const next = matchaWorkModelMode === 'light' ? 'heavy' : 'light';
@@ -1022,11 +1054,11 @@ export default function MatchaWorkThread() {
               {isArchived && <span className="text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Archived</span>}
               {thread.linked_offer_letter_id && <span className="text-[10px] text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Draft Saved</span>}
               {tokenUsage ? (
-                <span className="hidden sm:inline text-[10px] text-zinc-600 font-mono border border-white/10 px-1.5 py-0.5 shrink-0">
+                <span className="hidden sm:inline text-[10px] text-zinc-300 font-mono border border-zinc-600 bg-zinc-800/60 px-1.5 py-0.5 shrink-0">
                   {tokenUsage.estimated ? '~' : ''}{formatTokenCount(tokenUsage.total_tokens)} tok{tokenUsage.cost_dollars != null ? ` · $${tokenUsage.cost_dollars.toFixed(4)}` : ''}
                 </span>
               ) : usageSummary && usageSummary.totals.total_tokens > 0 ? (
-                <span className="hidden sm:inline text-[10px] text-zinc-600 font-mono border border-white/10 px-1.5 py-0.5 shrink-0">
+                <span className="hidden sm:inline text-[10px] text-zinc-300 font-mono border border-zinc-600 bg-zinc-800/60 px-1.5 py-0.5 shrink-0">
                   {formatTokenCount(usageSummary.totals.total_tokens)} tok · ${usageSummary.totals.total_cost_dollars.toFixed(4)}
                 </span>
               ) : null}
@@ -1420,9 +1452,9 @@ export default function MatchaWorkThread() {
           {/* PDF iframe */}
           <div className="flex-1 bg-zinc-900 min-h-0">
             {(isOfferLetter || hasOfferLetterPreviewContent) ? (
-              pdfUrl ? (
+              pdfBlobUrl ? (
                 <iframe
-                  src={pdfUrl}
+                  src={pdfBlobUrl}
                   className="w-full h-full border-0"
                   title="Offer Letter Preview"
                 />
