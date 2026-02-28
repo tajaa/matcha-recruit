@@ -1259,10 +1259,11 @@ async def generate_presentation_pdf(
 
 
 async def generate_cover_image(presentation_title: str, subtitle: Optional[str] = None) -> Optional[str]:
-    """Generate a cover image via Gemini Imagen and upload to S3."""
+    """Generate a cover image via Gemini 3.1 Flash Image and upload to S3."""
     import os
     try:
         from google import genai as _genai
+        from google.genai import types as _genai_types
         from ...config import get_settings
         settings = get_settings()
         api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
@@ -1272,32 +1273,39 @@ async def generate_cover_image(presentation_title: str, subtitle: Optional[str] 
         prompt_parts = [f"Professional corporate presentation cover slide illustration for: {presentation_title}"]
         if subtitle:
             prompt_parts.append(f"Subtitle: {subtitle}")
-        prompt_parts.append("Clean, modern, abstract data visualization, dark background with green accents, no text, high quality")
+        prompt_parts.append("Clean, modern, abstract data visualization, dark background with green accents, no text, high quality, 16:9 aspect ratio")
         prompt = ". ".join(prompt_parts)
 
-        def _call() -> Optional[bytes]:
+        def _call() -> Optional[tuple[bytes, str]]:
             try:
-                result = client.models.generate_images(
-                    model="imagen-4.0-generate-001",
-                    prompt=prompt,
-                    config={"number_of_images": 1, "aspect_ratio": "16:9"},
+                response = client.models.generate_content(
+                    model="gemini-3.1-flash-image-preview",
+                    contents=prompt,
+                    config=_genai_types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"],
+                        image_config=_genai_types.ImageConfig(aspect_ratio="16:9"),
+                    ),
                 )
-                if result.generated_images:
-                    return result.generated_images[0].image.image_bytes
+                for part in response.candidates[0].content.parts:
+                    if part.inline_data and part.inline_data.data:
+                        mime = part.inline_data.mime_type or "image/png"
+                        return part.inline_data.data, mime
             except Exception as e:
-                logger.warning("Imagen call failed: %s", e)
+                logger.warning("Gemini image generation call failed: %s", e)
             return None
 
-        image_bytes = await asyncio.to_thread(_call)
-        if image_bytes is None:
+        result = await asyncio.to_thread(_call)
+        if result is None:
             return None
 
-        filename = f"cover_{secrets.token_hex(8)}.png"
+        image_bytes, mime_type = result
+        ext = "png" if "png" in mime_type else "jpg"
+        filename = f"cover_{secrets.token_hex(8)}.{ext}"
         url = await get_storage().upload_file(
             image_bytes,
             filename,
             prefix="matcha-work/covers",
-            content_type="image/png",
+            content_type=mime_type,
         )
         return url
     except Exception as e:
