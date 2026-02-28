@@ -1116,11 +1116,14 @@ def _render_presentation_html(state: dict) -> str:
     }
     colors = themes.get(theme, themes["professional"])
 
+    cover_image_url = state.get("cover_image_url")
     slides_html = []
     # Cover slide
     subtitle_html = f"<p class='subtitle'>{subtitle}</p>" if subtitle else ""
+    cover_img_html = f"<img src='{html.escape(cover_image_url)}' class='cover-img' />" if cover_image_url else ""
     slides_html.append(f"""
         <div class="slide cover-slide">
+          {cover_img_html}
           <div class="cover-content">
             <h1 class="cover-title">{title}</h1>
             {subtitle_html}
@@ -1169,8 +1172,14 @@ def _render_presentation_html(state: dict) -> str:
     align-items: flex-start;
     border-left: 8px solid {colors['accent']};
     padding-left: 72px;
+    position: relative;
+    overflow: hidden;
   }}
-  .cover-content {{ max-width: 800px; }}
+  .cover-img {{
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: cover; opacity: 0.25;
+  }}
+  .cover-content {{ max-width: 800px; position: relative; z-index: 1; }}
   .cover-title {{
     font-size: 52px; font-weight: 800; line-height: 1.15;
     color: {colors['text']}; margin-bottom: 20px; letter-spacing: -1px;
@@ -1647,6 +1656,12 @@ async def generate_workbook_presentation(thread_id: UUID, company_id: UUID) -> d
 
             current_state = _parse_jsonb(row["current_state"])
             presentation = _build_workbook_presentation_state(current_state)
+            cover_url = await generate_cover_image(
+                presentation_title=presentation.get("title") or "Presentation",
+                subtitle=presentation.get("subtitle"),
+            )
+            if cover_url:
+                presentation["cover_image_url"] = cover_url
             merged_state = {**current_state, "presentation": presentation}
             new_version = int(row["version"] or 0) + 1
 

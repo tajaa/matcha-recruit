@@ -954,6 +954,8 @@ async def send_message(
         prompt_tokens=(final_usage or {}).get("prompt_tokens"),
         completion_tokens=(final_usage or {}).get("completion_tokens"),
     )
+    if final_usage is not None:
+        final_usage["cost_dollars"] = float(cost)
 
     try:
         await doc_svc.log_token_usage_event(
@@ -1082,6 +1084,8 @@ async def send_message_stream(
                 prompt_tokens=(final_usage or {}).get("prompt_tokens"),
                 completion_tokens=(final_usage or {}).get("completion_tokens"),
             )
+            if final_usage is not None:
+                final_usage["cost_dollars"] = float(stream_cost)
 
             try:
                 await doc_svc.log_token_usage_event(
@@ -1492,8 +1496,7 @@ async def get_presentation_pdf(
     thread_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Return a redirect to the presentation PDF, generating it on demand."""
-    from fastapi.responses import RedirectResponse
+    """Return the presentation PDF URL, generating it on demand."""
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -1516,6 +1519,7 @@ async def get_presentation_pdf(
             "presentation_title": pres.get("title"),
             "subtitle": pres.get("subtitle"),
             "slides": pres.get("slides", []),
+            "cover_image_url": pres.get("cover_image_url"),
         }
     else:
         pdf_state = state
@@ -1524,7 +1528,7 @@ async def get_presentation_pdf(
     if not pdf_url:
         raise HTTPException(status_code=500, detail="Failed to generate presentation PDF")
 
-    return RedirectResponse(url=pdf_url, status_code=302)
+    return {"pdf_url": pdf_url}
 
 
 @router.patch("/threads/{thread_id}", response_model=ThreadListItem)

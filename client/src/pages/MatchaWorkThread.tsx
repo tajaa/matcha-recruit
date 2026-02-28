@@ -144,7 +144,11 @@ function WorkbookPreview({ state, threadId }: { state: MWDocumentState; threadId
               </div>
             ) : (
               <>
-                <div className="bg-zinc-950 border border-white/10 p-5">
+                <div className="bg-zinc-950 border border-white/10 overflow-hidden">
+                  {presentation.cover_image_url && (
+                    <img src={presentation.cover_image_url} alt="Cover" className="w-full h-48 object-cover" />
+                  )}
+                  <div className="p-5">
                   <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 mb-1">Presentation Deck</p>
                   <h2 className="text-xl font-bold text-white tracking-tight">{presentation.title}</h2>
                   {presentation.subtitle && (
@@ -153,6 +157,7 @@ function WorkbookPreview({ state, threadId }: { state: MWDocumentState; threadId
                   <p className="text-xs text-zinc-500 mt-3">
                     {presentation.slide_count} slide{presentation.slide_count === 1 ? '' : 's'} · Generated {new Date(presentation.generated_at).toLocaleString()}
                   </p>
+                  </div>
                 </div>
                 {presentation.slides.map((slide, idx) => (
                   <div key={`${slide.title}-${idx}`} className="bg-zinc-950 border border-white/10 overflow-hidden">
