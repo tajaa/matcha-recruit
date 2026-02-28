@@ -965,11 +965,15 @@ export default function MatchaWorkThread() {
               {isFinalized && <span className="text-[10px] text-blue-400 border border-blue-500/20 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Finalized</span>}
               {isArchived && <span className="text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Archived</span>}
               {thread.linked_offer_letter_id && <span className="text-[10px] text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Draft Saved</span>}
-              {tokenUsage && (
+              {tokenUsage ? (
                 <span className="hidden sm:inline text-[10px] text-zinc-600 font-mono border border-white/10 px-1.5 py-0.5 shrink-0">
                   {tokenUsage.estimated ? '~' : ''}{formatTokenCount(tokenUsage.total_tokens)} tok{tokenUsage.cost_dollars != null ? ` · $${tokenUsage.cost_dollars.toFixed(4)}` : ''}
                 </span>
-              )}
+              ) : usageSummary && usageSummary.totals.total_tokens > 0 ? (
+                <span className="hidden sm:inline text-[10px] text-zinc-600 font-mono border border-white/10 px-1.5 py-0.5 shrink-0">
+                  {formatTokenCount(usageSummary.totals.total_tokens)} tok · ${usageSummary.totals.total_cost_dollars.toFixed(4)}
+                </span>
+              ) : null}
             </div>
           </div>
         </div>
