@@ -920,8 +920,8 @@ async def send_message(
     ai_provider = get_ai_provider()
     profile = await doc_svc.get_company_profile_for_ai(company_id)
     ctx = _build_company_context(profile)
-    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx)
-    ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx)
+    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
+    ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
     final_usage = ai_resp.token_usage or estimated_usage
 
     current_version = thread["version"]
@@ -1037,7 +1037,7 @@ async def send_message_stream(
     ai_provider = get_ai_provider()
     profile = await doc_svc.get_company_profile_for_ai(company_id)
     ctx = _build_company_context(profile)
-    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx)
+    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
 
     async def event_stream():
         try:
@@ -1051,7 +1051,7 @@ async def send_message_stream(
                 }
             )
 
-            ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx)
+            ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
 
             current_version = thread["version"]
             (

@@ -147,6 +147,7 @@ class CreateThreadResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=4000)
+    slide_index: Optional[int] = Field(None, ge=0, description="0-based index of slide to focus edits on")
 
 
 class MWMessageOut(BaseModel):

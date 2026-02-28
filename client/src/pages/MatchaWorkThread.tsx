@@ -33,7 +33,12 @@ function toItemList(value: unknown): string[] {
   return [];
 }
 
-function WorkbookPreview({ state, threadId }: { state: MWDocumentState; threadId?: string }) {
+function WorkbookPreview({ state, threadId, selectedSlideIndex, onSelectSlide }: {
+  state: MWDocumentState;
+  threadId?: string;
+  selectedSlideIndex?: number | null;
+  onSelectSlide?: (idx: number | null) => void;
+}) {
   const [activeView, setActiveView] = useState<'workbook' | 'presentation'>('workbook');
   const sections = state.sections || [];
   const presentation = state.presentation;
@@ -158,29 +163,49 @@ function WorkbookPreview({ state, threadId }: { state: MWDocumentState; threadId
                   </p>
                   </div>
                 </div>
-                {presentation.slides.map((slide, idx) => (
-                  <div key={`${slide.title}-${idx}`} className="bg-zinc-950 border border-white/10 overflow-hidden">
-                    <div className="px-5 py-3 border-b border-white/10 bg-zinc-900/30 flex items-center justify-between">
-                      <h3 className="text-sm font-bold text-zinc-200 tracking-wide uppercase">{slide.title}</h3>
-                      <span className="text-[10px] text-zinc-500">Slide {idx + 1}</span>
-                    </div>
-                    <div className="px-5 py-4">
-                      <ul className="space-y-1.5">
-                        {(slide.bullets || []).map((bullet, bulletIdx) => (
-                          <li key={`${bullet}-${bulletIdx}`} className="text-sm text-zinc-300 leading-relaxed">
-                            • {bullet}
-                          </li>
-                        ))}
-                      </ul>
-                      {slide.speaker_notes && (
-                        <div className="mt-4 p-3 bg-zinc-900 border border-white/10">
-                          <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Speaker Notes</p>
-                          <p className="text-xs text-zinc-400 whitespace-pre-wrap">{slide.speaker_notes}</p>
+                {presentation.slides.map((slide, idx) => {
+                  const isSelected = selectedSlideIndex === idx;
+                  return (
+                    <div
+                      key={`${slide.title}-${idx}`}
+                      onClick={() => onSelectSlide?.(isSelected ? null : idx)}
+                      className={`bg-zinc-950 border overflow-hidden transition-colors ${
+                        onSelectSlide ? 'cursor-pointer' : ''
+                      } ${
+                        isSelected
+                          ? 'border-matcha-500/60 ring-1 ring-matcha-500/20'
+                          : 'border-white/10 hover:border-white/20'
+                      }`}
+                    >
+                      <div className={`px-5 py-3 border-b flex items-center justify-between ${
+                        isSelected ? 'border-matcha-500/30 bg-matcha-900/20' : 'border-white/10 bg-zinc-900/30'
+                      }`}>
+                        <h3 className="text-sm font-bold text-zinc-200 tracking-wide uppercase">{slide.title}</h3>
+                        <div className="flex items-center gap-2">
+                          {isSelected && (
+                            <span className="text-[10px] text-matcha-400 font-mono uppercase tracking-wider">selected</span>
+                          )}
+                          <span className="text-[10px] text-zinc-500">Slide {idx + 1}</span>
                         </div>
-                      )}
+                      </div>
+                      <div className="px-5 py-4">
+                        <ul className="space-y-1.5">
+                          {(slide.bullets || []).map((bullet, bulletIdx) => (
+                            <li key={`${bullet}-${bulletIdx}`} className="text-sm text-zinc-300 leading-relaxed">
+                              • {bullet}
+                            </li>
+                          ))}
+                        </ul>
+                        {slide.speaker_notes && (
+                          <div className="mt-4 p-3 bg-zinc-900 border border-white/10">
+                            <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Speaker Notes</p>
+                            <p className="text-xs text-zinc-400 whitespace-pre-wrap">{slide.speaker_notes}</p>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             )}
           </div>
@@ -190,7 +215,12 @@ function WorkbookPreview({ state, threadId }: { state: MWDocumentState; threadId
   );
 }
 
-function PresentationPreview({ state, threadId }: { state: MWDocumentState; threadId?: string }) {
+function PresentationPreview({ state, threadId, selectedSlideIndex, onSelectSlide }: {
+  state: MWDocumentState;
+  threadId?: string;
+  selectedSlideIndex?: number | null;
+  onSelectSlide?: (idx: number | null) => void;
+}) {
   const slides = state.slides || [];
   const title = state.presentation_title || 'Presentation';
   const subtitle = state.subtitle;
@@ -243,27 +273,47 @@ function PresentationPreview({ state, threadId }: { state: MWDocumentState; thre
             <p className="text-zinc-500 text-sm italic font-mono">Generating slides...</p>
           </div>
         ) : (
-          slides.map((slide, idx) => (
-            <div key={idx} className="bg-zinc-950 border border-white/10 overflow-hidden">
-              <div className="px-5 py-3 border-b border-white/10 bg-zinc-900/30 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-zinc-200 tracking-wide uppercase">{slide.title}</h3>
-                <span className="text-[10px] text-zinc-500">Slide {idx + 1}</span>
-              </div>
-              <div className="px-5 py-4">
-                <ul className="space-y-1.5">
-                  {(slide.bullets || []).map((bullet, bulletIdx) => (
-                    <li key={bulletIdx} className="text-sm text-zinc-300 leading-relaxed">• {bullet}</li>
-                  ))}
-                </ul>
-                {slide.speaker_notes && (
-                  <div className="mt-4 p-3 bg-zinc-900 border border-white/10">
-                    <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Speaker Notes</p>
-                    <p className="text-xs text-zinc-400 whitespace-pre-wrap">{slide.speaker_notes}</p>
+          slides.map((slide, idx) => {
+            const isSelected = selectedSlideIndex === idx;
+            return (
+              <div
+                key={idx}
+                onClick={() => onSelectSlide?.(isSelected ? null : idx)}
+                className={`bg-zinc-950 border overflow-hidden transition-colors ${
+                  onSelectSlide ? 'cursor-pointer' : ''
+                } ${
+                  isSelected
+                    ? 'border-matcha-500/60 ring-1 ring-matcha-500/20'
+                    : 'border-white/10 hover:border-white/20'
+                }`}
+              >
+                <div className={`px-5 py-3 border-b flex items-center justify-between ${
+                  isSelected ? 'border-matcha-500/30 bg-matcha-900/20' : 'border-white/10 bg-zinc-900/30'
+                }`}>
+                  <h3 className="text-sm font-bold text-zinc-200 tracking-wide uppercase">{slide.title}</h3>
+                  <div className="flex items-center gap-2">
+                    {isSelected && (
+                      <span className="text-[10px] text-matcha-400 font-mono uppercase tracking-wider">selected</span>
+                    )}
+                    <span className="text-[10px] text-zinc-500">Slide {idx + 1}</span>
                   </div>
-                )}
+                </div>
+                <div className="px-5 py-4">
+                  <ul className="space-y-1.5">
+                    {(slide.bullets || []).map((bullet, bulletIdx) => (
+                      <li key={bulletIdx} className="text-sm text-zinc-300 leading-relaxed">• {bullet}</li>
+                    ))}
+                  </ul>
+                  {slide.speaker_notes && (
+                    <div className="mt-4 p-3 bg-zinc-900 border border-white/10">
+                      <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Speaker Notes</p>
+                      <p className="text-xs text-zinc-400 whitespace-pre-wrap">{slide.speaker_notes}</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -360,6 +410,7 @@ export default function MatchaWorkThread() {
   const [usageSummary, setUsageSummary] = useState<MWUsageSummaryResponse | null>(null);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [showReviewRequestsModal, setShowReviewRequestsModal] = useState(false);
+  const [selectedSlideIndex, setSelectedSlideIndex] = useState<number | null>(null);
   const [generatingPresentation, setGeneratingPresentation] = useState(false);
   const [sendingReviewRequests, setSendingReviewRequests] = useState(false);
   const [reviewRecipientInput, setReviewRecipientInput] = useState('');
@@ -493,7 +544,9 @@ export default function MatchaWorkThread() {
     if (!input.trim() || !threadId || sending || isOutOfCredits) return;
 
     const content = input.trim();
+    const capturedSlideIndex = selectedSlideIndex;
     setInput('');
+    setSelectedSlideIndex(null);
     setSending(true);
     setError(null);
     setTokenUsage(null);
@@ -622,7 +675,7 @@ export default function MatchaWorkThread() {
             streamError = message;
           }
         }
-      });
+      }, undefined, capturedSlideIndex ?? undefined);
 
       if (streamError) {
         setError(streamError);
@@ -1206,6 +1259,31 @@ export default function MatchaWorkThread() {
                 This thread is {thread.status} — no further edits.
               </div>
             ) : (
+              <>
+              {selectedSlideIndex !== null && (() => {
+                const slides = (isPresentation ? thread.current_state.slides : thread.current_state.presentation?.slides) || [];
+                const slide = slides[selectedSlideIndex];
+                const slideTitle = slide?.title || '';
+                return (
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-1.5 bg-matcha-900/40 border border-matcha-500/30 px-2.5 py-1 text-[11px] text-matcha-400">
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 0v10m0-10a2 2 0 012 2h2a2 2 0 012-2v0" />
+                      </svg>
+                      <span>Slide {selectedSlideIndex + 1}{slideTitle ? `: ${slideTitle}` : ''}</span>
+                    </div>
+                    <button
+                      onClick={() => setSelectedSlideIndex(null)}
+                      className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                      title="Clear slide selection"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })()}
               <div className="flex items-end gap-2">
                 <textarea
                   ref={inputRef}
@@ -1214,7 +1292,9 @@ export default function MatchaWorkThread() {
                   onKeyDown={handleKeyDown}
                   disabled={inputDisabled}
                   placeholder={
-                    isUnscopedChat
+                    selectedSlideIndex !== null
+                      ? `Edit slide ${selectedSlideIndex + 1} — describe your changes...`
+                      : isUnscopedChat
                       ? 'Ask for an offer letter, review, workbook, or onboarding...'
                       : isReview
                       ? 'Add anonymized review details...'
@@ -1243,6 +1323,7 @@ export default function MatchaWorkThread() {
                   </svg>
                 </button>
               </div>
+              </>
             )}
           </div>
         </div>
@@ -1358,9 +1439,19 @@ export default function MatchaWorkThread() {
                 </div>
               )
             ) : (isPresentation || hasPresentationPreviewContent) ? (
-              <PresentationPreview state={thread.current_state} threadId={thread.id} />
+              <PresentationPreview
+                state={thread.current_state}
+                threadId={thread.id}
+                selectedSlideIndex={selectedSlideIndex}
+                onSelectSlide={!isFinalized && !isArchived ? setSelectedSlideIndex : undefined}
+              />
             ) : (isWorkbook || hasWorkbookPreviewContent) ? (
-              <WorkbookPreview state={thread.current_state} threadId={thread.id} />
+              <WorkbookPreview
+                state={thread.current_state}
+                threadId={thread.id}
+                selectedSlideIndex={selectedSlideIndex}
+                onSelectSlide={!isFinalized && !isArchived ? setSelectedSlideIndex : undefined}
+              />
             ) : hasOnboardingPreviewContent ? (
               <div className="h-full overflow-y-auto p-4">
                 <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 p-4 space-y-3">

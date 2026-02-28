@@ -3185,7 +3185,8 @@ export const matchaWork = {
     threadId: string,
     content: string,
     onEvent: (event: MWMessageStreamEvent) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    slideIndex?: number
   ): Promise<void> => {
     const runRequest = async (): Promise<Response> => {
       const token = getAccessToken();
@@ -3195,7 +3196,7 @@ export const matchaWork = {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, ...(slideIndex !== undefined ? { slide_index: slideIndex } : {}) }),
         signal,
       });
     };

@@ -190,6 +190,7 @@ class MatchaWorkAIProvider:
         messages: list[dict],
         current_state: dict,
         company_context: str = "",
+        slide_index: Optional[int] = None,
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -220,9 +221,10 @@ class GeminiProvider(MatchaWorkAIProvider):
         messages: list[dict],
         current_state: dict,
         company_context: str = "",
+        slide_index: Optional[int] = None,
     ) -> AIResponse:
         system_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
-            messages, current_state, company_context=company_context
+            messages, current_state, company_context=company_context, slide_index=slide_index
         )
         model = await _get_model(self.settings)
 
@@ -345,9 +347,10 @@ class GeminiProvider(MatchaWorkAIProvider):
         messages: list[dict],
         current_state: dict,
         company_context: str = "",
+        slide_index: Optional[int] = None,
     ) -> dict:
         system_prompt, _, _, _ = self._build_prompt_and_contents(
-            messages, current_state, company_context=company_context
+            messages, current_state, company_context=company_context, slide_index=slide_index
         )
         model = await _get_model(self.settings)
         windowed = messages[-20:]
@@ -366,6 +369,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         messages: list[dict],
         current_state: dict,
         company_context: str = "",
+        slide_index: Optional[int] = None,
     ) -> tuple[str, list, list[str], str]:
         windowed = messages[-20:]
         current_skill = _infer_skill_from_state(current_state)
@@ -390,6 +394,21 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields=", ".join(valid_fields),
             company_context=company_context,
         )
+
+        # Inject slide-focus context when the user has selected a specific slide
+        if slide_index is not None and current_skill in ("presentation", "workbook"):
+            slides = current_state.get("slides") or []
+            slide_title = ""
+            if 0 <= slide_index < len(slides):
+                slide_title = slides[slide_index].get("title", "") if isinstance(slides[slide_index], dict) else ""
+            label = f'"{slide_title}" ' if slide_title else ""
+            total = len(slides)
+            system_prompt += (
+                f"\n\nSlide focus: The user has selected Slide {slide_index + 1}{f'/{total}' if total else ''} {label}(0-based index {slide_index}). "
+                f"Apply the user's requested changes ONLY to this slide. "
+                f"Return the complete slides array with all other slides identical to current_state. "
+                f"Do not modify any other slide's title, bullets, or speaker_notes."
+            )
 
         contents = []
         for msg in windowed:
