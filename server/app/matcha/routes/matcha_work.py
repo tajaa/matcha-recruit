@@ -14,6 +14,7 @@ from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
+from ..services.model_pricing import calculate_call_cost
 from ..models.matcha_work import (
     CreateThreadRequest,
     CreateThreadResponse,
@@ -948,6 +949,12 @@ async def send_message(
         version_created=current_version if changed else None,
     )
 
+    cost = calculate_call_cost(
+        model=str((final_usage or {}).get("model") or "unknown"),
+        prompt_tokens=(final_usage or {}).get("prompt_tokens"),
+        completion_tokens=(final_usage or {}).get("completion_tokens"),
+    )
+
     try:
         await doc_svc.log_token_usage_event(
             company_id=company_id,
@@ -955,6 +962,7 @@ async def send_message(
             thread_id=thread_id,
             token_usage=final_usage,
             operation="send_message",
+            cost_dollars=float(cost),
         )
     except Exception as e:
         logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
@@ -968,6 +976,8 @@ async def send_message(
                         company_id=company_id,
                         thread_id=thread_id,
                         user_id=current_user.id,
+                        cost=cost,
+                        model=str((final_usage or {}).get("model") or "unknown"),
                     )
         except HTTPException as exc:
             if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED:
@@ -1067,6 +1077,12 @@ async def send_message_stream(
             )
 
             final_usage = ai_resp.token_usage or estimated_usage
+            stream_cost = calculate_call_cost(
+                model=str((final_usage or {}).get("model") or "unknown"),
+                prompt_tokens=(final_usage or {}).get("prompt_tokens"),
+                completion_tokens=(final_usage or {}).get("completion_tokens"),
+            )
+
             try:
                 await doc_svc.log_token_usage_event(
                     company_id=company_id,
@@ -1074,6 +1090,7 @@ async def send_message_stream(
                     thread_id=thread_id,
                     token_usage=final_usage,
                     operation="send_message",
+                    cost_dollars=float(stream_cost),
                 )
             except Exception as e:
                 logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
@@ -1087,6 +1104,8 @@ async def send_message_stream(
                                 company_id=company_id,
                                 thread_id=thread_id,
                                 user_id=current_user.id,
+                                cost=stream_cost,
+                                model=str((final_usage or {}).get("model") or "unknown"),
                             )
                 except HTTPException as exc:
                     if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED:

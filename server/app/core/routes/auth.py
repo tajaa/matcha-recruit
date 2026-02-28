@@ -1660,7 +1660,7 @@ async def register_business(request: BusinessRegister):
                     company_id, transaction_type, credits_delta,
                     credits_after, description
                 )
-                VALUES ($1, 'grant', $2, $2, 'Welcome gift — $50 free credits')
+                VALUES ($1, 'grant', $2, $2, 'Welcome gift — $5 free AI credits')
                 """,
                 company_id,
                 FREE_SIGNUP_CREDITS,

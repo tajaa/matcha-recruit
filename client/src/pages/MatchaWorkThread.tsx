@@ -885,7 +885,7 @@ export default function MatchaWorkThread() {
     hasPresentationPreviewContent
   );
   const isOutOfCredits = creditBalance !== null && creditBalance <= 0;
-  const isLowCredits = creditBalance !== null && creditBalance > 0 && creditBalance < 10;
+  const isLowCredits = creditBalance !== null && creditBalance > 0 && creditBalance < 2.0;
   const inputDisabled = isFinalized || isArchived || sending || isOutOfCredits;
   const formatTokenCount = (value: number | null | undefined) =>
     value == null ? '—' : value.toLocaleString();
@@ -950,7 +950,7 @@ export default function MatchaWorkThread() {
               {thread.linked_offer_letter_id && <span className="text-[10px] text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Draft Saved</span>}
               {tokenUsage && (
                 <span className="hidden sm:inline text-[10px] text-zinc-600 font-mono border border-white/10 px-1.5 py-0.5 shrink-0">
-                  {tokenUsage.estimated ? '~' : ''}{formatTokenCount(tokenUsage.total_tokens)} tok
+                  {tokenUsage.estimated ? '~' : ''}{formatTokenCount(tokenUsage.total_tokens)} tok{tokenUsage.cost_dollars != null ? ` · $${tokenUsage.cost_dollars.toFixed(4)}` : ''}
                 </span>
               )}
             </div>
@@ -1095,7 +1095,7 @@ export default function MatchaWorkThread() {
 
       {!isOutOfCredits && isLowCredits && (
         <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-300 text-xs flex items-center justify-between gap-3">
-          <span>Low credit warning: {creditBalance} credits remaining.</span>
+          <span>${creditBalance?.toFixed(2)} remaining — top up soon.</span>
           <button
             onClick={() => navigate('/app/matcha/work/billing')}
             className="px-2 py-1 border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-100 uppercase tracking-wider transition-colors"

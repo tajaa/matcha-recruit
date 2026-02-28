@@ -3772,6 +3772,7 @@ async def init_db():
                 total_tokens INTEGER,
                 estimated BOOLEAN NOT NULL DEFAULT false,
                 operation VARCHAR(40) NOT NULL DEFAULT 'send_message',
+                cost_dollars NUMERIC(10,6),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
@@ -3819,9 +3820,9 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS mw_credit_balances (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 company_id UUID NOT NULL UNIQUE REFERENCES companies(id) ON DELETE CASCADE,
-                credits_remaining INTEGER NOT NULL DEFAULT 0 CHECK (credits_remaining >= 0),
-                total_credits_purchased INTEGER NOT NULL DEFAULT 0 CHECK (total_credits_purchased >= 0),
-                total_credits_granted INTEGER NOT NULL DEFAULT 0 CHECK (total_credits_granted >= 0),
+                credits_remaining NUMERIC(10,6) NOT NULL DEFAULT 0 CHECK (credits_remaining >= 0),
+                total_credits_purchased NUMERIC(10,6) NOT NULL DEFAULT 0 CHECK (total_credits_purchased >= 0),
+                total_credits_granted NUMERIC(10,6) NOT NULL DEFAULT 0 CHECK (total_credits_granted >= 0),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
@@ -3831,8 +3832,8 @@ async def init_db():
                 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
                 transaction_type VARCHAR(20) NOT NULL
                     CHECK (transaction_type IN ('purchase', 'grant', 'deduction', 'refund', 'adjustment')),
-                credits_delta INTEGER NOT NULL,
-                credits_after INTEGER NOT NULL CHECK (credits_after >= 0),
+                credits_delta NUMERIC(10,6) NOT NULL,
+                credits_after NUMERIC(10,6) NOT NULL CHECK (credits_after >= 0),
                 description TEXT,
                 reference_id UUID,
                 created_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -3853,7 +3854,7 @@ async def init_db():
                 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
                 stripe_session_id VARCHAR(255) NOT NULL UNIQUE,
                 credit_pack_id VARCHAR(50) NOT NULL,
-                credits_to_add INTEGER NOT NULL CHECK (credits_to_add > 0),
+                credits_to_add NUMERIC(10,6) NOT NULL CHECK (credits_to_add > 0),
                 amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
                 status VARCHAR(20) NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending', 'completed', 'expired')),
@@ -3872,7 +3873,7 @@ async def init_db():
                 stripe_subscription_id VARCHAR(255) NOT NULL UNIQUE,
                 stripe_customer_id VARCHAR(255) NOT NULL,
                 pack_id VARCHAR(50) NOT NULL,
-                credits_per_cycle INTEGER NOT NULL,
+                credits_per_cycle NUMERIC(10,6) NOT NULL,
                 amount_cents INTEGER NOT NULL,
                 status VARCHAR(20) NOT NULL DEFAULT 'active',
                 current_period_end TIMESTAMPTZ,

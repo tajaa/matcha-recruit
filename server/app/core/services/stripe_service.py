@@ -16,27 +16,26 @@ from ...config import get_settings
 # $2.50 processing fee added on top of each pack
 FEE_CENTS = 250
 
-# $20 pack: 100 credits, customer pays $22.50
-# $50 pack: 250 credits, customer pays $52.50
+# Dollar-based credit packs — credits represent real dollar amounts
 CREDIT_PACKS: dict[str, dict[str, Any]] = {
     "twenty": {
-        "credits": 100,
+        "credits": 20.0,
         "base_cents": 2000,
         "amount_cents": 2000 + FEE_CENTS,   # $22.50
-        "label": "$20 Credits",
-        "description": "100 AI operations + $2.50 processing fee",
+        "label": "$20 AI Credits",
+        "description": "$20 of AI usage + $2.50 processing fee",
     },
     "fifty": {
-        "credits": 250,
+        "credits": 50.0,
         "base_cents": 5000,
         "amount_cents": 5000 + FEE_CENTS,   # $52.50
-        "label": "$50 Credits",
-        "description": "250 AI operations + $2.50 processing fee",
+        "label": "$50 AI Credits",
+        "description": "$50 of AI usage + $2.50 processing fee",
     },
 }
 
-# Free credits granted to every new business on signup ($50 equivalent)
-FREE_SIGNUP_CREDITS = 250
+# Free credits granted to every new business on signup
+FREE_SIGNUP_CREDITS = 5.0
 
 
 class StripeServiceError(Exception):
@@ -65,7 +64,7 @@ class StripeService:
         return [
             {
                 "pack_id": pack_id,
-                "credits": int(pack["credits"]),
+                "credits": float(pack["credits"]),
                 "base_cents": int(pack["base_cents"]),
                 "amount_cents": int(pack["amount_cents"]),
                 "fee_cents": FEE_CENTS,

@@ -757,6 +757,7 @@ async def log_token_usage_event(
     thread_id: UUID,
     token_usage: Optional[dict],
     operation: str = "send_message",
+    cost_dollars: float | None = None,
 ) -> None:
     if not token_usage:
         return
@@ -776,9 +777,9 @@ async def log_token_usage_event(
             INSERT INTO mw_token_usage_events(
                 company_id, user_id, thread_id, model,
                 prompt_tokens, completion_tokens, total_tokens,
-                estimated, operation
+                estimated, operation, cost_dollars
             )
-            VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             company_id,
             user_id,
@@ -789,6 +790,7 @@ async def log_token_usage_event(
             total_tokens,
             estimated,
             operation,
+            cost_dollars,
         )
 
 
@@ -807,6 +809,7 @@ async def get_token_usage_summary(
                 COALESCE(SUM(total_tokens), 0) AS total_tokens,
                 COUNT(*) AS operation_count,
                 COUNT(*) FILTER (WHERE estimated) AS estimated_operations,
+                COALESCE(SUM(cost_dollars), 0) AS total_cost_dollars,
                 MIN(created_at) AS first_seen_at,
                 MAX(created_at) AS last_seen_at
             FROM mw_token_usage_events
@@ -828,7 +831,8 @@ async def get_token_usage_summary(
                 COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                 COALESCE(SUM(total_tokens), 0) AS total_tokens,
                 COUNT(*) AS operation_count,
-                COUNT(*) FILTER (WHERE estimated) AS estimated_operations
+                COUNT(*) FILTER (WHERE estimated) AS estimated_operations,
+                COALESCE(SUM(cost_dollars), 0) AS total_cost_dollars
             FROM mw_token_usage_events
             WHERE company_id=$1
               AND user_id=$2
@@ -848,6 +852,7 @@ async def get_token_usage_summary(
             "total_tokens": totals_row["total_tokens"] if totals_row else 0,
             "operation_count": totals_row["operation_count"] if totals_row else 0,
             "estimated_operations": totals_row["estimated_operations"] if totals_row else 0,
+            "total_cost_dollars": float(totals_row["total_cost_dollars"]) if totals_row else 0,
         },
         "by_model": [
             {
@@ -857,6 +862,7 @@ async def get_token_usage_summary(
                 "total_tokens": row["total_tokens"],
                 "operation_count": row["operation_count"],
                 "estimated_operations": row["estimated_operations"],
+                "total_cost_dollars": float(row["total_cost_dollars"]),
                 "first_seen_at": row["first_seen_at"],
                 "last_seen_at": row["last_seen_at"],
             }

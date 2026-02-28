@@ -164,6 +164,7 @@ class TokenUsage(BaseModel):
     total_tokens: Optional[int] = None
     estimated: bool = False
     model: Optional[str] = None
+    cost_dollars: Optional[float] = None
 
 
 class SendMessageResponse(BaseModel):
@@ -255,6 +256,7 @@ class UsageTotals(BaseModel):
     total_tokens: int = 0
     operation_count: int = 0
     estimated_operations: int = 0
+    total_cost_dollars: float = 0
 
 
 class UsageByModel(BaseModel):
@@ -264,6 +266,7 @@ class UsageByModel(BaseModel):
     total_tokens: int = 0
     operation_count: int = 0
     estimated_operations: int = 0
+    total_cost_dollars: float = 0
     first_seen_at: Optional[datetime] = None
     last_seen_at: Optional[datetime] = None
 

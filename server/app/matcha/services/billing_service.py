@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Optional
 from uuid import UUID
 
@@ -16,8 +17,8 @@ INSUFFICIENT_CREDITS_MESSAGE = (
 INSUFFICIENT_CREDITS_CODE = "insufficient_credits"
 
 
-def _insufficient_credits_exception(credits_remaining: int = 0) -> HTTPException:
-    remaining = max(int(credits_remaining or 0), 0)
+def _insufficient_credits_exception(credits_remaining: float = 0) -> HTTPException:
+    remaining = max(float(credits_remaining or 0), 0)
     return HTTPException(
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         detail={
@@ -35,8 +36,8 @@ def _row_to_transaction(row: asyncpg.Record) -> dict[str, Any]:
         "id": row["id"],
         "company_id": row["company_id"],
         "transaction_type": row["transaction_type"],
-        "credits_delta": int(row["credits_delta"]),
-        "credits_after": int(row["credits_after"]),
+        "credits_delta": float(row["credits_delta"]),
+        "credits_after": float(row["credits_after"]),
         "description": row["description"],
         "reference_id": row["reference_id"],
         "created_by": row["created_by"],
@@ -51,7 +52,7 @@ def _row_to_stripe_session(row: asyncpg.Record) -> dict[str, Any]:
         "company_id": row["company_id"],
         "stripe_session_id": row["stripe_session_id"],
         "credit_pack_id": row["credit_pack_id"],
-        "credits_to_add": int(row["credits_to_add"]),
+        "credits_to_add": float(row["credits_to_add"]),
         "amount_cents": int(row["amount_cents"]),
         "status": row["status"],
         "created_at": row["created_at"],
@@ -109,16 +110,16 @@ async def get_credit_balance(
 
     return {
         "company_id": row["company_id"],
-        "credits_remaining": int(row["credits_remaining"]),
-        "total_credits_purchased": int(row["total_credits_purchased"]),
-        "total_credits_granted": int(row["total_credits_granted"]),
+        "credits_remaining": float(row["credits_remaining"]),
+        "total_credits_purchased": float(row["total_credits_purchased"]),
+        "total_credits_granted": float(row["total_credits_granted"]),
         "updated_at": row["updated_at"],
     }
 
 
 async def check_credits(company_id: UUID) -> bool:
     balance = await get_credit_balance(company_id)
-    remaining = int(balance.get("credits_remaining") or 0)
+    remaining = float(balance.get("credits_remaining") or 0)
     if remaining <= 0:
         raise _insufficient_credits_exception(remaining)
     return True
@@ -129,19 +130,25 @@ async def deduct_credit(
     company_id: UUID,
     thread_id: UUID,
     user_id: UUID,
+    *,
+    cost: Decimal = Decimal("0.0001"),
+    model: str = "unknown",
 ) -> dict[str, Any]:
     await _ensure_balance_row(conn, company_id)
+
+    cost_float = float(cost)
 
     balance_row = await conn.fetchrow(
         """
         UPDATE mw_credit_balances
-        SET credits_remaining = credits_remaining - 1,
+        SET credits_remaining = credits_remaining - $2,
             updated_at = NOW()
         WHERE company_id = $1
-          AND credits_remaining > 0
+          AND credits_remaining >= $2
         RETURNING credits_remaining
         """,
         company_id,
+        cost_float,
     )
 
     if balance_row is None:
@@ -149,8 +156,9 @@ async def deduct_credit(
             "SELECT COALESCE(credits_remaining, 0) FROM mw_credit_balances WHERE company_id = $1",
             company_id,
         )
-        raise _insufficient_credits_exception(int(credits_remaining or 0))
+        raise _insufficient_credits_exception(float(credits_remaining or 0))
 
+    description = f"AI call ({model}) — ${cost_float:.4f}"
     transaction = await conn.fetchrow(
         """
         INSERT INTO mw_credit_transactions (
@@ -162,7 +170,7 @@ async def deduct_credit(
             reference_id,
             created_by
         )
-        VALUES ($1, 'deduction', -1, $2, $3, $4, $5)
+        VALUES ($1, 'deduction', $2, $3, $4, $5, $6)
         RETURNING
             id,
             company_id,
@@ -175,8 +183,9 @@ async def deduct_credit(
             created_at
         """,
         company_id,
-        int(balance_row["credits_remaining"]),
-        "Matcha Work AI call",
+        -cost_float,
+        float(balance_row["credits_remaining"]),
+        description,
         thread_id,
         user_id,
     )
@@ -186,7 +195,7 @@ async def deduct_credit(
 
 async def grant_credits(
     company_id: UUID,
-    credits: int,
+    credits: float,
     description: Optional[str],
     granted_by: UUID,
 ) -> dict[str, Any]:
@@ -215,15 +224,15 @@ async def grant_credits(
                 """,
                 company_id,
             )
-            current_remaining = int(locked_balance["credits_remaining"])
-            next_remaining = current_remaining + int(credits)
+            current_remaining = float(locked_balance["credits_remaining"])
+            next_remaining = current_remaining + float(credits)
             if next_remaining < 0:
                 raise HTTPException(
                     status_code=400,
                     detail="Credit adjustment would make balance negative",
                 )
 
-            grant_delta = int(credits) if credits > 0 else 0
+            grant_delta = float(credits) if credits > 0 else 0
             await conn.execute(
                 """
                 UPDATE mw_credit_balances
@@ -262,7 +271,7 @@ async def grant_credits(
                 """,
                 company_id,
                 transaction_type,
-                int(credits),
+                float(credits),
                 next_remaining,
                 normalized_description,
                 granted_by,
@@ -326,7 +335,7 @@ async def create_pending_stripe_session(
     company_id: UUID,
     stripe_session_id: str,
     credit_pack_id: str,
-    credits_to_add: int,
+    credits_to_add: float,
     amount_cents: int,
 ) -> dict[str, Any]:
     async with get_connection() as conn:
@@ -365,7 +374,7 @@ async def create_pending_stripe_session(
             company_id,
             stripe_session_id,
             credit_pack_id,
-            int(credits_to_add),
+            float(credits_to_add),
             int(amount_cents),
         )
 
@@ -416,8 +425,8 @@ async def fulfill_checkout_session(stripe_session_id: str) -> Optional[dict[str,
                 session_row["company_id"],
             )
 
-            current_remaining = int(locked_balance["credits_remaining"])
-            credits_to_add = int(session_row["credits_to_add"])
+            current_remaining = float(locked_balance["credits_remaining"])
+            credits_to_add = float(session_row["credits_to_add"])
             next_remaining = current_remaining + credits_to_add
 
             await conn.execute(
@@ -520,7 +529,7 @@ async def upsert_subscription(
     stripe_subscription_id: str,
     stripe_customer_id: str,
     pack_id: str,
-    credits_per_cycle: int,
+    credits_per_cycle: float,
     amount_cents: int,
     current_period_end=None,
 ) -> dict[str, Any]:
@@ -601,14 +610,14 @@ async def fulfill_subscription_invoice(
                 return {"already_fulfilled": True}
 
             company_id = sub_row["company_id"]
-            credits_to_add = int(sub_row["credits_per_cycle"])
+            credits_to_add = float(sub_row["credits_per_cycle"])
 
             await _ensure_balance_row(conn, company_id)
             locked = await conn.fetchrow(
                 "SELECT credits_remaining FROM mw_credit_balances WHERE company_id = $1 FOR UPDATE",
                 company_id,
             )
-            next_remaining = int(locked["credits_remaining"]) + credits_to_add
+            next_remaining = float(locked["credits_remaining"]) + credits_to_add
 
             await conn.execute(
                 """

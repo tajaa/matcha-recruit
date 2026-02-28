@@ -68,7 +68,7 @@ async def stripe_webhook(request: Request):
                 try:
                     company_id = UUID(company_id_str)
                     pack = CREDIT_PACKS.get(pack_id)
-                    credits_per_cycle = int(pack["credits"]) if pack else 0
+                    credits_per_cycle = float(pack["credits"]) if pack else 0
                     amount_cents = int(pack["amount_cents"]) if pack else 0
 
                     await billing_service.upsert_subscription(

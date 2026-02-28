@@ -24,8 +24,8 @@ class CreditTransactionResponse(BaseModel):
     id: UUID
     company_id: UUID
     transaction_type: str
-    credits_delta: int
-    credits_after: int
+    credits_delta: float
+    credits_after: float
     description: Optional[str] = None
     reference_id: Optional[UUID] = None
     created_by: Optional[UUID] = None
@@ -35,16 +35,16 @@ class CreditTransactionResponse(BaseModel):
 
 class BillingBalanceResponse(BaseModel):
     company_id: UUID
-    credits_remaining: int
-    total_credits_purchased: int
-    total_credits_granted: int
+    credits_remaining: float
+    total_credits_purchased: float
+    total_credits_granted: float
     updated_at: Optional[datetime] = None
     recent_transactions: list[CreditTransactionResponse]
 
 
 class CreditPackResponse(BaseModel):
     pack_id: str
-    credits: int
+    credits: float
     base_cents: int
     amount_cents: int
     fee_cents: int
@@ -56,7 +56,7 @@ class CreditPackResponse(BaseModel):
 class SubscriptionResponse(BaseModel):
     active: bool
     pack_id: Optional[str] = None
-    credits_per_cycle: Optional[int] = None
+    credits_per_cycle: Optional[float] = None
     amount_cents: Optional[int] = None
     status: Optional[str] = None
     current_period_end: Optional[datetime] = None
@@ -96,7 +96,7 @@ async def get_billing_balance(
     if current_user.role == "admin":
         return BillingBalanceResponse(
             company_id=company_id,
-            credits_remaining=999999,
+            credits_remaining=999999.0,
             total_credits_purchased=0,
             total_credits_granted=0,
             updated_at=None,
@@ -169,7 +169,7 @@ async def create_checkout_session(
         company_id=company_id,
         stripe_session_id=stripe_session_id,
         credit_pack_id=body.pack_id,
-        credits_to_add=int(pack["credits"]),
+        credits_to_add=float(pack["credits"]),
         amount_cents=int(pack["amount_cents"]),
     )
 
@@ -191,7 +191,7 @@ async def get_subscription(
     return SubscriptionResponse(
         active=True,
         pack_id=sub["pack_id"],
-        credits_per_cycle=int(sub["credits_per_cycle"]),
+        credits_per_cycle=float(sub["credits_per_cycle"]),
         amount_cents=int(sub["amount_cents"]),
         status=sub["status"],
         current_period_end=sub["current_period_end"],
@@ -252,14 +252,14 @@ class CompanyCreditSummary(BaseModel):
     company_id: UUID
     company_name: str
     company_status: str
-    credits_remaining: int
-    total_credits_purchased: int
-    total_credits_granted: int
+    credits_remaining: float
+    total_credits_purchased: float
+    total_credits_granted: float
     updated_at: Optional[datetime] = None
 
 
 class AdminGrantRequest(BaseModel):
-    credits: int = Field(..., description="Positive = grant, negative = deduct")
+    credits: float = Field(..., description="Positive = grant, negative = deduct")
     description: Optional[str] = Field(None, max_length=500)
 
 
@@ -287,9 +287,9 @@ async def admin_list_company_credits(
             company_id=row["id"],
             company_name=row["name"],
             company_status=row["status"],
-            credits_remaining=int(row["credits_remaining"]),
-            total_credits_purchased=int(row["total_credits_purchased"]),
-            total_credits_granted=int(row["total_credits_granted"]),
+            credits_remaining=float(row["credits_remaining"]),
+            total_credits_purchased=float(row["total_credits_purchased"]),
+            total_credits_granted=float(row["total_credits_granted"]),
             updated_at=row["updated_at"],
         )
         for row in rows

@@ -13,6 +13,10 @@ import type {
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const PAGE_SIZE = 25;
 
+function formatDollars(amount: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+}
+
 function formatCents(cents: number, currency = 'USD'): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(cents / 100);
 }
@@ -103,7 +107,7 @@ function AdminBillingView() {
 
   const submitGrant = async () => {
     if (!grantTarget) return;
-    const credits = parseInt(grantAmount, 10);
+    const credits = parseFloat(grantAmount);
     if (isNaN(credits) || credits === 0) { setGrantError('Enter a non-zero amount'); return; }
     setGranting(true);
     setGrantError(null);
@@ -120,7 +124,7 @@ function AdminBillingView() {
         const b = await res.json().catch(() => ({}));
         throw new Error(b.detail || 'Grant failed');
       }
-      setNotice(`${credits > 0 ? '+' : ''}${credits.toLocaleString()} credits applied to ${grantTarget.company_name}.`);
+      setNotice(`${credits > 0 ? '+' : ''}${formatDollars(credits)} applied to ${grantTarget.company_name}.`);
       setGrantTarget(null);
       void load();
     } catch (err) {
@@ -133,7 +137,7 @@ function AdminBillingView() {
   const totalRemaining  = companies.reduce((s, c) => s + c.credits_remaining, 0);
   const totalPurchased  = companies.reduce((s, c) => s + c.total_credits_purchased, 0);
   const totalGranted    = companies.reduce((s, c) => s + c.total_credits_granted, 0);
-  const parsedAmount    = parseInt(grantAmount, 10);
+  const parsedAmount    = parseFloat(grantAmount);
   const amountIsValid   = !isNaN(parsedAmount) && parsedAmount !== 0;
 
   return (
@@ -159,9 +163,9 @@ function AdminBillingView() {
       {!loading && (
         <div className="grid grid-cols-3 gap-px bg-white/10 border border-white/10">
           {[
-            { label: 'Credits in Use', value: totalRemaining.toLocaleString(), sub: 'across all accounts' },
-            { label: 'Total Purchased', value: totalPurchased.toLocaleString(), sub: 'via Stripe' },
-            { label: 'Total Granted', value: totalGranted.toLocaleString(), sub: 'manual grants' },
+            { label: 'Balance in Use', value: formatDollars(totalRemaining), sub: 'across all accounts' },
+            { label: 'Total Purchased', value: formatDollars(totalPurchased), sub: 'via Stripe' },
+            { label: 'Total Granted', value: formatDollars(totalGranted), sub: 'manual grants' },
           ].map(s => (
             <div key={s.label} className="bg-zinc-950 px-6 py-6">
               <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-3">{s.label}</div>
@@ -181,7 +185,7 @@ function AdminBillingView() {
           <table className="min-w-full">
             <thead>
               <tr className="border-b border-white/10">
-                {['Company', 'Credits Remaining', 'Purchased', 'Granted', 'Last Activity', ''].map(h => (
+                {['Company', 'Balance', 'Purchased', 'Granted', 'Last Activity', ''].map(h => (
                   <th key={h} className={`px-5 py-3 text-[10px] uppercase tracking-widest text-zinc-600 font-bold ${h === 'Company' || h === '' ? 'text-left' : 'text-right'}`}>{h}</th>
                 ))}
               </tr>
@@ -194,7 +198,7 @@ function AdminBillingView() {
                 <tr><td colSpan={6} className="px-5 py-12 text-center text-xs text-zinc-600">No companies found.</td></tr>
               )}
               {companies.map(c => {
-                const low = c.credits_remaining > 0 && c.credits_remaining < 20;
+                const low = c.credits_remaining > 0 && c.credits_remaining < 2.0;
                 const empty = c.credits_remaining <= 0;
                 return (
                   <tr key={c.company_id} className="bg-zinc-950 hover:bg-zinc-900/30 transition-colors">
@@ -206,14 +210,14 @@ function AdminBillingView() {
                     </td>
                     <td className="px-5 py-4 text-right">
                       <span className={`text-sm font-mono ${empty ? 'text-red-400' : low ? 'text-amber-400' : 'text-zinc-100'}`}>
-                        {c.credits_remaining.toLocaleString()}
+                        {formatDollars(c.credits_remaining)}
                       </span>
                       {(empty || low) && (
                         <div className="text-[10px] text-zinc-600 mt-0.5 font-mono">{empty ? 'out of credits' : 'running low'}</div>
                       )}
                     </td>
-                    <td className="px-5 py-4 text-right text-sm font-mono text-zinc-500">{c.total_credits_purchased.toLocaleString()}</td>
-                    <td className="px-5 py-4 text-right text-sm font-mono text-zinc-500">{c.total_credits_granted.toLocaleString()}</td>
+                    <td className="px-5 py-4 text-right text-sm font-mono text-zinc-500">{formatDollars(c.total_credits_purchased)}</td>
+                    <td className="px-5 py-4 text-right text-sm font-mono text-zinc-500">{formatDollars(c.total_credits_granted)}</td>
                     <td className="px-5 py-4 text-right text-[11px] text-zinc-600 font-mono">{c.updated_at ? formatDate(c.updated_at) : '—'}</td>
                     <td className="px-5 py-4 text-right">
                       <button
@@ -244,23 +248,24 @@ function AdminBillingView() {
             <div className="px-6 py-5 space-y-4">
               <div className="flex items-center justify-between border border-white/10 px-4 py-3">
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Current balance</span>
-                <span className="text-sm font-mono text-zinc-200">{grantTarget.credits_remaining.toLocaleString()}</span>
+                <span className="text-sm font-mono text-zinc-200">{formatDollars(grantTarget.credits_remaining)}</span>
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">
-                  Credits <span className="text-zinc-600 normal-case font-normal">(negative to deduct)</span>
+                  Amount ($) <span className="text-zinc-600 normal-case font-normal">(negative to deduct)</span>
                 </label>
                 <input
                   type="number"
+                  step="0.01"
                   value={grantAmount}
                   onChange={e => setGrantAmount(e.target.value)}
-                  placeholder="500"
+                  placeholder="10.00"
                   autoFocus
                   className="w-full bg-zinc-900 border border-white/10 text-zinc-100 text-sm px-3.5 py-2.5 focus:outline-none focus:border-white/30 placeholder:text-zinc-700 transition-colors"
                 />
                 {amountIsValid && (
                   <p className="mt-1.5 text-[11px] text-zinc-500 font-mono">
-                    New balance: <span className="text-zinc-300">{Math.max(0, grantTarget.credits_remaining + parsedAmount).toLocaleString()}</span>
+                    New balance: <span className="text-zinc-300">{formatDollars(Math.max(0, grantTarget.credits_remaining + parsedAmount))}</span>
                   </p>
                 )}
               </div>
@@ -293,7 +298,7 @@ function AdminBillingView() {
                 {granting
                   ? 'Applying…'
                   : amountIsValid
-                    ? `Apply ${parsedAmount > 0 ? '+' : ''}${parsedAmount.toLocaleString()}`
+                    ? `Apply ${parsedAmount > 0 ? '+' : ''}${formatDollars(parsedAmount)}`
                     : 'Apply Credits'}
               </button>
             </div>
@@ -385,7 +390,7 @@ function ClientBillingView() {
   };
 
   const credits   = balance?.credits_remaining ?? 0;
-  const low       = credits > 0 && credits < 10;
+  const low       = credits > 0 && credits < 2.0;
   const activeSub = subscription?.active ? subscription : null;
 
   return (
@@ -411,22 +416,22 @@ function ClientBillingView() {
       {/* Balance + subscription */}
       <div className="grid grid-cols-2 gap-px bg-white/10 border border-white/10">
         <div className="bg-zinc-950 p-8">
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Credits Remaining</div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Balance</div>
           <div className={`text-6xl font-light font-mono ${credits <= 0 ? 'text-red-400' : low ? 'text-amber-400' : 'text-white'}`}>
-            {credits.toLocaleString()}
+            {formatDollars(credits)}
           </div>
           <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-2 gap-4">
             <div>
               <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Purchased</div>
-              <div className="text-sm font-mono text-zinc-300">{(balance?.total_credits_purchased ?? 0).toLocaleString()}</div>
+              <div className="text-sm font-mono text-zinc-300">{formatDollars(balance?.total_credits_purchased ?? 0)}</div>
             </div>
             <div>
               <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Granted</div>
-              <div className="text-sm font-mono text-zinc-300">{(balance?.total_credits_granted ?? 0).toLocaleString()}</div>
+              <div className="text-sm font-mono text-zinc-300">{formatDollars(balance?.total_credits_granted ?? 0)}</div>
             </div>
           </div>
           {credits <= 0 && <div className="mt-4 text-xs text-red-400">Out of credits — purchase a pack below to continue.</div>}
-          {low && <div className="mt-4 text-xs text-amber-400">Running low — fewer than 10 credits remaining.</div>}
+          {low && <div className="mt-4 text-xs text-amber-400">Less than $2.00 remaining.</div>}
         </div>
 
         {activeSub ? (
@@ -435,7 +440,7 @@ function ClientBillingView() {
               <div className="w-1.5 h-1.5 bg-emerald-400 animate-pulse" />
               <div className="text-[10px] text-emerald-400 uppercase tracking-widest font-bold">Auto-Renew Active</div>
             </div>
-            <div className="text-4xl font-light font-mono text-white">{activeSub.credits_per_cycle?.toLocaleString()}</div>
+            <div className="text-4xl font-light font-mono text-white">{formatDollars(activeSub.credits_per_cycle ?? 0)}</div>
             <div className="text-[10px] text-zinc-500 mt-1 font-mono uppercase tracking-wider">credits / month</div>
             <div className="mt-6 pt-6 border-t border-white/10 space-y-2 text-[11px] text-zinc-500 font-mono">
               {activeSub.amount_cents && <div>{formatCents(activeSub.amount_cents)} billed monthly</div>}
@@ -478,8 +483,8 @@ function ClientBillingView() {
                   <div>
                     <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">{pack.label}</div>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-5xl font-light font-mono text-white">{pack.credits.toLocaleString()}</span>
-                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider">credits</span>
+                      <span className="text-5xl font-light font-mono text-white">{formatDollars(pack.credits)}</span>
+                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider">AI credits</span>
                     </div>
                   </div>
                   <div className="text-right">
@@ -567,9 +572,9 @@ function ClientBillingView() {
                     </span>
                   </td>
                   <td className={`px-5 py-3.5 text-right text-sm font-mono ${tx.credits_delta >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {tx.credits_delta >= 0 ? '+' : ''}{tx.credits_delta.toLocaleString()}
+                    {tx.credits_delta >= 0 ? '+' : ''}{formatDollars(tx.credits_delta)}
                   </td>
-                  <td className="px-5 py-3.5 text-right text-sm font-mono text-zinc-500">{tx.credits_after.toLocaleString()}</td>
+                  <td className="px-5 py-3.5 text-right text-sm font-mono text-zinc-500">{formatDollars(tx.credits_after)}</td>
                   <td className="px-5 py-3.5 text-sm text-zinc-500 max-w-xs truncate">{tx.description || '—'}</td>
                   <td className="px-5 py-3.5 text-[11px] text-zinc-600 whitespace-nowrap font-mono">{formatTs(tx.created_at)}</td>
                 </tr>

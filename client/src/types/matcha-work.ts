@@ -161,6 +161,7 @@ export interface MWTokenUsage {
   total_tokens: number | null;
   estimated: boolean;
   model: string | null;
+  cost_dollars: number | null;
 }
 
 export interface MWSendMessageResponse {
@@ -199,6 +200,7 @@ export interface MWUsageTotals {
   total_tokens: number;
   operation_count: number;
   estimated_operations: number;
+  total_cost_dollars: number;
 }
 
 export interface MWUsageByModel extends MWUsageTotals {
