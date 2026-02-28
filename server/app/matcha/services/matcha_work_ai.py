@@ -61,7 +61,7 @@ Supported skills:
 - presentation: create standalone slide decks, reports, or presentations that are NOT workbooks.
   Use this when the user asks for a "presentation", "report", "slide deck", "deck", or "slides".
   Fields: presentation_title (string), subtitle (string), theme (string: professional/minimal/bold),
-  slides (array of {title, bullets: [string], speaker_notes}). Generate full slides array upfront.
+  slides (array of {{title, bullets: [string], speaker_notes}}). Generate full slides array upfront.
   Aim for 5-12 slides. Each slide: 1 title + 3-6 bullet points. Speaker notes optional.
 - onboarding: collect employee details and create employee records with automatic provisioning.
   Required per employee: first_name, last_name, work_email.
