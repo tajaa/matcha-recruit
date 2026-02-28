@@ -383,6 +383,11 @@ export default function MatchaWorkThread() {
         setVersions(cached.versions);
         setPdfUrl(cached.pdfUrl);
         setLoading(false);
+        // Open preview panel if cached thread has content
+        const cst = cached.thread.current_state || {};
+        if (cached.pdfUrl || cst.workbook_title || cst.sections?.length || cst.review_title || cst.summary || cst.strengths || cst.presentation_title || cst.slides?.length || (cst.employees as unknown[] | undefined)?.length) {
+          setPreviewPanelOpen(true);
+        }
       } else {
         setLoading(true);
       }
@@ -419,6 +424,19 @@ export default function MatchaWorkThread() {
       setMessages(threadData.messages);
       setVersions(verData);
       setPdfUrl(pdfUrlResult);
+
+      // Auto-open preview panel if thread already has content
+      const st = threadData.current_state || {};
+      const threadHasContent = Boolean(
+        pdfUrlResult ||
+        st.workbook_title || st.sections?.length ||
+        st.review_title || st.summary || st.strengths ||
+        st.presentation_title || st.slides?.length ||
+        (st.employees as unknown[] | undefined)?.length
+      );
+      if (threadHasContent) {
+        setPreviewPanelOpen(true);
+      }
 
       // Update cache
       threadCache.set(threadId, { thread: threadData, versions: verData, pdfUrl: pdfUrlResult, ts: Date.now() });
@@ -955,6 +973,24 @@ export default function MatchaWorkThread() {
               title={matchaWorkModelMode === 'heavy' ? 'Switch to light (flash)' : 'Switch to heavy (3.1 pro)'}
             >
               {matchaWorkModelMode === 'heavy' ? '3.1 pro' : 'flash'}
+            </button>
+          )}
+
+          {/* Preview panel toggle */}
+          {hasPreviewContent && (
+            <button
+              onClick={() => { setPreviewPanelOpen((v) => !v); if (!previewPanelOpen) setActiveTab('preview'); }}
+              className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono border transition-colors ${
+                previewPanelOpen
+                  ? 'text-matcha-400 border-matcha-500/20 hover:border-matcha-500/40'
+                  : 'text-zinc-500 border-white/10 hover:border-white/20'
+              }`}
+              title={previewPanelOpen ? 'Hide preview panel' : 'Show preview panel'}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" />
+              </svg>
+              {previewPanelOpen ? 'Hide' : 'Assets'}
             </button>
           )}
 
