@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
 from ...core.models.auth import CurrentUser
@@ -84,8 +84,10 @@ class TransactionHistoryResponse(BaseModel):
 
 @router.get("/balance", response_model=BillingBalanceResponse)
 async def get_billing_balance(
+    response: Response,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
+    response.headers["Cache-Control"] = "private, max-age=60"
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No company associated with this account")

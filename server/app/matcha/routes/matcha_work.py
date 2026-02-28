@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 
 from ...core.models.auth import CurrentUser
@@ -1137,10 +1137,12 @@ async def send_message_stream(
 
 @router.get("/usage/summary", response_model=UsageSummaryResponse)
 async def get_usage_summary(
+    response: Response,
     period_days: int = Query(30, ge=1, le=365),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get Matcha Work token usage totals for the current user, grouped by model."""
+    response.headers["Cache-Control"] = "private, max-age=300"
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return UsageSummaryResponse(

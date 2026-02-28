@@ -317,6 +317,14 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
   );
 }
 
+// Simple thread cache — avoids re-fetching when switching between threads
+const threadCache = new Map<string, { thread: MWThreadDetail; versions: MWDocumentVersion[]; pdfUrl: string | null; ts: number }>();
+const THREAD_CACHE_TTL = 60_000; // 60 seconds
+
+// Account-level cache (usage + billing) — shared across threads
+let accountCache: { usage: MWUsageSummaryResponse | null; balance: number | null; ts: number } | null = null;
+const ACCOUNT_CACHE_TTL = 120_000; // 2 minutes
+
 export default function MatchaWorkThread() {
   const { threadId } = useParams<{ threadId: string }>();
   const navigate = useNavigate();
@@ -365,25 +373,59 @@ export default function MatchaWorkThread() {
   const loadThread = useCallback(async () => {
     if (!threadId) return;
     try {
-      setLoading(true);
       setTokenUsage(null);
-      const [threadData, verData, usageData, billingData] = await Promise.all([
+
+      // Serve from cache instantly if available
+      const cached = threadCache.get(threadId);
+      if (cached && Date.now() - cached.ts < THREAD_CACHE_TTL) {
+        setThread(cached.thread);
+        setMessages(cached.thread.messages);
+        setVersions(cached.versions);
+        setPdfUrl(cached.pdfUrl);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+
+      // Load account-level data from cache or fetch
+      if (accountCache && Date.now() - accountCache.ts < ACCOUNT_CACHE_TTL) {
+        setUsageSummary(accountCache.usage);
+        setCreditBalance(accountCache.balance);
+      } else {
+        // Fire these in background — don't block thread rendering
+        Promise.all([
+          matchaWork.getUsageSummary(30).catch(() => null),
+          matchaWork.getBillingBalance().catch(() => null),
+        ]).then(([usageData, billingData]) => {
+          const balance = typeof billingData?.credits_remaining === 'number' ? billingData.credits_remaining : null;
+          setUsageSummary(usageData);
+          setCreditBalance(balance);
+          accountCache = { usage: usageData, balance, ts: Date.now() };
+        });
+      }
+
+      // Fetch thread + versions (these are per-thread, always refresh)
+      const [threadData, verData] = await Promise.all([
         matchaWork.getThread(threadId),
         matchaWork.getVersions(threadId),
-        matchaWork.getUsageSummary(30).catch(() => null),
-        matchaWork.getBillingBalance().catch(() => null),
       ]);
+      let pdfUrlResult: string | null = null;
+      if (threadData.task_type === 'offer_letter' && threadData.version > 0) {
+        const pdfData = await matchaWork.getPdf(threadId);
+        pdfUrlResult = pdfData.pdf_url;
+      }
+
       setThread(threadData);
       setMessages(threadData.messages);
       setVersions(verData);
-      setUsageSummary(usageData);
-      setCreditBalance(typeof billingData?.credits_remaining === 'number' ? billingData.credits_remaining : null);
-      // Offer-letter threads render a PDF preview.
-      if (threadData.task_type === 'offer_letter' && threadData.version > 0) {
-        const pdfData = await matchaWork.getPdf(threadId);
-        setPdfUrl(pdfData.pdf_url);
-      } else {
-        setPdfUrl(null);
+      setPdfUrl(pdfUrlResult);
+
+      // Update cache
+      threadCache.set(threadId, { thread: threadData, versions: verData, pdfUrl: pdfUrlResult, ts: Date.now() });
+      // Evict old entries (keep last 10 threads)
+      if (threadCache.size > 10) {
+        const oldest = [...threadCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+        if (oldest) threadCache.delete(oldest[0]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load thread');

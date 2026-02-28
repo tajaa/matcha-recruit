@@ -955,23 +955,38 @@ async def revert_to_version(thread_id: UUID, target_version: int) -> dict:
         return {"version": new_version, "current_state": old_state}
 
 
-async def list_versions(thread_id: UUID) -> list[dict]:
+async def list_versions(thread_id: UUID, include_state: bool = False) -> list[dict]:
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, thread_id, version, state_json, diff_summary, created_at
-            FROM mw_document_versions
-            WHERE thread_id=$1
-            ORDER BY version DESC
-            """,
-            thread_id,
-        )
-        result = []
-        for r in rows:
-            d = dict(r)
-            d["state_json"] = _parse_jsonb(d["state_json"])
-            result.append(d)
-        return result
+        if include_state:
+            rows = await conn.fetch(
+                """
+                SELECT id, thread_id, version, state_json, diff_summary, created_at
+                FROM mw_document_versions
+                WHERE thread_id=$1
+                ORDER BY version DESC
+                """,
+                thread_id,
+            )
+            result = []
+            for r in rows:
+                d = dict(r)
+                d["state_json"] = _parse_jsonb(d["state_json"])
+                result.append(d)
+            return result
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, thread_id, version, diff_summary, created_at
+                FROM mw_document_versions
+                WHERE thread_id=$1
+                ORDER BY version DESC
+                """,
+                thread_id,
+            )
+            return [
+                {**dict(r), "state_json": {}}
+                for r in rows
+            ]
 
 
 async def _get_cached_pdf_url(thread_id: UUID, version: int, is_draft: bool) -> Optional[str]:
