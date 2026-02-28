@@ -1,15 +1,15 @@
 """Convert credits from integer to dollar-based NUMERIC(10,6)
 
-Revision ID: a1b2c3d4e5f6
-Revises: z7a8b9c0d1e
+Revision ID: p7q8r9s0t1u2
+Revises: o1p2q3r4s5t6
 Create Date: 2026-02-27
 
 """
 
 from alembic import op
 
-revision = "a1b2c3d4e5f6"
-down_revision = "z7a8b9c0d1e"
+revision = "p7q8r9s0t1u2"
+down_revision = "o1p2q3r4s5t6"
 branch_labels = None
 depends_on = None
 
