@@ -15,7 +15,8 @@ struct ThreadDetailView: View {
                 PreviewPanelView(
                     currentState: viewModel.currentState,
                     pdfData: viewModel.pdfData,
-                    isLoading: viewModel.isLoadingPDF
+                    isLoading: viewModel.isLoadingPDF,
+                    threadId: viewModel.thread?.id
                 )
                 .frame(minWidth: 300)
             }
@@ -30,6 +31,16 @@ struct ThreadDetailView: View {
                             .foregroundColor(.white)
                         VersionBadge(version: thread.version)
                         StatusBadge(status: thread.status)
+
+                        if let usageText = viewModel.tokenUsage?.displayText {
+                            Text(usageText)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.white.opacity(0.06))
+                                .cornerRadius(4)
+                        }
                     }
                 }
             }

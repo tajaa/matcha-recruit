@@ -5,6 +5,7 @@ struct PreviewPanelView: View {
     let currentState: [String: AnyCodable]
     let pdfData: Data?
     let isLoading: Bool
+    var threadId: String?
 
     private var inferredSkill: String {
         if currentState["candidate_name"] != nil || currentState["position_title"] != nil ||
@@ -38,7 +39,7 @@ struct PreviewPanelView: View {
                 case "workbook":
                     WorkbookPreview(state: currentState)
                 case "presentation":
-                    PresentationPreview(state: currentState)
+                    PresentationPreview(state: currentState, threadId: threadId)
                 case "onboarding":
                     OnboardingPreview(state: currentState)
                 default:
@@ -231,9 +232,32 @@ struct WorkbookPreview: View {
 
     var workbookTitle: String { (state["workbook_title"]?.value as? String) ?? "Workbook" }
 
+    // Workbook presentation cover image
+    var presentationCoverUrl: String? {
+        guard let pres = state["presentation"]?.value as? [String: AnyCodable] else { return nil }
+        return pres["cover_image_url"]?.value as? String
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                // Cover image from workbook presentation
+                if let urlStr = presentationCoverUrl, let url = URL(string: urlStr) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(maxHeight: 160)
+                                .clipped()
+                                .cornerRadius(8)
+                        default:
+                            EmptyView()
+                        }
+                    }
+                }
+
                 Text(workbookTitle)
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.white)
@@ -270,6 +294,8 @@ struct WorkbookPreview: View {
 
 struct PresentationPreview: View {
     let state: [String: AnyCodable]
+    var threadId: String?
+    @State private var isLoadingPdf = false
 
     struct SlideEntry: Identifiable {
         let id = UUID()
@@ -289,6 +315,22 @@ struct PresentationPreview: View {
             let title = (dict["title"]?.value as? String) ?? ""
             let bullets = (dict["bullets"]?.value as? [AnyCodable])?.compactMap { $0.value as? String } ?? []
             return SlideEntry(index: index + 1, title: title, bullets: bullets)
+        }
+    }
+
+    private func openPdf() {
+        guard let id = threadId else { return }
+        isLoadingPdf = true
+        Task {
+            defer { Task { @MainActor in isLoadingPdf = false } }
+            do {
+                let url = try await MatchaWorkService.shared.getPresentationPdfUrl(threadId: id)
+                if let nsUrl = URL(string: url) {
+                    await MainActor.run { NSWorkspace.shared.open(nsUrl) }
+                }
+            } catch {
+                // Silently fail — user can retry
+            }
         }
     }
 
@@ -312,15 +354,39 @@ struct PresentationPreview: View {
                     }
                 }
 
-                // Title
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(presentationTitle)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
-                    if !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
+                // Title + PDF button row
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(presentationTitle)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                        if !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if threadId != nil && !slides.isEmpty {
+                        Button(action: openPdf) {
+                            HStack(spacing: 4) {
+                                if isLoadingPdf {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "doc.richtext")
+                                        .font(.system(size: 12))
+                                }
+                                Text("View PDF")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.matcha500)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.matcha500.opacity(0.12))
+                            .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isLoadingPdf)
                     }
                 }
 

@@ -66,6 +66,14 @@ class MatchaWorkService {
         enum CodingKeys: String, CodingKey { case pdfUrl = "pdf_url" }
     }
 
+    func getPresentationPdfUrl(threadId: String) async throws -> String {
+        let response: PDFResponse = try await client.request(
+            method: "GET",
+            path: "\(basePath)/threads/\(threadId)/presentation/pdf"
+        )
+        return response.pdfUrl
+    }
+
     func uploadImages(
         threadId: String,
         images: [(data: Data, filename: String, mimeType: String)]

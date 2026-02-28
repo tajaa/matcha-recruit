@@ -104,9 +104,29 @@ struct MWSendMessageResponse: Codable {
 struct MWTokenUsage: Codable {
     let inputTokens: Int?
     let outputTokens: Int?
+    let totalTokens: Int?
+    let costDollars: Double?
+    let model: String?
+    let estimated: Bool?
+
     enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
+        case totalTokens = "total_tokens"
+        case costDollars = "cost_dollars"
+        case model, estimated
+    }
+
+    /// Formatted display string, e.g. "1.2k tok · $0.0012"
+    var displayText: String? {
+        let total = totalTokens ?? ((inputTokens ?? 0) + (outputTokens ?? 0))
+        guard total > 0 else { return nil }
+        let tokStr = total >= 1000 ? String(format: "%.1fk", Double(total) / 1000.0) : "\(total)"
+        let prefix = (estimated == true) ? "~" : ""
+        if let cost = costDollars, cost > 0 {
+            return "\(prefix)\(tokStr) tok · $\(String(format: "%.4f", cost))"
+        }
+        return "\(prefix)\(tokStr) tok"
     }
 }
 

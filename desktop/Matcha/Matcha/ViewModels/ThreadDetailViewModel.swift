@@ -147,12 +147,15 @@ class ThreadDetailViewModel {
             if let state = event.data?.currentState {
                 currentState = state
             }
+            if let usage = event.data?.resolvedTokenUsage() {
+                tokenUsage = usage
+            }
             streamingContent = ""
             if isOfferLetterState(currentState) {
                 Task { await loadPDF() }
             }
         case "usage":
-            if let usage = event.data?.tokenUsage {
+            if let usage = event.data?.resolvedTokenUsage() {
                 tokenUsage = usage
             }
         case "error":
@@ -265,6 +268,7 @@ class ThreadDetailViewModel {
 }
 
 // SSE event structs — backend sends {"type":"complete","data":{...}} or {"type":"error","message":"..."}
+// Usage events spread fields directly in data: {"type":"usage","data":{"input_tokens":X,...}}
 struct SSEEventData: Codable {
     let userMessage: MWMessage?
     let assistantMessage: MWMessage?
@@ -272,14 +276,40 @@ struct SSEEventData: Codable {
     let version: Int?
     let pdfUrl: String?
     let tokenUsage: MWTokenUsage?
+    // Flat usage fields (when parent event type == "usage")
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let totalTokens: Int?
+    let costDollars: Double?
+    let model: String?
+    let estimated: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case version
+        case version, model, estimated
         case userMessage = "user_message"
         case assistantMessage = "assistant_message"
         case currentState = "current_state"
         case pdfUrl = "pdf_url"
         case tokenUsage = "token_usage"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case totalTokens = "total_tokens"
+        case costDollars = "cost_dollars"
+    }
+
+    /// Build an MWTokenUsage from flat fields (usage events) or nested token_usage (complete events).
+    func resolvedTokenUsage() -> MWTokenUsage? {
+        if let tu = tokenUsage { return tu }
+        let hasAny = inputTokens != nil || outputTokens != nil || totalTokens != nil || costDollars != nil
+        guard hasAny else { return nil }
+        return MWTokenUsage(
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            totalTokens: totalTokens,
+            costDollars: costDollars,
+            model: model,
+            estimated: estimated
+        )
     }
 }
 
