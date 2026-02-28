@@ -66,14 +66,12 @@ function WorkbookPreview({ state, threadId }: { state: MWDocumentState; threadId
             </button>
           </div>
           {activeView === 'presentation' && presentation && threadId && (
-            <a
-              href={`/api/matcha-work/threads/${threadId}/presentation/pdf`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => matchaWork.downloadPresentationPdf(threadId, presentation.title || 'presentation')}
               className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] border border-white/10 text-zinc-300 hover:text-zinc-100 hover:border-white/20 uppercase tracking-wider transition-colors"
             >
               Download PDF
-            </a>
+            </button>
           )}
         </div>
 
@@ -209,17 +207,15 @@ function PresentationPreview({ state, threadId }: { state: MWDocumentState; thre
             <div className="flex items-center gap-3 mt-4">
               <span className="text-xs text-zinc-500">{slides.length} slide{slides.length !== 1 ? 's' : ''}</span>
               {threadId && slides.length > 0 && (
-                <a
-                  href={`/api/matcha-work/threads/${threadId}/presentation/pdf`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={() => matchaWork.downloadPresentationPdf(threadId, title)}
                   className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] border border-white/10 text-zinc-300 hover:text-zinc-100 uppercase tracking-wider transition-colors"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
                   Download PDF
-                </a>
+                </button>
               )}
             </div>
           </div>
@@ -1269,17 +1265,15 @@ export default function MatchaWorkThread() {
                 </a>
               )}
               {hasPresentationPreviewContent && (
-                <a
-                  href={`/api/matcha-work/threads/${thread.id}/presentation/pdf`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={() => matchaWork.downloadPresentationPdf(thread.id, thread.current_state.presentation_title || 'presentation')}
                   className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
                   Download PDF
-                </a>
+                </button>
               )}
             </div>
           </div>

@@ -91,7 +91,7 @@ Output constraints:
 - JSON format:
 {{
   "mode": "skill|general|clarify|refuse",
-  "skill": "offer_letter|review|workbook|onboarding|none",
+  "skill": "offer_letter|review|workbook|onboarding|presentation|none",
   "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|none",
   "confidence": 0.0,
   "updates": {{}},

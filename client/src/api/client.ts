@@ -3348,8 +3348,32 @@ export const matchaWork = {
       method: 'POST',
     }),
 
-  getPresentationPdfUrl: (threadId: string): string =>
-    `/api/matcha-work/threads/${threadId}/presentation/pdf`,
+  downloadPresentationPdf: async (threadId: string, title: string): Promise<void> => {
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/matcha-work/threads/${threadId}/presentation/pdf`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to download presentation PDF');
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title.replace(/\s+/g, '-').toLowerCase() || 'presentation'}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  },
 
   archiveThread: (threadId: string): Promise<void> =>
     request<void>(`/matcha-work/threads/${threadId}`, { method: 'DELETE' }),
