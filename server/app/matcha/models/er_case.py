@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 # Type aliases
 ERCaseStatus = Literal["open", "in_review", "pending_determination", "closed"]
+ERCaseCategory = Literal["harassment", "discrimination", "safety", "retaliation", "policy_violation", "misconduct", "wage_hour", "other"]
+ERCaseOutcome = Literal["termination", "disciplinary_action", "retraining", "no_action", "resignation", "other"]
 ERDocumentType = Literal["transcript", "policy", "email", "other"]
 ERProcessingStatus = Literal["pending", "processing", "completed", "failed"]
 ERAnalysisType = Literal["timeline", "discrepancies", "policy_check", "summary", "determination"]
@@ -28,6 +30,7 @@ class ERCaseCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
     intake_context: Optional[dict[str, Any]] = None
+    category: Optional[ERCaseCategory] = None
 
 
 class ERCaseUpdate(BaseModel):
@@ -37,6 +40,8 @@ class ERCaseUpdate(BaseModel):
     status: Optional[ERCaseStatus] = None
     assigned_to: Optional[UUID] = None
     intake_context: Optional[dict[str, Any]] = None
+    category: Optional[ERCaseCategory] = None
+    outcome: Optional[ERCaseOutcome] = None
 
 
 class ERCaseResponse(BaseModel):
@@ -47,6 +52,8 @@ class ERCaseResponse(BaseModel):
     description: Optional[str] = None
     intake_context: Optional[dict[str, Any]] = None
     status: ERCaseStatus
+    category: Optional[ERCaseCategory] = None
+    outcome: Optional[ERCaseOutcome] = None
     company_id: Optional[UUID] = None
     created_by: Optional[UUID] = None
     assigned_to: Optional[UUID] = None

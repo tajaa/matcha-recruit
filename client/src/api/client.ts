@@ -85,6 +85,7 @@ import type {
   ERCaseCreate,
   ERCaseUpdate,
   ERCaseListResponse,
+  ERCaseMetrics,
   ERCaseStatus,
   ERCaseNote,
   ERCaseNoteCreate,
@@ -1584,6 +1585,29 @@ export const erCopilot = {
     request<{ status: string; case_id: string }>(`/er/cases/${id}`, {
       method: 'DELETE',
     }),
+
+  // Metrics
+  getMetrics: (days?: number): Promise<ERCaseMetrics> =>
+    request<ERCaseMetrics>(`/er/cases/metrics${days ? `?days=${days}` : ''}`),
+
+  // Export
+  exportCase: async (caseId: string, password: string): Promise<Blob> => {
+    const token = getAccessToken();
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(`${API_BASE}/er/cases/${caseId}/export`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Export failed' }));
+      throw new Error(error.detail || 'Export failed');
+    }
+    return res.blob();
+  },
 
   // Notes
   listCaseNotes: (caseId: string): Promise<ERCaseNote[]> =>

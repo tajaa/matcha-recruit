@@ -934,7 +934,9 @@ async def init_db():
                 assigned_to UUID REFERENCES users(id),
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW(),
-                closed_at TIMESTAMP
+                closed_at TIMESTAMP,
+                category VARCHAR(50),
+                outcome VARCHAR(50)
             )
         """)
         await conn.execute("""
@@ -942,10 +944,24 @@ async def init_db():
             ADD COLUMN IF NOT EXISTS intake_context JSONB
         """)
         await conn.execute("""
+            ALTER TABLE er_cases
+            ADD COLUMN IF NOT EXISTS category VARCHAR(50)
+        """)
+        await conn.execute("""
+            ALTER TABLE er_cases
+            ADD COLUMN IF NOT EXISTS outcome VARCHAR(50)
+        """)
+        await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_er_cases_status ON er_cases(status)
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_er_cases_created_by ON er_cases(created_by)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_cases_category ON er_cases(category)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_cases_outcome ON er_cases(outcome)
         """)
 
         # ER Case Documents table (uploaded evidence files)

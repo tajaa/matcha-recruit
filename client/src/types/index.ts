@@ -1540,6 +1540,8 @@ export interface TutorVocabularyStats {
 // ===========================================
 
 export type ERCaseStatus = 'open' | 'in_review' | 'pending_determination' | 'closed';
+export type ERCaseCategory = 'harassment' | 'discrimination' | 'safety' | 'retaliation' | 'policy_violation' | 'misconduct' | 'wage_hour' | 'other';
+export type ERCaseOutcome = 'termination' | 'disciplinary_action' | 'retraining' | 'no_action' | 'resignation' | 'other';
 export type ERDocumentType = 'transcript' | 'policy' | 'email' | 'other';
 export type ERProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
 export type ERAnalysisType = 'timeline' | 'discrepancies' | 'policy_check' | 'summary' | 'determination';
@@ -1583,6 +1585,8 @@ export interface ERCase {
   description: string | null;
   intake_context: ERCaseIntakeContext | null;
   status: ERCaseStatus;
+  category: ERCaseCategory | null;
+  outcome: ERCaseOutcome | null;
   created_by: string | null;
   assigned_to: string | null;
   document_count: number;
@@ -1595,6 +1599,7 @@ export interface ERCaseCreate {
   title: string;
   description?: string;
   intake_context?: ERCaseIntakeContext | null;
+  category?: ERCaseCategory;
 }
 
 export interface ERCaseUpdate {
@@ -1603,11 +1608,22 @@ export interface ERCaseUpdate {
   status?: ERCaseStatus;
   assigned_to?: string;
   intake_context?: ERCaseIntakeContext | null;
+  category?: ERCaseCategory;
+  outcome?: ERCaseOutcome;
 }
 
 export interface ERCaseListResponse {
   cases: ERCase[];
   total: number;
+}
+
+export interface ERCaseMetrics {
+  period_days: number;
+  total_cases: number;
+  by_status: Record<string, number>;
+  by_category: Record<string, number>;
+  by_outcome: Record<string, number>;
+  trend: { date: string; count: number }[];
 }
 
 export interface ERCaseNote {

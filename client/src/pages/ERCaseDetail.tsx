@@ -19,7 +19,7 @@ import type {
 } from '../types';
 import {
   ChevronLeft, Upload, Trash2, Search,
-  AlertTriangle, CheckCircle, Clock, X, RefreshCw
+  AlertTriangle, CheckCircle, Clock, X, RefreshCw, Download
 } from 'lucide-react';
 
 function normalizeDiscrepancyStatement(
@@ -382,6 +382,35 @@ export function ERCaseDetail() {
   const [guidanceActionBusyId, setGuidanceActionBusyId] = useState<string | null>(null);
   const [determinationDismissed, setDeterminationDismissed] = useState(false);
   const [determinationAccepting, setDeterminationAccepting] = useState(false);
+
+  // Export state
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportPassword, setExportPassword] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExport = useCallback(async () => {
+    if (!id || exportPassword.length < 4) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const blob = await erCopilot.exportCase(id, exportPassword);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ER-Case-${erCase?.case_number || id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setShowExportModal(false);
+      setExportPassword('');
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }, [id, exportPassword, erCase?.case_number]);
 
   const fetchCase = useCallback(async () => {
     if (!id) return;
@@ -1119,19 +1148,28 @@ export function ERCaseDetail() {
           </div>
           <h1 className="text-2xl font-light text-zinc-900 dark:text-zinc-100 tracking-tight">{erCase.title}</h1>
         </div>
-        <div className="w-40">
-          <select
-            value={erCase.status}
-            onChange={(e) => handleStatusChange(e.target.value as ERCaseStatus)}
-            disabled={statusUpdating}
-            className={`w-full px-2 py-1.5 bg-transparent border-b border-zinc-200 text-xs text-zinc-600 focus:outline-none focus:border-zinc-400 cursor-pointer ${
-              statusUpdating ? 'opacity-50' : ''
-            }`}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowExportModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-zinc-500 hover:text-zinc-800 uppercase tracking-wider transition-colors border border-zinc-200 hover:border-zinc-400"
           >
-            {STATUS_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+            <Download size={12} />
+            Export
+          </button>
+          <div className="w-40">
+            <select
+              value={erCase.status}
+              onChange={(e) => handleStatusChange(e.target.value as ERCaseStatus)}
+              disabled={statusUpdating}
+              className={`w-full px-2 py-1.5 bg-transparent border-b border-zinc-200 text-xs text-zinc-600 focus:outline-none focus:border-zinc-400 cursor-pointer ${
+                statusUpdating ? 'opacity-50' : ''
+              }`}
+            >
+              {STATUS_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -1849,6 +1887,52 @@ export function ERCaseDetail() {
                 label={uploading ? 'Uploading...' : 'Drop files here or click to select'}
                 description="Supports PDF, DOCX, TXT, CSV, JSON"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm bg-white border border-zinc-200 shadow-2xl">
+            <div className="flex items-center justify-between p-5 border-b border-zinc-100">
+              <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-wider">Export Case File</h3>
+              <button
+                onClick={() => { setShowExportModal(false); setExportPassword(''); setExportError(null); }}
+                className="text-zinc-400 hover:text-zinc-600 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-[11px] text-zinc-500">
+                Export a password-protected PDF containing the full case file, documents, analyses, and notes.
+              </p>
+              {exportError && (
+                <div className="text-[11px] text-red-500 bg-red-50 px-3 py-2 border border-red-200">
+                  {exportError}
+                </div>
+              )}
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">PDF Password</label>
+                <input
+                  type="password"
+                  value={exportPassword}
+                  onChange={(e) => setExportPassword(e.target.value)}
+                  placeholder="Min 4 characters"
+                  className="w-full px-3 py-2 bg-white border border-zinc-200 text-sm text-zinc-900 focus:outline-none focus:border-zinc-400"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && exportPassword.length >= 4) handleExport(); }}
+                />
+              </div>
+              <button
+                onClick={handleExport}
+                disabled={exporting || exportPassword.length < 4}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-zinc-900 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Download size={14} />
+                {exporting ? 'Generating…' : 'Export Case File'}
+              </button>
             </div>
           </div>
         </div>

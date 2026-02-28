@@ -198,9 +198,9 @@ async def create_case(
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO er_cases (case_number, title, description, intake_context, created_by, company_id)
-            VALUES ($1, $2, $3, $4::jsonb, $5, $6)
-            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at
+            INSERT INTO er_cases (case_number, title, description, intake_context, created_by, company_id, category)
+            VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at, category, outcome
             """,
             case_number,
             case.title,
@@ -208,6 +208,7 @@ async def create_case(
             json.dumps(case.intake_context) if case.intake_context is not None else None,
             str(current_user.id),
             company_id,
+            case.category,
         )
 
         # Log audit
@@ -229,6 +230,8 @@ async def create_case(
             description=row["description"],
             intake_context=_normalize_intake_context(row["intake_context"]),
             status=row["status"],
+            category=row["category"],
+            outcome=row["outcome"],
             company_id=row["company_id"],
             created_by=row["created_by"],
             assigned_to=row["assigned_to"],
@@ -274,6 +277,8 @@ async def list_cases(
                 description=row["description"],
                 intake_context=_normalize_intake_context(row["intake_context"]),
                 status=row["status"],
+                category=row.get("category"),
+                outcome=row.get("outcome"),
                 company_id=row["company_id"],
                 created_by=row["created_by"],
                 assigned_to=row["assigned_to"],
@@ -286,6 +291,65 @@ async def list_cases(
         ]
 
         return ERCaseListResponse(cases=cases, total=len(cases))
+
+
+@router.get("/metrics")
+async def get_case_metrics(
+    days: int = Query(30, ge=1, le=365),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get ER case metrics for the specified period."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return {"period_days": days, "total_cases": 0, "by_status": {}, "by_category": {}, "by_outcome": {}, "trend": []}
+
+    async with get_connection() as conn:
+        is_admin = current_user.role == "admin"
+        company_filter = "(company_id = $1 OR company_id IS NULL)" if is_admin else "company_id = $1"
+        date_filter = f"created_at >= NOW() - interval '{int(days)} days'"
+
+        # Total cases
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM er_cases WHERE {company_filter} AND {date_filter}",
+            company_id,
+        )
+
+        # By status
+        status_rows = await conn.fetch(
+            f"SELECT status, COUNT(*) as cnt FROM er_cases WHERE {company_filter} AND {date_filter} GROUP BY status",
+            company_id,
+        )
+        by_status = {r["status"]: r["cnt"] for r in status_rows}
+
+        # By category
+        cat_rows = await conn.fetch(
+            f"SELECT category, COUNT(*) as cnt FROM er_cases WHERE {company_filter} AND {date_filter} AND category IS NOT NULL GROUP BY category",
+            company_id,
+        )
+        by_category = {r["category"]: r["cnt"] for r in cat_rows}
+
+        # By outcome
+        out_rows = await conn.fetch(
+            f"SELECT outcome, COUNT(*) as cnt FROM er_cases WHERE {company_filter} AND {date_filter} AND outcome IS NOT NULL GROUP BY outcome",
+            company_id,
+        )
+        by_outcome = {r["outcome"]: r["cnt"] for r in out_rows}
+
+        # Daily trend
+        trend_rows = await conn.fetch(
+            f"SELECT created_at::date as d, COUNT(*) as cnt FROM er_cases WHERE {company_filter} AND {date_filter} GROUP BY d ORDER BY d",
+            company_id,
+        )
+        trend = [{"date": str(r["d"]), "count": r["cnt"]} for r in trend_rows]
+
+        return {
+            "period_days": days,
+            "total_cases": total or 0,
+            "by_status": by_status,
+            "by_category": by_category,
+            "by_outcome": by_outcome,
+            "trend": trend,
+        }
 
 
 @router.get("/{case_id}", response_model=ERCaseResponse)
@@ -323,6 +387,8 @@ async def get_case(
             description=row["description"],
             intake_context=_normalize_intake_context(row["intake_context"]),
             status=row["status"],
+            category=row.get("category"),
+            outcome=row.get("outcome"),
             company_id=row["company_id"],
             created_by=row["created_by"],
             assigned_to=row["assigned_to"],
@@ -382,6 +448,16 @@ async def update_case(
             params.append(json.dumps(case.intake_context))
             param_count += 1
 
+        if case.category is not None:
+            updates.append(f"category = ${param_count}")
+            params.append(case.category)
+            param_count += 1
+
+        if case.outcome is not None:
+            updates.append(f"outcome = ${param_count}")
+            params.append(case.outcome)
+            param_count += 1
+
         if not updates:
             raise HTTPException(status_code=400, detail="No updates provided")
 
@@ -395,7 +471,7 @@ async def update_case(
             UPDATE er_cases
             SET {', '.join(updates)}
             WHERE id = ${param_count - 1} AND {company_filter}
-            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at
+            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at, category, outcome
         """
 
         row = await conn.fetchrow(query, *params)
@@ -428,6 +504,8 @@ async def update_case(
             description=row["description"],
             intake_context=_normalize_intake_context(row["intake_context"]),
             status=row["status"],
+            category=row["category"],
+            outcome=row["outcome"],
             company_id=row["company_id"],
             created_by=row["created_by"],
             assigned_to=row["assigned_to"],
@@ -483,6 +561,169 @@ async def delete_case(
         )
 
         return {"status": "deleted", "case_id": str(case_id)}
+
+
+# ===========================================
+# Case Export
+# ===========================================
+
+@router.post("/{case_id}/export")
+async def export_case_file(
+    case_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Export a case as a password-protected PDF."""
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+    from pydantic import BaseModel, Field
+
+    # Parse password from body
+    body = await request.json()
+    password = body.get("password", "")
+    if not password or len(password) < 4 or len(password) > 128:
+        raise HTTPException(status_code=422, detail="Password must be 4-128 characters")
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    is_admin = current_user.role == "admin"
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, is_admin)
+
+        # Fetch case
+        case_row = await conn.fetchrow(
+            "SELECT * FROM er_cases WHERE id = $1", case_id
+        )
+        if not case_row:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        # Fetch documents
+        doc_rows = await conn.fetch(
+            "SELECT filename, document_type, file_size, created_at FROM er_case_documents WHERE case_id = $1 ORDER BY created_at",
+            case_id,
+        )
+
+        # Fetch analyses
+        analysis_rows = await conn.fetch(
+            "SELECT analysis_type, result, created_at FROM er_case_analysis WHERE case_id = $1 ORDER BY created_at",
+            case_id,
+        )
+
+        # Fetch notes
+        note_rows = await conn.fetch(
+            "SELECT note_type, content, created_at FROM er_case_notes WHERE case_id = $1 ORDER BY created_at",
+            case_id,
+        )
+
+    # Build HTML report
+    case_title = case_row["title"] or "Untitled Case"
+    case_number = case_row["case_number"]
+    status = case_row["status"]
+    category = case_row.get("category") or "—"
+    outcome = case_row.get("outcome") or "—"
+    description = case_row["description"] or "No description provided."
+    created_at = case_row["created_at"].strftime("%Y-%m-%d %H:%M") if case_row["created_at"] else "—"
+    closed_at = case_row["closed_at"].strftime("%Y-%m-%d %H:%M") if case_row.get("closed_at") else "—"
+
+    docs_html = ""
+    if doc_rows:
+        rows_html = "".join(
+            f"<tr><td>{r['filename']}</td><td>{r['document_type']}</td><td>{(r['file_size'] or 0) // 1024} KB</td><td>{r['created_at'].strftime('%Y-%m-%d')}</td></tr>"
+            for r in doc_rows
+        )
+        docs_html = f"<h2>Documents ({len(doc_rows)})</h2><table><tr><th>Filename</th><th>Type</th><th>Size</th><th>Uploaded</th></tr>{rows_html}</table>"
+
+    analyses_html = ""
+    for a in analysis_rows:
+        atype = (a["analysis_type"] or "unknown").replace("_", " ").title()
+        result = a["result"]
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except Exception:
+                pass
+        summary = ""
+        if isinstance(result, dict):
+            summary = result.get("summary") or result.get("timeline_summary") or json.dumps(result, indent=2)[:500]
+        else:
+            summary = str(result)[:500] if result else "No results."
+        analyses_html += f"<h3>{atype}</h3><p>{summary}</p>"
+    if analyses_html:
+        analyses_html = f"<h2>Analyses</h2>{analyses_html}"
+
+    notes_html = ""
+    if note_rows:
+        items = "".join(
+            f"<div class='note'><span class='note-type'>{r['note_type']}</span> <span class='note-date'>{r['created_at'].strftime('%Y-%m-%d %H:%M')}</span><p>{r['content']}</p></div>"
+            for r in note_rows
+        )
+        notes_html = f"<h2>Case Notes ({len(note_rows)})</h2>{items}"
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; color: #1a1a1a; font-size: 12px; line-height: 1.6; }}
+h1 {{ font-size: 20px; margin-bottom: 4px; }}
+h2 {{ font-size: 14px; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 28px; text-transform: uppercase; letter-spacing: 1px; color: #555; }}
+h3 {{ font-size: 12px; margin-top: 16px; color: #333; }}
+.meta {{ color: #666; font-size: 11px; margin-bottom: 20px; }}
+.meta span {{ display: inline-block; margin-right: 20px; }}
+table {{ width: 100%; border-collapse: collapse; font-size: 11px; margin: 12px 0; }}
+th, td {{ border: 1px solid #ddd; padding: 6px 8px; text-align: left; }}
+th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }}
+.note {{ border-left: 3px solid #ddd; padding: 8px 12px; margin: 8px 0; background: #fafafa; }}
+.note-type {{ font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }}
+.note-date {{ color: #999; font-size: 10px; margin-left: 8px; }}
+.footer {{ margin-top: 40px; border-top: 1px solid #ddd; padding-top: 12px; color: #999; font-size: 10px; text-align: center; }}
+</style></head><body>
+<h1>{case_title}</h1>
+<div class="meta">
+  <span><strong>Case:</strong> {case_number}</span>
+  <span><strong>Status:</strong> {status}</span>
+  <span><strong>Category:</strong> {category}</span>
+  <span><strong>Outcome:</strong> {outcome}</span>
+  <span><strong>Created:</strong> {created_at}</span>
+  <span><strong>Closed:</strong> {closed_at}</span>
+</div>
+<h2>Description</h2>
+<p>{description}</p>
+{docs_html}
+{analyses_html}
+{notes_html}
+<div class="footer">Confidential — ER Case Export — Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</div>
+</body></html>"""
+
+    # Convert to PDF
+    try:
+        from weasyprint import HTML as WeasyHTML
+        pdf_bytes = WeasyHTML(string=html).write_pdf()
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PDF generation not available (WeasyPrint not installed)")
+
+    # Encrypt PDF with password
+    try:
+        from pypdf import PdfReader, PdfWriter
+        reader = PdfReader(BytesIO(pdf_bytes))
+        writer = PdfWriter()
+        for page in reader.pages:
+            writer.add_page(page)
+        writer.encrypt(password)
+
+        output = BytesIO()
+        writer.write(output)
+        output.seek(0)
+        encrypted_bytes = output.read()
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PDF encryption not available (pypdf not installed)")
+
+    filename = f"ER-Case-{case_number}.pdf"
+
+    return StreamingResponse(
+        BytesIO(encrypted_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ===========================================
