@@ -3348,16 +3348,26 @@ export const matchaWork = {
       method: 'POST',
     }),
 
-  downloadPresentationPdf: async (threadId: string, title: string): Promise<void> => {
+  getPresentationPdfUrl: async (threadId: string): Promise<string> => {
     const data = await request<{ pdf_url: string }>(`/matcha-work/threads/${threadId}/presentation/pdf`);
+    return data.pdf_url;
+  },
+
+  downloadPresentationPdf: async (threadId: string, title: string): Promise<void> => {
+    const url = await matchaWork.getPresentationPdfUrl(threadId);
     const a = document.createElement('a');
-    a.href = data.pdf_url;
+    a.href = url;
     a.download = `${title.replace(/\s+/g, '-').toLowerCase() || 'presentation'}.pdf`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  },
+
+  viewPresentationPdf: async (threadId: string): Promise<void> => {
+    const url = await matchaWork.getPresentationPdfUrl(threadId);
+    window.open(url, '_blank', 'noopener,noreferrer');
   },
 
   archiveThread: (threadId: string): Promise<void> =>

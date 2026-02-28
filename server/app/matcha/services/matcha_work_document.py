@@ -1278,7 +1278,7 @@ async def generate_cover_image(presentation_title: str, subtitle: Optional[str] 
         def _call() -> Optional[bytes]:
             try:
                 result = client.models.generate_images(
-                    model="imagen-3.0-generate-001",
+                    model="imagen-4.0-generate-001",
                     prompt=prompt,
                     config={"number_of_images": 1, "aspect_ratio": "16:9"},
                 )
