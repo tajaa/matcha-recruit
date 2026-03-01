@@ -390,9 +390,11 @@ export function ERCaseDetail() {
   const [outcomeAnalysis, setOutcomeAnalysis] = useState<OutcomeAnalysisResponse | null>(null);
   const [outcomeLoading, setOutcomeLoading] = useState(false);
   const [outcomeStatusMsg, setOutcomeStatusMsg] = useState<string | null>(null);
+  const [outcomeError, setOutcomeError] = useState<string | null>(null);
   const [selectedOutcomeIdx, setSelectedOutcomeIdx] = useState<number | null>(null);
   const [determinationNotes, setDeterminationNotes] = useState('');
   const [closingCase, setClosingCase] = useState(false);
+  const outcomeLoadingRef = useRef(false);
 
   // Standalone add-note state
   const [newNoteContent, setNewNoteContent] = useState('');
@@ -496,9 +498,11 @@ export function ERCaseDetail() {
   }, [id]);
 
   const fetchOutcomeAnalysis = useCallback(async () => {
-    if (!id || outcomeLoading) return;
+    if (!id || outcomeLoadingRef.current) return;
+    outcomeLoadingRef.current = true;
     setOutcomeLoading(true);
     setOutcomeStatusMsg(null);
+    setOutcomeError(null);
     try {
       const result = await erCopilot.generateOutcomeAnalysisStream(id, (msg) => {
         setOutcomeStatusMsg(msg);
@@ -507,11 +511,13 @@ export function ERCaseDetail() {
       setOutcomeStatusMsg(null);
     } catch (err) {
       console.error('Failed to generate outcome analysis:', err);
+      setOutcomeError(getErrorMessage(err, 'Failed to generate outcome analysis. Click below to retry.'));
       setOutcomeStatusMsg(null);
     } finally {
+      outcomeLoadingRef.current = false;
       setOutcomeLoading(false);
     }
-  }, [id, outcomeLoading]);
+  }, [id]);
 
   const handleCloseCase = useCallback(async () => {
     if (!id || selectedOutcomeIdx === null || !outcomeAnalysis || !determinationNotes.trim()) return;
@@ -588,10 +594,10 @@ export function ERCaseDetail() {
 
   // Auto-load outcome analysis when visiting a pending_determination case
   useEffect(() => {
-    if (!loading && erCase?.status === 'pending_determination' && !outcomeAnalysis && !outcomeLoading) {
+    if (!loading && erCase?.status === 'pending_determination' && !outcomeAnalysis && !outcomeLoadingRef.current) {
       fetchOutcomeAnalysis();
     }
-  }, [loading, erCase?.status, outcomeAnalysis, outcomeLoading, fetchOutcomeAnalysis]);
+  }, [loading, erCase?.status, outcomeAnalysis, fetchOutcomeAnalysis]);
 
   useEffect(() => {
     autoReviewSignatureRef.current = null;
@@ -1447,10 +1453,10 @@ export function ERCaseDetail() {
                         try {
                           const updated = await erCopilot.updateCase(id, { status: 'pending_determination' });
                           setCase(updated);
-                          await erCopilot.generateSummary(id);
-                          await fetchNotes();
-                          // Trigger outcome analysis stream
+                          // Fire outcome analysis + summary in parallel, don't block on either
                           fetchOutcomeAnalysis();
+                          erCopilot.generateSummary(id).catch((e) => console.error('Summary generation failed:', e));
+                          await fetchNotes();
                         } catch (err) {
                           console.error('Failed to transition to pending determination:', err);
                         } finally {
@@ -1723,8 +1729,24 @@ export function ERCaseDetail() {
                 </div>
               )}
 
+              {/* Error state */}
+              {outcomeError && !outcomeLoading && (
+                <div className="border border-red-200 bg-red-50 p-3 rounded-sm space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={12} className="text-red-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-red-700">{outcomeError}</p>
+                  </div>
+                  <button
+                    onClick={fetchOutcomeAnalysis}
+                    className="text-[10px] uppercase tracking-wider font-medium text-red-700 hover:text-red-900"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
               {/* No analysis yet and not loading */}
-              {!outcomeAnalysis && !outcomeLoading && (
+              {!outcomeAnalysis && !outcomeLoading && !outcomeError && (
                 <div className="text-center py-4">
                   <p className="text-xs text-zinc-400 mb-2">Outcome analysis not yet generated.</p>
                   <button
