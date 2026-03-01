@@ -390,7 +390,7 @@ export function ERCaseDetail() {
   // Outcome analysis state (determination panel)
   const [outcomeAnalysis, setOutcomeAnalysis] = useState<OutcomeAnalysisResponse | null>(null);
   const [outcomeLoading, setOutcomeLoading] = useState(false);
-  const [outcomeStatusMsg, setOutcomeStatusMsg] = useState<string | null>(null);
+  const [outcomeStatusMsgs, setOutcomeStatusMsgs] = useState<string[]>([]);
   const [outcomeError, setOutcomeError] = useState<string | null>(null);
   const [selectedOutcomeIdx, setSelectedOutcomeIdx] = useState<number | null>(null);
   const [determinationNotes, setDeterminationNotes] = useState('');
@@ -506,21 +506,22 @@ export function ERCaseDetail() {
     outcomeRequestSeqRef.current = requestSeq;
     outcomeLoadingRef.current = true;
     setOutcomeLoading(true);
-    setOutcomeStatusMsg(null);
+    setOutcomeStatusMsgs([]);
     setOutcomeError(null);
     try {
       const result = await erCopilot.generateOutcomeAnalysisStream(id, (msg) => {
         if (outcomeRequestSeqRef.current !== requestSeq) return;
-        setOutcomeStatusMsg(msg);
+        setOutcomeStatusMsgs(prev => {
+          if (prev.length > 0 && prev[prev.length - 1] === msg) return prev;
+          return [...prev, msg];
+        });
       });
       if (outcomeRequestSeqRef.current !== requestSeq) return;
       setOutcomeAnalysis(result);
-      setOutcomeStatusMsg(null);
     } catch (err) {
       if (outcomeRequestSeqRef.current !== requestSeq) return;
       console.error('Failed to generate outcome analysis:', err);
       setOutcomeError(getErrorMessage(err, 'Failed to generate outcome analysis. Click below to retry.'));
-      setOutcomeStatusMsg(null);
     } finally {
       if (outcomeRequestSeqRef.current !== requestSeq) return;
       outcomeLoadingRef.current = false;
@@ -617,7 +618,7 @@ export function ERCaseDetail() {
     setNotes([]);
     setOutcomeAnalysis(null);
     setOutcomeLoading(false);
-    setOutcomeStatusMsg(null);
+    setOutcomeStatusMsgs([]);
     setOutcomeError(null);
     setSelectedOutcomeIdx(null);
     setDeterminationNotes('');
@@ -1442,12 +1443,64 @@ export function ERCaseDetail() {
                 <div ref={determinationPanelRef} className="space-y-4">
                   <h3 className="text-[10px] uppercase tracking-wider text-zinc-500">Case Determination</h3>
 
-                  {/* Loading state */}
+                  {/* Loading state — Analysis Console */}
                   {outcomeLoading && (
-                    <div className="border border-orange-200 bg-orange-50 p-3 rounded-sm">
-                      <div className="flex items-center gap-2">
-                        <RefreshCw size={12} className="animate-spin text-orange-600" />
-                        <span className="text-xs text-orange-800">{outcomeStatusMsg || 'Generating outcome analysis...'}</span>
+                    <div className="relative border border-emerald-500/25 rounded-sm overflow-hidden animate-border-breathe">
+                      {/* Dark background with noise */}
+                      <div className="bg-zinc-900/95 bg-noise p-4 space-y-3">
+                        {/* Scan-line overlay */}
+                        <div className="analysis-console-scanline absolute inset-0" />
+
+                        {/* Header */}
+                        <div className="relative flex items-center gap-2">
+                          <span className="text-[10px] uppercase tracking-[0.2em] font-mono font-medium text-emerald-400/80">
+                            Outcome Analysis
+                          </span>
+                          <span className="inline-block w-1.5 h-3 bg-emerald-400 animate-cursor-blink" />
+                        </div>
+
+                        {/* Step log */}
+                        <div className="relative space-y-1.5 font-mono">
+                          {outcomeStatusMsgs.map((msg, i) => {
+                            const isCurrent = i === outcomeStatusMsgs.length - 1;
+                            return (
+                              <div
+                                key={i}
+                                className="animate-fade-in-up"
+                                style={{ animationDelay: `${i * 50}ms` }}
+                              >
+                                {isCurrent ? (
+                                  <div className="flex items-start gap-2 relative">
+                                    <span className="mt-1 block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-dot flex-shrink-0" />
+                                    <span className="text-xs text-emerald-300 animate-text-flicker relative">
+                                      {msg}
+                                      <span className="absolute inset-0 animate-shimmer-sweep rounded" />
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-start gap-2">
+                                    <span className="mt-0.5 text-emerald-500/60 text-xs flex-shrink-0">✓</span>
+                                    <span className="text-xs text-emerald-400/50">{msg}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {outcomeStatusMsgs.length === 0 && (
+                            <div className="flex items-start gap-2">
+                              <span className="mt-1 block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-dot flex-shrink-0" />
+                              <span className="text-xs text-emerald-300 animate-text-flicker">Initializing analysis...</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Progress bar */}
+                        <div className="relative h-0.5 bg-zinc-800 rounded-full overflow-hidden mt-2">
+                          <div
+                            className="h-full bg-emerald-500/70 rounded-full transition-all duration-700 ease-out animate-progress-glow"
+                            style={{ width: `${Math.min(95, Math.max(8, (outcomeStatusMsgs.length / 8) * 100))}%` }}
+                          />
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1456,13 +1509,13 @@ export function ERCaseDetail() {
                   {outcomeAnalysis && !outcomeLoading && (
                     <div className="space-y-3">
                       {outcomeAnalysis.case_summary && (
-                        <div className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
+                        <div className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm animate-fade-in-up" style={{ animationDelay: '0ms' }}>
                           <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Case Summary</p>
                           <p className="text-xs text-zinc-700 leading-relaxed">{outcomeAnalysis.case_summary}</p>
                         </div>
                       )}
 
-                      <p className="text-[10px] uppercase tracking-wide text-zinc-500">Recommended Outcomes</p>
+                      <p className="text-[10px] uppercase tracking-wide text-zinc-500 animate-fade-in-up" style={{ animationDelay: '80ms' }}>Recommended Outcomes</p>
 
                       {outcomeAnalysis.outcomes.map((outcome, idx) => {
                         const isSelected = selectedOutcomeIdx === idx;
@@ -1481,11 +1534,12 @@ export function ERCaseDetail() {
                           <button
                             key={idx}
                             onClick={() => setSelectedOutcomeIdx(isSelected ? null : idx)}
-                            className={`w-full text-left border rounded-sm p-3 space-y-2 transition-colors ${
+                            className={`w-full text-left border rounded-sm p-3 space-y-2 transition-colors animate-fade-in-up ${
                               isSelected
                                 ? 'border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900'
                                 : 'border-zinc-200 bg-white hover:border-zinc-400'
                             }`}
+                            style={{ animationDelay: `${160 + idx * 100}ms` }}
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 min-w-0">
