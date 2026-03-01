@@ -83,38 +83,38 @@ export default function MatchaWorkChats() {
 
   return (
     <div className="relative min-h-[calc(100vh-8rem)]">
-      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-gradient-to-br light:from-slate-50 light:via-zinc-100 light:to-slate-200" />
+      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-gradient-to-b light:from-[#d9d9d9] light:to-[#b3b3b3]" />
       <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between gap-3 mb-5">
         <div>
-          <div className="inline-flex items-center bg-zinc-800 light:bg-zinc-200/50 light:backdrop-blur-md rounded-lg p-0.5 mb-2 transition-colors">
+          <div className="inline-flex items-center bg-zinc-800 light:bg-black/5 light:border-black/5 rounded-lg p-0.5 mb-2 transition-colors">
             <button
               onClick={() => navigate('/app/matcha/work')}
-              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 light:text-zinc-500 light:hover:text-zinc-800 transition-colors"
+              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 light:text-black/60 light:hover:text-black transition-colors"
             >
               Chat
             </button>
-            <button className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-100 light:bg-white light:text-zinc-900 light:shadow-sm transition-colors">
+            <button className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-100 light:bg-transparent light:text-black light:font-medium light:shadow-none transition-colors">
               Chats
             </button>
             <button
               onClick={() => navigate('/app/matcha/work/elements')}
-              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 light:text-zinc-500 light:hover:text-zinc-800 transition-colors"
+              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 light:text-black/60 light:hover:text-black transition-colors"
             >
               Matcha Elements
             </button>
             <button
               onClick={() => navigate('/app/matcha/work/billing')}
-              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 light:text-zinc-500 light:hover:text-zinc-800 transition-colors"
+              className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 light:text-black/60 light:hover:text-black transition-colors"
             >
               Billing
             </button>
           </div>
-          <h1 className="text-xl font-semibold text-zinc-100 light:text-zinc-900 transition-colors">Chat History</h1>
-          <p className="text-sm text-zinc-400 light:text-zinc-500 mt-0.5 transition-colors">
+          <h1 className="text-xl font-semibold text-zinc-100 light:text-black transition-colors">Chat History</h1>
+          <p className="text-sm text-zinc-400 light:text-black/60 mt-0.5 transition-colors">
             Stored chats for your company. Pin important threads to keep them at the top.
           </p>
-          <p className="text-xs text-zinc-500 light:text-zinc-400 mt-2 transition-colors">
+          <p className="text-xs text-zinc-500 light:text-black/40 mt-2 transition-colors">
             Default mode: US HR chat. Skills: offer letters, anonymized reviews, HR workbooks, employee onboarding. Ask naturally and Matcha will route supported commands.
           </p>
         </div>
@@ -123,7 +123,7 @@ export default function MatchaWorkChats() {
           <button
             onClick={handleCreateThread}
             disabled={creatingChat}
-            className="px-3 py-2 text-sm rounded-lg bg-matcha-600 hover:bg-matcha-700 light:bg-matcha-500 light:hover:bg-matcha-600 light:shadow-md disabled:opacity-50 text-white transition-colors"
+            className="px-3 py-2 text-sm rounded-lg bg-matcha-600 hover:bg-matcha-700 light:bg-black light:hover:bg-black/80 light:shadow-none disabled:opacity-50 text-white transition-colors"
           >
             {creatingChat ? 'Creating...' : 'New Chat'}
           </button>
@@ -137,8 +137,8 @@ export default function MatchaWorkChats() {
             onClick={() => setStatusFilter(value)}
             className={`px-2.5 py-1 rounded-md text-xs capitalize transition-colors ${
               statusFilter === value
-                ? 'bg-zinc-700 text-zinc-100 light:bg-white light:text-zinc-900 light:shadow-sm'
-                : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 light:bg-zinc-200/50 light:text-zinc-600 light:hover:bg-zinc-200 light:hover:text-zinc-900'
+                ? 'bg-zinc-700 text-zinc-100 light:bg-black/10 light:text-black'
+                : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 light:bg-transparent light:text-black/60 light:hover:bg-black/5 light:hover:text-black'
             }`}
           >
             {value}
@@ -147,7 +147,7 @@ export default function MatchaWorkChats() {
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-300 light:text-red-600 light:bg-red-50 light:border-red-200 text-sm transition-colors">
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-300 light:text-red-600 light:bg-red-500/10 light:border-red-500/20 text-sm transition-colors">
           {error}
         </div>
       )}
@@ -155,12 +155,12 @@ export default function MatchaWorkChats() {
       {loading ? (
         <div className="space-y-2">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-16 bg-zinc-800/50 light:bg-white/40 light:backdrop-blur-md rounded-lg animate-pulse" />
+            <div key={i} className="h-16 bg-zinc-800/50 light:bg-black/5 rounded-lg animate-pulse" />
           ))}
         </div>
       ) : threads.length === 0 ? (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 light:border-zinc-200/50 light:bg-white/40 light:backdrop-blur-xl p-8 text-center transition-colors">
-          <p className="text-sm text-zinc-400 light:text-zinc-500">No chats found.</p>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 light:border-black/10 light:bg-black/5 p-8 text-center transition-colors">
+          <p className="text-sm text-zinc-400 light:text-black/60">No chats found.</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -176,13 +176,13 @@ export default function MatchaWorkChats() {
                   navigate(`/app/matcha/work/${thread.id}`);
                 }
               }}
-              className="w-full flex items-center justify-between p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 light:bg-white/60 light:hover:bg-white/80 light:border-white/50 light:hover:border-white/80 light:shadow-[0_4px_24px_rgba(0,0,0,0.02)] light:backdrop-blur-xl rounded-lg text-left transition-all duration-200 group cursor-pointer"
+              className="w-full flex items-center justify-between p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 light:bg-transparent light:hover:bg-black/5 light:border-black/5 light:hover:border-black/10 light:shadow-none rounded-lg text-left transition-all duration-200 group cursor-pointer"
             >
               <div className="min-w-0">
-                <p className="text-sm font-medium text-zinc-200 truncate group-hover:text-white light:text-zinc-800 light:group-hover:text-black transition-colors">
+                <p className="text-sm font-medium text-zinc-200 truncate group-hover:text-white light:text-black light:group-hover:text-black transition-colors">
                   {thread.title}
                 </p>
-                <p className="text-xs text-zinc-500 light:text-zinc-500 mt-0.5">
+                <p className="text-xs text-zinc-500 light:text-black/50 mt-0.5">
                   {thread.task_type === 'review' ? 'anonymized review' : thread.task_type === 'workbook' ? 'HR workbook' : thread.task_type === 'onboarding' ? 'employee onboarding' : 'offer letter'} · v{thread.version} · Updated{' '}
                   {formatDate(thread.updated_at)}
                 </p>
@@ -195,12 +195,12 @@ export default function MatchaWorkChats() {
                     if (pinningThreadId) return;
                     handleTogglePin(thread);
                   }}
-                  className="w-7 h-7 rounded-md border border-zinc-700 hover:border-zinc-500 light:border-zinc-300 light:hover:border-zinc-400 flex items-center justify-center text-zinc-400 hover:text-amber-300 light:text-zinc-400 light:hover:text-amber-500 transition-colors"
+                  className="w-7 h-7 rounded-md border border-zinc-700 hover:border-zinc-500 light:border-black/10 light:hover:border-black/20 flex items-center justify-center text-zinc-400 hover:text-amber-300 light:text-black/40 light:hover:text-black transition-colors"
                   title={thread.is_pinned ? 'Unpin chat' : 'Pin chat'}
                   aria-label={thread.is_pinned ? 'Unpin chat' : 'Pin chat'}
                 >
                   <svg
-                    className={`w-4 h-4 ${thread.is_pinned ? 'text-amber-300 light:text-amber-500 fill-current' : ''}`}
+                    className={`w-4 h-4 ${thread.is_pinned ? 'text-amber-300 light:text-black fill-current' : ''}`}
                     fill={thread.is_pinned ? 'currentColor' : 'none'}
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -214,12 +214,12 @@ export default function MatchaWorkChats() {
                   </svg>
                 </button>
                 <span
-                  className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLORS[thread.status]}`}
+                  className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLORS[thread.status].replace('bg-matcha-500/20 text-matcha-300', 'bg-matcha-500/20 text-matcha-300 light:bg-black/10 light:text-black').replace('bg-blue-500/20 text-blue-300', 'bg-blue-500/20 text-blue-300 light:bg-black/10 light:text-black').replace('bg-zinc-500/20 text-zinc-400', 'bg-zinc-500/20 text-zinc-400 light:bg-black/10 light:text-black')}`}
                 >
                   {thread.status}
                 </span>
                 <svg
-                  className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 light:text-zinc-400 light:group-hover:text-zinc-600 transition-colors"
+                  className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 light:text-black/40 light:group-hover:text-black/70 transition-colors"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"

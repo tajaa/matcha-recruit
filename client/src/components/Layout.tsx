@@ -814,12 +814,12 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-400 font-sans selection:bg-white selection:text-black">
+    <div className="min-h-screen bg-zinc-950 light:bg-gradient-to-b light:from-[#d9d9d9] light:to-[#b3b3b3] text-zinc-400 light:text-black/70 font-sans selection:bg-white selection:text-black light:selection:bg-black light:selection:text-white">
       {/* Noise Overlay */}
-      <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-30 mix-blend-overlay" />
+      <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-30 mix-blend-overlay light:mix-blend-multiply light:opacity-[0.03]" />
 
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 border-r border-white/10 ${themeMode === 'lightSidebar' ? 'invert brightness-90 hue-rotate-180' : ''}`}>
+      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 light:bg-transparent light:backdrop-blur-2xl border-r border-white/10 light:border-black/5 ${themeMode === 'lightSidebar' ? 'invert brightness-90 hue-rotate-180' : ''}`}>
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-white/10">
           <Link to="/" className="flex items-center gap-3 group">

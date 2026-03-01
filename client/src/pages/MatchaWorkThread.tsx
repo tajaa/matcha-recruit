@@ -81,7 +81,7 @@ function WorkbookPreview({ state, threadId, selectedSlideIndex, onSelectSlide }:
 
         {activeView === 'workbook' ? (
           <>
-        <div className="bg-zinc-950 border border-white/10 light:bg-white/80 light:border-white/60 light:shadow-sm p-6 transition-colors">
+        <div className="bg-zinc-950 border border-white/10 light:bg-white/80 light:border-black/5 light:shadow-sm p-6 transition-colors">
           <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 light:text-zinc-500 mb-1">HR Workbook</p>
           <h2 className="text-xl font-bold text-white light:text-zinc-900 tracking-tight transition-colors">
             {state.workbook_title || 'Untitled Workbook'}
@@ -107,8 +107,8 @@ function WorkbookPreview({ state, threadId, selectedSlideIndex, onSelectSlide }:
 
         <div className="space-y-4">
           {sections.length === 0 ? (
-            <div className="border border-white/10 light:border-zinc-300 border-dashed p-12 text-center transition-colors">
-              <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-white/60 light:border-zinc-200 flex items-center justify-center mx-auto mb-4 text-zinc-600 light:text-zinc-400 transition-colors">
+            <div className="border border-white/10 light:border-black/5 border-dashed p-12 text-center transition-colors">
+              <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-transparent light:border-zinc-200 flex items-center justify-center mx-auto mb-4 text-zinc-600 light:text-zinc-400 transition-colors">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
@@ -119,8 +119,8 @@ function WorkbookPreview({ state, threadId, selectedSlideIndex, onSelectSlide }:
             </div>
           ) : (
             sections.map((section, idx) => (
-              <div key={idx} className="bg-zinc-950 border border-white/10 light:bg-white/80 light:border-white/60 light:shadow-sm overflow-hidden transition-colors">
-                <div className="px-5 py-3 border-b border-white/10 bg-zinc-900/30 light:border-zinc-200/50 light:bg-zinc-100/50 transition-colors">
+              <div key={idx} className="bg-zinc-950 border border-white/10 light:bg-white/80 light:border-black/5 light:shadow-sm overflow-hidden transition-colors">
+                <div className="px-5 py-3 border-b border-white/10 bg-zinc-900/30 light:border-black/5 light:bg-zinc-100/50 transition-colors">
                   <h3 className="text-sm font-bold text-zinc-200 light:text-zinc-800 tracking-wide uppercase transition-colors">
                     {section.title}
                   </h3>
@@ -230,7 +230,7 @@ function PresentationPreview({ state, threadId, selectedSlideIndex, onSelectSlid
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-4">
         {/* Cover */}
-        <div className="bg-zinc-950 border border-white/10 light:bg-white/80 light:border-white/60 light:shadow-sm overflow-hidden transition-colors">
+        <div className="bg-zinc-950 border border-white/10 light:bg-white/80 light:border-black/5 light:shadow-sm overflow-hidden transition-colors">
           {coverImageUrl && (
             <img src={coverImageUrl} alt="Cover" className="w-full h-48 object-cover" />
           )}
@@ -244,7 +244,7 @@ function PresentationPreview({ state, threadId, selectedSlideIndex, onSelectSlid
                 <>
                   <button
                     onClick={() => matchaWork.viewPresentationPdf(threadId)}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] border border-white/10 light:border-zinc-300 light:bg-white/50 text-zinc-300 hover:text-zinc-100 light:text-zinc-700 light:hover:text-zinc-900 uppercase tracking-wider transition-colors"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] border border-white/10 light:border-black/5 light:bg-black/5 text-zinc-300 hover:text-zinc-100 light:text-zinc-700 light:hover:text-zinc-900 uppercase tracking-wider transition-colors"
                   >
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -254,7 +254,7 @@ function PresentationPreview({ state, threadId, selectedSlideIndex, onSelectSlid
                   </button>
                   <button
                     onClick={() => matchaWork.downloadPresentationPdf(threadId, title)}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] border border-white/10 light:border-zinc-300 light:bg-white/50 text-zinc-300 hover:text-zinc-100 light:text-zinc-700 light:hover:text-zinc-900 uppercase tracking-wider transition-colors"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] border border-white/10 light:border-black/5 light:bg-black/5 text-zinc-300 hover:text-zinc-100 light:text-zinc-700 light:hover:text-zinc-900 uppercase tracking-wider transition-colors"
                   >
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -269,7 +269,7 @@ function PresentationPreview({ state, threadId, selectedSlideIndex, onSelectSlid
 
         {/* Slides */}
         {slides.length === 0 ? (
-          <div className="border border-white/10 light:border-zinc-300 border-dashed p-12 text-center transition-colors">
+          <div className="border border-white/10 light:border-black/5 border-dashed p-12 text-center transition-colors">
             <p className="text-zinc-500 light:text-zinc-500 text-sm italic font-mono">Generating slides...</p>
           </div>
         ) : (
@@ -284,16 +284,16 @@ function PresentationPreview({ state, threadId, selectedSlideIndex, onSelectSlid
                 } ${
                   isSelected
                     ? 'border-matcha-500/60 ring-1 ring-matcha-500/20 light:border-matcha-400 light:ring-matcha-500/30'
-                    : 'border-white/10 hover:border-white/20 light:border-white/60 light:hover:border-zinc-300'
+                    : 'border-white/10 hover:border-white/20 light:border-black/5 light:hover:border-zinc-300'
                 }`}
               >
                 <div className={`px-5 py-3 border-b flex items-center justify-between transition-colors ${
-                  isSelected ? 'border-matcha-500/30 bg-matcha-900/20 light:bg-matcha-50 light:border-matcha-200' : 'border-white/10 bg-zinc-900/30 light:border-zinc-200/50 light:bg-zinc-100/50'
+                  isSelected ? 'border-matcha-500/30 bg-matcha-900/20 light:bg-matcha-50 light:border-matcha-200' : 'border-white/10 bg-zinc-900/30 light:border-black/5 light:bg-zinc-100/50'
                 }`}>
                   <h3 className="text-sm font-bold text-zinc-200 light:text-zinc-800 tracking-wide uppercase transition-colors">{slide.title}</h3>
                   <div className="flex items-center gap-2">
                     {isSelected && (
-                      <span className="text-[10px] text-matcha-400 light:text-matcha-600 font-mono uppercase tracking-wider transition-colors">selected</span>
+                      <span className="text-[10px] text-matcha-400 light:text-black font-mono uppercase tracking-wider transition-colors">selected</span>
                     )}
                     <span className="text-[10px] text-zinc-500 light:text-zinc-500">Slide {idx + 1}</span>
                   </div>
@@ -345,7 +345,7 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
   if (isSystem) {
     return (
       <div className="flex justify-center my-2">
-        <span className="text-xs text-zinc-500 bg-zinc-800 light:bg-zinc-200/50 light:backdrop-blur-md light:text-zinc-600 border border-white/10 light:border-zinc-300/50 px-3 py-1 transition-colors">
+        <span className="text-xs text-zinc-500 bg-zinc-800 light:bg-zinc-200/50 light:backdrop-blur-md light:text-zinc-600 border border-white/10 light:border-black/5 px-3 py-1 transition-colors">
           {msg.content}
         </span>
       </div>
@@ -355,8 +355,8 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       {!isUser && (
-        <div className="w-7 h-7 bg-matcha-600 light:bg-white/80 light:shadow-sm light:border-white/60 light:backdrop-blur-md flex items-center justify-center mr-2 flex-shrink-0 mt-0.5 rounded-sm transition-colors">
-          <svg className="w-3.5 h-3.5 text-white light:text-matcha-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="w-7 h-7 bg-matcha-600 light:bg-transparent light:border-black/5 light:shadow-none flex items-center justify-center mr-2 flex-shrink-0 mt-0.5 rounded-sm transition-colors">
+          <svg className="w-3.5 h-3.5 text-white light:text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.5l1.196 4.784" />
           </svg>
         </div>
@@ -364,8 +364,8 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
       <div
         className={`max-w-[75%] px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap transition-colors ${
           isUser
-            ? 'bg-matcha-600 text-white light:bg-matcha-500 light:shadow-md'
-            : 'bg-zinc-800 text-zinc-200 border border-white/10 light:bg-white/80 light:border-white/60 light:text-zinc-800 light:shadow-sm light:backdrop-blur-md'
+            ? 'bg-matcha-600 text-white light:bg-black light:shadow-md'
+            : 'bg-zinc-800 text-zinc-200 border border-white/10 light:bg-white/80 light:border-black/5 light:text-zinc-800 light:shadow-sm light:backdrop-blur-md'
         }`}
       >
         {msg.content}
@@ -1030,9 +1030,9 @@ export default function MatchaWorkThread() {
 
   return (
     <div className="flex flex-col h-full relative" style={{ height: 'calc(100vh - 56px)' }}>
-      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-gradient-to-br light:from-slate-50 light:via-zinc-100 light:to-slate-200" />
+      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-gradient-to-b light:from-[#d9d9d9] light:to-[#b3b3b3]" />
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 light:border-zinc-200/50 light:bg-white/40 light:backdrop-blur-xl flex-shrink-0 transition-colors">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 light:border-black/5 light:bg-white/40 light:backdrop-blur-xl flex-shrink-0 transition-colors">
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => navigate('/app/matcha/work/chats')}
@@ -1338,7 +1338,7 @@ export default function MatchaWorkThread() {
                       : 'Describe changes or add details...'
                   }
                   rows={1}
-                  className="flex-1 bg-zinc-900 border border-white/10 light:bg-white/50 light:focus:bg-white/80 light:border-zinc-300/50 light:backdrop-blur-md light:shadow-inner px-3.5 py-2.5 text-sm text-zinc-200 light:text-zinc-900 placeholder-zinc-500 light:placeholder-zinc-500/70 resize-none focus:outline-none focus:border-white/20 light:focus:border-zinc-400 disabled:opacity-50 transition-all rounded-sm"
+                  className="flex-1 bg-zinc-900 border border-white/10 light:bg-black/5 light:focus:bg-white/80 light:border-black/5 light:backdrop-blur-md light:shadow-inner px-3.5 py-2.5 text-sm text-zinc-200 light:text-zinc-900 placeholder-zinc-500 light:placeholder-zinc-500/70 resize-none focus:outline-none focus:border-white/20 light:focus:border-zinc-400 disabled:opacity-50 transition-all rounded-sm"
                   style={{ minHeight: '42px', maxHeight: '120px' }}
                   onInput={(e) => {
                     const t = e.currentTarget;
@@ -1349,7 +1349,7 @@ export default function MatchaWorkThread() {
                 <button
                   onClick={handleSend}
                   disabled={inputDisabled || !input.trim()}
-                  className="w-10 h-10 flex items-center justify-center bg-matcha-600 hover:bg-matcha-700 light:bg-matcha-500 light:hover:bg-matcha-600 light:shadow-md disabled:opacity-40 transition-colors flex-shrink-0 rounded-sm"
+                  className="w-10 h-10 flex items-center justify-center bg-matcha-600 hover:bg-matcha-700 light:bg-black light:hover:bg-black/80 light:shadow-md disabled:opacity-40 transition-colors flex-shrink-0 rounded-sm"
                 >
                   <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -1451,7 +1451,7 @@ export default function MatchaWorkThread() {
           )}
 
           {/* PDF iframe */}
-          <div className="flex-1 bg-zinc-900 light:bg-white/60 light:backdrop-blur-md min-h-0 transition-colors">
+          <div className="flex-1 bg-zinc-900 light:bg-transparent light:backdrop-blur-md min-h-0 transition-colors">
             {(isOfferLetter || hasOfferLetterPreviewContent) ? (
               pdfBlobUrl ? (
                 <iframe
@@ -1461,7 +1461,7 @@ export default function MatchaWorkThread() {
                 />
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                  <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-white/80 light:border-zinc-300 flex items-center justify-center mb-3 transition-colors">
+                  <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-white/80 light:border-black/5 flex items-center justify-center mb-3 transition-colors">
                     <svg className="w-6 h-6 text-zinc-600 light:text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
@@ -1487,7 +1487,7 @@ export default function MatchaWorkThread() {
               />
             ) : hasOnboardingPreviewContent ? (
               <div className="h-full overflow-y-auto p-4">
-                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/80 light:border-white/60 light:shadow-sm p-4 space-y-3 transition-colors">
+                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/80 light:border-black/5 light:shadow-sm p-4 space-y-3 transition-colors">
                   <p className="text-xs uppercase tracking-wider text-zinc-500 light:text-zinc-500">Employee Onboarding</p>
                   <p className="text-sm text-zinc-300 light:text-zinc-900">{(thread.current_state.employees as unknown[])?.length || 0} employee(s) queued</p>
                   <p className="text-xs text-zinc-500 light:text-zinc-500">Batch status: {thread.current_state.batch_status || 'collecting'}</p>
@@ -1495,7 +1495,7 @@ export default function MatchaWorkThread() {
               </div>
             ) : (
               <div className="h-full overflow-y-auto p-4">
-                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/80 light:border-white/60 light:shadow-sm p-4 space-y-4 transition-colors">
+                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/80 light:border-black/5 light:shadow-sm p-4 space-y-4 transition-colors">
                   <div>
                     <p className="text-xs uppercase tracking-wider text-zinc-500 light:text-zinc-500">Anonymous Review</p>
                     <h3 className="text-base font-semibold text-zinc-100 mt-1">
