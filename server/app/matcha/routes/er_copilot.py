@@ -1867,6 +1867,233 @@ async def generate_suggested_guidance(
         return SuggestedGuidanceResponse(**fallback_payload)
 
 
+@router.post("/{case_id}/guidance/suggested/stream")
+async def generate_suggested_guidance_stream(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Stream SSE progress events during guidance generation, ending with the final result."""
+    from fastapi.responses import StreamingResponse
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+
+        case_row = await conn.fetchrow(
+            """
+            SELECT case_number, title, description, status, intake_context, created_at, updated_at
+            FROM er_cases
+            WHERE id = $1
+            """,
+            case_id,
+        )
+        if not case_row:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        evidence_rows = await conn.fetch(
+            """
+            SELECT id, filename
+            FROM er_case_documents
+            WHERE case_id = $1
+              AND processing_status = 'completed'
+              AND document_type != 'policy'
+            ORDER BY created_at DESC
+            """,
+            case_id,
+        )
+
+        analysis_rows = await conn.fetch(
+            """
+            SELECT analysis_type, analysis_data
+            FROM er_case_analysis
+            WHERE case_id = $1 AND analysis_type = ANY($2::text[])
+            """,
+            case_id,
+            ["timeline", "discrepancies", "policy_check"],
+        )
+
+        transcript_rows = await conn.fetch(
+            """
+            SELECT id, filename, scrubbed_text
+            FROM er_case_documents
+            WHERE case_id = $1 AND processing_status = 'completed' AND document_type = 'transcript'
+            ORDER BY created_at DESC
+            """,
+            case_id,
+        )
+
+    async def event_stream():
+        def sse(event: dict) -> str:
+            return f"data: {json.dumps(event)}\n\n"
+
+        yield sse({"type": "status", "message": f"Loading case {case_row['case_number']}..."})
+
+        analysis_map_local: dict[str, dict[str, Any]] = {}
+        for row in analysis_rows:
+            analysis_type_key = str(row["analysis_type"])
+            analysis_map_local[analysis_type_key] = _normalize_analysis_payload(row["analysis_data"], {})
+
+        timeline_data_local = _normalize_analysis_payload(
+            analysis_map_local.get("timeline"),
+            {"events": [], "gaps_identified": [], "timeline_summary": ""},
+        )
+        discrepancies_data_local = _normalize_analysis_payload(
+            analysis_map_local.get("discrepancies"),
+            {"discrepancies": [], "credibility_notes": [], "summary": ""},
+        )
+        policy_data_local = _normalize_analysis_payload(
+            analysis_map_local.get("policy_check"),
+            {"violations": [], "policies_potentially_applicable": [], "summary": ""},
+        )
+
+        doc_count = len(evidence_rows)
+        transcript_count = len(transcript_rows)
+        yield sse({"type": "status", "message": f"Found {doc_count} evidence document(s) and {transcript_count} transcript(s)"})
+
+        intake_ctx = _normalize_intake_context(case_row["intake_context"]) or {}
+        assistance_ans = intake_ctx.get("answers", {}) if isinstance(intake_ctx, dict) else {}
+        obj = assistance_ans.get("objective") if isinstance(assistance_ans, dict) else None
+        imm_risk = assistance_ans.get("immediate_risk") if isinstance(assistance_ans, dict) else None
+
+        completed_docs = [
+            {"id": str(row["id"]), "filename": row["filename"] or f"Document {idx + 1}"}
+            for idx, row in enumerate(evidence_rows)
+        ]
+        can_run_disc = len(completed_docs) >= 2
+
+        fallback = _build_fallback_guidance_payload(
+            timeline_data=timeline_data_local,
+            discrepancies_data=discrepancies_data_local,
+            policy_data=policy_data_local,
+            completed_non_policy_docs=completed_docs,
+            objective=obj if isinstance(obj, str) else None,
+            immediate_risk=imm_risk if isinstance(imm_risk, str) else None,
+        )
+
+        c_info = {
+            "case_number": case_row["case_number"],
+            "title": case_row["title"],
+            "description": case_row["description"],
+            "status": case_row["status"],
+            "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
+            "updated_at": case_row["updated_at"].isoformat() if case_row["updated_at"] else None,
+        }
+        analyses_done = {
+            "timeline": "timeline" in analysis_map_local and bool(
+                timeline_data_local.get("events") or timeline_data_local.get("timeline_summary")
+            ),
+            "discrepancies": "discrepancies" in analysis_map_local and bool(
+                discrepancies_data_local.get("discrepancies") or discrepancies_data_local.get("summary")
+            ),
+            "policy_check": "policy_check" in analysis_map_local and bool(
+                policy_data_local.get("violations") or policy_data_local.get("summary")
+            ),
+        }
+        ev_overview = {
+            "completed_non_policy_doc_count": len(completed_docs),
+            "completed_non_policy_doc_names": [d["filename"] for d in completed_docs[:12]],
+            "can_run_discrepancies": can_run_disc,
+            "analyses_completed": analyses_done,
+        }
+        a_results = {
+            "timeline": timeline_data_local,
+            "discrepancies": discrepancies_data_local,
+            "policy_check": policy_data_local,
+        }
+
+        # Build transcript excerpts
+        t_parts: list[str] = []
+        for tr in transcript_rows:
+            text = tr["scrubbed_text"] or ""
+            if len(text) > 2000:
+                text = text[:1000] + "\n...\n" + text[-1000:]
+            t_parts.append(f"--- {tr['filename']} ---\n{text}")
+        t_excerpts = "\n\n".join(t_parts) if t_parts else ""
+
+        has_violations = bool(policy_data_local.get("violations"))
+        has_any_analysis = any(analyses_done.values())
+        floor_conf = _determination_confidence_floor(
+            completed_doc_count=len(completed_docs),
+            transcript_count=transcript_count,
+            has_analyses=has_any_analysis,
+            has_policy_violations=has_violations,
+        )
+
+        try:
+            analyzer = _build_er_analyzer()
+
+            yield sse({"type": "status", "message": "Generating investigative guidance..."})
+
+            guidance_task = analyzer.generate_suggested_guidance(
+                case_info=c_info,
+                intake_context=intake_ctx if isinstance(intake_ctx, dict) else {},
+                evidence_overview=ev_overview,
+                analysis_results=a_results,
+            )
+
+            yield sse({"type": "status", "message": "Scoring evidence confidence..."})
+
+            confidence_task = analyzer.evaluate_determination_confidence(
+                case_info=c_info,
+                evidence_overview={"doc_count": len(completed_docs), "transcript_count": transcript_count},
+                transcript_excerpts=t_excerpts,
+                timeline_summary=timeline_data_local.get("timeline_summary", ""),
+                discrepancies_summary=discrepancies_data_local.get("summary", ""),
+                policy_summary=policy_data_local.get("summary", ""),
+            )
+
+            raw_result, conf_result = await asyncio.gather(
+                guidance_task, confidence_task, return_exceptions=True,
+            )
+
+            yield sse({"type": "status", "message": "Assembling recommendations..."})
+
+            if isinstance(raw_result, BaseException):
+                logger.warning("Streaming guidance generation failed for case %s: %s", case_id, raw_result)
+                payload = fallback
+            else:
+                payload = _normalize_suggested_guidance_payload(
+                    raw_result,
+                    fallback_payload=fallback,
+                    can_run_discrepancies=can_run_disc,
+                    model_name=analyzer.model,
+                )
+
+            if isinstance(conf_result, BaseException):
+                logger.warning("Streaming confidence eval failed for case %s: %s", case_id, conf_result)
+                conf_result = {"confidence": floor_conf, "signals": [], "summary": ""}
+
+            conf = conf_result.get("confidence", floor_conf)
+            if not isinstance(conf, (int, float)):
+                conf = floor_conf
+            conf = max(floor_conf, float(conf))
+            present_signals = [s for s in conf_result.get("signals", []) if isinstance(s, dict) and s.get("present")]
+            det_signals = [s["reasoning"] for s in present_signals if isinstance(s.get("reasoning"), str)]
+
+            payload["determination_suggested"] = conf >= 0.50
+            payload["determination_confidence"] = round(conf, 2)
+            payload["determination_signals"] = det_signals
+
+            response_obj = SuggestedGuidanceResponse(**payload)
+            yield sse({"type": "result", "data": response_obj.model_dump(mode="json")})
+        except Exception as exc:
+            logger.warning("Streaming guidance generation failed for case %s: %s", case_id, exc)
+            fallback["determination_confidence"] = floor_conf
+            response_obj = SuggestedGuidanceResponse(**fallback)
+            yield sse({"type": "result", "data": response_obj.model_dump(mode="json")})
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
 # ===========================================
 # Evidence Search (RAG)
 # ===========================================

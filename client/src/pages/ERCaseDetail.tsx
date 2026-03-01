@@ -898,10 +898,18 @@ export function ERCaseDetail() {
     const shouldRunDiscrepancies = completedNonPolicyDocs.length >= 2;
 
     try {
+      setAutoAssistMessage('Reconstructing event timeline...');
       const timelineOk = await handleGenerateTimeline();
+
+      if (shouldRunDiscrepancies) {
+        setAutoAssistMessage('Analyzing witness statement discrepancies...');
+      }
       const discrepanciesOk = shouldRunDiscrepancies ? await handleGenerateDiscrepancies() : false;
+
+      setAutoAssistMessage('Checking evidence against company policies...');
       const policyOk = await handleRunPolicyCheck();
 
+      setAutoAssistMessage('Collecting analysis results...');
       const timelineResult = timelineOk ? await erCopilot.getTimeline(id).catch(() => null) : null;
       const discrepancyResult = shouldRunDiscrepancies && discrepanciesOk
         ? await erCopilot.getDiscrepancies(id).catch(() => null)
@@ -937,9 +945,18 @@ export function ERCaseDetail() {
 
       let suggestedGuidancePayload: ERSuggestedGuidanceResponse | null = null;
       try {
-        suggestedGuidancePayload = await erCopilot.generateSuggestedGuidance(id);
+        suggestedGuidancePayload = await erCopilot.generateSuggestedGuidanceStream(
+          id,
+          (statusMsg) => setAutoAssistMessage(statusMsg),
+        );
       } catch (guidanceErr) {
-        console.error('Failed to generate Gemini suggested guidance:', guidanceErr);
+        console.error('Failed to generate streaming suggested guidance:', guidanceErr);
+        // Fall back to non-streaming endpoint
+        try {
+          suggestedGuidancePayload = await erCopilot.generateSuggestedGuidance(id);
+        } catch (fallbackErr) {
+          console.error('Non-streaming guidance also failed:', fallbackErr);
+        }
       }
 
       if (!suggestedGuidancePayload) {

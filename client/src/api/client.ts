@@ -1706,6 +1706,50 @@ export const erCopilot = {
       method: 'POST',
     }),
 
+  generateSuggestedGuidanceStream: async (
+    caseId: string,
+    onStatus: (message: string) => void,
+  ): Promise<ERSuggestedGuidanceResponse> => {
+    const token = getAccessToken();
+    const response = await fetch(`${API_BASE}/er/cases/${caseId}/guidance/suggested/stream`, {
+      method: 'POST',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!response.ok) throw new Error('Failed to start guidance stream');
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: ERSuggestedGuidanceResponse | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data: ')) continue;
+        const payload = trimmed.slice(6);
+        if (payload === '[DONE]') continue;
+        try {
+          const event = JSON.parse(payload);
+          if (event.type === 'status' && event.message) {
+            onStatus(event.message);
+          } else if (event.type === 'result' && event.data) {
+            result = event.data as ERSuggestedGuidanceResponse;
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+
+    if (!result) throw new Error('No guidance result received from stream');
+    return result;
+  },
+
   searchEvidence: (caseId: string, query: string, topK: number = 5): Promise<EvidenceSearchResponse> =>
     request<EvidenceSearchResponse>(`/er/cases/${caseId}/search`, {
       method: 'POST',
