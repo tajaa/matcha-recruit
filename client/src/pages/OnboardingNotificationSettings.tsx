@@ -141,7 +141,7 @@ export default function OnboardingNotificationSettings() {
             onChange={(e) => setEmailInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEmail(); } }}
             placeholder="hr@company.com"
-            className="flex-1 bg-zinc-900 border border-white/10 text-xs text-zinc-200 px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-white/30"
+            className="flex-1 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-white/30"
           />
           <button
             type="button"
@@ -196,7 +196,7 @@ export default function OnboardingNotificationSettings() {
                   reminder_days_before_due: Math.max(1, Math.min(7, parseInt(e.target.value) || 1)),
                 }))
               }
-              className="w-20 bg-zinc-900 border border-white/10 text-xs text-zinc-200 px-3 py-2 text-center focus:outline-none focus:border-white/30"
+              className="w-20 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 px-3 py-2 text-center focus:outline-none focus:border-white/30"
             />
           </div>
 
@@ -213,7 +213,7 @@ export default function OnboardingNotificationSettings() {
                   escalate_to_manager_after_days: Math.max(1, parseInt(e.target.value) || 1),
                 }))
               }
-              className="w-20 bg-zinc-900 border border-white/10 text-xs text-zinc-200 px-3 py-2 text-center focus:outline-none focus:border-white/30"
+              className="w-20 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 px-3 py-2 text-center focus:outline-none focus:border-white/30"
             />
           </div>
 
@@ -230,7 +230,7 @@ export default function OnboardingNotificationSettings() {
                   escalate_to_hr_after_days: Math.max(1, parseInt(e.target.value) || 1),
                 }))
               }
-              className="w-20 bg-zinc-900 border border-white/10 text-xs text-zinc-200 px-3 py-2 text-center focus:outline-none focus:border-white/30"
+              className="w-20 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 px-3 py-2 text-center focus:outline-none focus:border-white/30"
             />
           </div>
         </div>

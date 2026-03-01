@@ -378,7 +378,7 @@ export default function OnboardingPriorities() {
                   value={form.title}
                   onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                   placeholder="e.g. Introduce yourself in Slack"
-                  className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                  className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
                 />
               </div>
 
@@ -392,7 +392,7 @@ export default function OnboardingPriorities() {
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   placeholder="Optional context for the employee..."
                   rows={2}
-                  className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30 resize-none"
+                  className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30 resize-none"
                 />
               </div>
 
@@ -408,7 +408,7 @@ export default function OnboardingPriorities() {
                     max={90}
                     value={form.due_days}
                     onChange={e => setForm(f => ({ ...f, due_days: parseInt(e.target.value) || 0 }))}
-                    className="w-24 bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
+                    className="w-24 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                   />
                   <span className="text-xs text-zinc-500 light:text-black/60">days after start date</span>
                 </div>
@@ -473,7 +473,7 @@ export default function OnboardingPriorities() {
                           const p = policyList.find(p => p.id === e.target.value);
                           handleResourceSelect(e.target.value, p?.title || '');
                         }}
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                       >
                         <option value="">— Select a policy —</option>
                         {policyList.map(p => (
@@ -501,7 +501,7 @@ export default function OnboardingPriorities() {
                           const h = handbookList.find(h => h.id === e.target.value);
                           handleResourceSelect(e.target.value, h?.title || '');
                         }}
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                       >
                         <option value="">— Select a handbook —</option>
                         {handbookList.map(h => (
@@ -524,7 +524,7 @@ export default function OnboardingPriorities() {
                         value={form.link_url}
                         onChange={e => setForm(f => ({ ...f, link_url: e.target.value }))}
                         placeholder="https://..."
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
                       />
                     </div>
                     <div>
@@ -536,7 +536,7 @@ export default function OnboardingPriorities() {
                         value={form.link_label}
                         onChange={e => setForm(f => ({ ...f, link_label: e.target.value }))}
                         placeholder="e.g. Fill out this form"
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
                       />
                     </div>
                   </div>
@@ -559,7 +559,7 @@ export default function OnboardingPriorities() {
                           const t = allTemplates.find(t => t.id === e.target.value);
                           handleResourceSelect(e.target.value, t?.title || '');
                         }}
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                       >
                         <option value="">— Select a template —</option>
                         {allTemplates.map(t => (
