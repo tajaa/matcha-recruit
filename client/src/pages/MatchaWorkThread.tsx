@@ -108,7 +108,7 @@ function WorkbookPreview({ state, threadId, selectedSlideIndex, onSelectSlide }:
         <div className="space-y-4">
           {sections.length === 0 ? (
             <div className="border border-white/10 light:border-black/5 border-dashed p-12 text-center transition-colors">
-              <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-transparent light:border-zinc-200 flex items-center justify-center mx-auto mb-4 text-zinc-600 light:text-zinc-400 transition-colors">
+              <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-black/[0.12] light:border-zinc-200 flex items-center justify-center mx-auto mb-4 text-zinc-600 light:text-zinc-400 transition-colors">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
@@ -1451,7 +1451,7 @@ export default function MatchaWorkThread() {
           )}
 
           {/* PDF iframe */}
-          <div className="flex-1 bg-zinc-900 light:bg-transparent light:backdrop-blur-md min-h-0 transition-colors">
+          <div className="flex-1 bg-zinc-900 light:bg-black/[0.12] light:backdrop-blur-md min-h-0 transition-colors">
             {(isOfferLetter || hasOfferLetterPreviewContent) ? (
               pdfBlobUrl ? (
                 <iframe

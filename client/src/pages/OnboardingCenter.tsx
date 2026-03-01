@@ -240,7 +240,7 @@ export default function OnboardingCenter() {
 
   return (
     <div className="relative min-h-[calc(100vh-8rem)]">
-      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-transparent" />
+      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-black/[0.12]" />
       <div className="max-w-7xl mx-auto space-y-6 overflow-x-hidden relative z-10">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/10 pb-6">
         <div className="text-center sm:text-left">

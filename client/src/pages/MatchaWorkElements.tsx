@@ -80,7 +80,7 @@ export default function MatchaWorkElements() {
             >
               Chats
             </button>
-            <button className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-100 light:bg-transparent light:text-black light:font-medium light:shadow-none transition-colors">
+            <button className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-100 light:bg-black/[0.12] light:text-black light:font-medium light:shadow-none transition-colors">
               Matcha Elements
             </button>
             <button
@@ -115,7 +115,7 @@ export default function MatchaWorkElements() {
             className={`px-2.5 py-1 rounded-md text-xs capitalize transition-colors ${
               statusFilter === value
                 ? 'bg-zinc-700 text-zinc-100 light:bg-black/10 light:text-black'
-                : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 light:bg-transparent light:text-black/60 light:hover:bg-black/5 light:hover:text-black'
+                : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 light:bg-black/[0.12] light:text-black/60 light:hover:bg-black/5 light:hover:text-black'
             }`}
           >
             {value}

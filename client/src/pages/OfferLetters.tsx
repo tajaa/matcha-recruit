@@ -658,7 +658,7 @@ export function OfferLetters() {
 
   return (
     <div className="relative min-h-[calc(100vh-8rem)]">
-      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-transparent" />
+      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-black/[0.12]" />
       <div className="max-w-6xl mx-auto w-full relative z-10 relative z-10 relative z-10">
         {/* Header */}
       <div className="flex flex-col gap-4 mb-8 border-b border-white/10 pb-6 sm:flex-row sm:items-start sm:justify-between sm:mb-12 sm:pb-8">
