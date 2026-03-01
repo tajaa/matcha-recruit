@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Button, FileUpload } from '../components';
 import { erCopilot } from '../api/client';
@@ -2216,7 +2217,7 @@ export function ERCaseDetail() {
       </div>
 
       {/* Upload Modal */}
-      {showUploadModal && (
+      {showUploadModal && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm p-4">
           <div className="w-full max-w-md bg-white shadow-2xl rounded-sm flex flex-col max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-zinc-100">
@@ -2299,7 +2300,7 @@ export function ERCaseDetail() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

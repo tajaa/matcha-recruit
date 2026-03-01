@@ -611,7 +611,7 @@ async def export_case_file(
 
         # Fetch analyses
         analysis_rows = await conn.fetch(
-            "SELECT analysis_type, result, created_at FROM er_case_analysis WHERE case_id = $1 ORDER BY created_at",
+            "SELECT analysis_type, analysis_data, created_at FROM er_case_analysis WHERE case_id = $1 ORDER BY created_at",
             case_id,
         )
 
@@ -642,7 +642,7 @@ async def export_case_file(
     analyses_html = ""
     for a in analysis_rows:
         atype = (a["analysis_type"] or "unknown").replace("_", " ").title()
-        result = a["result"]
+        result = a["analysis_data"]
         if isinstance(result, str):
             try:
                 result = json.loads(result)
