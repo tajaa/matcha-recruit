@@ -2156,8 +2156,7 @@ async def generate_outcome_analysis_stream(
         def sse(event: dict) -> str:
             return f"data: {json.dumps(event)}\n\n"
 
-        yield sse({"type": "status", "message": "Reviewing case evidence..."})
-
+        # Parse analysis data
         analysis_map: dict[str, dict[str, Any]] = {}
         for row in analysis_rows:
             raw = row["analysis_data"]
@@ -2172,6 +2171,13 @@ async def generate_outcome_analysis_stream(
         disc_data = analysis_map.get("discrepancies", {})
         policy_data = analysis_map.get("policy_check", {})
 
+        # Data-aware status messages
+        n_events = len(timeline_data.get("events", []))
+        n_discrepancies = len(disc_data.get("discrepancies", []))
+        n_violations = len(policy_data.get("violations", []))
+
+        yield sse({"type": "status", "message": f"Reviewing {n_events} timeline events..."})
+
         analysis_summary_parts = []
         if timeline_data.get("timeline_summary"):
             analysis_summary_parts.append(f"Timeline: {timeline_data['timeline_summary']}")
@@ -2181,14 +2187,14 @@ async def generate_outcome_analysis_stream(
 
         policy_findings = policy_data.get("summary", "No policy findings available.")
 
-        yield sse({"type": "status", "message": "Checking past case precedent..."})
+        yield sse({"type": "status", "message": f"Found {n_discrepancies} discrepancies and {n_violations} policy violations"})
 
         precedent_display = {
             "total_closed_cases": total_closed,
             "outcome_distribution": precedent_stats,
         }
 
-        yield sse({"type": "status", "message": "Generating outcome recommendations..."})
+        yield sse({"type": "status", "message": f"Checking precedent across {total_closed} prior closed cases..."})
 
         c_info = {
             "case_number": case_row["case_number"],
@@ -2199,14 +2205,41 @@ async def generate_outcome_analysis_stream(
             "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
         }
 
+        yield sse({"type": "status", "message": "Starting AI outcome analysis..."})
+
         try:
             analyzer = _build_er_analyzer()
-            raw_result = await analyzer.generate_outcome_analysis(
-                case_info=c_info,
-                analysis_summary=analysis_summary,
-                policy_findings=policy_findings,
-                precedent_stats=precedent_display,
+
+            # Queue bridge: stream status from the analyzer callback into SSE
+            status_queue: asyncio.Queue[str] = asyncio.Queue()
+
+            async def on_status(msg: str):
+                await status_queue.put(msg)
+
+            task = asyncio.create_task(
+                analyzer.generate_outcome_analysis_streaming(
+                    case_info=c_info,
+                    analysis_summary=analysis_summary,
+                    policy_findings=policy_findings,
+                    precedent_stats=precedent_display,
+                    on_status=on_status,
+                )
             )
+
+            # Drain status messages while analysis runs
+            while not task.done():
+                try:
+                    msg = await asyncio.wait_for(status_queue.get(), timeout=0.3)
+                    yield sse({"type": "status", "message": msg})
+                except asyncio.TimeoutError:
+                    continue
+
+            # Drain any remaining queued messages
+            while not status_queue.empty():
+                msg = status_queue.get_nowait()
+                yield sse({"type": "status", "message": msg})
+
+            raw_result = task.result()
 
             # Normalize outcomes
             outcomes = []
@@ -2233,7 +2266,6 @@ async def generate_outcome_analysis_stream(
                     precedent_note=o.get("precedent_note", ""),
                     confidence=conf,
                 ))
-
 
             response_obj = OutcomeAnalysisResponse(
                 outcomes=outcomes,

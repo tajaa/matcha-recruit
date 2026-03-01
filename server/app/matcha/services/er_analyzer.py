@@ -10,7 +10,7 @@ AI-powered analysis for Employee Relations investigations:
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Optional, Any, AsyncIterator, Callable
 
 from google import genai
 
@@ -475,6 +475,40 @@ class ERAnalyzer:
             raise last_model_error
         raise RuntimeError("No Gemini model candidates were available for ER analysis")
 
+    async def _generate_content_streaming(self, prompt: str) -> AsyncIterator[str]:
+        """Stream content from Gemini, yielding text chunks. Falls back through model candidates."""
+        last_model_error: Exception | None = None
+        for candidate in self._model_candidates():
+            try:
+                response = await self.client.aio.models.generate_content_stream(
+                    model=candidate,
+                    contents=prompt,
+                )
+                if candidate != self.model:
+                    logger.warning(
+                        "ERAnalyzer model '%s' unavailable; fell back to '%s'",
+                        self.model,
+                        candidate,
+                    )
+                async for chunk in response:
+                    if chunk.text:
+                        yield chunk.text
+                return
+            except Exception as exc:
+                if self._is_model_unavailable_error(exc):
+                    last_model_error = exc
+                    logger.warning(
+                        "ERAnalyzer model candidate '%s' unavailable: %s",
+                        candidate,
+                        exc,
+                    )
+                    continue
+                raise
+
+        if last_model_error:
+            raise last_model_error
+        raise RuntimeError("No Gemini model candidates were available for ER analysis")
+
     def _generate_content_sync(self, prompt: str) -> str:
         """Synchronous generate_content with the same model fallback behavior."""
         last_model_error: Exception | None = None
@@ -754,6 +788,73 @@ class ERAnalyzer:
             return result
         except Exception as exc:
             logger.warning("Outcome analysis generation failed: %s", exc, exc_info=True)
+            return {
+                "outcomes": [],
+                "case_summary": "Unable to generate outcome analysis. Please review the case manually.",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "model": self.model,
+            }
+
+    # Phase markers for streaming outcome analysis status detection
+    _OUTCOME_PHASE_MARKERS = [
+        ("case_summary", "Summarizing case findings..."),
+        ("policy_basis", "Reviewing applicable policies..."),
+        ("reasoning", "Analyzing supporting evidence..."),
+        ("hr_considerations", "Assessing HR best practices..."),
+        ("precedent_note", "Comparing with past case outcomes..."),
+    ]
+
+    async def generate_outcome_analysis_streaming(
+        self,
+        case_info: dict,
+        analysis_summary: str,
+        policy_findings: str,
+        precedent_stats: dict,
+        on_status: Callable[[str], Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generate outcome analysis with streaming status callbacks.
+
+        Same as generate_outcome_analysis but streams Gemini output and calls
+        on_status(msg) when it detects the AI entering a new JSON section.
+        """
+        try:
+            prompt = OUTCOME_ANALYSIS_PROMPT.format(
+                case_info=json.dumps(case_info, indent=2, default=str),
+                analysis_summary=analysis_summary or "No analysis summary available.",
+                policy_findings=policy_findings or "No policy findings available.",
+                precedent_stats=json.dumps(precedent_stats, indent=2, default=str) if precedent_stats else "No prior case data available.",
+            )
+
+            accumulated = ""
+            fired_phases: set[str] = set()
+            determination_count = 0
+
+            async for chunk in self._generate_content_streaming(prompt):
+                accumulated += chunk
+
+                # Detect determination entries (can appear multiple times for each outcome)
+                new_det_count = accumulated.count('"determination"')
+                if new_det_count > determination_count:
+                    determination_count = new_det_count
+                    if on_status:
+                        if determination_count == 1:
+                            await on_status("Evaluating primary outcome path...")
+                        else:
+                            await on_status(f"Evaluating alternative outcome {determination_count - 1}...")
+
+                # Detect other phase markers
+                for marker, message in self._OUTCOME_PHASE_MARKERS:
+                    if marker not in fired_phases and f'"{marker}"' in accumulated:
+                        fired_phases.add(marker)
+                        if on_status:
+                            await on_status(message)
+
+            result = self._parse_json_response(accumulated)
+            result["generated_at"] = datetime.now(timezone.utc).isoformat()
+            result["model"] = self.model
+            return result
+        except Exception as exc:
+            logger.warning("Outcome analysis streaming failed: %s", exc, exc_info=True)
             return {
                 "outcomes": [],
                 "case_summary": "Unable to generate outcome analysis. Please review the case manually.",
