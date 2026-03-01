@@ -79,7 +79,7 @@ export default function OnboardingNotificationSettings() {
 
   if (loading) {
     return (
-      <p className="text-xs text-zinc-500 font-mono uppercase tracking-wider animate-pulse py-8 text-center">
+      <p className="text-xs text-zinc-500 light:text-black/60 font-mono uppercase tracking-wider animate-pulse py-8 text-center">
         Loading notification settings...
       </p>
     );
@@ -102,8 +102,8 @@ export default function OnboardingNotificationSettings() {
       <div className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest text-white">Email Notifications</h3>
-            <p className="text-[10px] text-zinc-500 mt-1">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">Email Notifications</h3>
+            <p className="text-[10px] text-zinc-500 light:text-black/60 mt-1">
               Send email reminders and escalation alerts for onboarding tasks.
             </p>
           </div>
@@ -128,8 +128,8 @@ export default function OnboardingNotificationSettings() {
       {/* HR Escalation Emails */}
       <div className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
         <div>
-          <h3 className="text-xs font-bold uppercase tracking-widest text-white">HR Escalation Emails</h3>
-          <p className="text-[10px] text-zinc-500 mt-1">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">HR Escalation Emails</h3>
+          <p className="text-[10px] text-zinc-500 light:text-black/60 mt-1">
             These addresses receive alerts when tasks are escalated to HR.
           </p>
         </div>
@@ -163,7 +163,7 @@ export default function OnboardingNotificationSettings() {
                 <button
                   type="button"
                   onClick={() => removeEmail(email)}
-                  className="text-zinc-500 hover:text-white"
+                  className="text-zinc-500 light:text-black/60 hover:text-white light:text-black"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -176,8 +176,8 @@ export default function OnboardingNotificationSettings() {
       {/* Timing Settings */}
       <div className="border border-white/10 bg-zinc-900/50 p-5 space-y-5">
         <div>
-          <h3 className="text-xs font-bold uppercase tracking-widest text-white">Timing</h3>
-          <p className="text-[10px] text-zinc-500 mt-1">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">Timing</h3>
+          <p className="text-[10px] text-zinc-500 light:text-black/60 mt-1">
             Configure when reminders and escalations are triggered.
           </p>
         </div>

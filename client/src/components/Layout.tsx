@@ -696,7 +696,9 @@ export function Layout() {
   }, [themeMode]);
 
   const isMatchaWork = location.pathname.startsWith('/app/matcha/work');
-  const shouldInvertPages = themeMode === 'lightPages' && !isMatchaWork;
+  const isOnboarding = location.pathname.startsWith('/app/onboarding');
+  const isOfferLetters = location.pathname.startsWith('/app/offer-letters');
+  const shouldInvertPages = themeMode === 'lightPages' && !isMatchaWork && !isOnboarding && !isOfferLetters;
 
   const toggleSection = (title: string) => {
     setCollapsedSections(prev => {

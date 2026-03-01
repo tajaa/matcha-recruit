@@ -248,8 +248,8 @@ export default function OnboardingPriorities() {
       {/* Header row */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-bold uppercase tracking-widest text-white">Priority To-Dos</h2>
-          <p className="text-[10px] font-mono uppercase tracking-wide text-zinc-500 mt-1">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-white light:text-black">Priority To-Dos</h2>
+          <p className="text-[10px] font-mono uppercase tracking-wide text-zinc-500 light:text-black/60 mt-1">
             {active.length} active · {inactive.length} inactive
           </p>
         </div>
@@ -258,7 +258,7 @@ export default function OnboardingPriorities() {
           <div className="relative" ref={templateDropdownRef}>
             <button
               onClick={openTemplateDropdown}
-              className="flex items-center gap-2 border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+              className="flex items-center gap-2 border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white light:text-black transition-colors"
             >
               <Layers className="w-3 h-3" />
               From Template
@@ -267,13 +267,13 @@ export default function OnboardingPriorities() {
             {showTemplateDropdown && (
               <div className="absolute right-0 top-full mt-1 w-72 bg-zinc-950 border border-white/15 shadow-2xl z-20 max-h-72 overflow-y-auto">
                 {loadingAllTemplates ? (
-                  <div className="px-4 py-3 text-xs text-zinc-500 font-mono">Loading templates...</div>
+                  <div className="px-4 py-3 text-xs text-zinc-500 light:text-black/60 font-mono">Loading templates...</div>
                 ) : allTemplates.length === 0 ? (
-                  <div className="px-4 py-3 text-xs text-zinc-500">No active templates found</div>
+                  <div className="px-4 py-3 text-xs text-zinc-500 light:text-black/60">No active templates found</div>
                 ) : (
                   <>
                     <div className="px-3 py-2 border-b border-white/10">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Pick a template to copy</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 light:text-black/60">Pick a template to copy</p>
                     </div>
                     {allTemplates.map(tmpl => (
                       <button
@@ -281,8 +281,8 @@ export default function OnboardingPriorities() {
                         onClick={() => openCreateFromTemplate(tmpl)}
                         className="w-full text-left px-4 py-3 hover:bg-white/5 transition-colors border-b border-white/5 last:border-0"
                       >
-                        <p className="text-sm text-white truncate">{tmpl.title}</p>
-                        <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider mt-0.5">
+                        <p className="text-sm text-white light:text-black truncate">{tmpl.title}</p>
+                        <p className="text-[10px] font-mono text-zinc-500 light:text-black/60 uppercase tracking-wider mt-0.5">
                           {tmpl.category} · due {tmpl.due_days}d
                         </p>
                       </button>
@@ -295,7 +295,7 @@ export default function OnboardingPriorities() {
 
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 border border-white/20 bg-white/5 hover:bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white transition-colors"
+            className="flex items-center gap-2 border border-white/20 bg-white/5 hover:bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white light:text-black transition-colors"
           >
             <Plus className="w-3 h-3" />
             Add Priority
@@ -304,7 +304,7 @@ export default function OnboardingPriorities() {
       </div>
 
       {loading && (
-        <div className="flex items-center gap-2 py-6 text-xs text-zinc-500 font-mono">
+        <div className="flex items-center gap-2 py-6 text-xs text-zinc-500 light:text-black/60 font-mono">
           <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" />
           Loading...
         </div>
@@ -340,7 +340,7 @@ export default function OnboardingPriorities() {
 
       {inactive.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 pt-2">Inactive</p>
+          <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 light:text-black/60 pt-2">Inactive</p>
           {inactive.map(tmpl => (
             <TemplateRow
               key={tmpl.id}
@@ -359,10 +359,10 @@ export default function OnboardingPriorities() {
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 bg-black/70 overflow-y-auto">
           <div className="bg-zinc-950 border border-white/10 w-full max-w-lg shadow-2xl mb-8">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-              <h3 className="text-xs font-bold uppercase tracking-widest text-white">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">
                 {editing ? 'Edit Priority' : 'New Priority'}
               </h3>
-              <button onClick={closeModal} className="text-zinc-500 hover:text-white transition-colors">
+              <button onClick={closeModal} className="text-zinc-500 light:text-black/60 hover:text-white light:text-black transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -378,7 +378,7 @@ export default function OnboardingPriorities() {
                   value={form.title}
                   onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                   placeholder="e.g. Introduce yourself in Slack"
-                  className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                  className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
                 />
               </div>
 
@@ -392,7 +392,7 @@ export default function OnboardingPriorities() {
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   placeholder="Optional context for the employee..."
                   rows={2}
-                  className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 resize-none"
+                  className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30 resize-none"
                 />
               </div>
 
@@ -408,16 +408,16 @@ export default function OnboardingPriorities() {
                     max={90}
                     value={form.due_days}
                     onChange={e => setForm(f => ({ ...f, due_days: parseInt(e.target.value) || 0 }))}
-                    className="w-24 bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-white/30"
+                    className="w-24 bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                   />
-                  <span className="text-xs text-zinc-500">days after start date</span>
+                  <span className="text-xs text-zinc-500 light:text-black/60">days after start date</span>
                 </div>
               </div>
 
               {/* Link section */}
               <div className="border-t border-white/10 pt-5">
                 <div className="flex items-center gap-2 mb-3">
-                  <Link className="w-3.5 h-3.5 text-zinc-500" />
+                  <Link className="w-3.5 h-3.5 text-zinc-500 light:text-black/60" />
                   <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                     Attach Resource <span className="text-zinc-600 normal-case font-normal">(optional)</span>
                   </label>
@@ -430,7 +430,7 @@ export default function OnboardingPriorities() {
                     onClick={() => handleLinkTypeChange(null)}
                     className={`py-2 px-2 text-[10px] font-bold uppercase tracking-widest border transition-colors ${
                       form.link_type === null
-                        ? 'border-white/30 bg-white/10 text-white'
+                        ? 'border-white/30 bg-white/10 text-white light:text-black'
                         : 'border-white/10 text-zinc-600 hover:text-zinc-300 hover:border-white/20'
                     }`}
                   >
@@ -445,11 +445,11 @@ export default function OnboardingPriorities() {
                         onClick={() => handleLinkTypeChange(type)}
                         className={`py-2 px-2 text-[10px] font-bold uppercase tracking-widest border transition-colors flex flex-col items-center gap-1 ${
                           form.link_type === type
-                            ? 'border-white/30 bg-white/10 text-white'
+                            ? 'border-white/30 bg-white/10 text-white light:text-black'
                             : 'border-white/10 text-zinc-600 hover:text-zinc-300 hover:border-white/20'
                         }`}
                       >
-                        <Icon className={`w-3.5 h-3.5 ${form.link_type === type ? 'text-white' : meta.color}`} />
+                        <Icon className={`w-3.5 h-3.5 ${form.link_type === type ? 'text-white light:text-black' : meta.color}`} />
                         {type === 'policy' ? 'Policy' : type === 'handbook' ? 'Handbook' : 'URL'}
                       </button>
                     );
@@ -459,7 +459,7 @@ export default function OnboardingPriorities() {
                 {/* Policy picker */}
                 {form.link_type === 'policy' && (
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1.5">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 light:text-black/60 mb-1.5">
                       Select Policy
                     </label>
                     {loadingResources ? (
@@ -473,7 +473,7 @@ export default function OnboardingPriorities() {
                           const p = policyList.find(p => p.id === e.target.value);
                           handleResourceSelect(e.target.value, p?.title || '');
                         }}
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                       >
                         <option value="">— Select a policy —</option>
                         {policyList.map(p => (
@@ -487,7 +487,7 @@ export default function OnboardingPriorities() {
                 {/* Handbook picker */}
                 {form.link_type === 'handbook' && (
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1.5">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 light:text-black/60 mb-1.5">
                       Select Handbook
                     </label>
                     {loadingResources ? (
@@ -501,7 +501,7 @@ export default function OnboardingPriorities() {
                           const h = handbookList.find(h => h.id === e.target.value);
                           handleResourceSelect(e.target.value, h?.title || '');
                         }}
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                       >
                         <option value="">— Select a handbook —</option>
                         {handbookList.map(h => (
@@ -516,7 +516,7 @@ export default function OnboardingPriorities() {
                 {form.link_type === 'url' && (
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1.5">
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 light:text-black/60 mb-1.5">
                         URL <span className="text-red-400">*</span>
                       </label>
                       <input
@@ -524,11 +524,11 @@ export default function OnboardingPriorities() {
                         value={form.link_url}
                         onChange={e => setForm(f => ({ ...f, link_url: e.target.value }))}
                         placeholder="https://..."
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1.5">
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 light:text-black/60 mb-1.5">
                         Display Label
                       </label>
                       <input
@@ -536,7 +536,7 @@ export default function OnboardingPriorities() {
                         value={form.link_label}
                         onChange={e => setForm(f => ({ ...f, link_label: e.target.value }))}
                         placeholder="e.g. Fill out this form"
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
                       />
                     </div>
                   </div>
@@ -545,7 +545,7 @@ export default function OnboardingPriorities() {
                 {/* Template picker */}
                 {form.link_type === 'template' && (
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1.5">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500 light:text-black/60 mb-1.5">
                       Select Template
                     </label>
                     {loadingAllTemplates ? (
@@ -559,7 +559,7 @@ export default function OnboardingPriorities() {
                           const t = allTemplates.find(t => t.id === e.target.value);
                           handleResourceSelect(e.target.value, t?.title || '');
                         }}
-                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 border border-white/10 px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                       >
                         <option value="">— Select a template —</option>
                         {allTemplates.map(t => (
@@ -589,7 +589,7 @@ export default function OnboardingPriorities() {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
               <button
                 onClick={closeModal}
-                className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+                className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white light:text-black transition-colors"
               >
                 Cancel
               </button>
@@ -637,12 +637,12 @@ function TemplateRow({
         ? 'border-white/10 bg-zinc-900/40 hover:bg-zinc-900/70'
         : 'border-white/5 bg-zinc-900/20 opacity-50'
     }`}>
-      <CheckSquare className="w-4 h-4 text-zinc-500 mt-0.5 flex-shrink-0" />
+      <CheckSquare className="w-4 h-4 text-zinc-500 light:text-black/60 mt-0.5 flex-shrink-0" />
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-white truncate">{tmpl.title}</p>
+        <p className="text-sm font-medium text-white light:text-black truncate">{tmpl.title}</p>
         {tmpl.description && (
-          <p className="text-xs text-zinc-500 mt-0.5 line-clamp-1">{tmpl.description}</p>
+          <p className="text-xs text-zinc-500 light:text-black/60 mt-0.5 line-clamp-1">{tmpl.description}</p>
         )}
         <div className="flex items-center gap-3 mt-1">
           <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider">
@@ -669,7 +669,7 @@ function TemplateRow({
         >
           {tmpl.is_active ? 'Active' : 'Inactive'}
         </button>
-        <button onClick={onEdit} className="text-zinc-500 hover:text-white transition-colors p-1" title="Edit">
+        <button onClick={onEdit} className="text-zinc-500 light:text-black/60 hover:text-white light:text-black transition-colors p-1" title="Edit">
           <Edit2 className="w-3.5 h-3.5" />
         </button>
         <button

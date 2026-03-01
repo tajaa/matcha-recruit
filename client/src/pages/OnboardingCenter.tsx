@@ -242,8 +242,8 @@ export default function OnboardingCenter() {
     <div className="max-w-7xl mx-auto space-y-6 overflow-x-hidden">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/10 pb-6">
         <div className="text-center sm:text-left">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tighter text-white uppercase">Onboarding Center</h1>
-          <p className="text-[10px] sm:text-xs text-zinc-500 mt-2 font-mono uppercase tracking-wide">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tighter text-white light:text-black uppercase">Onboarding Center</h1>
+          <p className="text-[10px] sm:text-xs text-zinc-500 light:text-black/60 mt-2 font-mono uppercase tracking-wide">
             Manage integrations, new hires, and onboarding workflows.
           </p>
         </div>
@@ -282,8 +282,8 @@ export default function OnboardingCenter() {
               data-tour={`onboarding-tab-${tab.id}`}
               className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
                 activeTab === tab.id
-                  ? 'border-white text-white'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-800'
+                  ? 'border-white text-white light:text-black'
+                  : 'border-transparent text-zinc-500 light:text-black/60 hover:text-zinc-300 hover:border-zinc-800'
               }`}
             >
               {tab.label}
@@ -305,8 +305,8 @@ export default function OnboardingCenter() {
               <section data-tour="onboarding-workspace-google-card" className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h2 className="text-sm font-semibold tracking-wide text-white">Google Workspace</h2>
-                    <p className="text-xs text-zinc-500 mt-1">Provision Gmail & groups.</p>
+                    <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Google Workspace</h2>
+                    <p className="text-xs text-zinc-500 light:text-black/60 mt-1">Provision Gmail & groups.</p>
                   </div>
                   <span className={`rounded border px-2 py-1 text-[10px] uppercase tracking-wider ${googleBadge.tone}`}>
                     {googleBadge.label}
@@ -338,8 +338,8 @@ export default function OnboardingCenter() {
               <section data-tour="onboarding-workspace-slack-card" className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h2 className="text-sm font-semibold tracking-wide text-white">Slack</h2>
-                    <p className="text-xs text-zinc-500 mt-1">Auto-invite, channels, and workspace defaults.</p>
+                    <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Slack</h2>
+                    <p className="text-xs text-zinc-500 light:text-black/60 mt-1">Auto-invite, channels, and workspace defaults.</p>
                   </div>
                   <span className={`rounded border px-2 py-1 text-[10px] uppercase tracking-wider ${slackBadge.tone}`}>
                     {slackBadge.label}
@@ -371,8 +371,8 @@ export default function OnboardingCenter() {
               <section className="border border-white/10 bg-zinc-900/50 p-5 space-y-4 opacity-75">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h2 className="text-sm font-semibold tracking-wide text-white">Toast</h2>
-                    <p className="text-xs text-zinc-500 mt-1">POS & location mapping.</p>
+                    <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Toast</h2>
+                    <p className="text-xs text-zinc-500 light:text-black/60 mt-1">POS & location mapping.</p>
                   </div>
                   <span className="rounded border border-zinc-700 bg-zinc-900/70 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-300">
                     Soon
@@ -380,7 +380,7 @@ export default function OnboardingCenter() {
                 </div>
                 <button
                   disabled
-                  className="w-full px-3 py-2 border border-white/10 text-zinc-500 text-[10px] font-bold uppercase tracking-wider cursor-not-allowed"
+                  className="w-full px-3 py-2 border border-white/10 text-zinc-500 light:text-black/60 text-[10px] font-bold uppercase tracking-wider cursor-not-allowed"
                 >
                   Configure
                 </button>
@@ -441,12 +441,12 @@ export default function OnboardingCenter() {
               {(runsProviderFilter || runsStatusFilter) && (
                 <button
                   onClick={() => { setRunsProviderFilter(''); setRunsStatusFilter(''); }}
-                  className="text-[10px] uppercase tracking-wider text-zinc-500 hover:text-white"
+                  className="text-[10px] uppercase tracking-wider text-zinc-500 light:text-black/60 hover:text-white light:text-black"
                 >
                   Clear
                 </button>
               )}
-              <span className="ml-auto text-[10px] text-zinc-500 uppercase tracking-wider">
+              <span className="ml-auto text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-wider">
                 {runs.length} run{runs.length !== 1 ? 's' : ''}
               </span>
             </div>
@@ -458,13 +458,13 @@ export default function OnboardingCenter() {
             )}
 
             {runsLoading ? (
-              <p className="text-xs text-zinc-500 font-mono uppercase tracking-wider animate-pulse py-8 text-center">
+              <p className="text-xs text-zinc-500 light:text-black/60 font-mono uppercase tracking-wider animate-pulse py-8 text-center">
                 Loading activity...
               </p>
             ) : runs.length === 0 ? (
               <div className="flex items-center justify-center h-48 border border-dashed border-white/10 bg-white/5">
                 <div className="text-center">
-                  <p className="text-zinc-500 text-xs font-mono uppercase tracking-wide">No provisioning runs found</p>
+                  <p className="text-zinc-500 light:text-black/60 text-xs font-mono uppercase tracking-wide">No provisioning runs found</p>
                   <p className="text-zinc-600 text-[10px] mt-2">Runs appear here when employees are created or provisioned manually.</p>
                 </div>
               </div>
@@ -491,8 +491,8 @@ export default function OnboardingCenter() {
                       className="grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-3 border border-white/5 bg-zinc-900/30 hover:bg-zinc-900/60 transition-colors"
                     >
                       <div className="min-w-0">
-                        <p className="text-xs text-white truncate">{run.employee_name || '—'}</p>
-                        <p className="text-[10px] text-zinc-500 truncate">{run.employee_email || run.employee_id}</p>
+                        <p className="text-xs text-white light:text-black truncate">{run.employee_name || '—'}</p>
+                        <p className="text-[10px] text-zinc-500 light:text-black/60 truncate">{run.employee_email || run.employee_id}</p>
                         {run.last_error && (
                           <p className="text-[10px] text-red-400 mt-0.5 truncate" title={run.last_error}>
                             {run.last_error}
@@ -505,10 +505,10 @@ export default function OnboardingCenter() {
                       <span className={`self-center px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border w-fit ${statusClass}`}>
                         {run.status}
                       </span>
-                      <span className="text-[10px] text-zinc-500 self-center capitalize">
+                      <span className="text-[10px] text-zinc-500 light:text-black/60 self-center capitalize">
                         {run.trigger_source.replace(/_/g, ' ')}
                       </span>
-                      <span className="text-[10px] text-zinc-500 self-center">
+                      <span className="text-[10px] text-zinc-500 light:text-black/60 self-center">
                         {new Date(run.created_at).toLocaleString()}
                       </span>
                     </div>
