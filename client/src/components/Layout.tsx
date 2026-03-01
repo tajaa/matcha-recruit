@@ -695,10 +695,8 @@ export function Layout() {
     }
   }, [themeMode]);
 
-  const isMatchaWork = location.pathname.startsWith('/app/matcha/work');
-  const isOnboarding = location.pathname.startsWith('/app/onboarding');
-  const isOfferLetters = location.pathname.startsWith('/app/offer-letters');
-  const shouldInvertPages = themeMode === 'lightPages' && !isMatchaWork && !isOnboarding && !isOfferLetters;
+  const isMatchaRoute = location.pathname.startsWith('/app/matcha');
+  const shouldInvertPages = themeMode === 'lightPages' && !isMatchaRoute;
 
   const toggleSection = (title: string) => {
     setCollapsedSections(prev => {

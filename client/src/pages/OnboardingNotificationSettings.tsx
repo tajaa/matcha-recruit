@@ -99,7 +99,7 @@ export default function OnboardingNotificationSettings() {
       )}
 
       {/* Email notifications toggle */}
-      <div className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
+      <div className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">Email Notifications</h3>
@@ -126,7 +126,7 @@ export default function OnboardingNotificationSettings() {
       </div>
 
       {/* HR Escalation Emails */}
-      <div className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
+      <div className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4">
         <div>
           <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">HR Escalation Emails</h3>
           <p className="text-[10px] text-zinc-500 light:text-black/60 mt-1">
@@ -141,7 +141,7 @@ export default function OnboardingNotificationSettings() {
             onChange={(e) => setEmailInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEmail(); } }}
             placeholder="hr@company.com"
-            className="flex-1 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-white/30"
+            className="flex-1 bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-white/30"
           />
           <button
             type="button"
@@ -157,7 +157,7 @@ export default function OnboardingNotificationSettings() {
             {settings.hr_escalation_emails.map((email) => (
               <span
                 key={email}
-                className="inline-flex items-center gap-1.5 border border-white/10 bg-zinc-800 px-2.5 py-1 text-[11px] text-zinc-300 light:text-black/80"
+                className="inline-flex items-center gap-1.5 border border-white/10 bg-zinc-800 light:bg-black/[0.05] px-2.5 py-1 text-[11px] text-zinc-300 light:text-black/80"
               >
                 {email}
                 <button
@@ -174,7 +174,7 @@ export default function OnboardingNotificationSettings() {
       </div>
 
       {/* Timing Settings */}
-      <div className="border border-white/10 bg-zinc-900/50 p-5 space-y-5">
+      <div className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-5">
         <div>
           <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">Timing</h3>
           <p className="text-[10px] text-zinc-500 light:text-black/60 mt-1">
@@ -196,7 +196,7 @@ export default function OnboardingNotificationSettings() {
                   reminder_days_before_due: Math.max(1, Math.min(7, parseInt(e.target.value) || 1)),
                 }))
               }
-              className="w-20 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 text-center focus:outline-none focus:border-white/30"
+              className="w-20 bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 text-center focus:outline-none focus:border-white/30"
             />
           </div>
 
@@ -213,7 +213,7 @@ export default function OnboardingNotificationSettings() {
                   escalate_to_manager_after_days: Math.max(1, parseInt(e.target.value) || 1),
                 }))
               }
-              className="w-20 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 text-center focus:outline-none focus:border-white/30"
+              className="w-20 bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 text-center focus:outline-none focus:border-white/30"
             />
           </div>
 
@@ -230,7 +230,7 @@ export default function OnboardingNotificationSettings() {
                   escalate_to_hr_after_days: Math.max(1, parseInt(e.target.value) || 1),
                 }))
               }
-              className="w-20 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 text-center focus:outline-none focus:border-white/30"
+              className="w-20 bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 text-center focus:outline-none focus:border-white/30"
             />
           </div>
         </div>

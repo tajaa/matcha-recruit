@@ -16,7 +16,7 @@ function statusTone(status: string): string {
   if (status === 'connected') return 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200';
   if (status === 'error') return 'border-red-500/40 bg-red-950/30 text-red-200';
   if (status === 'needs_action') return 'border-amber-500/40 bg-amber-950/30 text-amber-200';
-  return 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80';
+  return 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80';
 }
 
 const ONBOARDING_CYCLE_STEPS = [
@@ -202,10 +202,10 @@ export default function OnboardingCenter() {
 
   const googleBadge = useMemo(() => {
     if (loadingGoogle) {
-      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80' };
+      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80' };
     }
     if (!googleStatus || googleStatus.status === 'disconnected') {
-      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80' };
+      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80' };
     }
     if (googleStatus.status === 'connected') {
       return { label: 'Connected', tone: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200' };
@@ -218,10 +218,10 @@ export default function OnboardingCenter() {
 
   const slackBadge = useMemo(() => {
     if (loadingSlack) {
-      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80' };
+      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80' };
     }
     if (!slackStatus || slackStatus.status === 'disconnected') {
-      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80' };
+      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80' };
     }
     if (slackStatus.status === 'connected') {
       return { label: 'Connected', tone: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200' };
@@ -298,13 +298,13 @@ export default function OnboardingCenter() {
       <div className="py-6">
         {activeTab === 'workspace' && (
           <div className="space-y-6">
-            <div className="border border-white/10 bg-zinc-900/40 p-4 text-xs text-zinc-300 light:text-black/80 leading-relaxed">
+            <div className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/40 p-4 text-xs text-zinc-300 light:text-black/80 leading-relaxed">
               Connect external systems to automate employee provisioning. Credentials are encrypted and scoped to your organization.
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {/* Google Workspace Card */}
-              <section data-tour="onboarding-workspace-google-card" className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
+              <section data-tour="onboarding-workspace-google-card" className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Google Workspace</h2>
@@ -337,7 +337,7 @@ export default function OnboardingCenter() {
               </section>
 
               {/* Slack Card */}
-              <section data-tour="onboarding-workspace-slack-card" className="border border-white/10 bg-zinc-900/50 p-5 space-y-4">
+              <section data-tour="onboarding-workspace-slack-card" className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Slack</h2>
@@ -370,13 +370,13 @@ export default function OnboardingCenter() {
               </section>
 
               {/* Toast Card (Coming Soon) */}
-              <section className="border border-white/10 bg-zinc-900/50 p-5 space-y-4 opacity-75">
+              <section className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4 opacity-75">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Toast</h2>
                     <p className="text-xs text-zinc-500 light:text-black/60 mt-1">POS & location mapping.</p>
                   </div>
-                  <span className="rounded border border-zinc-700 bg-zinc-900/70 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-300 light:text-black/80">
+                  <span className="rounded border border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-300 light:text-black/80">
                     Soon
                   </span>
                 </div>
@@ -422,7 +422,7 @@ export default function OnboardingCenter() {
               <select
                 value={runsProviderFilter}
                 onChange={(e) => setRunsProviderFilter(e.target.value)}
-                className="bg-zinc-900 border border-white/10 text-xs text-zinc-300 light:text-black/80 px-3 py-1.5 focus:outline-none focus:border-white/30"
+                className="bg-zinc-900 light:bg-black/[0.03] border border-white/10 text-xs text-zinc-300 light:text-black/80 px-3 py-1.5 focus:outline-none focus:border-white/30"
               >
                 <option value="">All Providers</option>
                 <option value="slack">Slack</option>
@@ -431,7 +431,7 @@ export default function OnboardingCenter() {
               <select
                 value={runsStatusFilter}
                 onChange={(e) => setRunsStatusFilter(e.target.value)}
-                className="bg-zinc-900 border border-white/10 text-xs text-zinc-300 light:text-black/80 px-3 py-1.5 focus:outline-none focus:border-white/30"
+                className="bg-zinc-900 light:bg-black/[0.03] border border-white/10 text-xs text-zinc-300 light:text-black/80 px-3 py-1.5 focus:outline-none focus:border-white/30"
               >
                 <option value="">All Statuses</option>
                 <option value="completed">Completed</option>
@@ -481,7 +481,7 @@ export default function OnboardingCenter() {
                   <span>Time</span>
                 </div>
                 {runs.map((run) => {
-                  let statusClass = 'bg-zinc-800 text-zinc-300 light:text-black/80 border-zinc-700';
+                  let statusClass = 'bg-zinc-800 light:bg-black/[0.05] text-zinc-300 light:text-black/80 border-zinc-700';
                   if (run.status === 'completed') statusClass = 'bg-emerald-900/30 text-emerald-300 border-emerald-600/30';
                   else if (run.status === 'failed') statusClass = 'bg-red-900/30 text-red-300 border-red-600/30';
                   else if (run.status === 'needs_action') statusClass = 'bg-amber-900/30 text-amber-300 border-amber-600/30';
@@ -490,7 +490,7 @@ export default function OnboardingCenter() {
                   return (
                     <div
                       key={run.run_id}
-                      className="grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-3 border border-white/5 bg-zinc-900/30 hover:bg-zinc-900/60 transition-colors"
+                      className="grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-3 border border-white/5 bg-zinc-900 light:bg-black/[0.03]/30 hover:bg-zinc-900 light:bg-black/[0.03]/60 transition-colors"
                     >
                       <div className="min-w-0">
                         <p className="text-xs text-white light:text-black truncate">{run.employee_name || '—'}</p>

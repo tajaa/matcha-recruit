@@ -253,7 +253,7 @@ export default function OnboardingTemplates() {
       {/* Templates grouped by category */}
       {templates.length === 0 ? (
         <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
-          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner flex items-center justify-center">
+          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner flex items-center justify-center">
             <CheckCircle size={24} className="text-zinc-600" />
           </div>
           <h3 className="text-white light:text-black text-sm font-bold mb-1 uppercase tracking-wide">Create your first template</h3>
@@ -276,7 +276,7 @@ export default function OnboardingTemplates() {
                   {categoryTemplates.map((template) => (
                     <div
                       key={template.id}
-                      className={`group bg-zinc-950 hover:bg-zinc-900 transition-colors p-4 flex flex-col sm:flex-row sm:items-center gap-4 ${
+                      className={`group bg-zinc-950 light:bg-black/[0.02] hover:bg-zinc-900 light:bg-black/[0.03] transition-colors p-4 flex flex-col sm:flex-row sm:items-center gap-4 ${
                         !template.is_active ? 'opacity-50' : ''
                       }`}
                     >
@@ -284,7 +284,7 @@ export default function OnboardingTemplates() {
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-bold text-white light:text-black truncate">{template.title}</p>
                           {!template.is_active && (
-                            <span className="text-[10px] px-2 py-0.5 bg-zinc-800 text-zinc-500 light:text-black/60 uppercase tracking-wider rounded">
+                            <span className="text-[10px] px-2 py-0.5 bg-zinc-800 light:bg-black/[0.05] text-zinc-500 light:text-black/60 uppercase tracking-wider rounded">
                               Inactive
                             </span>
                           )}
@@ -310,7 +310,7 @@ export default function OnboardingTemplates() {
                             className={`p-2 rounded transition-colors ${
                               template.is_active
                                 ? 'text-emerald-400 hover:bg-emerald-500/10'
-                                : 'text-zinc-500 light:text-black/60 hover:bg-zinc-800'
+                                : 'text-zinc-500 light:text-black/60 hover:bg-zinc-800 light:bg-black/[0.05]'
                             }`}
                             title={template.is_active ? 'Deactivate' : 'Activate'}
                           >
@@ -318,7 +318,7 @@ export default function OnboardingTemplates() {
                           </button>
                           <button
                             onClick={() => openEditModal(template)}
-                            className="p-2 text-zinc-400 light:text-black/70 hover:text-white light:text-black hover:bg-zinc-800 rounded transition-colors"
+                            className="p-2 text-zinc-400 light:text-black/70 hover:text-white light:text-black hover:bg-zinc-800 light:bg-black/[0.05] rounded transition-colors"
                             title="Edit"
                           >
                             <Edit2 size={16} />
@@ -344,7 +344,7 @@ export default function OnboardingTemplates() {
       {/* Add/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm">
+          <div className="w-full max-w-lg bg-zinc-950 light:bg-black/[0.02] border border-zinc-800 shadow-2xl rounded-sm">
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <h3 className="text-xl font-bold text-white light:text-black uppercase tracking-tight">
                 {editingTemplate ? 'Edit Template' : 'Add Template'}
@@ -367,7 +367,7 @@ export default function OnboardingTemplates() {
                   required
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors"
+                  className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors"
                 />
               </div>
 
@@ -379,7 +379,7 @@ export default function OnboardingTemplates() {
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors resize-none"
+                  className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors resize-none"
                 />
               </div>
 
@@ -391,7 +391,7 @@ export default function OnboardingTemplates() {
                   <select
                     value={formData.category}
                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors"
+                    className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors"
                   >
                     {CATEGORIES.map((cat) => (
                       <option key={cat.value} value={cat.value}>
@@ -409,7 +409,7 @@ export default function OnboardingTemplates() {
                     min="0"
                     value={formData.due_days}
                     onChange={(e) => setFormData({ ...formData, due_days: parseInt(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors"
+                    className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors"
                   />
                 </div>
               </div>
@@ -420,7 +420,7 @@ export default function OnboardingTemplates() {
                   id="is_employee_task"
                   checked={formData.is_employee_task}
                   onChange={(e) => setFormData({ ...formData, is_employee_task: e.target.checked })}
-                  className="w-4 h-4 bg-zinc-900 border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner rounded"
+                  className="w-4 h-4 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner rounded"
                 />
                 <label htmlFor="is_employee_task" className="text-sm text-zinc-400 light:text-black/70">
                   Employee completes this task (vs HR/Manager)

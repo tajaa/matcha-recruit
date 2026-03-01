@@ -239,7 +239,7 @@ export default function OnboardingPriorities() {
   return (
     <div className="space-y-6">
       {/* Info Banner */}
-      <div className="border border-white/10 bg-zinc-900/40 p-4 text-xs text-zinc-300 light:text-black/80 leading-relaxed">
+      <div className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/40 p-4 text-xs text-zinc-300 light:text-black/80 leading-relaxed">
         Priority tasks are automatically assigned to every new hire when they're created.
         Each priority can optionally link to a policy, handbook, or external URL so employees
         know exactly what to read or sign. You'll be notified by email and in-app when each item is completed.
@@ -265,7 +265,7 @@ export default function OnboardingPriorities() {
               <ChevronDown className={`w-3 h-3 transition-transform ${showTemplateDropdown ? 'rotate-180' : ''}`} />
             </button>
             {showTemplateDropdown && (
-              <div className="absolute right-0 top-full mt-1 w-72 bg-zinc-950 border border-white/15 shadow-2xl z-20 max-h-72 overflow-y-auto">
+              <div className="absolute right-0 top-full mt-1 w-72 bg-zinc-950 light:bg-black/[0.02] border border-white/15 shadow-2xl z-20 max-h-72 overflow-y-auto">
                 {loadingAllTemplates ? (
                   <div className="px-4 py-3 text-xs text-zinc-500 light:text-black/60 font-mono">Loading templates...</div>
                 ) : allTemplates.length === 0 ? (
@@ -357,7 +357,7 @@ export default function OnboardingPriorities() {
       {/* Create / Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 bg-black/70 overflow-y-auto">
-          <div className="bg-zinc-950 border border-white/10 w-full max-w-lg shadow-2xl mb-8">
+          <div className="bg-zinc-950 light:bg-black/[0.02] border border-white/10 w-full max-w-lg shadow-2xl mb-8">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
               <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">
                 {editing ? 'Edit Priority' : 'New Priority'}
@@ -378,7 +378,7 @@ export default function OnboardingPriorities() {
                   value={form.title}
                   onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                   placeholder="e.g. Introduce yourself in Slack"
-                  className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                  className="w-full bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
                 />
               </div>
 
@@ -392,7 +392,7 @@ export default function OnboardingPriorities() {
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   placeholder="Optional context for the employee..."
                   rows={2}
-                  className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30 resize-none"
+                  className="w-full bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30 resize-none"
                 />
               </div>
 
@@ -408,7 +408,7 @@ export default function OnboardingPriorities() {
                     max={90}
                     value={form.due_days}
                     onChange={e => setForm(f => ({ ...f, due_days: parseInt(e.target.value) || 0 }))}
-                    className="w-24 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
+                    className="w-24 bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                   />
                   <span className="text-xs text-zinc-500 light:text-black/60">days after start date</span>
                 </div>
@@ -473,7 +473,7 @@ export default function OnboardingPriorities() {
                           const p = policyList.find(p => p.id === e.target.value);
                           handleResourceSelect(e.target.value, p?.title || '');
                         }}
-                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                       >
                         <option value="">— Select a policy —</option>
                         {policyList.map(p => (
@@ -501,7 +501,7 @@ export default function OnboardingPriorities() {
                           const h = handbookList.find(h => h.id === e.target.value);
                           handleResourceSelect(e.target.value, h?.title || '');
                         }}
-                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                       >
                         <option value="">— Select a handbook —</option>
                         {handbookList.map(h => (
@@ -524,7 +524,7 @@ export default function OnboardingPriorities() {
                         value={form.link_url}
                         onChange={e => setForm(f => ({ ...f, link_url: e.target.value }))}
                         placeholder="https://..."
-                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
                       />
                     </div>
                     <div>
@@ -536,7 +536,7 @@ export default function OnboardingPriorities() {
                         value={form.link_label}
                         onChange={e => setForm(f => ({ ...f, link_label: e.target.value }))}
                         placeholder="e.g. Fill out this form"
-                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black placeholder-zinc-600 focus:outline-none focus:border-white/30"
                       />
                     </div>
                   </div>
@@ -559,7 +559,7 @@ export default function OnboardingPriorities() {
                           const t = allTemplates.find(t => t.id === e.target.value);
                           handleResourceSelect(e.target.value, t?.title || '');
                         }}
-                        className="w-full bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
+                        className="w-full bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner px-3 py-2 text-sm text-white light:text-black focus:outline-none focus:border-white/30"
                       >
                         <option value="">— Select a template —</option>
                         {allTemplates.map(t => (
@@ -572,7 +572,7 @@ export default function OnboardingPriorities() {
 
                 {/* Preview of selected link */}
                 {form.link_type && form.link_id && (
-                  <div className="mt-3 px-3 py-2 bg-zinc-900/60 border border-white/5 text-xs text-zinc-400 light:text-black/70">
+                  <div className="mt-3 px-3 py-2 bg-zinc-900 light:bg-black/[0.03]/60 border border-white/5 text-xs text-zinc-400 light:text-black/70">
                     <span className="text-zinc-600 uppercase tracking-wider text-[10px] font-bold mr-2">Linked:</span>
                     {form.link_label || form.link_id}
                   </div>
@@ -634,8 +634,8 @@ function TemplateRow({
   return (
     <div className={`flex items-start gap-4 border px-4 py-3 transition-colors ${
       tmpl.is_active
-        ? 'border-white/10 bg-zinc-900/40 hover:bg-zinc-900/70'
-        : 'border-white/5 bg-zinc-900/20 opacity-50'
+        ? 'border-white/10 bg-zinc-900 light:bg-black/[0.03]/40 hover:bg-zinc-900 light:bg-black/[0.03]/70'
+        : 'border-white/5 bg-zinc-900 light:bg-black/[0.03]/20 opacity-50'
     }`}>
       <CheckSquare className="w-4 h-4 text-zinc-500 light:text-black/60 mt-0.5 flex-shrink-0" />
 
