@@ -1030,7 +1030,7 @@ export default function MatchaWorkThread() {
 
   return (
     <div className="flex flex-col h-full relative" style={{ height: 'calc(100vh - 56px)' }}>
-      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-transparent" />
+      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-black/[0.04]" />
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 light:border-white/30 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] flex-shrink-0 transition-colors">
         <div className="flex items-center gap-3 min-w-0">
