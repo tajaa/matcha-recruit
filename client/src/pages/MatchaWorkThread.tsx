@@ -81,7 +81,7 @@ function WorkbookPreview({ state, threadId, selectedSlideIndex, onSelectSlide }:
 
         {activeView === 'workbook' ? (
           <>
-        <div className="bg-zinc-950 border border-white/10 light:bg-white/40 light:backdrop-blur-xl light:border-white/60 light:shadow-sm p-6 transition-colors">
+        <div className="bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm p-6 transition-colors">
           <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 light:text-zinc-500 mb-1">HR Workbook</p>
           <h2 className="text-xl font-bold text-white light:text-zinc-900 tracking-tight transition-colors">
             {state.workbook_title || 'Untitled Workbook'}
@@ -119,7 +119,7 @@ function WorkbookPreview({ state, threadId, selectedSlideIndex, onSelectSlide }:
             </div>
           ) : (
             sections.map((section, idx) => (
-              <div key={idx} className="bg-zinc-950 border border-white/10 light:bg-white/40 light:backdrop-blur-xl light:border-white/60 light:shadow-sm overflow-hidden transition-colors">
+              <div key={idx} className="bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm overflow-hidden transition-colors">
                 <div className="px-5 py-3 border-b border-white/10 bg-zinc-900/30 light:border-black/5 light:bg-zinc-100/50 transition-colors">
                   <h3 className="text-sm font-bold text-zinc-200 light:text-zinc-800 tracking-wide uppercase transition-colors">
                     {section.title}
@@ -230,7 +230,7 @@ function PresentationPreview({ state, threadId, selectedSlideIndex, onSelectSlid
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-4">
         {/* Cover */}
-        <div className="bg-zinc-950 border border-white/10 light:bg-white/40 light:backdrop-blur-xl light:border-white/60 light:shadow-sm overflow-hidden transition-colors">
+        <div className="bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm overflow-hidden transition-colors">
           {coverImageUrl && (
             <img src={coverImageUrl} alt="Cover" className="w-full h-48 object-cover" />
           )}
@@ -355,7 +355,7 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       {!isUser && (
-        <div className="w-7 h-7 bg-matcha-600 light:bg-white/40 light:border-white/60 light:shadow-[0_2px_12px_rgba(0,0,0,0.03)] light:backdrop-blur-xl flex items-center justify-center mr-2 flex-shrink-0 mt-0.5 rounded-sm transition-colors">
+        <div className="w-7 h-7 bg-matcha-600 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] flex items-center justify-center mr-2 flex-shrink-0 mt-0.5 rounded-sm transition-colors">
           <svg className="w-3.5 h-3.5 text-white light:text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.5l1.196 4.784" />
           </svg>
@@ -365,7 +365,7 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
         className={`max-w-[75%] px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap transition-colors ${
           isUser
             ? 'bg-matcha-600 text-white light:bg-black light:shadow-md'
-            : 'bg-zinc-800 text-zinc-200 border border-white/10 light:bg-white/40 light:backdrop-blur-xl light:border-white/60 light:text-zinc-800 light:shadow-sm light:backdrop-blur-md'
+            : 'bg-zinc-800 text-zinc-200 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:text-zinc-800 light:shadow-sm light:backdrop-blur-md'
         }`}
       >
         {msg.content}
@@ -1032,7 +1032,7 @@ export default function MatchaWorkThread() {
     <div className="flex flex-col h-full relative" style={{ height: 'calc(100vh - 56px)' }}>
       <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-transparent" />
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 light:border-black/5 light:bg-white/40 light:backdrop-blur-xl flex-shrink-0 transition-colors">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 light:border-white/30 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] flex-shrink-0 transition-colors">
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => navigate('/app/matcha/work/chats')}
@@ -1338,7 +1338,7 @@ export default function MatchaWorkThread() {
                       : 'Describe changes or add details...'
                   }
                   rows={1}
-                  className="flex-1 bg-zinc-900 border border-white/10 light:bg-black/[0.03] light:focus:bg-white/30 light:border-black/5 light:backdrop-blur-md light:shadow-inner px-3.5 py-2.5 text-sm text-zinc-200 light:text-zinc-900 placeholder-zinc-500 light:placeholder-zinc-500/70 resize-none focus:outline-none focus:border-white/20 light:focus:border-zinc-400 disabled:opacity-50 transition-all rounded-sm"
+                  className="flex-1 bg-zinc-900 border border-white/10 light:bg-black/[0.04] light:focus:bg-white/20 light:border-white/30 light:backdrop-blur-[40px] light:shadow-[inset_0_2px_8px_rgba(0,0,0,0.04)] px-3.5 py-2.5 text-sm text-zinc-200 light:text-zinc-900 placeholder-zinc-500 light:placeholder-zinc-500/70 resize-none focus:outline-none focus:border-white/20 light:focus:border-zinc-400 disabled:opacity-50 transition-all rounded-sm"
                   style={{ minHeight: '42px', maxHeight: '120px' }}
                   onInput={(e) => {
                     const t = e.currentTarget;
@@ -1461,7 +1461,7 @@ export default function MatchaWorkThread() {
                 />
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                  <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-white/40 light:backdrop-blur-xl light:border-white/60 flex items-center justify-center mb-3 transition-colors">
+                  <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] flex items-center justify-center mb-3 transition-colors">
                     <svg className="w-6 h-6 text-zinc-600 light:text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
@@ -1487,7 +1487,7 @@ export default function MatchaWorkThread() {
               />
             ) : hasOnboardingPreviewContent ? (
               <div className="h-full overflow-y-auto p-4">
-                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/40 light:backdrop-blur-xl light:border-white/60 light:shadow-sm p-4 space-y-3 transition-colors">
+                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm p-4 space-y-3 transition-colors">
                   <p className="text-xs uppercase tracking-wider text-zinc-500 light:text-zinc-500">Employee Onboarding</p>
                   <p className="text-sm text-zinc-300 light:text-zinc-900">{(thread.current_state.employees as unknown[])?.length || 0} employee(s) queued</p>
                   <p className="text-xs text-zinc-500 light:text-zinc-500">Batch status: {thread.current_state.batch_status || 'collecting'}</p>
@@ -1495,7 +1495,7 @@ export default function MatchaWorkThread() {
               </div>
             ) : (
               <div className="h-full overflow-y-auto p-4">
-                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/40 light:backdrop-blur-xl light:border-white/60 light:shadow-sm p-4 space-y-4 transition-colors">
+                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm p-4 space-y-4 transition-colors">
                   <div>
                     <p className="text-xs uppercase tracking-wider text-zinc-500 light:text-zinc-500">Anonymous Review</p>
                     <h3 className="text-base font-semibold text-zinc-100 mt-1">

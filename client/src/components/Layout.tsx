@@ -820,13 +820,14 @@ export function Layout() {
 
       {/* Abstract Glassmorphism Background Blobs (Light mode only) */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 hidden light:block">
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-white/40 blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[-5%] w-[60%] h-[60%] rounded-full bg-[#d1d5db]/50 blur-[100px]" />
-        <div className="absolute top-[30%] right-[15%] w-[30%] h-[30%] rounded-full bg-[#cbd5e1]/40 blur-[90px]" />
+        <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-white/60 blur-[120px]" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[70%] h-[70%] rounded-full bg-[#cbd5e1]/60 blur-[140px]" />
+        <div className="absolute top-[20%] right-[10%] w-[40%] h-[40%] rounded-full bg-[#e2e8f0]/80 blur-[100px]" />
+        <div className="absolute bottom-[20%] left-[10%] w-[30%] h-[30%] rounded-full bg-[#f1f5f9]/80 blur-[100px]" />
       </div>
 
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 light:bg-white/30 light:backdrop-blur-2xl border-r border-white/10 light:border-white/40 light:shadow-[1px_0_12px_rgba(0,0,0,0.03)] ${themeMode === 'lightSidebar' ? 'invert brightness-90 hue-rotate-180' : ''}`}>
+      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 light:bg-white/10 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] border-r border-white/10 light:border-white/30 light:shadow-[1px_0_24px_rgba(0,0,0,0.02),inset_-1px_0_0_rgba(255,255,255,0.4)] ${themeMode === 'lightSidebar' ? 'invert brightness-90 hue-rotate-180' : ''}`}>
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-white/10 light:border-black/5">
           <Link to="/" className="flex items-center gap-3 group">

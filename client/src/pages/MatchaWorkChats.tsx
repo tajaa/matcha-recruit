@@ -87,7 +87,7 @@ export default function MatchaWorkChats() {
       <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between gap-3 mb-5">
         <div>
-          <div className="inline-flex items-center bg-zinc-800 light:bg-white/30 light:backdrop-blur-2xl light:border-white/40 light:shadow-[0_4px_12px_rgba(0,0,0,0.03)] rounded-lg p-0.5 mb-2 transition-colors">
+          <div className="inline-flex items-center bg-zinc-800 light:bg-white/10 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/30 light:shadow-[0_4px_24px_rgba(0,0,0,0.02),inset_0_1px_1px_rgba(255,255,255,0.4)] rounded-lg p-0.5 mb-2 transition-colors">
             <button
               onClick={() => navigate('/app/matcha/work')}
               className="px-3 py-1 text-xs rounded text-zinc-400 hover:text-zinc-200 light:text-black/60 light:hover:text-black transition-colors"
@@ -176,7 +176,7 @@ export default function MatchaWorkChats() {
                   navigate(`/app/matcha/work/${thread.id}`);
                 }
               }}
-              className="w-full flex items-center justify-between p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 light:bg-white/40 light:backdrop-blur-xl light:hover:bg-white/60 light:border-white/50 light:hover:border-white/80 light:shadow-[0_2px_12px_rgba(0,0,0,0.03)] rounded-lg text-left transition-all duration-200 group cursor-pointer"
+              className="w-full flex items-center justify-between p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:hover:bg-white/30 light:border-white/40 light:hover:border-white/60 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] rounded-lg text-left transition-all duration-200 group cursor-pointer"
             >
               <div className="min-w-0">
                 <p className="text-sm font-medium text-zinc-200 truncate group-hover:text-white light:text-black light:group-hover:text-black transition-colors">
