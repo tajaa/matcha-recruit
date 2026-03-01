@@ -63,7 +63,7 @@ export default function MatchaWorkElements() {
 
   return (
     <div className="relative min-h-[calc(100vh-8rem)]">
-      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-black/[0.04]" />
+      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-black/[0.12]" />
       <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between gap-3 mb-5">
         <div>
