@@ -295,7 +295,7 @@ For each outcome path, provide:
 - policy_basis: Which company policies or legal standards support this outcome
 - hr_considerations: Best practice notes, risks, or mitigating factors to consider
 - precedent_note: How this aligns with the company's past case outcomes (use the precedent stats provided)
-- confidence: "high", "moderate", or "low" based on evidence strength for this path
+- confidence: "high", "medium", or "low" based on evidence strength for this path
 
 Order outcomes from most to least supported by evidence.
 
@@ -320,7 +320,7 @@ Rules:
 - Provide 2 to 4 outcome paths, sorted by evidence strength
 - Always include at least one path with a different determination when evidence allows
 - Be objective — present options, don't advocate for one
-- confidence must be "high", "moderate", or "low"
+- confidence must be "high", "medium", or "low"
 - Keep reasoning concise but cite specific evidence
 - If precedent data is sparse, say so honestly in precedent_note"""
 
@@ -740,21 +740,20 @@ class ERAnalyzer:
         Returns:
             Dict with outcomes list and case_summary.
         """
-        prompt = OUTCOME_ANALYSIS_PROMPT.format(
-            case_info=json.dumps(case_info, indent=2),
-            analysis_summary=analysis_summary or "No analysis summary available.",
-            policy_findings=policy_findings or "No policy findings available.",
-            precedent_stats=json.dumps(precedent_stats, indent=2) if precedent_stats else "No prior case data available.",
-        )
-
         try:
+            prompt = OUTCOME_ANALYSIS_PROMPT.format(
+                case_info=json.dumps(case_info, indent=2, default=str),
+                analysis_summary=analysis_summary or "No analysis summary available.",
+                policy_findings=policy_findings or "No policy findings available.",
+                precedent_stats=json.dumps(precedent_stats, indent=2, default=str) if precedent_stats else "No prior case data available.",
+            )
             text = await self._generate_content_async(prompt)
             result = self._parse_json_response(text)
             result["generated_at"] = datetime.now(timezone.utc).isoformat()
             result["model"] = self.model
             return result
         except Exception as exc:
-            logger.warning("Outcome analysis generation failed: %s", exc)
+            logger.warning("Outcome analysis generation failed: %s", exc, exc_info=True)
             return {
                 "outcomes": [],
                 "case_summary": "Unable to generate outcome analysis. Please review the case manually.",

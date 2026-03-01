@@ -1452,7 +1452,7 @@ export function ERCaseDetail() {
                         const isSelected = selectedOutcomeIdx === idx;
                         const confColor = outcome.confidence === 'high'
                           ? 'text-emerald-700 bg-emerald-100'
-                          : outcome.confidence === 'moderate'
+                          : outcome.confidence === 'medium'
                             ? 'text-amber-700 bg-amber-100'
                             : 'text-zinc-600 bg-zinc-100';
                         const detColor = outcome.determination === 'substantiated'

@@ -1682,7 +1682,7 @@ export interface OutcomeOption {
   policy_basis: string;
   hr_considerations: string;
   precedent_note: string;
-  confidence: 'high' | 'moderate' | 'low';
+  confidence: 'high' | 'medium' | 'low';
 }
 
 export interface OutcomeAnalysisResponse {
