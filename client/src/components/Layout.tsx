@@ -773,7 +773,7 @@ export function Layout() {
           <Link
             to={item.path}
             className={`flex-1 min-w-0 flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
-                ? 'text-white bg-zinc-800 border-l-2 border-white light:text-black light:bg-black/5 light:border-black'
+                ? 'text-white bg-zinc-800 border-l-2 border-white light:text-black light:bg-white/50 light:backdrop-blur-md light:shadow-[0_4px_12px_rgba(0,0,0,0.05)] light:border-white/60'
                 : 'text-zinc-300 hover:text-white border-l-2 border-transparent hover:border-zinc-700 light:text-black/60 light:hover:text-black light:hover:border-black/20'
               }`}
             title={item.label}
@@ -814,12 +814,19 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 light:bg-gradient-to-b light:from-[#d9d9d9] light:to-[#b3b3b3] text-zinc-400 light:text-black/70 font-sans selection:bg-white selection:text-black light:selection:bg-black light:selection:text-white">
+    <div className="min-h-screen bg-zinc-950 light:bg-[#e4e4e7] text-zinc-400 light:text-black/70 font-sans selection:bg-white selection:text-black light:selection:bg-black light:selection:text-white">
       {/* Noise Overlay */}
       <div className="fixed inset-0 pointer-events-none z-50 bg-noise opacity-30 mix-blend-overlay light:mix-blend-multiply light:opacity-[0.03]" />
 
+      {/* Abstract Glassmorphism Background Blobs (Light mode only) */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 hidden light:block">
+        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-white/40 blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-5%] w-[60%] h-[60%] rounded-full bg-[#d1d5db]/50 blur-[100px]" />
+        <div className="absolute top-[30%] right-[15%] w-[30%] h-[30%] rounded-full bg-[#cbd5e1]/40 blur-[90px]" />
+      </div>
+
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 light:bg-transparent light:backdrop-blur-2xl border-r border-white/10 light:border-black/5 ${themeMode === 'lightSidebar' ? 'invert brightness-90 hue-rotate-180' : ''}`}>
+      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 light:bg-white/30 light:backdrop-blur-2xl border-r border-white/10 light:border-white/40 light:shadow-[1px_0_12px_rgba(0,0,0,0.03)] ${themeMode === 'lightSidebar' ? 'invert brightness-90 hue-rotate-180' : ''}`}>
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-white/10 light:border-black/5">
           <Link to="/" className="flex items-center gap-3 group">
@@ -892,7 +899,7 @@ export function Layout() {
             </span>
           </button>
 
-          <div className="mt-4 px-3 py-3 bg-zinc-900 border border-white/5 light:bg-black/5 light:border-black/5">
+          <div className="mt-4 px-3 py-3 bg-zinc-900 border border-white/5 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner">
             {companyName && (
               <div className="text-[10px] font-bold text-white light:text-black tracking-widest uppercase truncate mb-2 pb-2 border-b border-white/10 light:border-black/10">
                 {companyName}
