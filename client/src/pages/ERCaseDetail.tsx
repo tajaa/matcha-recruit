@@ -264,6 +264,8 @@ function getSuggestedGuidancePayload(note: ERCaseNote | null): ERSuggestedGuidan
         : 'unknown',
     fallback_used: raw.fallback_used === true,
     determination_suggested: raw.determination_suggested === true,
+    determination_confidence: typeof raw.determination_confidence === 'number' ? raw.determination_confidence : undefined,
+    determination_signals: Array.isArray(raw.determination_signals) ? (raw.determination_signals as string[]) : undefined,
   };
 }
 
@@ -1303,8 +1305,25 @@ export function ERCaseDetail() {
                 <div className="border border-amber-200 bg-amber-50 p-3 rounded-sm mb-3 space-y-2">
                   <p className="text-xs font-medium text-amber-900">Ready for a determination?</p>
                   <p className="text-xs text-amber-800 leading-relaxed">
-                    We've collected substantial evidence and analysis for this case. Would you like to focus on a conclusion?
+                    The current case file contains evidence that appears to meet the standard of
+                    'preponderance of the evidence.' Continuing to investigate may produce diminishing returns.
                   </p>
+                  {latestGuidancePayload?.determination_confidence != null && (
+                    <div className="mt-1.5 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 bg-amber-200 rounded-full overflow-hidden">
+                          <div className="h-full bg-amber-600 rounded-full"
+                               style={{ width: `${Math.round(latestGuidancePayload.determination_confidence * 100)}%` }} />
+                        </div>
+                        <span className="text-[10px] font-mono text-amber-700">
+                          {Math.round(latestGuidancePayload.determination_confidence * 100)}%
+                        </span>
+                      </div>
+                      {latestGuidancePayload.determination_signals?.map((s, i) => (
+                        <p key={i} className="text-[10px] text-amber-600">&middot; {s}</p>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-center gap-3">
                     <button
                       onClick={async () => {
@@ -1324,7 +1343,7 @@ export function ERCaseDetail() {
                       disabled={determinationAccepting}
                       className="text-xs font-medium text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1 rounded-sm disabled:opacity-50"
                     >
-                      {determinationAccepting ? 'Working...' : "Yes, let's wrap up"}
+                      {determinationAccepting ? 'Working...' : 'Proceed to case determination'}
                     </button>
                     <button
                       onClick={async () => {
@@ -1347,9 +1366,14 @@ export function ERCaseDetail() {
                       }}
                       className="text-xs text-amber-700 hover:text-amber-900"
                     >
-                      Continue investigating
+                      Continue investigation
                     </button>
                   </div>
+                  {latestGuidancePayload?.cards && latestGuidancePayload.cards.length > 0 && (
+                    <p className="text-[10px] text-amber-600 mt-1">
+                      Still open: {latestGuidancePayload.cards.slice(0, 2).map(c => c.title).join(', ')}
+                    </p>
+                  )}
                 </div>
               )}
 

@@ -300,6 +300,28 @@ def _build_fallback_guidance_payload(
     }
 
 
+def _determination_confidence_floor(
+    completed_doc_count: int,
+    transcript_count: int,
+    has_analyses: bool,
+    has_policy_violations: bool,
+) -> float:
+    """Return a deterministic minimum confidence based on simple evidence counts.
+
+    This is the fallback if the LLM confidence call fails — ensures the system
+    never returns 0.0 and has a reasonable baseline.
+    """
+    if has_policy_violations and transcript_count >= 2:
+        return 0.35
+    if has_policy_violations:
+        return 0.30
+    if has_analyses:
+        return 0.20
+    if transcript_count >= 1:
+        return 0.15
+    return 0.10
+
+
 def _normalize_suggested_guidance_payload(
     raw_payload: Any,
     fallback_payload: dict[str, Any],

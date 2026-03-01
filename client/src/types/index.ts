@@ -1667,6 +1667,8 @@ export interface ERSuggestedGuidanceResponse {
   model: string;
   fallback_used: boolean;
   determination_suggested: boolean;
+  determination_confidence?: number;
+  determination_signals?: string[];
 }
 
 // Document types

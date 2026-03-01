@@ -236,6 +236,8 @@ class SuggestedGuidanceResponse(BaseModel):
     model: str
     fallback_used: bool = False
     determination_suggested: bool = False
+    determination_confidence: float = 0.0
+    determination_signals: list[str] = []
 
 
 # ===========================================

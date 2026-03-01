@@ -217,6 +217,62 @@ The letter should be suitable for delivery to the employee and potential inclusi
 
 Return the letter as plain text, professionally formatted."""
 
+DETERMINATION_CONFIDENCE_PROMPT = """You are evaluating the strength of evidence in an internal company policy investigation.
+Your job is to assess how confident we can be that a policy infraction occurred, based on the
+available evidence. Score from 0.10 (case just opened, no evidence yet) to 0.95 (overwhelming evidence).
+
+Evaluate these four signals:
+
+1. DUAL CONFIRMATION — Is the reported issue supported by both evidence AND at least one
+   witness who corroborates it? Look for multiple people describing the same behavior/incident.
+
+2. ADMISSION — Has the subject acknowledged, admitted, or taken responsibility for the
+   act or policy violation in any interview or statement? Look for direct or indirect admissions.
+
+3. DIMINISHING RETURNS — Have multiple people been interviewed with consistent accounts
+   and no significant new information emerging? This suggests further investigation
+   is unlikely to change the picture.
+
+4. HARD EVIDENCE — Is there documented proof (data, records, policy text matched to actions)
+   that directly demonstrates a policy violation?
+
+CASE INFORMATION:
+{case_info}
+
+EVIDENCE DOCUMENTS:
+{evidence_overview}
+
+TRANSCRIPT EXCERPTS:
+{transcript_excerpts}
+
+ANALYSIS RESULTS:
+Timeline: {timeline_summary}
+Discrepancies: {discrepancies_summary}
+Policy findings: {policy_summary}
+
+Return ONLY a JSON object:
+{{
+  "confidence": 0.XX,
+  "signals": [
+    {{
+      "name": "hard_evidence" | "admission" | "dual_confirmation" | "diminishing_returns",
+      "present": true/false,
+      "strength": "strong" | "moderate" | "weak",
+      "reasoning": "1 sentence explaining why this signal is/isn't present"
+    }}
+  ],
+  "summary": "1-2 sentence overall assessment of evidence strength"
+}}
+
+Rules:
+- confidence must be between 0.10 and 0.95
+- Always evaluate all 4 signals even if not present (set present: false)
+- Be calibrated: 0.10-0.30 = early/weak, 0.30-0.50 = building, 0.50-0.70 = substantial, 0.70-0.95 = strong/overwhelming
+- A single strong signal (clear admission, hard proof) can justify 0.50+
+- Multiple moderate signals compound to higher confidence
+- Do NOT inflate confidence — be honest about gaps"""
+
+
 SUGGESTED_GUIDANCE_PROMPT = """You are an Employee Relations investigation assistant generating interactive next-step guidance for an active case.
 
 CASE INFORMATION:
@@ -545,6 +601,41 @@ class ERAnalyzer:
         )
 
         return await self._generate_content_async(prompt)
+
+    async def evaluate_determination_confidence(
+        self,
+        case_info: dict[str, Any],
+        evidence_overview: dict[str, Any],
+        transcript_excerpts: str,
+        timeline_summary: str,
+        discrepancies_summary: str,
+        policy_summary: str,
+    ) -> dict[str, Any]:
+        """Evaluate evidence confidence for determination readiness.
+
+        Returns a dict with confidence score (0.10-0.95), signal assessments,
+        and summary. Falls back to a minimal result on any failure.
+        """
+        prompt = DETERMINATION_CONFIDENCE_PROMPT.format(
+            case_info=json.dumps(case_info, indent=2),
+            evidence_overview=json.dumps(evidence_overview, indent=2),
+            transcript_excerpts=transcript_excerpts or "No transcripts available.",
+            timeline_summary=timeline_summary or "Not yet analyzed",
+            discrepancies_summary=discrepancies_summary or "Not yet analyzed",
+            policy_summary=policy_summary or "Not yet analyzed",
+        )
+        try:
+            text = await self._generate_content_async(prompt)
+            result = self._parse_json_response(text)
+            # Clamp confidence to valid range
+            conf = result.get("confidence", 0.10)
+            if not isinstance(conf, (int, float)):
+                conf = 0.10
+            result["confidence"] = max(0.10, min(0.95, float(conf)))
+            return result
+        except Exception as exc:
+            logger.warning("Determination confidence evaluation failed: %s", exc)
+            return {"confidence": 0.10, "signals": [], "summary": "Insufficient data"}
 
     async def generate_suggested_guidance(
         self,

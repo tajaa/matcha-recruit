@@ -8,6 +8,7 @@ Employee Relations Investigation management:
 - Evidence search (RAG)
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -26,6 +27,7 @@ from ...config import get_settings
 from ...core.services.storage import get_storage
 from ..services.er_guidance import (
     _build_fallback_guidance_payload,
+    _determination_confidence_floor,
     _normalize_analysis_payload,
     _normalize_suggested_guidance_payload,
 )
@@ -1710,6 +1712,16 @@ async def generate_suggested_guidance(
             ["timeline", "discrepancies", "policy_check"],
         )
 
+        transcript_rows = await conn.fetch(
+            """
+            SELECT id, filename, scrubbed_text
+            FROM er_case_documents
+            WHERE case_id = $1 AND processing_status = 'completed' AND document_type = 'transcript'
+            ORDER BY created_at DESC
+            """,
+            case_id,
+        )
+
     analysis_map: dict[str, dict[str, Any]] = {}
     for row in analysis_rows:
         analysis_type = str(row["analysis_type"])
@@ -1782,23 +1794,76 @@ async def generate_suggested_guidance(
         "policy_check": policy_data,
     }
 
+    # Build transcript excerpts for confidence eval (truncate each to ~2000 chars)
+    transcript_parts: list[str] = []
+    for tr in transcript_rows:
+        text = tr["scrubbed_text"] or ""
+        if len(text) > 2000:
+            text = text[:1000] + "\n...\n" + text[-1000:]
+        transcript_parts.append(f"--- {tr['filename']} ---\n{text}")
+    transcript_excerpts = "\n\n".join(transcript_parts) if transcript_parts else ""
+
+    has_policy_violations = bool(policy_data.get("violations"))
+    has_analyses = any(analyses_completed.values())
+    floor_confidence = _determination_confidence_floor(
+        completed_doc_count=len(completed_non_policy_docs),
+        transcript_count=len(transcript_rows),
+        has_analyses=has_analyses,
+        has_policy_violations=has_policy_violations,
+    )
+
     try:
         analyzer = _build_er_analyzer()
-        raw_payload = await analyzer.generate_suggested_guidance(
+        guidance_task = analyzer.generate_suggested_guidance(
             case_info=case_info,
             intake_context=intake_context if isinstance(intake_context, dict) else {},
             evidence_overview=evidence_overview,
             analysis_results=analysis_results,
         )
-        payload = _normalize_suggested_guidance_payload(
-            raw_payload,
-            fallback_payload=fallback_payload,
-            can_run_discrepancies=can_run_discrepancies,
-            model_name=analyzer.model,
+        confidence_task = analyzer.evaluate_determination_confidence(
+            case_info=case_info,
+            evidence_overview={"doc_count": len(completed_non_policy_docs), "transcript_count": len(transcript_rows)},
+            transcript_excerpts=transcript_excerpts,
+            timeline_summary=timeline_data.get("timeline_summary", ""),
+            discrepancies_summary=discrepancies_data.get("summary", ""),
+            policy_summary=policy_data.get("summary", ""),
         )
+        raw_payload, confidence_result = await asyncio.gather(
+            guidance_task, confidence_task, return_exceptions=True,
+        )
+
+        # Handle guidance result
+        if isinstance(raw_payload, BaseException):
+            logger.warning("Suggested guidance generation failed for case %s: %s", case_id, raw_payload)
+            payload = fallback_payload
+        else:
+            payload = _normalize_suggested_guidance_payload(
+                raw_payload,
+                fallback_payload=fallback_payload,
+                can_run_discrepancies=can_run_discrepancies,
+                model_name=analyzer.model,
+            )
+
+        # Handle confidence result
+        if isinstance(confidence_result, BaseException):
+            logger.warning("Confidence eval failed for case %s: %s", case_id, confidence_result)
+            confidence_result = {"confidence": floor_confidence, "signals": [], "summary": ""}
+
+        confidence = confidence_result.get("confidence", floor_confidence)
+        if not isinstance(confidence, (int, float)):
+            confidence = floor_confidence
+        confidence = max(floor_confidence, float(confidence))
+        signals = [s for s in confidence_result.get("signals", []) if isinstance(s, dict) and s.get("present")]
+        determination_signals = [s["reasoning"] for s in signals if isinstance(s.get("reasoning"), str)]
+
+        payload["determination_suggested"] = confidence >= 0.50
+        payload["determination_confidence"] = round(confidence, 2)
+        payload["determination_signals"] = determination_signals
+
         return SuggestedGuidanceResponse(**payload)
     except Exception as exc:
         logger.warning("Suggested guidance generation failed for case %s: %s", case_id, exc)
+        fallback_payload["determination_confidence"] = floor_confidence
         return SuggestedGuidanceResponse(**fallback_payload)
 
 
