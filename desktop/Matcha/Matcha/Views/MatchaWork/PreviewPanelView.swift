@@ -305,6 +305,7 @@ struct PresentationPreview: View {
         let index: Int
         let title: String
         let bullets: [String]
+        let speakerNotes: String?
     }
 
     var presentationTitle: String { (state["presentation_title"]?.value as? String) ?? "Presentation" }
@@ -317,7 +318,8 @@ struct PresentationPreview: View {
             guard let dict = item.value as? [String: AnyCodable] else { return nil }
             let title = (dict["title"]?.value as? String) ?? ""
             let bullets = (dict["bullets"]?.value as? [AnyCodable])?.compactMap { $0.value as? String } ?? []
-            return SlideEntry(index: index + 1, title: title, bullets: bullets)
+            let speakerNotes = dict["speaker_notes"]?.value as? String
+            return SlideEntry(index: index + 1, title: title, bullets: bullets, speakerNotes: speakerNotes)
         }
     }
 
@@ -440,6 +442,16 @@ struct PresentationPreview: View {
                                     }
                                 }
                                 .padding(.leading, 26)
+                            }
+                            if let notes = slide.speakerNotes, !notes.isEmpty {
+                                Text(notes)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                    .lineSpacing(2)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(Color.white.opacity(0.04))
+                                    .cornerRadius(4)
                             }
                         }
                         .padding(12)

@@ -13,6 +13,21 @@ struct ChatPanelView: View {
         Task { await viewModel.sendMessage(content: content) }
     }
 
+    private var selectedSlideTitle: String? {
+        guard let idx = viewModel.selectedSlideIndex,
+              let raw = viewModel.currentState["slides"]?.value as? [AnyCodable],
+              idx < raw.count,
+              let dict = raw[idx].value as? [String: AnyCodable] else { return nil }
+        return dict["title"]?.value as? String
+    }
+
+    private var inputPlaceholder: String {
+        if let idx = viewModel.selectedSlideIndex {
+            return "Edit slide \(idx + 1) — describe your changes..."
+        }
+        return "Message..."
+    }
+
     private func pickImages() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
@@ -114,6 +129,38 @@ struct ChatPanelView: View {
                     Divider().opacity(0.3)
                 }
 
+                // Slide selection indicator
+                if let idx = viewModel.selectedSlideIndex {
+                    HStack(spacing: 6) {
+                        Image(systemName: "rectangle.on.rectangle")
+                            .font(.system(size: 11))
+                            .foregroundColor(.matcha500)
+                        let title = selectedSlideTitle
+                        Text("Slide \(idx + 1)\(title.map { ": \($0)" } ?? "")")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color.matcha500.opacity(0.85))
+                        Spacer()
+                        Button {
+                            viewModel.selectedSlideIndex = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear slide selection")
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(Color.matcha500.opacity(0.08))
+                    .overlay(
+                        Rectangle()
+                            .frame(height: 1)
+                            .foregroundColor(Color.matcha500.opacity(0.2)),
+                        alignment: .top
+                    )
+                }
+
                 // Input area
                 HStack(alignment: .bottom, spacing: 10) {
                     // Image attach button
@@ -135,7 +182,7 @@ struct ChatPanelView: View {
                         : "Upload images (\(viewModel.presentationImageURLs.count)/4)"
                     )
 
-                    TextField("Message...", text: $inputText, axis: .vertical)
+                    TextField(inputPlaceholder, text: $inputText, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 14))
                         .foregroundColor(.white)

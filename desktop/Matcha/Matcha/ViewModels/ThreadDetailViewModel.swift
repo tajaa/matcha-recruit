@@ -66,6 +66,9 @@ class ThreadDetailViewModel {
         // Cancel any in-flight stream
         streamingTask?.cancel()
 
+        // Capture and clear slide selection before send
+        let capturedSlideIndex = selectedSlideIndex
+
         // Optimistically add user message
         let tempUserMsg = MWMessage(
             id: UUID().uuidString,
@@ -79,6 +82,7 @@ class ThreadDetailViewModel {
             messages.append(tempUserMsg)
             isStreaming = true
             streamingContent = ""
+            selectedSlideIndex = nil
         }
 
         guard let url = URL(string: "\(basePath)/threads/\(threadId)/messages/stream") else {
@@ -102,7 +106,7 @@ class ThreadDetailViewModel {
             }
         }
         request.httpBody = try? JSONEncoder().encode(
-            SendBody(content: content, slideIndex: selectedSlideIndex)
+            SendBody(content: content, slideIndex: capturedSlideIndex)
         )
 
         let task = Task {
