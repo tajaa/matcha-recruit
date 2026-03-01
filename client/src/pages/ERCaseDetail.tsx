@@ -395,6 +395,7 @@ export function ERCaseDetail() {
   const [determinationNotes, setDeterminationNotes] = useState('');
   const [closingCase, setClosingCase] = useState(false);
   const outcomeLoadingRef = useRef(false);
+  const determinationPanelRef = useRef<HTMLDivElement>(null);
 
   // Standalone add-note state
   const [newNoteContent, setNewNoteContent] = useState('');
@@ -594,10 +595,10 @@ export function ERCaseDetail() {
 
   // Auto-load outcome analysis when visiting a pending_determination case
   useEffect(() => {
-    if (!loading && erCase?.status === 'pending_determination' && !outcomeAnalysis && !outcomeLoadingRef.current) {
+    if (!loading && erCase?.status === 'pending_determination' && !outcomeAnalysis && !outcomeError && !outcomeLoadingRef.current) {
       fetchOutcomeAnalysis();
     }
-  }, [loading, erCase?.status, outcomeAnalysis, fetchOutcomeAnalysis]);
+  }, [loading, erCase?.status, outcomeAnalysis, outcomeError, fetchOutcomeAnalysis]);
 
   useEffect(() => {
     autoReviewSignatureRef.current = null;
@@ -1418,164 +1419,323 @@ export function ERCaseDetail() {
             )}
           </div>
 
-          {showAssistancePanel && (
+          {(showAssistancePanel || erCase.status === 'pending_determination') && (
             <div className="pt-4 border-t border-zinc-200">
-              <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Suggested Guidance</h3>
+              {erCase.status === 'pending_determination' ? (
+                /* Determination Panel — replaces guidance when in determination mode */
+                <div ref={determinationPanelRef} className="space-y-4">
+                  <h3 className="text-[10px] uppercase tracking-wider text-zinc-500">Case Determination</h3>
 
-              {showDeterminationBanner && (
-                <div className="border border-amber-200 bg-amber-50 p-3 rounded-sm mb-3 space-y-2">
-                  <p className="text-xs font-medium text-amber-900">Ready for a determination?</p>
-                  <p className="text-xs text-amber-800 leading-relaxed">
-                    The current case file contains evidence that appears to meet the standard of
-                    'preponderance of the evidence.' Continuing to investigate may produce diminishing returns.
-                  </p>
-                  {latestGuidancePayload?.determination_confidence != null && (
-                    <div className="mt-1.5 space-y-1">
+                  {/* Loading state */}
+                  {outcomeLoading && (
+                    <div className="border border-orange-200 bg-orange-50 p-3 rounded-sm">
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 h-1.5 bg-amber-200 rounded-full overflow-hidden">
-                          <div className="h-full bg-amber-600 rounded-full"
-                               style={{ width: `${Math.round(latestGuidancePayload.determination_confidence * 100)}%` }} />
-                        </div>
-                        <span className="text-[10px] font-mono text-amber-700">
-                          {Math.round(latestGuidancePayload.determination_confidence * 100)}%
-                        </span>
+                        <RefreshCw size={12} className="animate-spin text-orange-600" />
+                        <span className="text-xs text-orange-800">{outcomeStatusMsg || 'Generating outcome analysis...'}</span>
                       </div>
-                      {latestGuidancePayload.determination_signals?.map((s, i) => (
-                        <p key={i} className="text-[10px] text-amber-600">&middot; {s}</p>
-                      ))}
                     </div>
                   )}
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={async () => {
-                        if (!id) return;
-                        setDeterminationAccepting(true);
-                        try {
-                          const updated = await erCopilot.updateCase(id, { status: 'pending_determination' });
-                          setCase(updated);
-                          // Fire outcome analysis + summary in parallel, don't block on either
-                          fetchOutcomeAnalysis();
-                          erCopilot.generateSummary(id).catch((e) => console.error('Summary generation failed:', e));
-                          await fetchNotes();
-                        } catch (err) {
-                          console.error('Failed to transition to pending determination:', err);
-                        } finally {
-                          setDeterminationAccepting(false);
-                        }
-                      }}
-                      disabled={determinationAccepting}
-                      className="text-xs font-medium text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1 rounded-sm disabled:opacity-50"
-                    >
-                      {determinationAccepting ? 'Working...' : 'Proceed to case determination'}
-                    </button>
-                    <button
-                      onClick={async () => {
-                        setDeterminationDismissed(true);
-                        if (!id) return;
-                        try {
-                          const ctx = normalizeIntakeContext(erCase.intake_context);
-                          await erCopilot.updateCase(id, {
-                            intake_context: {
-                              ...(ctx || {}),
-                              assistance: {
-                                ...(ctx?.assistance || {}),
-                                determination_dismissed: true,
-                              },
-                            },
-                          });
-                        } catch (err) {
-                          console.error('Failed to persist determination dismissal:', err);
-                        }
-                      }}
-                      className="text-xs text-amber-700 hover:text-amber-900"
-                    >
-                      Continue investigation
-                    </button>
-                  </div>
-                  {latestGuidancePayload?.cards && latestGuidancePayload.cards.length > 0 && (
-                    <p className="text-[10px] text-amber-600 mt-1">
-                      Still open: {latestGuidancePayload.cards.slice(0, 2).map(c => c.title).join(', ')}
-                    </p>
-                  )}
-                </div>
-              )}
 
-              {latestGuidanceNote ? (
-                <div className="space-y-2">
-                  <div className="border border-emerald-200 bg-emerald-50 p-2.5 rounded-sm">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] uppercase tracking-wide text-emerald-700">Next Steps</span>
-                      <span className="text-[10px] text-zinc-400">
-                        {new Date(latestGuidancePayload?.generated_at || latestGuidanceNote.created_at).toLocaleString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-xs text-zinc-700 whitespace-pre-wrap leading-relaxed">
-                      {latestGuidancePayload?.summary || latestGuidanceNote.content}
-                    </p>
-                    {latestGuidancePayload && (
-                      <p className="mt-1 text-[10px] text-zinc-500">
-                        Model: {latestGuidancePayload.model}{latestGuidancePayload.fallback_used ? ' (fallback)' : ''}
-                      </p>
-                    )}
-                  </div>
+                  {/* Outcome analysis results */}
+                  {outcomeAnalysis && !outcomeLoading && (
+                    <div className="space-y-3">
+                      {outcomeAnalysis.case_summary && (
+                        <div className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
+                          <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Case Summary</p>
+                          <p className="text-xs text-zinc-700 leading-relaxed">{outcomeAnalysis.case_summary}</p>
+                        </div>
+                      )}
 
-                  {latestGuidancePayload?.cards.length ? (
-                    <div className="space-y-2">
-                      {latestGuidancePayload.cards.map((card) => {
-                        const state = getCardState(card.id);
-                        const stateLabel = state === 'done' ? 'Completed' : state === 'dismissed' ? 'Dismissed' : 'Pending';
+                      <p className="text-[10px] uppercase tracking-wide text-zinc-500">Recommended Outcomes</p>
+
+                      {outcomeAnalysis.outcomes.map((outcome, idx) => {
+                        const isSelected = selectedOutcomeIdx === idx;
+                        const confColor = outcome.confidence === 'high'
+                          ? 'text-emerald-700 bg-emerald-100'
+                          : outcome.confidence === 'moderate'
+                            ? 'text-amber-700 bg-amber-100'
+                            : 'text-zinc-600 bg-zinc-100';
+                        const detColor = outcome.determination === 'substantiated'
+                          ? 'text-red-700'
+                          : outcome.determination === 'unsubstantiated'
+                            ? 'text-emerald-700'
+                            : 'text-amber-700';
+
                         return (
-                          <div key={card.id} className="border border-zinc-200 bg-white p-2.5 rounded-sm space-y-2">
+                          <button
+                            key={idx}
+                            onClick={() => setSelectedOutcomeIdx(isSelected ? null : idx)}
+                            className={`w-full text-left border rounded-sm p-3 space-y-2 transition-colors ${
+                              isSelected
+                                ? 'border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900'
+                                : 'border-zinc-200 bg-white hover:border-zinc-400'
+                            }`}
+                          >
                             <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-medium text-zinc-800">{card.title}</p>
-                              <span className={`px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded ${guidancePriorityStyle(card.priority)}`}>
-                                {card.priority}
-                              </span>
-                            </div>
-                            <p className="text-xs text-zinc-700">{card.recommendation}</p>
-                            <p className="text-[11px] text-zinc-500">{card.rationale}</p>
-                            {card.blockers.length > 0 && (
-                              <p className="text-[11px] text-zinc-500">Blockers: {card.blockers.join('; ')}</p>
-                            )}
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">{stateLabel}</span>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => void updateGuidanceCardState(card.id, 'done')}
-                                  className="text-[10px] uppercase tracking-wide text-emerald-700 hover:text-emerald-600 disabled:opacity-40"
-                                  disabled={state === 'done'}
-                                >
-                                  Mark Done
-                                </button>
-                                <button
-                                  onClick={() => void updateGuidanceCardState(card.id, 'dismissed')}
-                                  className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-700 disabled:opacity-40"
-                                  disabled={state === 'dismissed'}
-                                >
-                                  Dismiss
-                                </button>
-                                <button
-                                  onClick={() => void handleGuidanceAction(card)}
-                                  className="text-[10px] uppercase tracking-wide text-blue-700 hover:text-blue-600 disabled:opacity-50"
-                                  disabled={guidanceActionBusyId === card.id}
-                                >
-                                  {guidanceActionBusyId === card.id ? 'Working...' : card.action.label}
-                                </button>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${
+                                  isSelected ? 'border-zinc-900 bg-zinc-900' : 'border-zinc-300'
+                                }`} />
+                                <span className="text-xs font-medium text-zinc-900 truncate">{outcome.action_label}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                <span className={`text-[10px] uppercase tracking-wide font-medium ${detColor}`}>
+                                  {outcome.determination}
+                                </span>
+                                <span className={`px-1.5 py-0.5 text-[9px] uppercase tracking-wide rounded ${confColor}`}>
+                                  {outcome.confidence}
+                                </span>
                               </div>
                             </div>
-                          </div>
+                            <p className="text-xs text-zinc-700 leading-relaxed">{outcome.reasoning}</p>
+                            {isSelected && (
+                              <div className="pt-2 border-t border-zinc-200 space-y-1.5">
+                                <div>
+                                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">Policy Basis</span>
+                                  <p className="text-xs text-zinc-600 mt-0.5">{outcome.policy_basis}</p>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">HR Considerations</span>
+                                  <p className="text-xs text-zinc-600 mt-0.5">{outcome.hr_considerations}</p>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">Precedent</span>
+                                  <p className="text-xs text-zinc-600 mt-0.5">{outcome.precedent_note}</p>
+                                </div>
+                              </div>
+                            )}
+                          </button>
                         );
                       })}
+
+                      {outcomeAnalysis.outcomes.length === 0 && (
+                        <p className="text-xs text-zinc-400">No outcome recommendations generated. Please review the case manually.</p>
+                      )}
+
+                      {/* Determination notes */}
+                      <div>
+                        <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                          Determination Notes <span className="text-red-500">*</span>
+                        </label>
+                        <textarea
+                          value={determinationNotes}
+                          onChange={(e) => setDeterminationNotes(e.target.value)}
+                          placeholder="Document your reasoning for this determination..."
+                          rows={4}
+                          className="w-full px-3 py-2 text-xs text-zinc-900 bg-white border border-zinc-200 rounded-sm focus:outline-none focus:border-zinc-400 resize-none"
+                        />
+                      </div>
+
+                      {/* Close case button */}
+                      <button
+                        onClick={handleCloseCase}
+                        disabled={closingCase || selectedOutcomeIdx === null || !determinationNotes.trim()}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-zinc-900 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed rounded-sm"
+                      >
+                        <CheckCircle size={14} />
+                        {closingCase ? 'Closing Case...' : 'Close Case & Finalize'}
+                      </button>
+
+                      <p className="text-[10px] text-zinc-400">
+                        Model: {outcomeAnalysis.model}
+                      </p>
                     </div>
-                  ) : null}
+                  )}
+
+                  {/* Error state */}
+                  {outcomeError && !outcomeLoading && (
+                    <div className="border border-red-200 bg-red-50 p-3 rounded-sm space-y-2">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle size={12} className="text-red-500 mt-0.5 shrink-0" />
+                        <p className="text-xs text-red-700">{outcomeError}</p>
+                      </div>
+                      <button
+                        onClick={() => { setOutcomeError(null); fetchOutcomeAnalysis(); }}
+                        className="text-[10px] uppercase tracking-wider font-medium text-red-700 hover:text-red-900"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+
+                  {/* No analysis yet and not loading */}
+                  {!outcomeAnalysis && !outcomeLoading && !outcomeError && (
+                    <div className="text-center py-4">
+                      <p className="text-xs text-zinc-400 mb-2">Outcome analysis not yet generated.</p>
+                      <button
+                        onClick={fetchOutcomeAnalysis}
+                        className="text-xs text-zinc-700 hover:text-zinc-900 uppercase tracking-wider font-medium"
+                      >
+                        Generate Analysis
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <p className="text-xs text-zinc-400">No guidance yet. Complete assistance intake and analysis to generate next steps.</p>
+                /* Normal guidance section */
+                <>
+                  <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Suggested Guidance</h3>
+
+                  {showDeterminationBanner && (
+                    <div className="border border-amber-200 bg-amber-50 p-3 rounded-sm mb-3 space-y-2">
+                      <p className="text-xs font-medium text-amber-900">Ready for a determination?</p>
+                      <p className="text-xs text-amber-800 leading-relaxed">
+                        The current case file contains evidence that appears to meet the standard of
+                        'preponderance of the evidence.' Continuing to investigate may produce diminishing returns.
+                      </p>
+                      {latestGuidancePayload?.determination_confidence != null && (
+                        <div className="mt-1.5 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-1.5 bg-amber-200 rounded-full overflow-hidden">
+                              <div className="h-full bg-amber-600 rounded-full"
+                                   style={{ width: `${Math.round(latestGuidancePayload.determination_confidence * 100)}%` }} />
+                            </div>
+                            <span className="text-[10px] font-mono text-amber-700">
+                              {Math.round(latestGuidancePayload.determination_confidence * 100)}%
+                            </span>
+                          </div>
+                          {latestGuidancePayload.determination_signals?.map((s, i) => (
+                            <p key={i} className="text-[10px] text-amber-600">&middot; {s}</p>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={async () => {
+                            if (!id) return;
+                            setDeterminationAccepting(true);
+                            try {
+                              const updated = await erCopilot.updateCase(id, { status: 'pending_determination' });
+                              setCase(updated);
+                              // Fire outcome analysis + summary in parallel, don't block on either
+                              fetchOutcomeAnalysis();
+                              erCopilot.generateSummary(id).catch((e) => console.error('Summary generation failed:', e));
+                              // Scroll to determination panel after React renders
+                              setTimeout(() => {
+                                determinationPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }, 100);
+                              await fetchNotes();
+                            } catch (err) {
+                              console.error('Failed to transition to pending determination:', err);
+                            } finally {
+                              setDeterminationAccepting(false);
+                            }
+                          }}
+                          disabled={determinationAccepting}
+                          className="text-xs font-medium text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1 rounded-sm disabled:opacity-50"
+                        >
+                          {determinationAccepting ? 'Working...' : 'Proceed to case determination'}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            setDeterminationDismissed(true);
+                            if (!id) return;
+                            try {
+                              const ctx = normalizeIntakeContext(erCase.intake_context);
+                              await erCopilot.updateCase(id, {
+                                intake_context: {
+                                  ...(ctx || {}),
+                                  assistance: {
+                                    ...(ctx?.assistance || {}),
+                                    determination_dismissed: true,
+                                  },
+                                },
+                              });
+                            } catch (err) {
+                              console.error('Failed to persist determination dismissal:', err);
+                            }
+                          }}
+                          className="text-xs text-amber-700 hover:text-amber-900"
+                        >
+                          Continue investigation
+                        </button>
+                      </div>
+                      {latestGuidancePayload?.cards && latestGuidancePayload.cards.length > 0 && (
+                        <p className="text-[10px] text-amber-600 mt-1">
+                          Still open: {latestGuidancePayload.cards.slice(0, 2).map(c => c.title).join(', ')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {latestGuidanceNote ? (
+                    <div className="space-y-2">
+                      <div className="border border-emerald-200 bg-emerald-50 p-2.5 rounded-sm">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] uppercase tracking-wide text-emerald-700">Next Steps</span>
+                          <span className="text-[10px] text-zinc-400">
+                            {new Date(latestGuidancePayload?.generated_at || latestGuidanceNote.created_at).toLocaleString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-700 whitespace-pre-wrap leading-relaxed">
+                          {latestGuidancePayload?.summary || latestGuidanceNote.content}
+                        </p>
+                        {latestGuidancePayload && (
+                          <p className="mt-1 text-[10px] text-zinc-500">
+                            Model: {latestGuidancePayload.model}{latestGuidancePayload.fallback_used ? ' (fallback)' : ''}
+                          </p>
+                        )}
+                      </div>
+
+                      {latestGuidancePayload?.cards.length ? (
+                        <div className="space-y-2">
+                          {latestGuidancePayload.cards.map((card) => {
+                            const state = getCardState(card.id);
+                            const stateLabel = state === 'done' ? 'Completed' : state === 'dismissed' ? 'Dismissed' : 'Pending';
+                            return (
+                              <div key={card.id} className="border border-zinc-200 bg-white p-2.5 rounded-sm space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="text-xs font-medium text-zinc-800">{card.title}</p>
+                                  <span className={`px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded ${guidancePriorityStyle(card.priority)}`}>
+                                    {card.priority}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-zinc-700">{card.recommendation}</p>
+                                <p className="text-[11px] text-zinc-500">{card.rationale}</p>
+                                {card.blockers.length > 0 && (
+                                  <p className="text-[11px] text-zinc-500">Blockers: {card.blockers.join('; ')}</p>
+                                )}
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">{stateLabel}</span>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => void updateGuidanceCardState(card.id, 'done')}
+                                      className="text-[10px] uppercase tracking-wide text-emerald-700 hover:text-emerald-600 disabled:opacity-40"
+                                      disabled={state === 'done'}
+                                    >
+                                      Mark Done
+                                    </button>
+                                    <button
+                                      onClick={() => void updateGuidanceCardState(card.id, 'dismissed')}
+                                      className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-700 disabled:opacity-40"
+                                      disabled={state === 'dismissed'}
+                                    >
+                                      Dismiss
+                                    </button>
+                                    <button
+                                      onClick={() => void handleGuidanceAction(card)}
+                                      className="text-[10px] uppercase tracking-wide text-blue-700 hover:text-blue-600 disabled:opacity-50"
+                                      disabled={guidanceActionBusyId === card.id}
+                                    >
+                                      {guidanceActionBusyId === card.id ? 'Working...' : card.action.label}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-400">No guidance yet. Complete assistance intake and analysis to generate next steps.</p>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -1603,158 +1763,6 @@ export function ERCaseDetail() {
                       <p className="text-xs text-zinc-700 whitespace-pre-wrap">{note.content}</p>
                     </div>
                   ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Determination Panel — shown when status is pending_determination */}
-          {erCase.status === 'pending_determination' && (
-            <div className="pt-4 border-t border-zinc-200 space-y-4">
-              <h3 className="text-[10px] uppercase tracking-wider text-zinc-500">Case Determination</h3>
-
-              {/* Loading state */}
-              {outcomeLoading && (
-                <div className="border border-orange-200 bg-orange-50 p-3 rounded-sm">
-                  <div className="flex items-center gap-2">
-                    <RefreshCw size={12} className="animate-spin text-orange-600" />
-                    <span className="text-xs text-orange-800">{outcomeStatusMsg || 'Generating outcome analysis...'}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Outcome analysis results */}
-              {outcomeAnalysis && !outcomeLoading && (
-                <div className="space-y-3">
-                  {outcomeAnalysis.case_summary && (
-                    <div className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
-                      <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Case Summary</p>
-                      <p className="text-xs text-zinc-700 leading-relaxed">{outcomeAnalysis.case_summary}</p>
-                    </div>
-                  )}
-
-                  <p className="text-[10px] uppercase tracking-wide text-zinc-500">Recommended Outcomes</p>
-
-                  {outcomeAnalysis.outcomes.map((outcome, idx) => {
-                    const isSelected = selectedOutcomeIdx === idx;
-                    const confColor = outcome.confidence === 'high'
-                      ? 'text-emerald-700 bg-emerald-100'
-                      : outcome.confidence === 'moderate'
-                        ? 'text-amber-700 bg-amber-100'
-                        : 'text-zinc-600 bg-zinc-100';
-                    const detColor = outcome.determination === 'substantiated'
-                      ? 'text-red-700'
-                      : outcome.determination === 'unsubstantiated'
-                        ? 'text-emerald-700'
-                        : 'text-amber-700';
-
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => setSelectedOutcomeIdx(isSelected ? null : idx)}
-                        className={`w-full text-left border rounded-sm p-3 space-y-2 transition-colors ${
-                          isSelected
-                            ? 'border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900'
-                            : 'border-zinc-200 bg-white hover:border-zinc-400'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${
-                              isSelected ? 'border-zinc-900 bg-zinc-900' : 'border-zinc-300'
-                            }`} />
-                            <span className="text-xs font-medium text-zinc-900 truncate">{outcome.action_label}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 flex-shrink-0">
-                            <span className={`text-[10px] uppercase tracking-wide font-medium ${detColor}`}>
-                              {outcome.determination}
-                            </span>
-                            <span className={`px-1.5 py-0.5 text-[9px] uppercase tracking-wide rounded ${confColor}`}>
-                              {outcome.confidence}
-                            </span>
-                          </div>
-                        </div>
-                        <p className="text-xs text-zinc-700 leading-relaxed">{outcome.reasoning}</p>
-                        {isSelected && (
-                          <div className="pt-2 border-t border-zinc-200 space-y-1.5">
-                            <div>
-                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">Policy Basis</span>
-                              <p className="text-xs text-zinc-600 mt-0.5">{outcome.policy_basis}</p>
-                            </div>
-                            <div>
-                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">HR Considerations</span>
-                              <p className="text-xs text-zinc-600 mt-0.5">{outcome.hr_considerations}</p>
-                            </div>
-                            <div>
-                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">Precedent</span>
-                              <p className="text-xs text-zinc-600 mt-0.5">{outcome.precedent_note}</p>
-                            </div>
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-
-                  {outcomeAnalysis.outcomes.length === 0 && (
-                    <p className="text-xs text-zinc-400">No outcome recommendations generated. Please review the case manually.</p>
-                  )}
-
-                  {/* Determination notes */}
-                  <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
-                      Determination Notes <span className="text-red-500">*</span>
-                    </label>
-                    <textarea
-                      value={determinationNotes}
-                      onChange={(e) => setDeterminationNotes(e.target.value)}
-                      placeholder="Document your reasoning for this determination..."
-                      rows={4}
-                      className="w-full px-3 py-2 text-xs text-zinc-900 bg-white border border-zinc-200 rounded-sm focus:outline-none focus:border-zinc-400 resize-none"
-                    />
-                  </div>
-
-                  {/* Close case button */}
-                  <button
-                    onClick={handleCloseCase}
-                    disabled={closingCase || selectedOutcomeIdx === null || !determinationNotes.trim()}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-zinc-900 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed rounded-sm"
-                  >
-                    <CheckCircle size={14} />
-                    {closingCase ? 'Closing Case...' : 'Close Case & Finalize'}
-                  </button>
-
-                  <p className="text-[10px] text-zinc-400">
-                    Model: {outcomeAnalysis.model}
-                  </p>
-                </div>
-              )}
-
-              {/* Error state */}
-              {outcomeError && !outcomeLoading && (
-                <div className="border border-red-200 bg-red-50 p-3 rounded-sm space-y-2">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle size={12} className="text-red-500 mt-0.5 shrink-0" />
-                    <p className="text-xs text-red-700">{outcomeError}</p>
-                  </div>
-                  <button
-                    onClick={fetchOutcomeAnalysis}
-                    className="text-[10px] uppercase tracking-wider font-medium text-red-700 hover:text-red-900"
-                  >
-                    Retry
-                  </button>
-                </div>
-              )}
-
-              {/* No analysis yet and not loading */}
-              {!outcomeAnalysis && !outcomeLoading && !outcomeError && (
-                <div className="text-center py-4">
-                  <p className="text-xs text-zinc-400 mb-2">Outcome analysis not yet generated.</p>
-                  <button
-                    onClick={fetchOutcomeAnalysis}
-                    className="text-xs text-zinc-700 hover:text-zinc-900 uppercase tracking-wider font-medium"
-                  >
-                    Generate Analysis
-                  </button>
                 </div>
               )}
             </div>
