@@ -738,16 +738,18 @@ export function Dashboard() {
     const token = getAccessToken();
     const headers = { Authorization: `Bearer ${token}` };
 
-    fetch(`${API_BASE}/employees/pto/summary`, { headers })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => data && setPtoSummary(data))
-      .catch(err => console.error('Failed to fetch PTO summary:', err));
+    if (hasFeature('time_off')) {
+      fetch(`${API_BASE}/employees/pto/summary`, { headers })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => data && setPtoSummary(data))
+        .catch(err => console.error('Failed to fetch PTO summary:', err));
+    }
 
     fetch(`${API_BASE}/dashboard/stats`, { headers })
       .then(r => r.ok ? r.json() : null)
       .then(data => data && setDashStats(data))
       .catch(err => console.error('Failed to fetch dashboard stats:', err));
-  }, []);
+  }, [hasFeature]);
 
   const showComplianceImpact = user?.role === 'client' && hasFeature('compliance');
 
