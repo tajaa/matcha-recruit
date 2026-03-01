@@ -98,9 +98,9 @@ function RangeNegotiationFlowchart() {
                 <div key={step.id} className="flex items-start">
                   <div className="flex flex-col items-center w-32">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-bold ${
-                      step.branch ? 'border-amber-400/50 bg-amber-400/10 text-amber-400' : 'border-zinc-600 bg-zinc-900 text-zinc-400'
+                      step.branch ? 'border-amber-400/50 bg-amber-400/10 text-amber-400' : 'border-zinc-600 bg-zinc-900 text-zinc-400 light:text-black/70'
                     }`}>{step.id}</div>
-                    <div className="mt-2 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-300 leading-tight px-1">{step.label}</div>
+                    <div className="mt-2 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-300 light:text-black/80 leading-tight px-1">{step.label}</div>
                     <div className="mt-1 text-center text-[9px] text-zinc-600 leading-tight px-1">{step.sublabel}</div>
                   </div>
                   {idx < RANGE_FLOW_STEPS.length - 1 && (
@@ -114,11 +114,11 @@ function RangeNegotiationFlowchart() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
             <div className="bg-emerald-400/5 border border-emerald-400/20 p-3">
               <div className="font-bold uppercase tracking-wider text-emerald-400 mb-1">✓ Overlap Found</div>
-              <div className="text-zinc-400">Offer accepted automatically at the midpoint of the overlapping range. Both parties are notified.</div>
+              <div className="text-zinc-400 light:text-black/70">Offer accepted automatically at the midpoint of the overlapping range. Both parties are notified.</div>
             </div>
             <div className="bg-amber-400/5 border border-amber-400/20 p-3">
               <div className="font-bold uppercase tracking-wider text-amber-400 mb-1">↻ No Overlap</div>
-              <div className="text-zinc-400">Direction is shared (too low / too high) but exact numbers stay private. Employer can revise and re-send up to the round limit.</div>
+              <div className="text-zinc-400 light:text-black/70">Direction is shared (too low / too high) but exact numbers stay private. Employer can revise and re-send up to the round limit.</div>
             </div>
           </div>
           <p className="mt-3 text-[9px] text-zinc-600 leading-relaxed">
@@ -281,7 +281,7 @@ export function OfferLetters() {
                     </button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => formHook.logoInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-zinc-700 text-sm text-zinc-500 light:text-black/60 hover:border-zinc-500 hover:text-zinc-300 transition-colors rounded">
+                  <button type="button" onClick={() => formHook.logoInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-zinc-700 text-sm text-zinc-500 light:text-black/60 hover:border-zinc-500 hover:text-zinc-300 light:text-black/80 transition-colors rounded">
                     <Upload size={16} />
                     Upload company logo
                   </button>
@@ -439,7 +439,7 @@ export function OfferLetters() {
                       onChange={(e) => formHook.setFormData({...formHook.formData, benefits_medical: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-200">Medical insurance offered</span>
+                    <span className="text-sm text-zinc-200 light:text-black/90">Medical insurance offered</span>
                   </label>
                   {formHook.formData.benefits_medical && (
                     <div className="mt-3 pl-0 sm:pl-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -481,7 +481,7 @@ export function OfferLetters() {
                       onChange={(e) => formHook.setFormData({...formHook.formData, benefits_dental: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-400">Dental insurance</span>
+                    <span className="text-sm text-zinc-400 light:text-black/70">Dental insurance</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -490,7 +490,7 @@ export function OfferLetters() {
                       onChange={(e) => formHook.setFormData({...formHook.formData, benefits_vision: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-400">Vision insurance</span>
+                    <span className="text-sm text-zinc-400 light:text-black/70">Vision insurance</span>
                   </label>
                 </div>
 
@@ -503,7 +503,7 @@ export function OfferLetters() {
                       onChange={(e) => formHook.setFormData({...formHook.formData, benefits_401k: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-200">401(k) retirement plan</span>
+                    <span className="text-sm text-zinc-200 light:text-black/90">401(k) retirement plan</span>
                   </label>
                   {formHook.formData.benefits_401k && (
                     <div className="mt-3 pl-6">
@@ -540,7 +540,7 @@ export function OfferLetters() {
                       onChange={(e) => formHook.setFormData({...formHook.formData, benefits_pto_vacation: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-400">Paid vacation</span>
+                    <span className="text-sm text-zinc-400 light:text-black/70">Paid vacation</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -549,7 +549,7 @@ export function OfferLetters() {
                       onChange={(e) => formHook.setFormData({...formHook.formData, benefits_pto_sick: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-400">Paid sick leave</span>
+                    <span className="text-sm text-zinc-400 light:text-black/70">Paid sick leave</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -558,7 +558,7 @@ export function OfferLetters() {
                       onChange={(e) => formHook.setFormData({...formHook.formData, benefits_holidays: e.target.checked})}
                       className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                     />
-                    <span className="text-sm text-zinc-400">Paid holidays</span>
+                    <span className="text-sm text-zinc-400 light:text-black/70">Paid holidays</span>
                   </label>
                 </div>
 
@@ -588,7 +588,7 @@ export function OfferLetters() {
                     onChange={(e) => formHook.setFormData({...formHook.formData, contingency_background_check: e.target.checked})}
                     className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                   />
-                  <span className="text-sm text-zinc-400">Background check</span>
+                  <span className="text-sm text-zinc-400 light:text-black/70">Background check</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -597,7 +597,7 @@ export function OfferLetters() {
                     onChange={(e) => formHook.setFormData({...formHook.formData, contingency_credit_check: e.target.checked})}
                     className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                   />
-                  <span className="text-sm text-zinc-400">Credit check</span>
+                  <span className="text-sm text-zinc-400 light:text-black/70">Credit check</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -606,7 +606,7 @@ export function OfferLetters() {
                     onChange={(e) => formHook.setFormData({...formHook.formData, contingency_drug_screening: e.target.checked})}
                     className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white"
                   />
-                  <span className="text-sm text-zinc-400">Drug screening</span>
+                  <span className="text-sm text-zinc-400 light:text-black/70">Drug screening</span>
                 </label>
               </div>
             </div>
@@ -646,7 +646,7 @@ export function OfferLetters() {
               </div>
               <div className="pt-2">
                 <p className="text-zinc-500 light:text-black/60 mb-1 text-xs uppercase tracking-wide">Benefits</p>
-                <p className="text-zinc-300">{formHook.formData.benefits || 'Standard benefits'}</p>
+                <p className="text-zinc-300 light:text-black/80">{formHook.formData.benefits || 'Standard benefits'}</p>
               </div>
             </div>
           </div>
@@ -843,11 +843,11 @@ export function OfferLetters() {
                 </div>
                 <div className="mt-4">
                   <p className="text-[10px] uppercase tracking-wider text-zinc-500 light:text-black/60">Equity Guidance</p>
-                  <p className="mt-1 text-xs text-zinc-300">{guidanceHook.guidanceResult.equity_guidance}</p>
+                  <p className="mt-1 text-xs text-zinc-300 light:text-black/80">{guidanceHook.guidanceResult.equity_guidance}</p>
                 </div>
                 <div className="mt-4">
                   <p className="text-[10px] uppercase tracking-wider text-zinc-500 light:text-black/60 mb-2">Rationale</p>
-                  <ul className="space-y-1.5 text-xs text-zinc-400">
+                  <ul className="space-y-1.5 text-xs text-zinc-400 light:text-black/70">
                     {guidanceHook.guidanceResult.rationale.map((line) => (
                       <li key={line}>• {line}</li>
                     ))}
@@ -869,7 +869,7 @@ export function OfferLetters() {
           <button
             data-tour="offer-first-create-btn"
             onClick={() => setCreateMode('wizard')}
-            className="text-xs text-white light:text-black hover:text-zinc-300 font-bold uppercase tracking-wider underline underline-offset-4"
+            className="text-xs text-white light:text-black hover:text-zinc-300 light:text-black/80 font-bold uppercase tracking-wider underline underline-offset-4"
           >
             Create your first offer
           </button>
@@ -916,7 +916,7 @@ export function OfferLetters() {
                   </div>
                 )}
                 <div className="mt-3 flex items-center justify-between gap-3">
-                  <p className="text-xs text-zinc-400 truncate">{letter.position_title}</p>
+                  <p className="text-xs text-zinc-400 light:text-black/70 truncate">{letter.position_title}</p>
                   <span className="text-[10px] text-zinc-500 light:text-black/60 font-mono shrink-0">
                     {new Date(letter.created_at).toLocaleDateString()}
                   </span>
@@ -947,13 +947,13 @@ export function OfferLetters() {
                 </div>
                 
                 <div className="flex-1">
-                   <h3 className="text-sm font-bold text-white light:text-black group-hover:text-zinc-300">
+                   <h3 className="text-sm font-bold text-white light:text-black group-hover:text-zinc-300 light:text-black/80">
                      {letter.candidate_name}
                    </h3>
                    <p className="text-[10px] text-zinc-500 light:text-black/60 mt-0.5">{letter.company_name}</p>
                 </div>
 
-                <div className="w-48 text-xs text-zinc-400">
+                <div className="w-48 text-xs text-zinc-400 light:text-black/70">
                    {letter.position_title}
                 </div>
 
@@ -1194,31 +1194,31 @@ export function OfferLetters() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.benefits_medical || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_medical: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">Medical insurance</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">Medical insurance</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.benefits_dental || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_dental: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">Dental insurance</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">Dental insurance</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.benefits_vision || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_vision: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">Vision insurance</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">Vision insurance</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.benefits_401k || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_401k: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">401(k)</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">401(k)</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.benefits_pto_vacation || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_pto_vacation: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">Paid vacation</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">Paid vacation</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.benefits_pto_sick || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_pto_sick: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">Paid sick leave</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">Paid sick leave</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.benefits_holidays || false} onChange={(e) => formHook.setFormData({...formHook.formData, benefits_holidays: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">Paid holidays</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">Paid holidays</span>
                           </label>
                         </div>
                         {formHook.formData.benefits_medical && (
@@ -1256,15 +1256,15 @@ export function OfferLetters() {
                         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-6">
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.contingency_background_check || false} onChange={(e) => formHook.setFormData({...formHook.formData, contingency_background_check: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">Background check</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">Background check</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.contingency_credit_check || false} onChange={(e) => formHook.setFormData({...formHook.formData, contingency_credit_check: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">Credit check</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">Credit check</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={formHook.formData.contingency_drug_screening || false} onChange={(e) => formHook.setFormData({...formHook.formData, contingency_drug_screening: e.target.checked})} className="w-4 h-4 bg-zinc-800 border-zinc-700 rounded" />
-                            <span className="text-sm text-zinc-300">Drug screening</span>
+                            <span className="text-sm text-zinc-300 light:text-black/80">Drug screening</span>
                           </label>
                         </div>
                       </div>
@@ -1279,7 +1279,7 @@ export function OfferLetters() {
                               <button type="button" onClick={removeLogo} className="text-xs text-red-400 hover:text-red-300">Remove</button>
                             </div>
                           ) : (
-                            <button type="button" onClick={() => formHook.logoInputRef.current?.click()} className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-zinc-700 text-sm text-zinc-400 hover:border-white hover:text-white light:text-black transition-colors">
+                            <button type="button" onClick={() => formHook.logoInputRef.current?.click()} className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-zinc-700 text-sm text-zinc-400 light:text-black/70 hover:border-white hover:text-white light:text-black transition-colors">
                               <Upload size={16} />
                               Upload company logo
                             </button>
@@ -1291,12 +1291,12 @@ export function OfferLetters() {
                </div>
 
                <div className="flex flex-col gap-3 p-4 border-t border-white/10 bg-zinc-900/50 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-                  <Button variant="secondary" type="button" onClick={resetCreation} className="w-full sm:w-auto bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white light:text-black">Cancel</Button>
+                  <Button variant="secondary" type="button" onClick={resetCreation} className="w-full sm:w-auto bg-transparent border border-zinc-700 text-zinc-300 light:text-black/80 hover:bg-zinc-800 hover:text-white light:text-black">Cancel</Button>
                   
                   {createMode === 'wizard' ? (
                     <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
                       {formHook.wizardStep > 1 && (
-                        <Button variant="secondary" onClick={() => formHook.setWizardStep(formHook.wizardStep - 1)} className="w-full sm:w-auto bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white light:text-black">
+                        <Button variant="secondary" onClick={() => formHook.setWizardStep(formHook.wizardStep - 1)} className="w-full sm:w-auto bg-transparent border border-zinc-700 text-zinc-300 light:text-black/80 hover:bg-zinc-800 hover:text-white light:text-black">
                           <ArrowLeft size={14} className="mr-2" /> Back
                         </Button>
                       )}
@@ -1354,11 +1354,11 @@ export function OfferLetters() {
                       </div>
                       <div>
                          <label className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-widest block mb-1">Position</label>
-                         <p className="text-zinc-300">{selectedLetter.position_title}</p>
+                         <p className="text-zinc-300 light:text-black/80">{selectedLetter.position_title}</p>
                       </div>
                        <div>
                          <label className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-widest block mb-1">Company</label>
-                         <p className="text-zinc-300">{selectedLetter.company_name}</p>
+                         <p className="text-zinc-300 light:text-black/80">{selectedLetter.company_name}</p>
                       </div>
                       
                       {/* Range negotiation status */}
@@ -1387,9 +1387,9 @@ export function OfferLetters() {
                       )}
 
                       <div className="pt-6 border-t border-white/10 space-y-3">
-                         <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white light:text-black" onClick={() => handleDownloadPdf(selectedLetter)}>Download PDF</Button>
+                         <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 light:text-black/80 hover:bg-zinc-800 hover:text-white light:text-black" onClick={() => handleDownloadPdf(selectedLetter)}>Download PDF</Button>
                          {selectedLetter.status === 'draft' && (
-                           <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white light:text-black" onClick={() => handleEditDraft(selectedLetter)}>Edit Draft</Button>
+                           <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 light:text-black/80 hover:bg-zinc-800 hover:text-white light:text-black" onClick={() => handleEditDraft(selectedLetter)}>Edit Draft</Button>
                          )}
                          {selectedLetter.salary_range_min != null && selectedLetter.salary_range_max != null && !selectedLetter.range_match_status && (
                            <Button data-tour="offer-send-range-btn" variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => { rangeHook.setShowSendRangePrompt(selectedLetter.id); rangeHook.setSendRangeEmail(selectedLetter.candidate_email || ''); }}>Send Range Offer</Button>
@@ -1411,10 +1411,10 @@ export function OfferLetters() {
                                   <img src={selectedLetter.company_logo_url} alt="Company logo" className="h-10 max-w-[150px] object-contain mb-2" />
                                 )}
                                 <h3 className="font-bold text-lg tracking-tight mb-1">{selectedLetter.company_name}</h3>
-                                <p className="text-zinc-400 font-sans text-[10px] uppercase tracking-widest">Official Offer of Employment</p>
+                                <p className="text-zinc-400 light:text-black/70 font-sans text-[10px] uppercase tracking-widest">Official Offer of Employment</p>
                               </div>
                               <div className="sm:text-right">
-                                  <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Date</p>
+                                  <p className="font-sans text-[10px] text-zinc-400 light:text-black/70 uppercase tracking-widest mb-1">Date</p>
                                   <p className="font-bold">{new Date(selectedLetter.created_at).toLocaleDateString()}</p>
                               </div>
                             </div>
@@ -1434,30 +1434,30 @@ export function OfferLetters() {
 
                               {/* Terms Grid */}
                               <div className="bg-zinc-50 p-4 sm:p-6 rounded border border-zinc-100 space-y-4 font-sans mt-6 mb-6">
-                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 border-b border-zinc-200 pb-2">Compensation & Terms</h4>
+                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 light:text-black/70 border-b border-zinc-200 pb-2">Compensation & Terms</h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-6 gap-x-4">
                                   <div>
-                                    <p className="text-[10px] text-zinc-400 uppercase mb-1">Annual Salary</p>
+                                    <p className="text-[10px] text-zinc-400 light:text-black/70 uppercase mb-1">Annual Salary</p>
                                     <p className="font-bold text-zinc-800 text-sm">{selectedLetter.salary || 'TBD'}</p>
                                   </div>
                                   <div>
-                                    <p className="text-[10px] text-zinc-400 uppercase mb-1">Start Date</p>
+                                    <p className="text-[10px] text-zinc-400 light:text-black/70 uppercase mb-1">Start Date</p>
                                     <p className="font-bold text-zinc-800 text-sm">{selectedLetter.start_date ? new Date(selectedLetter.start_date).toLocaleDateString() : 'TBD'}</p>
                                   </div>
                                   <div>
-                                    <p className="text-[10px] text-zinc-400 uppercase mb-1">Bonus Potential</p>
+                                    <p className="text-[10px] text-zinc-400 light:text-black/70 uppercase mb-1">Bonus Potential</p>
                                     <p className="font-bold text-zinc-800 text-sm">{selectedLetter.bonus || 'N/A'}</p>
                                   </div>
                                    <div>
-                                    <p className="text-[10px] text-zinc-400 uppercase mb-1">Equity / Options</p>
+                                    <p className="text-[10px] text-zinc-400 light:text-black/70 uppercase mb-1">Equity / Options</p>
                                     <p className="font-bold text-zinc-800 text-sm">{selectedLetter.stock_options || 'N/A'}</p>
                                   </div>
                                   <div>
-                                    <p className="text-[10px] text-zinc-400 uppercase mb-1">Employment Type</p>
+                                    <p className="text-[10px] text-zinc-400 light:text-black/70 uppercase mb-1">Employment Type</p>
                                     <p className="font-bold text-zinc-800 text-sm">{selectedLetter.employment_type || 'Full-Time Exempt'}</p>
                                   </div>
                                    <div>
-                                    <p className="text-[10px] text-zinc-400 uppercase mb-1">Location</p>
+                                    <p className="text-[10px] text-zinc-400 light:text-black/70 uppercase mb-1">Location</p>
                                     <p className="font-bold text-zinc-800 text-sm">{selectedLetter.location || 'Remote'}</p>
                                   </div>
                                 </div>
@@ -1465,7 +1465,7 @@ export function OfferLetters() {
 
                               {/* Benefits Section */}
                               <div className="space-y-2">
-                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 font-sans">Benefits</h4>
+                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 light:text-black/70 font-sans">Benefits</h4>
                                 <p className="text-zinc-600 text-xs leading-relaxed">
                                   {generateBenefitsText(selectedLetter) || 'Standard company benefits package.'}
                                 </p>
@@ -1473,7 +1473,7 @@ export function OfferLetters() {
 
                               {/* Contingencies Section */}
                               <div className="space-y-2">
-                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 font-sans">Contingencies</h4>
+                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 light:text-black/70 font-sans">Contingencies</h4>
                                 <p className="text-zinc-600 text-xs leading-relaxed">
                                   {generateContingenciesText(selectedLetter)}
                                 </p>
@@ -1481,7 +1481,7 @@ export function OfferLetters() {
 
                               {/* At-Will Employment */}
                               <div className="space-y-2 mt-6">
-                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 font-sans">At-Will Employment</h4>
+                                <h4 className="font-bold text-[10px] uppercase tracking-widest text-zinc-400 light:text-black/70 font-sans">At-Will Employment</h4>
                                 <p className="text-zinc-600 text-xs leading-relaxed">
                                   Your employment with the Company will be on an at-will basis. This means that either you or the Company may terminate the employment relationship at any time, with or without cause or notice, subject to applicable law. Nothing in this offer letter or in any other Company document or policy should be interpreted as creating a contract of employment for any definite period of time.
                                 </p>
@@ -1502,10 +1502,10 @@ export function OfferLetters() {
                               <div>
                                 <div className="w-full sm:w-48 h-px bg-zinc-300 mb-2"></div>
                                 <p className="font-bold text-zinc-900">{selectedLetter.manager_name || 'Hiring Manager'}</p>
-                                <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest">Authorized Signature</p>
+                                <p className="font-sans text-[10px] text-zinc-400 light:text-black/70 uppercase tracking-widest">Authorized Signature</p>
                               </div>
                               <div className="sm:text-right">
-                                  <p className="font-sans text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Candidate Acceptance</p>
+                                  <p className="font-sans text-[10px] text-zinc-400 light:text-black/70 uppercase tracking-widest mb-1">Candidate Acceptance</p>
                                   <div className="w-full sm:w-48 h-10 border-b border-dashed border-zinc-300 mb-1"></div>
                               </div>
                             </div>
@@ -1534,7 +1534,7 @@ export function OfferLetters() {
             <div className="flex gap-3">
               <button
                 onClick={() => { rangeHook.setShowSendRangePrompt(null); rangeHook.setSendRangeEmail(''); }}
-                className="flex-1 px-4 py-2 text-xs font-bold uppercase tracking-wider border border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-white light:text-black transition-colors"
+                className="flex-1 px-4 py-2 text-xs font-bold uppercase tracking-wider border border-zinc-700 text-zinc-400 light:text-black/70 hover:bg-zinc-800 hover:text-white light:text-black transition-colors"
               >
                 Cancel
               </button>

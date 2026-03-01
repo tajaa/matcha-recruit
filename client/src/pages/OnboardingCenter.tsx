@@ -16,7 +16,7 @@ function statusTone(status: string): string {
   if (status === 'connected') return 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200';
   if (status === 'error') return 'border-red-500/40 bg-red-950/30 text-red-200';
   if (status === 'needs_action') return 'border-amber-500/40 bg-amber-950/30 text-amber-200';
-  return 'border-zinc-700 bg-zinc-900/70 text-zinc-300';
+  return 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80';
 }
 
 const ONBOARDING_CYCLE_STEPS = [
@@ -202,10 +202,10 @@ export default function OnboardingCenter() {
 
   const googleBadge = useMemo(() => {
     if (loadingGoogle) {
-      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
+      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80' };
     }
     if (!googleStatus || googleStatus.status === 'disconnected') {
-      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
+      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80' };
     }
     if (googleStatus.status === 'connected') {
       return { label: 'Connected', tone: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200' };
@@ -218,10 +218,10 @@ export default function OnboardingCenter() {
 
   const slackBadge = useMemo(() => {
     if (loadingSlack) {
-      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
+      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80' };
     }
     if (!slackStatus || slackStatus.status === 'disconnected') {
-      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
+      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300 light:text-black/80' };
     }
     if (slackStatus.status === 'connected') {
       return { label: 'Connected', tone: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200' };
@@ -285,7 +285,7 @@ export default function OnboardingCenter() {
               className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'border-white text-white light:text-black'
-                  : 'border-transparent text-zinc-500 light:text-black/60 hover:text-zinc-300 hover:border-zinc-800'
+                  : 'border-transparent text-zinc-500 light:text-black/60 hover:text-zinc-300 light:text-black/80 hover:border-zinc-800'
               }`}
             >
               {tab.label}
@@ -298,7 +298,7 @@ export default function OnboardingCenter() {
       <div className="py-6">
         {activeTab === 'workspace' && (
           <div className="space-y-6">
-            <div className="border border-white/10 bg-zinc-900/40 p-4 text-xs text-zinc-300 leading-relaxed">
+            <div className="border border-white/10 bg-zinc-900/40 p-4 text-xs text-zinc-300 light:text-black/80 leading-relaxed">
               Connect external systems to automate employee provisioning. Credentials are encrypted and scoped to your organization.
             </div>
 
@@ -320,10 +320,10 @@ export default function OnboardingCenter() {
                 )}
 
                 {googleStatus && (
-                  <div className="space-y-1 text-[11px] text-zinc-400">
-                    <p>Mode: <span className="text-zinc-200">{googleStatus.mode || 'not configured'}</span></p>
-                    <p>Domain: <span className="text-zinc-200">{googleStatus.domain || 'not set'}</span></p>
-                    <p>Auto-provision: <span className="text-zinc-200">{googleStatus.auto_provision_on_employee_create ? 'on' : 'off'}</span></p>
+                  <div className="space-y-1 text-[11px] text-zinc-400 light:text-black/70">
+                    <p>Mode: <span className="text-zinc-200 light:text-black/90">{googleStatus.mode || 'not configured'}</span></p>
+                    <p>Domain: <span className="text-zinc-200 light:text-black/90">{googleStatus.domain || 'not set'}</span></p>
+                    <p>Auto-provision: <span className="text-zinc-200 light:text-black/90">{googleStatus.auto_provision_on_employee_create ? 'on' : 'off'}</span></p>
                   </div>
                 )}
 
@@ -353,10 +353,10 @@ export default function OnboardingCenter() {
                 )}
 
                 {slackStatus && (
-                  <div className="space-y-1 text-[11px] text-zinc-400">
-                    <p>Workspace: <span className="text-zinc-200">{slackStatus.workspace_url || 'not set'}</span></p>
-                    <p>Team: <span className="text-zinc-200">{slackStatus.slack_team_name || 'not connected'}</span></p>
-                    <p>Auto-invite: <span className="text-zinc-200">{slackStatus.auto_invite_on_employee_create ? 'on' : 'off'}</span></p>
+                  <div className="space-y-1 text-[11px] text-zinc-400 light:text-black/70">
+                    <p>Workspace: <span className="text-zinc-200 light:text-black/90">{slackStatus.workspace_url || 'not set'}</span></p>
+                    <p>Team: <span className="text-zinc-200 light:text-black/90">{slackStatus.slack_team_name || 'not connected'}</span></p>
+                    <p>Auto-invite: <span className="text-zinc-200 light:text-black/90">{slackStatus.auto_invite_on_employee_create ? 'on' : 'off'}</span></p>
                   </div>
                 )}
 
@@ -376,7 +376,7 @@ export default function OnboardingCenter() {
                     <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Toast</h2>
                     <p className="text-xs text-zinc-500 light:text-black/60 mt-1">POS & location mapping.</p>
                   </div>
-                  <span className="rounded border border-zinc-700 bg-zinc-900/70 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-300">
+                  <span className="rounded border border-zinc-700 bg-zinc-900/70 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-300 light:text-black/80">
                     Soon
                   </span>
                 </div>
@@ -422,7 +422,7 @@ export default function OnboardingCenter() {
               <select
                 value={runsProviderFilter}
                 onChange={(e) => setRunsProviderFilter(e.target.value)}
-                className="bg-zinc-900 border border-white/10 text-xs text-zinc-300 px-3 py-1.5 focus:outline-none focus:border-white/30"
+                className="bg-zinc-900 border border-white/10 text-xs text-zinc-300 light:text-black/80 px-3 py-1.5 focus:outline-none focus:border-white/30"
               >
                 <option value="">All Providers</option>
                 <option value="slack">Slack</option>
@@ -431,7 +431,7 @@ export default function OnboardingCenter() {
               <select
                 value={runsStatusFilter}
                 onChange={(e) => setRunsStatusFilter(e.target.value)}
-                className="bg-zinc-900 border border-white/10 text-xs text-zinc-300 px-3 py-1.5 focus:outline-none focus:border-white/30"
+                className="bg-zinc-900 border border-white/10 text-xs text-zinc-300 light:text-black/80 px-3 py-1.5 focus:outline-none focus:border-white/30"
               >
                 <option value="">All Statuses</option>
                 <option value="completed">Completed</option>
@@ -481,7 +481,7 @@ export default function OnboardingCenter() {
                   <span>Time</span>
                 </div>
                 {runs.map((run) => {
-                  let statusClass = 'bg-zinc-800 text-zinc-300 border-zinc-700';
+                  let statusClass = 'bg-zinc-800 text-zinc-300 light:text-black/80 border-zinc-700';
                   if (run.status === 'completed') statusClass = 'bg-emerald-900/30 text-emerald-300 border-emerald-600/30';
                   else if (run.status === 'failed') statusClass = 'bg-red-900/30 text-red-300 border-red-600/30';
                   else if (run.status === 'needs_action') statusClass = 'bg-amber-900/30 text-amber-300 border-amber-600/30';
@@ -501,7 +501,7 @@ export default function OnboardingCenter() {
                           </p>
                         )}
                       </div>
-                      <span className="text-[10px] text-zinc-400 self-center">
+                      <span className="text-[10px] text-zinc-400 light:text-black/70 self-center">
                         {run.provider === 'google_workspace' ? 'Google WS' : run.provider.charAt(0).toUpperCase() + run.provider.slice(1)}
                       </span>
                       <span className={`self-center px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border w-fit ${statusClass}`}>

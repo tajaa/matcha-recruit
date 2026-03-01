@@ -29,7 +29,7 @@ const CATEGORIES = [
   { value: 'documents', label: 'Documents', icon: FileText, color: 'text-blue-400' },
   { value: 'equipment', label: 'Equipment', icon: Laptop, color: 'text-purple-400' },
   { value: 'training', label: 'Training', icon: GraduationCap, color: 'text-amber-400' },
-  { value: 'admin', label: 'Admin', icon: Settings, color: 'text-zinc-400' },
+  { value: 'admin', label: 'Admin', icon: Settings, color: 'text-zinc-400 light:text-black/70' },
   { value: 'return_to_work', label: 'Return to Work', icon: RotateCcw, color: 'text-emerald-400' },
 ];
 
@@ -241,7 +241,7 @@ export default function OnboardingTemplates() {
               className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
                 categoryFilter === cat.value
                   ? 'border-white text-white light:text-black'
-                  : 'border-transparent text-zinc-500 light:text-black/60 hover:text-zinc-300 hover:border-zinc-800'
+                  : 'border-transparent text-zinc-500 light:text-black/60 hover:text-zinc-300 light:text-black/80 hover:border-zinc-800'
               }`}
             >
               {cat.label}
@@ -296,11 +296,11 @@ export default function OnboardingTemplates() {
                       <div className="flex items-center justify-between sm:justify-end gap-4 md:gap-8 border-t border-white/5 pt-3 sm:border-0 sm:pt-0">
                         <div className="text-left sm:text-right">
                           <p className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-wider">Due</p>
-                          <p className="text-xs text-zinc-400 font-mono">{template.due_days} days</p>
+                          <p className="text-xs text-zinc-400 light:text-black/70 font-mono">{template.due_days} days</p>
                         </div>
                         <div className="text-left sm:text-right">
                           <p className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-wider">Assigned to</p>
-                          <p className="text-xs text-zinc-400">
+                          <p className="text-xs text-zinc-400 light:text-black/70">
                             {template.is_employee_task ? 'Employee' : 'HR/Manager'}
                           </p>
                         </div>
@@ -318,14 +318,14 @@ export default function OnboardingTemplates() {
                           </button>
                           <button
                             onClick={() => openEditModal(template)}
-                            className="p-2 text-zinc-400 hover:text-white light:text-black hover:bg-zinc-800 rounded transition-colors"
+                            className="p-2 text-zinc-400 light:text-black/70 hover:text-white light:text-black hover:bg-zinc-800 rounded transition-colors"
                             title="Edit"
                           >
                             <Edit2 size={16} />
                           </button>
                           <button
                             onClick={() => handleDelete(template.id)}
-                            className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                            className="p-2 text-zinc-400 light:text-black/70 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
                             title="Delete"
                           >
                             <Trash2 size={16} />
@@ -422,7 +422,7 @@ export default function OnboardingTemplates() {
                   onChange={(e) => setFormData({ ...formData, is_employee_task: e.target.checked })}
                   className="w-4 h-4 bg-zinc-900 border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner rounded"
                 />
-                <label htmlFor="is_employee_task" className="text-sm text-zinc-400">
+                <label htmlFor="is_employee_task" className="text-sm text-zinc-400 light:text-black/70">
                   Employee completes this task (vs HR/Manager)
                 </label>
               </div>
