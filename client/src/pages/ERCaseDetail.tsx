@@ -395,6 +395,7 @@ export function ERCaseDetail() {
   const [determinationNotes, setDeterminationNotes] = useState('');
   const [closingCase, setClosingCase] = useState(false);
   const outcomeLoadingRef = useRef(false);
+  const outcomeRequestSeqRef = useRef(0);
   const determinationPanelRef = useRef<HTMLDivElement>(null);
 
   // Standalone add-note state
@@ -500,21 +501,27 @@ export function ERCaseDetail() {
 
   const fetchOutcomeAnalysis = useCallback(async () => {
     if (!id || outcomeLoadingRef.current) return;
+    const requestSeq = outcomeRequestSeqRef.current + 1;
+    outcomeRequestSeqRef.current = requestSeq;
     outcomeLoadingRef.current = true;
     setOutcomeLoading(true);
     setOutcomeStatusMsg(null);
     setOutcomeError(null);
     try {
       const result = await erCopilot.generateOutcomeAnalysisStream(id, (msg) => {
+        if (outcomeRequestSeqRef.current !== requestSeq) return;
         setOutcomeStatusMsg(msg);
       });
+      if (outcomeRequestSeqRef.current !== requestSeq) return;
       setOutcomeAnalysis(result);
       setOutcomeStatusMsg(null);
     } catch (err) {
+      if (outcomeRequestSeqRef.current !== requestSeq) return;
       console.error('Failed to generate outcome analysis:', err);
       setOutcomeError(getErrorMessage(err, 'Failed to generate outcome analysis. Click below to retry.'));
       setOutcomeStatusMsg(null);
     } finally {
+      if (outcomeRequestSeqRef.current !== requestSeq) return;
       outcomeLoadingRef.current = false;
       setOutcomeLoading(false);
     }
@@ -602,9 +609,17 @@ export function ERCaseDetail() {
 
   useEffect(() => {
     autoReviewSignatureRef.current = null;
+    outcomeRequestSeqRef.current += 1;
+    outcomeLoadingRef.current = false;
     setAutoAssistStatus('idle');
     setAutoAssistMessage(null);
     setNotes([]);
+    setOutcomeAnalysis(null);
+    setOutcomeLoading(false);
+    setOutcomeStatusMsg(null);
+    setOutcomeError(null);
+    setSelectedOutcomeIdx(null);
+    setDeterminationNotes('');
   }, [id]);
 
   // WebSocket subscription for real-time analysis updates

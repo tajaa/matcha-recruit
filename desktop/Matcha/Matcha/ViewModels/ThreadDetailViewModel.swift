@@ -37,6 +37,7 @@ class ThreadDetailViewModel {
         await MainActor.run {
             isLoadingThread = true
             errorMessage = nil
+            selectedSlideIndex = nil
         }
         do {
             let detail = try await service.getThread(id: id)

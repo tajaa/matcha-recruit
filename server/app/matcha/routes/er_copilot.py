@@ -2363,9 +2363,9 @@ async def generate_outcome_analysis(
         valid_actions = {"termination", "disciplinary_action", "retraining", "no_action", "resignation", "other"}
         if action not in valid_actions:
             action = "other"
-        conf = o.get("confidence", "moderate")
-        if conf not in ("high", "moderate", "low"):
-            conf = "moderate"
+        conf = o.get("confidence", "medium")
+        if conf not in ("high", "medium", "low"):
+            conf = "medium"
         outcomes.append(OutcomeOption(
             determination=det,
             recommended_action=action,
