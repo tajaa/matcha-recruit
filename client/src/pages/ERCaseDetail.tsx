@@ -12,6 +12,7 @@ import type {
   ERGuidanceCard,
   ERGuidancePriority,
   ERSuggestedGuidanceResponse,
+  OutcomeAnalysisResponse,
   TimelineEvent,
   Discrepancy,
   PolicyViolation,
@@ -385,6 +386,18 @@ export function ERCaseDetail() {
   const [determinationDismissed, setDeterminationDismissed] = useState(false);
   const [determinationAccepting, setDeterminationAccepting] = useState(false);
 
+  // Outcome analysis state (determination panel)
+  const [outcomeAnalysis, setOutcomeAnalysis] = useState<OutcomeAnalysisResponse | null>(null);
+  const [outcomeLoading, setOutcomeLoading] = useState(false);
+  const [outcomeStatusMsg, setOutcomeStatusMsg] = useState<string | null>(null);
+  const [selectedOutcomeIdx, setSelectedOutcomeIdx] = useState<number | null>(null);
+  const [determinationNotes, setDeterminationNotes] = useState('');
+  const [closingCase, setClosingCase] = useState(false);
+
+  // Standalone add-note state
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [addingNote, setAddingNote] = useState(false);
+
   // Export state
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportPassword, setExportPassword] = useState('');
@@ -482,6 +495,84 @@ export function ERCaseDetail() {
     }
   }, [id]);
 
+  const fetchOutcomeAnalysis = useCallback(async () => {
+    if (!id || outcomeLoading) return;
+    setOutcomeLoading(true);
+    setOutcomeStatusMsg(null);
+    try {
+      const result = await erCopilot.generateOutcomeAnalysisStream(id, (msg) => {
+        setOutcomeStatusMsg(msg);
+      });
+      setOutcomeAnalysis(result);
+      setOutcomeStatusMsg(null);
+    } catch (err) {
+      console.error('Failed to generate outcome analysis:', err);
+      setOutcomeStatusMsg(null);
+    } finally {
+      setOutcomeLoading(false);
+    }
+  }, [id, outcomeLoading]);
+
+  const handleCloseCase = useCallback(async () => {
+    if (!id || selectedOutcomeIdx === null || !outcomeAnalysis || !determinationNotes.trim()) return;
+    const selected = outcomeAnalysis.outcomes[selectedOutcomeIdx];
+    if (!selected) return;
+
+    setClosingCase(true);
+    try {
+      // 1. Create case note with determination notes + selected outcome reasoning
+      await erCopilot.createCaseNote(id, {
+        note_type: 'system',
+        content: `Determination: ${selected.determination}\nOutcome: ${selected.action_label}\n\nInvestigator Notes:\n${determinationNotes.trim()}\n\nAI Reasoning:\n${selected.reasoning}`,
+        metadata: {
+          note_purpose: 'determination',
+          determination: selected.determination,
+          outcome: selected.recommended_action,
+          action_label: selected.action_label,
+        },
+      });
+
+      // 2. Generate determination letter
+      await erCopilot.generateDetermination(id, selected.determination);
+
+      // 3. Close case with outcome
+      const updated = await erCopilot.updateCase(id, {
+        status: 'closed',
+        outcome: selected.recommended_action,
+      });
+      setCase(updated);
+
+      // 4. Refresh notes
+      await fetchNotes();
+
+      // Reset state
+      setSelectedOutcomeIdx(null);
+      setDeterminationNotes('');
+      setOutcomeAnalysis(null);
+    } catch (err) {
+      console.error('Failed to close case:', err);
+    } finally {
+      setClosingCase(false);
+    }
+  }, [id, selectedOutcomeIdx, outcomeAnalysis, determinationNotes, fetchNotes]);
+
+  const handleAddNote = useCallback(async () => {
+    if (!id || !newNoteContent.trim()) return;
+    setAddingNote(true);
+    try {
+      await erCopilot.createCaseNote(id, {
+        note_type: 'general',
+        content: newNoteContent.trim(),
+      });
+      setNewNoteContent('');
+      await fetchNotes();
+    } catch (err) {
+      console.error('Failed to add note:', err);
+    } finally {
+      setAddingNote(false);
+    }
+  }, [id, newNoteContent, fetchNotes]);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -494,6 +585,13 @@ export function ERCaseDetail() {
   useEffect(() => {
     fetchAnalysis(activeTab);
   }, [activeTab, fetchAnalysis]);
+
+  // Auto-load outcome analysis when visiting a pending_determination case
+  useEffect(() => {
+    if (!loading && erCase?.status === 'pending_determination' && !outcomeAnalysis && !outcomeLoading) {
+      fetchOutcomeAnalysis();
+    }
+  }, [loading, erCase?.status, outcomeAnalysis, outcomeLoading, fetchOutcomeAnalysis]);
 
   useEffect(() => {
     autoReviewSignatureRef.current = null;
@@ -1351,6 +1449,8 @@ export function ERCaseDetail() {
                           setCase(updated);
                           await erCopilot.generateSummary(id);
                           await fetchNotes();
+                          // Trigger outcome analysis stream
+                          fetchOutcomeAnalysis();
                         } catch (err) {
                           console.error('Failed to transition to pending determination:', err);
                         } finally {
@@ -1474,7 +1574,7 @@ export function ERCaseDetail() {
             </div>
           )}
 
-          {showAssistancePanel && (
+          {showAssistancePanel && erCase.status !== 'pending_determination' && (
             <div className="pt-4 border-t border-zinc-200">
               <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Case Notes</h3>
               {caseNotes.length === 0 ? (
@@ -1501,6 +1601,183 @@ export function ERCaseDetail() {
               )}
             </div>
           )}
+
+          {/* Determination Panel — shown when status is pending_determination */}
+          {erCase.status === 'pending_determination' && (
+            <div className="pt-4 border-t border-zinc-200 space-y-4">
+              <h3 className="text-[10px] uppercase tracking-wider text-zinc-500">Case Determination</h3>
+
+              {/* Loading state */}
+              {outcomeLoading && (
+                <div className="border border-orange-200 bg-orange-50 p-3 rounded-sm">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw size={12} className="animate-spin text-orange-600" />
+                    <span className="text-xs text-orange-800">{outcomeStatusMsg || 'Generating outcome analysis...'}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Outcome analysis results */}
+              {outcomeAnalysis && !outcomeLoading && (
+                <div className="space-y-3">
+                  {outcomeAnalysis.case_summary && (
+                    <div className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
+                      <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Case Summary</p>
+                      <p className="text-xs text-zinc-700 leading-relaxed">{outcomeAnalysis.case_summary}</p>
+                    </div>
+                  )}
+
+                  <p className="text-[10px] uppercase tracking-wide text-zinc-500">Recommended Outcomes</p>
+
+                  {outcomeAnalysis.outcomes.map((outcome, idx) => {
+                    const isSelected = selectedOutcomeIdx === idx;
+                    const confColor = outcome.confidence === 'high'
+                      ? 'text-emerald-700 bg-emerald-100'
+                      : outcome.confidence === 'moderate'
+                        ? 'text-amber-700 bg-amber-100'
+                        : 'text-zinc-600 bg-zinc-100';
+                    const detColor = outcome.determination === 'substantiated'
+                      ? 'text-red-700'
+                      : outcome.determination === 'unsubstantiated'
+                        ? 'text-emerald-700'
+                        : 'text-amber-700';
+
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => setSelectedOutcomeIdx(isSelected ? null : idx)}
+                        className={`w-full text-left border rounded-sm p-3 space-y-2 transition-colors ${
+                          isSelected
+                            ? 'border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900'
+                            : 'border-zinc-200 bg-white hover:border-zinc-400'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${
+                              isSelected ? 'border-zinc-900 bg-zinc-900' : 'border-zinc-300'
+                            }`} />
+                            <span className="text-xs font-medium text-zinc-900 truncate">{outcome.action_label}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className={`text-[10px] uppercase tracking-wide font-medium ${detColor}`}>
+                              {outcome.determination}
+                            </span>
+                            <span className={`px-1.5 py-0.5 text-[9px] uppercase tracking-wide rounded ${confColor}`}>
+                              {outcome.confidence}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-zinc-700 leading-relaxed">{outcome.reasoning}</p>
+                        {isSelected && (
+                          <div className="pt-2 border-t border-zinc-200 space-y-1.5">
+                            <div>
+                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">Policy Basis</span>
+                              <p className="text-xs text-zinc-600 mt-0.5">{outcome.policy_basis}</p>
+                            </div>
+                            <div>
+                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">HR Considerations</span>
+                              <p className="text-xs text-zinc-600 mt-0.5">{outcome.hr_considerations}</p>
+                            </div>
+                            <div>
+                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">Precedent</span>
+                              <p className="text-xs text-zinc-600 mt-0.5">{outcome.precedent_note}</p>
+                            </div>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                  {outcomeAnalysis.outcomes.length === 0 && (
+                    <p className="text-xs text-zinc-400">No outcome recommendations generated. Please review the case manually.</p>
+                  )}
+
+                  {/* Determination notes */}
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                      Determination Notes <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      value={determinationNotes}
+                      onChange={(e) => setDeterminationNotes(e.target.value)}
+                      placeholder="Document your reasoning for this determination..."
+                      rows={4}
+                      className="w-full px-3 py-2 text-xs text-zinc-900 bg-white border border-zinc-200 rounded-sm focus:outline-none focus:border-zinc-400 resize-none"
+                    />
+                  </div>
+
+                  {/* Close case button */}
+                  <button
+                    onClick={handleCloseCase}
+                    disabled={closingCase || selectedOutcomeIdx === null || !determinationNotes.trim()}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-zinc-900 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed rounded-sm"
+                  >
+                    <CheckCircle size={14} />
+                    {closingCase ? 'Closing Case...' : 'Close Case & Finalize'}
+                  </button>
+
+                  <p className="text-[10px] text-zinc-400">
+                    Model: {outcomeAnalysis.model}
+                  </p>
+                </div>
+              )}
+
+              {/* No analysis yet and not loading */}
+              {!outcomeAnalysis && !outcomeLoading && (
+                <div className="text-center py-4">
+                  <p className="text-xs text-zinc-400 mb-2">Outcome analysis not yet generated.</p>
+                  <button
+                    onClick={fetchOutcomeAnalysis}
+                    className="text-xs text-zinc-700 hover:text-zinc-900 uppercase tracking-wider font-medium"
+                  >
+                    Generate Analysis
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Always-visible Case Notes & Add Note */}
+          <div className="pt-4 border-t border-zinc-200 space-y-3">
+            <h3 className="text-[10px] uppercase tracking-wider text-zinc-500">Case Notes</h3>
+            {caseNotes.length > 0 && (
+              <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                {caseNotes.slice(-10).reverse().map((note) => (
+                  <div key={note.id} className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] uppercase tracking-wide text-zinc-500">{formatCaseNoteType(note.note_type)}</span>
+                      <span className="text-[10px] text-zinc-400">
+                        {new Date(note.created_at).toLocaleString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-700 whitespace-pre-wrap">{note.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="space-y-2">
+              <textarea
+                value={newNoteContent}
+                onChange={(e) => setNewNoteContent(e.target.value)}
+                placeholder="Add a note..."
+                rows={2}
+                className="w-full px-3 py-2 text-xs text-zinc-900 bg-white border border-zinc-200 rounded-sm focus:outline-none focus:border-zinc-400 resize-none"
+              />
+              <button
+                onClick={handleAddNote}
+                disabled={addingNote || !newNoteContent.trim()}
+                className="text-[10px] uppercase tracking-wider font-medium text-zinc-700 hover:text-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {addingNote ? 'Adding...' : 'Add Note'}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Right: Analysis */}

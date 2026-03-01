@@ -274,6 +274,29 @@ class EvidenceSearchResponse(BaseModel):
 # Report Models
 # ===========================================
 
+ERDetermination = Literal["substantiated", "unsubstantiated", "inconclusive"]
+
+
+class OutcomeOption(BaseModel):
+    """A single AI-suggested outcome path for case determination."""
+    determination: ERDetermination
+    recommended_action: ERCaseOutcome
+    action_label: str
+    reasoning: str
+    policy_basis: str
+    hr_considerations: str
+    precedent_note: str
+    confidence: ConfidenceLevel
+
+
+class OutcomeAnalysisResponse(BaseModel):
+    """AI-generated outcome analysis with multiple recommended paths."""
+    outcomes: list[OutcomeOption]
+    case_summary: str
+    generated_at: datetime
+    model: str
+
+
 class ReportGenerateRequest(BaseModel):
     """Request to generate a report."""
     determination: Optional[str] = None  # substantiated, unsubstantiated, inconclusive

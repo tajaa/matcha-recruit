@@ -1671,6 +1671,27 @@ export interface ERSuggestedGuidanceResponse {
   determination_signals?: string[];
 }
 
+// Outcome Analysis types (Case Determination)
+export type ERDetermination = 'substantiated' | 'unsubstantiated' | 'inconclusive';
+
+export interface OutcomeOption {
+  determination: ERDetermination;
+  recommended_action: ERCaseOutcome;
+  action_label: string;
+  reasoning: string;
+  policy_basis: string;
+  hr_considerations: string;
+  precedent_note: string;
+  confidence: 'high' | 'moderate' | 'low';
+}
+
+export interface OutcomeAnalysisResponse {
+  outcomes: OutcomeOption[];
+  case_summary: string;
+  generated_at: string;
+  model: string;
+}
+
 // Document types
 export interface ERDocument {
   id: string;

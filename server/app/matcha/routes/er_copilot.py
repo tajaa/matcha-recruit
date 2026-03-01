@@ -45,6 +45,8 @@ from ..models.er_case import (
     DiscrepancyAnalysis,
     PolicyCheckAnalysis,
     SuggestedGuidanceResponse,
+    OutcomeAnalysisResponse,
+    OutcomeOption,
     EvidenceSearchRequest,
     EvidenceSearchResponse,
     EvidenceSearchResult,
@@ -2091,6 +2093,291 @@ async def generate_suggested_guidance_stream(
         event_stream(),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no"},
+    )
+
+
+# ===========================================
+# Outcome Analysis (Case Determination)
+# ===========================================
+
+@router.post("/{case_id}/guidance/outcomes/stream")
+async def generate_outcome_analysis_stream(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Stream SSE progress events during outcome analysis generation for case determination."""
+    from fastapi.responses import StreamingResponse
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        is_admin = current_user.role == "admin"
+        await _verify_case_company(conn, case_id, company_id, is_admin)
+
+        case_row = await conn.fetchrow(
+            """
+            SELECT case_number, title, description, status, intake_context, category, created_at, updated_at
+            FROM er_cases
+            WHERE id = $1
+            """,
+            case_id,
+        )
+        if not case_row:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        analysis_rows = await conn.fetch(
+            """
+            SELECT analysis_type, analysis_data
+            FROM er_case_analysis
+            WHERE case_id = $1 AND analysis_type = ANY($2::text[])
+            """,
+            case_id,
+            ["timeline", "discrepancies", "policy_check"],
+        )
+
+        # Query past case precedent for this company
+        company_filter = "(company_id = $1 OR company_id IS NULL)" if is_admin else "company_id = $1"
+        precedent_rows = await conn.fetch(
+            f"""
+            SELECT outcome, COUNT(*) as cnt
+            FROM er_cases
+            WHERE {company_filter} AND status = 'closed' AND outcome IS NOT NULL
+            GROUP BY outcome
+            """,
+            company_id,
+        )
+
+    precedent_stats = {r["outcome"]: r["cnt"] for r in precedent_rows}
+    total_closed = sum(precedent_stats.values())
+
+    async def event_stream():
+        def sse(event: dict) -> str:
+            return f"data: {json.dumps(event)}\n\n"
+
+        yield sse({"type": "status", "message": "Reviewing case evidence..."})
+
+        analysis_map: dict[str, dict[str, Any]] = {}
+        for row in analysis_rows:
+            raw = row["analysis_data"]
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raw = {}
+            analysis_map[str(row["analysis_type"])] = raw if isinstance(raw, dict) else {}
+
+        timeline_data = analysis_map.get("timeline", {})
+        disc_data = analysis_map.get("discrepancies", {})
+        policy_data = analysis_map.get("policy_check", {})
+
+        analysis_summary_parts = []
+        if timeline_data.get("timeline_summary"):
+            analysis_summary_parts.append(f"Timeline: {timeline_data['timeline_summary']}")
+        if disc_data.get("summary"):
+            analysis_summary_parts.append(f"Discrepancies: {disc_data['summary']}")
+        analysis_summary = "\n".join(analysis_summary_parts) or "No analysis summaries available."
+
+        policy_findings = policy_data.get("summary", "No policy findings available.")
+
+        yield sse({"type": "status", "message": "Checking past case precedent..."})
+
+        precedent_display = {
+            "total_closed_cases": total_closed,
+            "outcome_distribution": precedent_stats,
+        }
+
+        yield sse({"type": "status", "message": "Generating outcome recommendations..."})
+
+        c_info = {
+            "case_number": case_row["case_number"],
+            "title": case_row["title"],
+            "description": case_row["description"],
+            "status": case_row["status"],
+            "category": case_row.get("category"),
+            "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
+        }
+
+        try:
+            analyzer = _build_er_analyzer()
+            raw_result = await analyzer.generate_outcome_analysis(
+                case_info=c_info,
+                analysis_summary=analysis_summary,
+                policy_findings=policy_findings,
+                precedent_stats=precedent_display,
+            )
+
+            # Normalize outcomes
+            outcomes = []
+            for o in raw_result.get("outcomes", []):
+                if not isinstance(o, dict):
+                    continue
+                det = o.get("determination", "inconclusive")
+                if det not in ("substantiated", "unsubstantiated", "inconclusive"):
+                    det = "inconclusive"
+                action = o.get("recommended_action", "other")
+                valid_actions = {"termination", "disciplinary_action", "retraining", "no_action", "resignation", "other"}
+                if action not in valid_actions:
+                    action = "other"
+                conf = o.get("confidence", "moderate")
+                if conf not in ("high", "moderate", "low"):
+                    conf = "moderate"
+                outcomes.append(OutcomeOption(
+                    determination=det,
+                    recommended_action=action,
+                    action_label=o.get("action_label", action.replace("_", " ").title()),
+                    reasoning=o.get("reasoning", ""),
+                    policy_basis=o.get("policy_basis", ""),
+                    hr_considerations=o.get("hr_considerations", ""),
+                    precedent_note=o.get("precedent_note", ""),
+                    confidence=conf,
+                ))
+
+
+            response_obj = OutcomeAnalysisResponse(
+                outcomes=outcomes,
+                case_summary=raw_result.get("case_summary", ""),
+                generated_at=datetime.now(timezone.utc),
+                model=raw_result.get("model", analyzer.model),
+            )
+            yield sse({"type": "result", "data": response_obj.model_dump(mode="json")})
+
+        except Exception as exc:
+            logger.warning("Outcome analysis streaming failed for case %s: %s", case_id, exc)
+
+            fallback = OutcomeAnalysisResponse(
+                outcomes=[],
+                case_summary="Unable to generate outcome analysis. Please review the case manually.",
+                generated_at=datetime.now(timezone.utc),
+                model="unknown",
+            )
+            yield sse({"type": "result", "data": fallback.model_dump(mode="json")})
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/{case_id}/guidance/outcomes", response_model=OutcomeAnalysisResponse)
+async def generate_outcome_analysis(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Non-streaming outcome analysis generation for case determination."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        is_admin = current_user.role == "admin"
+        await _verify_case_company(conn, case_id, company_id, is_admin)
+
+        case_row = await conn.fetchrow(
+            "SELECT case_number, title, description, status, category, created_at FROM er_cases WHERE id = $1",
+            case_id,
+        )
+        if not case_row:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        analysis_rows = await conn.fetch(
+            """
+            SELECT analysis_type, analysis_data
+            FROM er_case_analysis
+            WHERE case_id = $1 AND analysis_type = ANY($2::text[])
+            """,
+            case_id,
+            ["timeline", "discrepancies", "policy_check"],
+        )
+
+        company_filter = "(company_id = $1 OR company_id IS NULL)" if is_admin else "company_id = $1"
+        precedent_rows = await conn.fetch(
+            f"""
+            SELECT outcome, COUNT(*) as cnt
+            FROM er_cases
+            WHERE {company_filter} AND status = 'closed' AND outcome IS NOT NULL
+            GROUP BY outcome
+            """,
+            company_id,
+        )
+
+    precedent_stats = {r["outcome"]: r["cnt"] for r in precedent_rows}
+    total_closed = sum(precedent_stats.values())
+
+    analysis_map: dict[str, dict[str, Any]] = {}
+    for row in analysis_rows:
+        raw = row["analysis_data"]
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = {}
+        analysis_map[str(row["analysis_type"])] = raw if isinstance(raw, dict) else {}
+
+    timeline_data = analysis_map.get("timeline", {})
+    disc_data = analysis_map.get("discrepancies", {})
+    policy_data = analysis_map.get("policy_check", {})
+
+    summary_parts = []
+    if timeline_data.get("timeline_summary"):
+        summary_parts.append(f"Timeline: {timeline_data['timeline_summary']}")
+    if disc_data.get("summary"):
+        summary_parts.append(f"Discrepancies: {disc_data['summary']}")
+    analysis_summary = "\n".join(summary_parts) or "No analysis summaries available."
+
+    policy_findings = policy_data.get("summary", "No policy findings available.")
+
+    c_info = {
+        "case_number": case_row["case_number"],
+        "title": case_row["title"],
+        "description": case_row["description"],
+        "status": case_row["status"],
+        "category": case_row.get("category"),
+        "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
+    }
+
+    analyzer = _build_er_analyzer()
+    raw_result = await analyzer.generate_outcome_analysis(
+        case_info=c_info,
+        analysis_summary=analysis_summary,
+        policy_findings=policy_findings,
+        precedent_stats={"total_closed_cases": total_closed, "outcome_distribution": precedent_stats},
+    )
+
+    outcomes = []
+    for o in raw_result.get("outcomes", []):
+        if not isinstance(o, dict):
+            continue
+        det = o.get("determination", "inconclusive")
+        if det not in ("substantiated", "unsubstantiated", "inconclusive"):
+            det = "inconclusive"
+        action = o.get("recommended_action", "other")
+        valid_actions = {"termination", "disciplinary_action", "retraining", "no_action", "resignation", "other"}
+        if action not in valid_actions:
+            action = "other"
+        conf = o.get("confidence", "moderate")
+        if conf not in ("high", "moderate", "low"):
+            conf = "moderate"
+        outcomes.append(OutcomeOption(
+            determination=det,
+            recommended_action=action,
+            action_label=o.get("action_label", action.replace("_", " ").title()),
+            reasoning=o.get("reasoning", ""),
+            policy_basis=o.get("policy_basis", ""),
+            hr_considerations=o.get("hr_considerations", ""),
+            precedent_note=o.get("precedent_note", ""),
+            confidence=conf,
+        ))
+
+    return OutcomeAnalysisResponse(
+        outcomes=outcomes,
+        case_summary=raw_result.get("case_summary", ""),
+        generated_at=datetime.now(timezone.utc),
+        model=raw_result.get("model", analyzer.model),
     )
 
 

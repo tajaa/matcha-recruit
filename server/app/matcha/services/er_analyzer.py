@@ -273,6 +273,58 @@ Rules:
 - Do NOT inflate confidence — be honest about gaps"""
 
 
+OUTCOME_ANALYSIS_PROMPT = """You are an Employee Relations investigation assistant. Based on the evidence, analysis, and company policy, evaluate this case and recommend 2-4 possible outcome paths.
+
+CASE INFORMATION:
+{case_info}
+
+ANALYSIS SUMMARY:
+{analysis_summary}
+
+POLICY FINDINGS:
+{policy_findings}
+
+PAST CASE PRECEDENT (this company):
+{precedent_stats}
+
+For each outcome path, provide:
+- determination: "substantiated", "unsubstantiated", or "inconclusive"
+- recommended_action: one of "termination", "disciplinary_action", "retraining", "no_action", "resignation", "other"
+- action_label: Human-readable label for the action (e.g. "Termination for Cause", "Written Warning + Retraining")
+- reasoning: 2-3 sentences citing specific evidence that supports this path
+- policy_basis: Which company policies or legal standards support this outcome
+- hr_considerations: Best practice notes, risks, or mitigating factors to consider
+- precedent_note: How this aligns with the company's past case outcomes (use the precedent stats provided)
+- confidence: "high", "moderate", or "low" based on evidence strength for this path
+
+Order outcomes from most to least supported by evidence.
+
+Return ONLY a JSON object with this structure:
+{{
+  "outcomes": [
+    {{
+      "determination": "substantiated",
+      "recommended_action": "disciplinary_action",
+      "action_label": "Written Warning with Mandatory Training",
+      "reasoning": "Two witnesses corroborate the reported behavior. The respondent's own statement partially acknowledges the conduct.",
+      "policy_basis": "Section 3.2 Workplace Conduct prohibits intimidating behavior. Progressive discipline policy calls for written warning on first offense.",
+      "hr_considerations": "Consider respondent's tenure and clean prior record as mitigating factors. Document the warning thoroughly for potential future escalation.",
+      "precedent_note": "3 of 5 similar past cases resulted in disciplinary action rather than termination.",
+      "confidence": "high"
+    }}
+  ],
+  "case_summary": "2-3 sentence executive summary of the case and key evidence"
+}}
+
+Rules:
+- Provide 2 to 4 outcome paths, sorted by evidence strength
+- Always include at least one path with a different determination when evidence allows
+- Be objective — present options, don't advocate for one
+- confidence must be "high", "moderate", or "low"
+- Keep reasoning concise but cite specific evidence
+- If precedent data is sparse, say so honestly in precedent_note"""
+
+
 SUGGESTED_GUIDANCE_PROMPT = """You are an Employee Relations investigation assistant generating interactive next-step guidance for an active case.
 
 CASE INFORMATION:
@@ -669,6 +721,46 @@ class ERAnalyzer:
         result = self._parse_json_response(text)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
+
+    async def generate_outcome_analysis(
+        self,
+        case_info: dict,
+        analysis_summary: str,
+        policy_findings: str,
+        precedent_stats: dict,
+    ) -> dict[str, Any]:
+        """Generate AI-analyzed outcome recommendations for case determination.
+
+        Args:
+            case_info: Case metadata (number, title, description, status).
+            analysis_summary: Combined timeline/discrepancy analysis summary.
+            policy_findings: Policy violation analysis summary.
+            precedent_stats: Past case outcome counts for this company.
+
+        Returns:
+            Dict with outcomes list and case_summary.
+        """
+        prompt = OUTCOME_ANALYSIS_PROMPT.format(
+            case_info=json.dumps(case_info, indent=2),
+            analysis_summary=analysis_summary or "No analysis summary available.",
+            policy_findings=policy_findings or "No policy findings available.",
+            precedent_stats=json.dumps(precedent_stats, indent=2) if precedent_stats else "No prior case data available.",
+        )
+
+        try:
+            text = await self._generate_content_async(prompt)
+            result = self._parse_json_response(text)
+            result["generated_at"] = datetime.now(timezone.utc).isoformat()
+            result["model"] = self.model
+            return result
+        except Exception as exc:
+            logger.warning("Outcome analysis generation failed: %s", exc)
+            return {
+                "outcomes": [],
+                "case_summary": "Unable to generate outcome analysis. Please review the case manually.",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "model": self.model,
+            }
 
     # Synchronous versions for Celery tasks
 

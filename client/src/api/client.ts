@@ -97,6 +97,7 @@ import type {
   PolicyCheckAnalysis,
   EvidenceSearchResponse,
   ERSuggestedGuidanceResponse,
+  OutcomeAnalysisResponse,
   ERTaskStatus,
   ERAuditLogResponse,
   // IR (Incident Report) types
@@ -1747,6 +1748,56 @@ export const erCopilot = {
     }
 
     if (!result) throw new Error('No guidance result received from stream');
+    return result;
+  },
+
+  // Outcome Analysis (Case Determination)
+  generateOutcomeAnalysis: (caseId: string): Promise<OutcomeAnalysisResponse> =>
+    request<OutcomeAnalysisResponse>(`/er/cases/${caseId}/guidance/outcomes`, {
+      method: 'POST',
+    }),
+
+  generateOutcomeAnalysisStream: async (
+    caseId: string,
+    onStatus: (message: string) => void,
+  ): Promise<OutcomeAnalysisResponse> => {
+    const token = getAccessToken();
+    const response = await fetch(`${API_BASE}/er/cases/${caseId}/guidance/outcomes/stream`, {
+      method: 'POST',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!response.ok) throw new Error('Failed to start outcome analysis stream');
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: OutcomeAnalysisResponse | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data: ')) continue;
+        const payload = trimmed.slice(6);
+        if (payload === '[DONE]') continue;
+        try {
+          const event = JSON.parse(payload);
+          if (event.type === 'status' && event.message) {
+            onStatus(event.message);
+          } else if (event.type === 'result' && event.data) {
+            result = event.data as OutcomeAnalysisResponse;
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+
+    if (!result) throw new Error('No outcome analysis result received from stream');
     return result;
   },
 
