@@ -393,23 +393,90 @@ async def _create_onboarding_employees(
     return results
 
 
+def _inject_slide_context(msg_dicts: list[dict], current_state: dict, slide_index: Optional[int]) -> None:
+    """Prepend selected slide content to the last user message so the AI sees what it's editing.
+
+    Modifies msg_dicts in-place. Only the AI-facing message list is changed — the saved
+    database message remains the user's original text.
+    """
+    if slide_index is None or not msg_dicts:
+        return
+
+    # Find slides in top-level or under presentation (workbook)
+    slides = current_state.get("slides") or []
+    if not slides:
+        pres = current_state.get("presentation")
+        if isinstance(pres, dict):
+            slides = pres.get("slides") or []
+
+    if not slides or not (0 <= slide_index < len(slides)):
+        return
+
+    slide = slides[slide_index]
+    if not isinstance(slide, dict):
+        return
+
+    total = len(slides)
+    title = slide.get("title", "Untitled")
+    bullets = slide.get("bullets") or []
+    speaker_notes = slide.get("speaker_notes", "")
+
+    context_lines = [
+        f"[Editing Slide {slide_index + 1}/{total}: \"{title}\"]",
+        "Current content:",
+        f"- Title: {title}",
+        f"- Bullets: {json.dumps(bullets)}",
+    ]
+    if speaker_notes:
+        context_lines.append(f"- Speaker Notes: {speaker_notes}")
+
+    context_block = "\n".join(context_lines)
+
+    # Find last user message and prepend context
+    for i in range(len(msg_dicts) - 1, -1, -1):
+        if msg_dicts[i]["role"] == "user":
+            original = msg_dicts[i]["content"]
+            msg_dicts[i] = {
+                "role": "user",
+                "content": f"{context_block}\n\nUser request: {original}",
+            }
+            break
+
+
 def _scope_slide_update(ai_resp, current_state: dict, slide_index: Optional[int]) -> None:
-    """When a specific slide was targeted, restrict the AI's slides update to only that slide.
+    """When a specific slide was targeted, restrict the AI's update to only that slide.
 
     The AI is instructed to return the full slides array, but it may inadvertently modify
-    other slides. This merges only the targeted slide from the AI response back into the
-    existing slides array, leaving all other slides untouched.
+    other slides or presentation-level fields. This function:
+    1) Strips non-slide keys (title, subtitle, theme, etc.) from the update
+    2) Merges only the targeted slide from the AI response into the existing slides array
+    3) Handles workbook presentations where slides live under presentation.slides
     """
     if slide_index is None:
         return
     if not isinstance(ai_resp.structured_update, dict):
         return
+
+    # Strip non-slide presentation fields — only slide content should change
+    for key in ("presentation_title", "subtitle", "theme", "cover_image_url", "generated_at"):
+        ai_resp.structured_update.pop(key, None)
+
     ai_slides = ai_resp.structured_update.get("slides")
-    if not isinstance(ai_slides, list):
-        return
+
+    # Determine where current slides live
     current_slides = list(current_state.get("slides") or [])
+
+    # Fallback: workbook presentations store slides under presentation.slides
+    if not current_slides:
+        pres = current_state.get("presentation")
+        if isinstance(pres, dict):
+            current_slides = list(pres.get("slides") or [])
+
+    if not isinstance(ai_slides, list) or not current_slides:
+        return
     if not (0 <= slide_index < len(ai_slides) and 0 <= slide_index < len(current_slides)):
         return
+
     merged = list(current_slides)
     merged[slide_index] = ai_slides[slide_index]
     ai_resp.structured_update["slides"] = merged
@@ -935,6 +1002,9 @@ async def send_message(
     messages = await doc_svc.get_thread_messages(thread_id)
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
+    # Inject selected slide content into the AI-facing message (not saved to DB)
+    _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)
+
     if current_user.role != "admin":
         await billing_service.check_credits(company_id)
 
@@ -1053,6 +1123,9 @@ async def send_message_stream(
     # Fetch message history for context (sliding window handled by AI provider)
     messages = await doc_svc.get_thread_messages(thread_id)
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
+
+    # Inject selected slide content into the AI-facing message (not saved to DB)
+    _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)
 
     if current_user.role != "admin":
         await billing_service.check_credits(company_id)

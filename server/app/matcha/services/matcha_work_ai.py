@@ -398,16 +398,25 @@ class GeminiProvider(MatchaWorkAIProvider):
         # Inject slide-focus context when the user has selected a specific slide
         if slide_index is not None and current_skill in ("presentation", "workbook"):
             slides = current_state.get("slides") or []
+            # Workbook presentations store slides under presentation.slides
+            if not slides:
+                pres = current_state.get("presentation")
+                if isinstance(pres, dict):
+                    slides = pres.get("slides") or []
             slide_title = ""
             if 0 <= slide_index < len(slides):
                 slide_title = slides[slide_index].get("title", "") if isinstance(slides[slide_index], dict) else ""
-            label = f'"{slide_title}" ' if slide_title else ""
+            label = f' "{slide_title}"' if slide_title else ""
             total = len(slides)
             system_prompt += (
-                f"\n\nSlide focus: The user has selected Slide {slide_index + 1}{f'/{total}' if total else ''} {label}(0-based index {slide_index}). "
-                f"Apply the user's requested changes ONLY to this slide. "
-                f"Return the complete slides array with all other slides identical to current_state. "
-                f"Do not modify any other slide's title, bullets, or speaker_notes."
+                f"\n\n--- SLIDE LOCK ACTIVE ---\n"
+                f"The user has selected Slide {slide_index + 1}/{total}{label} (0-based index {slide_index}). "
+                f"You MUST only modify this slide. In your updates JSON:\n"
+                f"- The 'slides' array must be identical to current_state except at index {slide_index}\n"
+                f"- Do NOT change any other slide's title, bullets, or speaker_notes\n"
+                f"- Do NOT include presentation_title, subtitle, theme, or cover_image_url in updates\n"
+                f"- Only include 'slides' in your updates object\n"
+                f"--- END SLIDE LOCK ---"
             )
 
         contents = []
