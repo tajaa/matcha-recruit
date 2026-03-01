@@ -773,8 +773,8 @@ export function Layout() {
           <Link
             to={item.path}
             className={`flex-1 min-w-0 flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase transition-all ${isActive
-                ? 'text-white bg-zinc-800 border-l-2 border-white'
-                : 'text-zinc-300 hover:text-white border-l-2 border-transparent hover:border-zinc-700'
+                ? 'text-white bg-zinc-800 border-l-2 border-white light:text-black light:bg-black/5 light:border-black'
+                : 'text-zinc-300 hover:text-white border-l-2 border-transparent hover:border-zinc-700 light:text-black/60 light:hover:text-black light:hover:border-black/20'
               }`}
             title={item.label}
           >
@@ -821,12 +821,12 @@ export function Layout() {
       {/* Desktop Sidebar - hidden on mobile */}
       <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 light:bg-transparent light:backdrop-blur-2xl border-r border-white/10 light:border-black/5 ${themeMode === 'lightSidebar' ? 'invert brightness-90 hue-rotate-180' : ''}`}>
         {/* Logo */}
-        <div className="h-16 flex items-center px-6 border-b border-white/10">
+        <div className="h-16 flex items-center px-6 border-b border-white/10 light:border-black/5">
           <Link to="/" className="flex items-center gap-3 group">
-            <div className="w-3 h-3 bg-white flex items-center justify-center">
-               <div className="w-1 h-1 bg-black group-hover:scale-0 transition-transform" />
+            <div className="w-3 h-3 bg-white light:bg-black flex items-center justify-center">
+               <div className="w-1 h-1 bg-black light:bg-white group-hover:scale-0 transition-transform" />
             </div>
-            <span className="text-xs tracking-[0.25em] uppercase text-white font-bold group-hover:text-zinc-300 transition-colors">
+            <span className="text-xs tracking-[0.25em] uppercase text-white light:text-black font-bold group-hover:text-zinc-300 light:group-hover:text-black/70 transition-colors">
               Matcha
             </span>
           </Link>
@@ -845,7 +845,7 @@ export function Layout() {
                   <div key={section.title}>
                     <button
                       onClick={() => toggleSection(section.title)}
-                      className="w-full flex items-center justify-between px-3 mb-1 text-[9px] tracking-[0.2em] uppercase text-zinc-300 font-bold hover:text-white transition-colors"
+                      className="w-full flex items-center justify-between px-3 mb-1 text-[9px] tracking-[0.2em] uppercase text-zinc-300 hover:text-white light:text-black/50 light:hover:text-black font-bold transition-colors"
                     >
                       {section.title}
                       <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isCollapsed ? '-rotate-90' : ''}`} />
@@ -864,11 +864,11 @@ export function Layout() {
         </nav>
 
         {/* Bottom section - Settings & User */}
-        <div className="border-t border-white/10 p-4">
+        <div className="border-t border-white/10 light:border-black/5 p-4">
           {user?.role === 'admin' && (
             <button
               onClick={() => setShowFeatureManager(true)}
-              className="w-full flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase text-zinc-400 hover:text-white border-l-2 border-transparent hover:border-zinc-700 transition-all mb-3"
+              className="w-full flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase text-zinc-400 hover:text-white light:text-black/60 light:hover:text-black border-l-2 border-transparent hover:border-zinc-700 light:hover:border-black/20 transition-all mb-3"
             >
               <Sliders className="w-4 h-4 shrink-0" />
               <span>Manage Features</span>
@@ -882,7 +882,7 @@ export function Layout() {
               else if (themeMode === 'lightSidebar') setThemeMode('lightPages');
               else setThemeMode('dark');
             }}
-            className="w-full flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase text-zinc-400 hover:text-white border-l-2 border-transparent hover:border-zinc-700 transition-all mt-1"
+            className="w-full flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase text-zinc-400 hover:text-white light:text-black/60 light:hover:text-black border-l-2 border-transparent hover:border-zinc-700 light:hover:border-black/20 transition-all mt-1"
           >
             {themeMode === 'lightPages' ? <Moon className="w-4 h-4 shrink-0" /> : <Sun className="w-4 h-4 shrink-0" />}
             <span>
@@ -892,20 +892,20 @@ export function Layout() {
             </span>
           </button>
 
-          <div className="mt-4 px-3 py-3 bg-zinc-900 border border-white/5">
+          <div className="mt-4 px-3 py-3 bg-zinc-900 border border-white/5 light:bg-black/5 light:border-black/5">
             {companyName && (
-              <div className="text-[10px] font-bold text-white tracking-widest uppercase truncate mb-2 pb-2 border-b border-white/10">
+              <div className="text-[10px] font-bold text-white light:text-black tracking-widest uppercase truncate mb-2 pb-2 border-b border-white/10 light:border-black/10">
                 {companyName}
               </div>
             )}
-            <div className="text-[10px] text-zinc-400 tracking-wide truncate font-mono">{user?.email}</div>
+            <div className="text-[10px] text-zinc-400 light:text-black/70 tracking-wide truncate font-mono">{user?.email}</div>
             <div className="flex items-center justify-between mt-2">
-              <span className="px-1.5 py-0.5 text-[8px] bg-emerald-900/30 text-emerald-400 border border-emerald-500/20 tracking-[0.15em] uppercase">
+              <span className="px-1.5 py-0.5 text-[8px] bg-emerald-900/30 text-emerald-400 border border-emerald-500/20 light:bg-black/10 light:text-black light:border-black/10 tracking-[0.15em] uppercase">
                 {user?.role}
               </span>
               <button
                 onClick={handleLogout}
-                className="text-[9px] tracking-[0.1em] uppercase text-zinc-500 hover:text-white transition-colors"
+                className="text-[9px] tracking-[0.1em] uppercase text-zinc-500 hover:text-white light:text-black/50 light:hover:text-black transition-colors"
               >
                 Logout
               </button>
