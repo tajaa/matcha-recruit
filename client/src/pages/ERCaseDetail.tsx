@@ -1879,7 +1879,7 @@ export function ERCaseDetail() {
       {/* Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-white shadow-2xl rounded-sm flex flex-col">
+          <div className="w-full max-w-md bg-white shadow-2xl rounded-sm flex flex-col max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-zinc-100">
               <h3 className="text-sm font-light text-zinc-900 uppercase tracking-wider">Upload Document</h3>
               <button 
