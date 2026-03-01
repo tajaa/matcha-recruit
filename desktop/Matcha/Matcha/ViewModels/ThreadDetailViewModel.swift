@@ -14,6 +14,7 @@ class ThreadDetailViewModel {
     var streamingContent = ""
     var tokenUsage: MWTokenUsage?
     var errorMessage: String?
+    var selectedSlideIndex: Int?
     private var streamingTask: Task<Void, Never>?
 
     var hasPreviewContent: Bool {
@@ -94,8 +95,15 @@ class ThreadDetailViewModel {
 
         struct SendBody: Codable {
             let content: String
+            let slideIndex: Int?
+            enum CodingKeys: String, CodingKey {
+                case content
+                case slideIndex = "slide_index"
+            }
         }
-        request.httpBody = try? JSONEncoder().encode(SendBody(content: content))
+        request.httpBody = try? JSONEncoder().encode(
+            SendBody(content: content, slideIndex: selectedSlideIndex)
+        )
 
         let task = Task {
             do {

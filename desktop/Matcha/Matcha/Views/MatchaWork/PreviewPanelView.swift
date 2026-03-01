@@ -6,6 +6,7 @@ struct PreviewPanelView: View {
     let pdfData: Data?
     let isLoading: Bool
     var threadId: String?
+    @Binding var selectedSlideIndex: Int?
 
     private var inferredSkill: String {
         if currentState["candidate_name"] != nil || currentState["position_title"] != nil ||
@@ -39,7 +40,7 @@ struct PreviewPanelView: View {
                 case "workbook":
                     WorkbookPreview(state: currentState)
                 case "presentation":
-                    PresentationPreview(state: currentState, threadId: threadId)
+                    PresentationPreview(state: currentState, threadId: threadId, selectedSlideIndex: $selectedSlideIndex)
                 case "onboarding":
                     OnboardingPreview(state: currentState)
                 default:
@@ -295,7 +296,9 @@ struct WorkbookPreview: View {
 struct PresentationPreview: View {
     let state: [String: AnyCodable]
     var threadId: String?
+    @Binding var selectedSlideIndex: Int?
     @State private var isLoadingPdf = false
+    @State private var hoveredSlideIndex: Int?
 
     struct SlideEntry: Identifiable {
         let id = UUID()
@@ -399,15 +402,28 @@ struct PresentationPreview: View {
                         .foregroundColor(.secondary)
 
                     ForEach(slides) { slide in
+                        let zeroBasedIndex = slide.index - 1
+                        let isSelected = selectedSlideIndex == zeroBasedIndex
+                        let isHovered = hoveredSlideIndex == zeroBasedIndex
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 6) {
                                 Text("\(slide.index)")
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundColor(.white.opacity(0.5))
+                                    .foregroundColor(isSelected ? Color.matcha500 : .white.opacity(0.5))
                                     .frame(width: 20, alignment: .center)
                                 Text(slide.title)
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(.white)
+                                Spacer()
+                                if isSelected {
+                                    Text("Editing")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(Color.matcha500)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.matcha500.opacity(0.15))
+                                        .cornerRadius(4)
+                                }
                             }
                             if !slide.bullets.isEmpty {
                                 VStack(alignment: .leading, spacing: 3) {
@@ -427,8 +443,29 @@ struct PresentationPreview: View {
                             }
                         }
                         .padding(12)
-                        .background(Color.zinc800)
-                        .cornerRadius(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(isSelected ? Color.matcha500.opacity(0.1) : Color.zinc800)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(isSelected ? Color.matcha500 : (isHovered ? Color.white.opacity(0.1) : Color.clear), lineWidth: 2)
+                                )
+                        )
+                        .onTapGesture {
+                            if selectedSlideIndex == zeroBasedIndex {
+                                selectedSlideIndex = nil
+                            } else {
+                                selectedSlideIndex = zeroBasedIndex
+                            }
+                        }
+                        .onHover { hovering in
+                            hoveredSlideIndex = hovering ? zeroBasedIndex : nil
+                            if hovering {
+                                NSCursor.pointingHand.push()
+                            } else {
+                                NSCursor.pop()
+                            }
+                        }
                     }
                 }
             }
