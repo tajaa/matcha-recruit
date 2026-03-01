@@ -127,4 +127,4 @@ body {
 @utility vertical-text {
   writing-mode: vertical-rl;
   text-orientation: mixed;
-}
+}@custom-variant light (.theme-light-pages &);

@@ -687,8 +687,16 @@ export function Layout() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('matcha_theme_mode', themeMode);
+      if (themeMode === 'lightPages') {
+        document.documentElement.classList.add('theme-light-pages');
+      } else {
+        document.documentElement.classList.remove('theme-light-pages');
+      }
     }
   }, [themeMode]);
+
+  const isMatchaWork = location.pathname.startsWith('/app/matcha/work');
+  const shouldInvertPages = themeMode === 'lightPages' && !isMatchaWork;
 
   const toggleSection = (title: string) => {
     setCollapsedSections(prev => {
@@ -990,14 +998,14 @@ export function Layout() {
       </nav>
 
       {/* Main content - offset for sidebar on desktop, header on mobile */}
-      <main className={`relative z-10 md:ml-56 pt-20 md:pt-6 pb-12 px-4 sm:px-6 lg:px-8 overflow-x-hidden ${themeMode === 'lightPages' ? 'invert brightness-90 hue-rotate-180 bg-zinc-950 min-h-screen' : ''}`}>
+      <main className={`relative z-10 md:ml-56 pt-20 md:pt-6 pb-12 px-4 sm:px-6 lg:px-8 overflow-x-hidden ${shouldInvertPages ? 'invert brightness-90 hue-rotate-180 bg-zinc-950 min-h-screen' : ''}`}>
         <div className="max-w-[1600px] mx-auto">
           <Outlet />
         </div>
       </main>
 
       {/* Bottom status bar */}
-      <footer className={`fixed bottom-0 left-0 md:left-56 right-0 z-30 border-t border-white/5 bg-zinc-950 text-zinc-600 ${themeMode === 'lightPages' ? 'invert brightness-90 hue-rotate-180' : ''}`}>
+      <footer className={`fixed bottom-0 left-0 md:left-56 right-0 z-30 border-t border-white/5 bg-zinc-950 text-zinc-600 ${shouldInvertPages ? 'invert brightness-90 hue-rotate-180' : ''}`}>
         <div className="px-6 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
