@@ -1678,41 +1678,43 @@ export const erCopilot = {
     }),
 
   // Analysis
-  generateTimeline: (caseId: string): Promise<ERTaskStatus> =>
-    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/timeline`, {
+  generateTimeline: (caseId: string, model?: 'flash' | 'pro'): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/timeline${model === 'pro' ? '?model=pro' : ''}`, {
       method: 'POST',
     }),
 
   getTimeline: (caseId: string): Promise<{ analysis: TimelineAnalysis; source_documents: string[]; generated_at: string | null }> =>
     request<{ analysis: TimelineAnalysis; source_documents: string[]; generated_at: string | null }>(`/er/cases/${caseId}/analysis/timeline`),
 
-  generateDiscrepancies: (caseId: string): Promise<ERTaskStatus> =>
-    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/discrepancies`, {
+  generateDiscrepancies: (caseId: string, model?: 'flash' | 'pro'): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/discrepancies${model === 'pro' ? '?model=pro' : ''}`, {
       method: 'POST',
     }),
 
   getDiscrepancies: (caseId: string): Promise<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string | null }> =>
     request<{ analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string | null }>(`/er/cases/${caseId}/analysis/discrepancies`),
 
-  runPolicyCheck: (caseId: string): Promise<ERTaskStatus> =>
-    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/policy-check`, {
+  runPolicyCheck: (caseId: string, model?: 'flash' | 'pro'): Promise<ERTaskStatus> =>
+    request<ERTaskStatus>(`/er/cases/${caseId}/analysis/policy-check${model === 'pro' ? '?model=pro' : ''}`, {
       method: 'POST',
     }),
 
   getPolicyCheck: (caseId: string): Promise<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string | null }> =>
     request<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string | null }>(`/er/cases/${caseId}/analysis/policy-check`),
 
-  generateSuggestedGuidance: (caseId: string): Promise<ERSuggestedGuidanceResponse> =>
-    request<ERSuggestedGuidanceResponse>(`/er/cases/${caseId}/guidance/suggested`, {
+  generateSuggestedGuidance: (caseId: string, model?: 'flash' | 'pro'): Promise<ERSuggestedGuidanceResponse> =>
+    request<ERSuggestedGuidanceResponse>(`/er/cases/${caseId}/guidance/suggested${model === 'pro' ? '?model=pro' : ''}`, {
       method: 'POST',
     }),
 
   generateSuggestedGuidanceStream: async (
     caseId: string,
     onStatus: (message: string) => void,
+    model?: 'flash' | 'pro',
   ): Promise<ERSuggestedGuidanceResponse> => {
     const token = getAccessToken();
-    const response = await fetch(`${API_BASE}/er/cases/${caseId}/guidance/suggested/stream`, {
+    const url = `${API_BASE}/er/cases/${caseId}/guidance/suggested/stream${model === 'pro' ? '?model=pro' : ''}`;
+    const response = await fetch(url, {
       method: 'POST',
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
@@ -1752,17 +1754,19 @@ export const erCopilot = {
   },
 
   // Outcome Analysis (Case Determination)
-  generateOutcomeAnalysis: (caseId: string): Promise<OutcomeAnalysisResponse> =>
-    request<OutcomeAnalysisResponse>(`/er/cases/${caseId}/guidance/outcomes`, {
+  generateOutcomeAnalysis: (caseId: string, model?: 'flash' | 'pro'): Promise<OutcomeAnalysisResponse> =>
+    request<OutcomeAnalysisResponse>(`/er/cases/${caseId}/guidance/outcomes${model === 'pro' ? '?model=pro' : ''}`, {
       method: 'POST',
     }),
 
   generateOutcomeAnalysisStream: async (
     caseId: string,
     onStatus: (message: string) => void,
+    model?: 'flash' | 'pro',
   ): Promise<OutcomeAnalysisResponse> => {
     const token = getAccessToken();
-    const response = await fetch(`${API_BASE}/er/cases/${caseId}/guidance/outcomes/stream`, {
+    const url = `${API_BASE}/er/cases/${caseId}/guidance/outcomes/stream${model === 'pro' ? '?model=pro' : ''}`;
+    const response = await fetch(url, {
       method: 'POST',
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });

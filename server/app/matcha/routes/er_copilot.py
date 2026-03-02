@@ -162,23 +162,24 @@ def _normalize_intake_context(raw_value: Any) -> Optional[dict]:
     return _normalize_json_dict(raw_value)
 
 
-def _build_er_analyzer():
+def _build_er_analyzer(model_override: Optional[str] = None):
     """Create ERAnalyzer using shared Gemini credential cascade."""
     from ..services.er_analyzer import ERAnalyzer
 
     settings = get_settings()
+    model = "gemini-3.1-pro-preview" if model_override == "pro" else settings.analysis_model
     explicit_api_key = os.getenv("GEMINI_API_KEY")
 
     if explicit_api_key:
-        return ERAnalyzer(api_key=explicit_api_key, model=settings.analysis_model)
+        return ERAnalyzer(api_key=explicit_api_key, model=model)
     if settings.use_vertex:
         return ERAnalyzer(
             vertex_project=settings.vertex_project,
             vertex_location=settings.vertex_location,
-            model=settings.analysis_model,
+            model=model,
         )
     if settings.gemini_api_key:
-        return ERAnalyzer(api_key=settings.gemini_api_key, model=settings.analysis_model)
+        return ERAnalyzer(api_key=settings.gemini_api_key, model=model)
     raise ValueError("ER analysis requires GEMINI_API_KEY, LIVE_API, or VERTEX_PROJECT configuration")
 
 
@@ -1308,6 +1309,7 @@ async def generate_timeline(
     case_id: UUID,
     request: Request,
     current_user: CurrentUser = Depends(require_admin_or_client),
+    model: Optional[str] = Query(None, pattern="^(flash|pro)$"),
 ):
     """Generate timeline analysis. Queues async task or runs synchronously."""
     company_id = await get_client_company_id(current_user)
@@ -1363,7 +1365,7 @@ async def generate_timeline(
         try:
             from app.workers.tasks.er_analysis import _run_timeline_analysis
             logger.info(f"Starting synchronous timeline analysis for case {case_id}")
-            result = await _run_timeline_analysis(str(case_id))
+            result = await _run_timeline_analysis(str(case_id), model_override=model)
             logger.info(f"Timeline analysis completed for case {case_id}: {result}")
             return TaskStatusResponse(
                 task_id=None,
@@ -1428,6 +1430,7 @@ async def generate_discrepancies(
     case_id: UUID,
     request: Request,
     current_user: CurrentUser = Depends(require_admin_or_client),
+    model: Optional[str] = Query(None, pattern="^(flash|pro)$"),
 ):
     """Generate discrepancy analysis. Queues async task or runs synchronously."""
     company_id = await get_client_company_id(current_user)
@@ -1487,7 +1490,7 @@ async def generate_discrepancies(
         try:
             from app.workers.tasks.er_analysis import _run_discrepancy_analysis
             logger.info(f"Starting synchronous discrepancy analysis for case {case_id}")
-            result = await _run_discrepancy_analysis(str(case_id))
+            result = await _run_discrepancy_analysis(str(case_id), model_override=model)
             logger.info(f"Discrepancy analysis completed for case {case_id}: {result}")
             return TaskStatusResponse(
                 task_id=None,
@@ -1551,6 +1554,7 @@ async def run_policy_check(
     case_id: UUID,
     request: Request,
     current_user: CurrentUser = Depends(require_admin_or_client),
+    model: Optional[str] = Query(None, pattern="^(flash|pro)$"),
 ):
     """Run policy violation check against all company policies. Queues async task or runs synchronously."""
     company_id = await get_client_company_id(current_user)
@@ -1609,7 +1613,7 @@ async def run_policy_check(
         try:
             from app.workers.tasks.er_analysis import _run_policy_check
             logger.info(f"Starting synchronous policy check for case {case_id}")
-            result = await _run_policy_check(str(case_id))
+            result = await _run_policy_check(str(case_id), model_override=model)
             logger.info(f"Policy check completed for case {case_id}: {result}")
             return TaskStatusResponse(
                 task_id=None,
@@ -1672,6 +1676,7 @@ async def get_policy_check(
 async def generate_suggested_guidance(
     case_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
+    model: Optional[str] = Query(None, pattern="^(flash|pro)$"),
 ):
     """Generate Gemini-backed interactive suggested guidance from current case analyses."""
     company_id = await get_client_company_id(current_user)
@@ -1815,7 +1820,7 @@ async def generate_suggested_guidance(
     )
 
     try:
-        analyzer = _build_er_analyzer()
+        analyzer = _build_er_analyzer(model_override=model)
         guidance_task = analyzer.generate_suggested_guidance(
             case_info=case_info,
             intake_context=intake_context if isinstance(intake_context, dict) else {},
@@ -1873,6 +1878,7 @@ async def generate_suggested_guidance(
 async def generate_suggested_guidance_stream(
     case_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
+    model: Optional[str] = Query(None, pattern="^(flash|pro)$"),
 ):
     """Stream SSE progress events during guidance generation, ending with the final result."""
     from fastapi.responses import StreamingResponse
@@ -2025,7 +2031,7 @@ async def generate_suggested_guidance_stream(
         )
 
         try:
-            analyzer = _build_er_analyzer()
+            analyzer = _build_er_analyzer(model_override=model)
 
             yield sse({"type": "status", "message": "Generating investigative guidance..."})
 
@@ -2104,6 +2110,7 @@ async def generate_suggested_guidance_stream(
 async def generate_outcome_analysis_stream(
     case_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
+    model: Optional[str] = Query(None, pattern="^(flash|pro)$"),
 ):
     """Stream SSE progress events during outcome analysis generation for case determination."""
     from fastapi.responses import StreamingResponse
@@ -2208,7 +2215,7 @@ async def generate_outcome_analysis_stream(
         yield sse({"type": "status", "message": "Starting AI outcome analysis..."})
 
         try:
-            analyzer = _build_er_analyzer()
+            analyzer = _build_er_analyzer(model_override=model)
 
             # Queue bridge: stream status from the analyzer callback into SSE
             status_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -2303,6 +2310,7 @@ async def generate_outcome_analysis_stream(
 async def generate_outcome_analysis(
     case_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
+    model: Optional[str] = Query(None, pattern="^(flash|pro)$"),
 ):
     """Non-streaming outcome analysis generation for case determination."""
     company_id = await get_client_company_id(current_user)
@@ -2376,7 +2384,7 @@ async def generate_outcome_analysis(
         "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
     }
 
-    analyzer = _build_er_analyzer()
+    analyzer = _build_er_analyzer(model_override=model)
     raw_result = await analyzer.generate_outcome_analysis(
         case_info=c_info,
         analysis_summary=analysis_summary,

@@ -30,13 +30,14 @@ def _safe_publish_progress(**kwargs) -> None:
         logger.debug("Redis unavailable for progress notification, skipping")
 
 
-def _build_er_analyzer():
+def _build_er_analyzer(model_override: Optional[str] = None):
     """Create ERAnalyzer using the same credential cascade as GeminiComplianceService."""
     from app.matcha.services.er_analyzer import ERAnalyzer
     from app.config import get_settings
     import os
 
     settings = get_settings()
+    model = "gemini-3.1-pro-preview" if model_override == "pro" else settings.analysis_model
 
     # Same priority as GeminiComplianceService.client:
     # 1. GEMINI_API_KEY env var (explicit override)
@@ -45,15 +46,15 @@ def _build_er_analyzer():
     explicit_api_key = os.getenv("GEMINI_API_KEY")
 
     if explicit_api_key:
-        return ERAnalyzer(api_key=explicit_api_key, model=settings.analysis_model)
+        return ERAnalyzer(api_key=explicit_api_key, model=model)
     elif settings.use_vertex:
         return ERAnalyzer(
             vertex_project=settings.vertex_project,
             vertex_location=settings.vertex_location,
-            model=settings.analysis_model,
+            model=model,
         )
     elif settings.gemini_api_key:
-        return ERAnalyzer(api_key=settings.gemini_api_key, model=settings.analysis_model)
+        return ERAnalyzer(api_key=settings.gemini_api_key, model=model)
     else:
         raise ValueError("ER analysis requires GEMINI_API_KEY, LIVE_API, or VERTEX_PROJECT configuration")
 
@@ -120,9 +121,9 @@ async def _save_analysis_result(
 # Timeline Analysis
 # ===========================================
 
-async def _run_timeline_analysis(case_id: str) -> dict[str, Any]:
+async def _run_timeline_analysis(case_id: str, model_override: Optional[str] = None) -> dict[str, Any]:
     """Run timeline reconstruction analysis."""
-    analyzer = _build_er_analyzer()
+    analyzer = _build_er_analyzer(model_override=model_override)
 
     conn = await get_db_connection()
     try:
@@ -214,9 +215,9 @@ def run_timeline_analysis(self, case_id: str) -> dict[str, Any]:
 # Discrepancy Analysis
 # ===========================================
 
-async def _run_discrepancy_analysis(case_id: str) -> dict[str, Any]:
+async def _run_discrepancy_analysis(case_id: str, model_override: Optional[str] = None) -> dict[str, Any]:
     """Run discrepancy detection analysis."""
-    analyzer = _build_er_analyzer()
+    analyzer = _build_er_analyzer(model_override=model_override)
 
     conn = await get_db_connection()
     try:
@@ -548,9 +549,9 @@ async def _get_policy_sources(conn, case_id: str) -> list[dict]:
     return source_docs
 
 
-async def _run_policy_check(case_id: str) -> dict[str, Any]:
+async def _run_policy_check(case_id: str, model_override: Optional[str] = None) -> dict[str, Any]:
     """Run policy violation check against company policy sources."""
-    analyzer = _build_er_analyzer()
+    analyzer = _build_er_analyzer(model_override=model_override)
 
     conn = await get_db_connection()
     try:

@@ -355,6 +355,7 @@ export function ERCaseDetail() {
   const [documents, setDocuments] = useState<ERDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<AnalysisTab>('timeline');
+  const [analysisModel, setAnalysisModel] = useState<'flash' | 'pro'>('flash');
   const [statusUpdating, setStatusUpdating] = useState(false);
 
   // Upload state
@@ -509,13 +510,14 @@ export function ERCaseDetail() {
     setOutcomeStatusMsgs([]);
     setOutcomeError(null);
     try {
+      const modelParam = analysisModel === 'pro' ? 'pro' as const : undefined;
       const result = await erCopilot.generateOutcomeAnalysisStream(id, (msg) => {
         if (outcomeRequestSeqRef.current !== requestSeq) return;
         setOutcomeStatusMsgs(prev => {
           if (prev.length > 0 && prev[prev.length - 1] === msg) return prev;
           return [...prev, msg];
         });
-      });
+      }, modelParam);
       if (outcomeRequestSeqRef.current !== requestSeq) return;
       setOutcomeAnalysis(result);
     } catch (err) {
@@ -527,7 +529,7 @@ export function ERCaseDetail() {
       outcomeLoadingRef.current = false;
       setOutcomeLoading(false);
     }
-  }, [id]);
+  }, [id, analysisModel]);
 
   const handleCloseCase = useCallback(async () => {
     if (!id || selectedOutcomeIdx === null || !outcomeAnalysis || !determinationNotes.trim()) return;
@@ -821,7 +823,7 @@ export function ERCaseDetail() {
     setAnalysisProgress({ step: 'Starting analysis...' });
     setAnalysisError(null);
     try {
-      await erCopilot.generateTimeline(id);
+      await erCopilot.generateTimeline(id, analysisModel === 'pro' ? 'pro' : undefined);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('timeline');
       if (!success) {
@@ -839,7 +841,7 @@ export function ERCaseDetail() {
       setAnalysisProgress(null);
       return false;
     }
-  }, [id, pollForAnalysis]);
+  }, [id, pollForAnalysis, analysisModel]);
 
   const handleGenerateDiscrepancies = useCallback(async (): Promise<boolean> => {
     if (!id) return false;
@@ -847,7 +849,7 @@ export function ERCaseDetail() {
     setAnalysisProgress({ step: 'Starting analysis...' });
     setAnalysisError(null);
     try {
-      await erCopilot.generateDiscrepancies(id);
+      await erCopilot.generateDiscrepancies(id, analysisModel === 'pro' ? 'pro' : undefined);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('discrepancies');
       if (!success) {
@@ -865,7 +867,7 @@ export function ERCaseDetail() {
       setAnalysisProgress(null);
       return false;
     }
-  }, [id, pollForAnalysis]);
+  }, [id, pollForAnalysis, analysisModel]);
 
   const handleRunPolicyCheck = useCallback(async (): Promise<boolean> => {
     if (!id) return false;
@@ -873,7 +875,7 @@ export function ERCaseDetail() {
     setAnalysisProgress({ step: 'Starting analysis...' });
     setAnalysisError(null);
     try {
-      await erCopilot.runPolicyCheck(id);
+      await erCopilot.runPolicyCheck(id, analysisModel === 'pro' ? 'pro' : undefined);
       // WebSocket will notify us when complete; fallback to polling if WS fails
       const success = await pollForAnalysis('policy');
       if (!success) {
@@ -891,7 +893,7 @@ export function ERCaseDetail() {
       setAnalysisProgress(null);
       return false;
     }
-  }, [id, pollForAnalysis]);
+  }, [id, pollForAnalysis, analysisModel]);
 
   const runEvidenceSearch = useCallback(async (query: string): Promise<boolean> => {
     if (!id || !query.trim()) return false;
@@ -1067,15 +1069,17 @@ export function ERCaseDetail() {
 
       let suggestedGuidancePayload: ERSuggestedGuidanceResponse | null = null;
       try {
+        const modelParam = analysisModel === 'pro' ? 'pro' as const : undefined;
         suggestedGuidancePayload = await erCopilot.generateSuggestedGuidanceStream(
           id,
           (statusMsg) => setAutoAssistMessage(statusMsg),
+          modelParam,
         );
       } catch (guidanceErr) {
         console.error('Failed to generate streaming suggested guidance:', guidanceErr);
         // Fall back to non-streaming endpoint
         try {
-          suggestedGuidancePayload = await erCopilot.generateSuggestedGuidance(id);
+          suggestedGuidancePayload = await erCopilot.generateSuggestedGuidance(id, analysisModel === 'pro' ? 'pro' : undefined);
         } catch (fallbackErr) {
           console.error('Non-streaming guidance also failed:', fallbackErr);
         }
@@ -1167,7 +1171,7 @@ export function ERCaseDetail() {
     } finally {
       setAutoReviewRunning(false);
     }
-  }, [id, handleGenerateTimeline, handleGenerateDiscrepancies, handleRunPolicyCheck, fetchNotes]);
+  }, [id, handleGenerateTimeline, handleGenerateDiscrepancies, handleRunPolicyCheck, fetchNotes, analysisModel]);
 
   // Sync determination dismissed state from persisted intake context
   useEffect(() => {
@@ -1883,27 +1887,51 @@ export function ERCaseDetail() {
         {/* Right: Analysis */}
         <div className="lg:col-span-2 space-y-6">
           {/* Tabs */}
-          <div className="flex gap-6 border-b border-zinc-200 pb-px">
-            {[
-              { id: 'timeline', label: 'Timeline', icon: Clock },
-              { id: 'discrepancies', label: 'Discrepancies', icon: AlertTriangle },
-              { id: 'policy', label: 'Policy Check', icon: CheckCircle },
-              { id: 'search', label: 'Search', icon: Search },
-            ].map(tab => {
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as AnalysisTab)}
-                  className={`pb-2 text-[10px] font-medium uppercase tracking-wider transition-colors flex items-center gap-2 border-b-2 ${
-                    activeTab === tab.id
-                      ? 'border-zinc-900 text-zinc-900'
-                      : 'border-transparent text-zinc-400 hover:text-zinc-600'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
+          <div className="flex items-center justify-between border-b border-zinc-200 pb-px">
+            <div className="flex gap-6">
+              {[
+                { id: 'timeline', label: 'Timeline', icon: Clock },
+                { id: 'discrepancies', label: 'Discrepancies', icon: AlertTriangle },
+                { id: 'policy', label: 'Policy Check', icon: CheckCircle },
+                { id: 'search', label: 'Search', icon: Search },
+              ].map(tab => {
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as AnalysisTab)}
+                    className={`pb-2 text-[10px] font-medium uppercase tracking-wider transition-colors flex items-center gap-2 border-b-2 ${
+                      activeTab === tab.id
+                        ? 'border-zinc-900 text-zinc-900'
+                        : 'border-transparent text-zinc-400 hover:text-zinc-600'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-1 pb-2">
+              <button
+                onClick={() => setAnalysisModel('flash')}
+                className={`px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded-l border ${
+                  analysisModel === 'flash'
+                    ? 'bg-zinc-900 text-white border-zinc-900'
+                    : 'bg-white text-zinc-400 border-zinc-200 hover:text-zinc-600'
+                }`}
+              >
+                Flash
+              </button>
+              <button
+                onClick={() => setAnalysisModel('pro')}
+                className={`px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded-r border border-l-0 ${
+                  analysisModel === 'pro'
+                    ? 'bg-zinc-900 text-white border-zinc-900'
+                    : 'bg-white text-zinc-400 border-zinc-200 hover:text-zinc-600'
+                }`}
+              >
+                Pro
+              </button>
+            </div>
           </div>
 
           {analysisError && (
