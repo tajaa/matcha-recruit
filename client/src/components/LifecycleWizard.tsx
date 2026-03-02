@@ -28,7 +28,6 @@ interface LifecycleWizardProps {
   activeStep: number;
   storageKey: string;
   title?: string;
-  displayMode?: 'full' | 'compact';
 }
 
 const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => React.ReactElement> = {
@@ -382,7 +381,6 @@ export function LifecycleWizard({
   activeStep,
   storageKey,
   title = 'System Lifecycle',
-  displayMode = 'full',
 }: LifecycleWizardProps) {
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -401,7 +399,6 @@ export function LifecycleWizard({
   };
 
   const StepIcon = STEP_ICONS[steps[activeStep - 1].icon];
-  const isCompactMode = displayMode === 'compact';
 
   return (
     <div className={`border border-white/5 light:border-white/40 bg-zinc-900/30 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:shadow-[0_4px_16px_rgba(0,0,0,0.04),inset_0_1px_1px_rgba(255,255,255,0.6)] rounded-sm overflow-hidden mb-8`}>
