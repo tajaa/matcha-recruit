@@ -52,23 +52,20 @@ interface DashboardStats {
 
 type HorizonDays = 30 | 60 | 90;
 
-const SEVERITY_STYLES: Record<string, { dot: string; border: string; badge: string; label: string }> = {
+const SEVERITY_STYLES: Record<string, { dot: string; badge: string; label: string }> = {
   critical: {
-    dot: 'bg-red-500 animate-pulse',
-    border: 'border-red-500/20 hover:border-red-500/40',
-    badge: 'bg-red-500/10 text-red-400 border border-red-500/20',
+    dot: 'bg-sage-900 animate-pulse',
+    badge: 'bg-sage-200 text-sage-900 rounded-full',
     label: 'Critical',
   },
   warning: {
-    dot: 'bg-amber-500',
-    border: 'border-amber-500/20 hover:border-amber-500/40',
-    badge: 'bg-amber-500/10 text-amber-400 border border-amber-500/20',
+    dot: 'bg-sage-500',
+    badge: 'bg-sage-200 text-sage-600 rounded-full',
     label: 'Warning',
   },
   info: {
-    dot: 'bg-blue-400',
-    border: 'border-white/10 hover:border-white/20',
-    badge: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
+    dot: 'bg-sage-400',
+    badge: 'bg-sage-200 text-sage-500 rounded-full',
     label: 'Info',
   },
 };
@@ -134,27 +131,27 @@ function CompanyProfileBanner() {
   };
 
   return (
-    <div className="relative border border-emerald-500/20 bg-emerald-950/10 p-5 mb-6 animate-in fade-in slide-in-from-top-2 duration-500">
+    <div className="relative bg-sage-100 rounded-3xl p-6 mb-6 animate-in fade-in slide-in-from-top-2 duration-500">
       <button
         onClick={dismiss}
-        className="absolute top-3 right-3 text-zinc-500 hover:text-zinc-300 transition-colors"
+        className="absolute top-4 right-4 text-sage-400 hover:text-sage-900 transition-colors"
         aria-label="Dismiss"
       >
         <X className="w-4 h-4" />
       </button>
       <div className="flex items-start gap-4">
-        <div className="p-2 border border-emerald-500/20 bg-emerald-900/20 rounded shrink-0">
-          <Sparkles className="w-5 h-5 text-emerald-400" />
+        <div className="p-2.5 bg-sage-200 rounded-2xl shrink-0">
+          <Sparkles className="w-5 h-5 text-sage-900" />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-bold text-white mb-1">Complete your company profile</h3>
-          <p className="text-xs text-zinc-400 leading-relaxed mb-3">
+          <h3 className="text-base font-semibold text-sage-900 mb-1">Complete your company profile</h3>
+          <p className="text-sm text-sage-500 leading-relaxed mb-3">
             Add your headquarters location, benefits, and employment defaults so the AI can pre-fill offer letters,
             give jurisdiction-aware guidance, and generate better documents without extra questions.
           </p>
           <button
             onClick={() => { dismiss(); navigate('/app/matcha/company'); }}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-sage-900 text-sage-100 hover:bg-sage-800 rounded-full text-xs font-bold transition-colors"
           >
             Set Up Profile
             <ChevronRight className="w-3 h-3" />
@@ -234,7 +231,6 @@ function ComplianceDashboardWidget() {
       const hasTurnaround = modalTurnaround !== null;
 
       if (!selectedItem.alert_id) {
-        // No alert yet — create it and apply owner/due-date in one call
         const dueDate = hasTurnaround ? (() => {
           const d = new Date();
           d.setDate(d.getDate() + modalTurnaround!);
@@ -290,66 +286,46 @@ function ComplianceDashboardWidget() {
 
   const getSlaStyle = (slaState: ComplianceDashboardItem['sla_state']) => {
     if (slaState === 'overdue') {
-      return {
-        label: 'Overdue',
-        badge: 'bg-red-500/10 text-red-400 border border-red-500/20',
-        dueText: 'text-red-400',
-      };
+      return { label: 'Overdue', badge: 'bg-sage-200 text-sage-900 rounded-full', dueText: 'text-sage-900' };
     }
     if (slaState === 'due_soon') {
-      return {
-        label: 'Due Soon',
-        badge: 'bg-amber-500/10 text-amber-400 border border-amber-500/20',
-        dueText: 'text-amber-400',
-      };
+      return { label: 'Due Soon', badge: 'bg-sage-200 text-sage-600 rounded-full', dueText: 'text-sage-600' };
     }
     if (slaState === 'completed') {
-      return {
-        label: 'Completed',
-        badge: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
-        dueText: 'text-emerald-400',
-      };
+      return { label: 'Completed', badge: 'bg-sage-300 text-sage-500 rounded-full', dueText: 'text-sage-500' };
     }
     if (slaState === 'unassigned') {
-      return {
-        label: 'Unassigned',
-        badge: 'bg-zinc-700/50 text-zinc-300 border border-zinc-600',
-        dueText: 'text-zinc-400',
-      };
+      return { label: 'Unassigned', badge: 'bg-sage-300 text-sage-500 rounded-full', dueText: 'text-sage-500' };
     }
-    return {
-      label: 'On Track',
-      badge: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
-      dueText: 'text-zinc-400',
-    };
+    return { label: 'On Track', badge: 'bg-sage-300 text-sage-500 rounded-full', dueText: 'text-sage-500' };
   };
 
   const criticalCount = data?.coming_up.filter(i => i.severity === 'critical').length ?? 0;
   const warningCount = data?.coming_up.filter(i => i.severity === 'warning').length ?? 0;
 
   return (
-    <div className="border border-white/10 bg-zinc-900/30">
+    <div className="bg-sage-100 rounded-3xl overflow-hidden">
       {/* Header */}
-      <div className="p-3 border-b border-white/10 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="w-3.5 h-3.5 text-emerald-500" />
-          <h2 className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">Compliance Impact</h2>
+      <div className="p-4 border-b border-sage-300 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <ShieldAlert className="w-4 h-4 text-sage-500" />
+          <h2 className="text-base font-semibold text-sage-900">Compliance Impact</h2>
           {criticalCount > 0 && (
-            <span className="px-1.5 py-0.5 text-[7px] font-mono uppercase tracking-widest bg-red-500/10 text-red-400 border border-red-500/20">
+            <span className="px-2 py-0.5 text-[10px] font-medium bg-sage-200 text-sage-900 rounded-full">
               {criticalCount} critical
             </span>
           )}
         </div>
         {/* Horizon selector */}
-        <div className="flex gap-px">
+        <div className="flex gap-1.5">
           {([30, 60, 90] as HorizonDays[]).map(d => (
             <button
               key={d}
               onClick={() => setHorizon(d)}
-              className={`px-2 py-0.5 text-[7px] font-mono uppercase tracking-widest transition-colors ${
+              className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
                 horizon === d
-                  ? 'bg-white text-black'
-                  : 'text-zinc-500 hover:text-white border border-white/10'
+                  ? 'bg-sage-900 text-sage-100'
+                  : 'bg-sage-200 text-sage-500 hover:text-sage-900'
               }`}
             >
               {d}d
@@ -360,46 +336,44 @@ function ComplianceDashboardWidget() {
 
       {/* KPI row */}
       {data && (
-        <div className="grid grid-cols-3 md:grid-cols-7 gap-px bg-white/5 border-b border-white/10">
+        <div className="grid grid-cols-3 md:grid-cols-7 gap-px bg-sage-300 border-b border-sage-300">
           {[
-            { label: 'Locations', value: data.kpis.total_locations, color: 'text-white' },
-            { label: 'Unread Alerts', value: data.kpis.unread_alerts, color: data.kpis.unread_alerts > 0 ? 'text-amber-400' : 'text-white' },
-            { label: 'Critical', value: data.kpis.critical_alerts, color: data.kpis.critical_alerts > 0 ? 'text-red-400' : 'text-white' },
-            { label: 'At Risk', value: data.kpis.employees_at_risk, color: data.kpis.employees_at_risk > 0 ? 'text-amber-400' : 'text-zinc-500' },
-            { label: 'Overdue', value: data.kpis.overdue_actions, color: data.kpis.overdue_actions > 0 ? 'text-red-400' : 'text-zinc-500' },
-            { label: 'Assigned', value: data.kpis.assigned_actions, color: data.kpis.assigned_actions > 0 ? 'text-emerald-400' : 'text-zinc-500' },
-            { label: 'Unassigned', value: data.kpis.unassigned_actions, color: data.kpis.unassigned_actions > 0 ? 'text-amber-400' : 'text-zinc-500' },
+            { label: 'Locations', value: data.kpis.total_locations },
+            { label: 'Unread Alerts', value: data.kpis.unread_alerts },
+            { label: 'Critical', value: data.kpis.critical_alerts },
+            { label: 'At Risk', value: data.kpis.employees_at_risk },
+            { label: 'Overdue', value: data.kpis.overdue_actions },
+            { label: 'Assigned', value: data.kpis.assigned_actions },
+            { label: 'Unassigned', value: data.kpis.unassigned_actions },
           ].map(kpi => (
-            <div key={kpi.label} className="bg-zinc-950 p-2 text-center">
-              <div className={`text-lg font-light tabular-nums ${kpi.color}`}>{kpi.value}</div>
-              <div className="text-[7px] uppercase tracking-widest text-zinc-500 mt-0.5">{kpi.label}</div>
+            <div key={kpi.label} className="bg-sage-200 p-2.5 text-center">
+              <div className={`text-lg font-light tabular-nums ${kpi.value > 0 ? 'text-sage-900' : 'text-sage-400'}`}>{kpi.value}</div>
+              <div className="text-[8px] uppercase tracking-widest text-sage-500 mt-0.5">{kpi.label}</div>
             </div>
           ))}
         </div>
       )}
 
       {/* Coming up list */}
-      <div className="divide-y divide-white/5">
-
-
+      <div className="p-3 space-y-2">
         {loading && (
           <div className="p-6 text-center">
-            <div className="w-4 h-4 border border-zinc-700 border-t-white rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Loading</p>
+            <div className="w-4 h-4 border-2 border-sage-300 border-t-sage-900 rounded-full animate-spin mx-auto mb-2" />
+            <p className="text-xs text-sage-500">Loading</p>
           </div>
         )}
 
         {error && !loading && (
           <div className="p-4 text-center">
-            <TriangleAlert className="w-4 h-4 text-zinc-700 mx-auto mb-1.5" />
-            <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Failed to load</p>
+            <TriangleAlert className="w-4 h-4 text-sage-400 mx-auto mb-1.5" />
+            <p className="text-xs text-sage-500">Failed to load</p>
           </div>
         )}
 
         {!loading && !error && data && data.coming_up.length === 0 && (
           <div className="p-4 text-center">
-            <CheckCircle2 className="w-4 h-4 text-zinc-700 mx-auto mb-1.5" />
-            <p className="text-[9px] text-zinc-500 uppercase tracking-wider">No upcoming changes in {horizon}d window</p>
+            <CheckCircle2 className="w-4 h-4 text-sage-400 mx-auto mb-1.5" />
+            <p className="text-xs text-sage-500">No upcoming changes in {horizon}d window</p>
           </div>
         )}
 
@@ -410,10 +384,10 @@ function ComplianceDashboardWidget() {
             ? item.days_until <= 0 ? 'Today' : `${item.days_until}d`
             : '—';
           const daysColor = item.days_until != null && item.days_until <= 30
-            ? 'text-red-400'
+            ? 'text-sage-900 font-semibold'
             : item.days_until != null && item.days_until <= 60
-            ? 'text-amber-400'
-            : 'text-zinc-400';
+            ? 'text-sage-600'
+            : 'text-sage-400';
           const sla = getSlaStyle(item.sla_state);
           const dueLabel = formatDateLabel(item.action_due_date);
 
@@ -429,75 +403,74 @@ function ComplianceDashboardWidget() {
               }}
               role="button"
               tabIndex={0}
-              className={`w-full text-left p-3 border-l-2 ${sev.border} bg-zinc-950 hover:bg-zinc-900 transition-all group`}
+              className="w-full text-left p-3.5 bg-sage-200 rounded-2xl hover:bg-sage-300 transition-all group cursor-pointer"
             >
               <div className="flex items-start gap-2.5">
                 <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${sev.dot}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2 mb-1">
-                    <span className="text-[11px] text-zinc-200 group-hover:text-white transition-colors font-medium leading-tight truncate">
+                    <span className="text-sm text-sage-900 font-medium leading-tight truncate">
                       {item.title}
                     </span>
-                    <span className={`text-[9px] font-mono tabular-nums flex-shrink-0 ${daysColor}`}>
+                    <span className={`text-xs font-mono tabular-nums flex-shrink-0 ${daysColor}`}>
                       {daysLabel}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 text-zinc-500">
+                    <div className="flex items-center gap-1 text-sage-500">
                       <MapPin className="w-2.5 h-2.5" />
-                      <span className="text-[8px] uppercase tracking-wider">{item.location_name}</span>
+                      <span className="text-[10px]">{item.location_name}</span>
                     </div>
 
                     {categoryLabel && (
-                      <span className="text-[7px] font-mono uppercase tracking-widest text-zinc-600 border border-white/10 px-1 py-px">
+                      <span className="text-[10px] text-sage-500 bg-sage-300 px-1.5 py-px rounded-full">
                         {categoryLabel}
                       </span>
                     )}
 
-                    <span className={`text-[7px] font-mono uppercase tracking-widest px-1 py-px ${sev.badge}`}>
+                    <span className={`text-[10px] px-1.5 py-px ${sev.badge}`}>
                       {sev.label}
                     </span>
-                    <span className={`text-[7px] font-mono uppercase tracking-widest px-1 py-px ${sla.badge}`}>
+                    <span className={`text-[10px] px-1.5 py-px ${sla.badge}`}>
                       {sla.label}
                     </span>
                   </div>
 
                   <div className="mt-1.5 space-y-1">
-                    <div className="text-[9px] text-zinc-400">
-                      <span className="text-zinc-600">Next:</span> {item.next_action || 'Review legal impact and assign an owner.'}
+                    <div className="text-xs text-sage-500">
+                      <span className="text-sage-400">Next:</span> {item.next_action || 'Review legal impact and assign an owner.'}
                     </div>
-                    <div className="flex items-center gap-3 flex-wrap text-[8px] text-zinc-500">
-                      <span>Owner: <span className="text-zinc-300">{item.action_owner_name || 'Unassigned'}</span></span>
+                    <div className="flex items-center gap-3 flex-wrap text-[10px] text-sage-500">
+                      <span>Owner: <span className="text-sage-900">{item.action_owner_name || 'Unassigned'}</span></span>
                       <span className={sla.dueText}>Due: {dueLabel}</span>
                     </div>
 
                     {item.estimated_financial_impact && (
-                      <div className="text-[8px] text-red-300/80">
+                      <div className="text-[10px] text-sage-600">
                         Exposure: {item.estimated_financial_impact}
                       </div>
                     )}
 
                     {item.affected_employee_count > 0 && (
                       <div className="mt-1 flex items-center gap-1.5">
-                        <Users className="w-2.5 h-2.5 text-zinc-600" />
-                        <span className="text-[8px] text-zinc-500">
+                        <Users className="w-2.5 h-2.5 text-sage-400" />
+                        <span className="text-[10px] text-sage-500">
                           {item.affected_employee_count} employee{item.affected_employee_count !== 1 ? 's' : ''}
                           {item.affected_employee_sample.length > 0 && (
-                            <span className="text-zinc-600">
+                            <span className="text-sage-400">
                               {' '}— {item.affected_employee_sample.slice(0, 3).join(', ')}
                               {item.affected_employee_count > 3 ? ` +${item.affected_employee_count - 3} more` : ''}
                             </span>
                           )}
                         </span>
-                        <span className="text-[7px] text-zinc-700 font-mono">~est</span>
+                        <span className="text-[9px] text-sage-400 font-mono">~est</span>
                       </div>
                     )}
-
                   </div>
                 </div>
 
-                <ChevronRight className="w-3 h-3 text-zinc-600 group-hover:text-zinc-400 transition-colors flex-shrink-0 mt-0.5" />
+                <ChevronRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 transition-colors flex-shrink-0 mt-0.5" />
               </div>
             </div>
           );
@@ -506,9 +479,9 @@ function ComplianceDashboardWidget() {
 
       {/* Footer */}
       {data && data.coming_up.length > 0 && (
-        <div className="p-2.5 border-t border-white/10 bg-white/5 flex items-center justify-between">
+        <div className="p-3 border-t border-sage-300 bg-sage-200 flex items-center justify-between">
           {(criticalCount > 0 || warningCount > 0) && (
-            <span className="text-[7px] font-mono text-zinc-600 uppercase tracking-widest">
+            <span className="text-[10px] text-sage-500">
               {criticalCount > 0 && `${criticalCount} critical`}
               {criticalCount > 0 && warningCount > 0 && ' · '}
               {warningCount > 0 && `${warningCount} warning`}
@@ -516,7 +489,7 @@ function ComplianceDashboardWidget() {
           )}
           <button
             onClick={() => navigate('/app/matcha/compliance?tab=upcoming')}
-            className="ml-auto text-[8px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors"
+            className="ml-auto text-xs text-sage-500 hover:text-sage-900 transition-colors"
           >
             Full Compliance View
           </button>
@@ -526,41 +499,41 @@ function ComplianceDashboardWidget() {
       {/* Compliance Action Modal */}
       {selectedItem && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
           onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
         >
-          <div className="w-full max-w-lg bg-zinc-950 border border-white/10 shadow-2xl flex flex-col max-h-[90vh]">
+          <div className="w-full max-w-lg bg-sage-100 rounded-3xl shadow-2xl flex flex-col max-h-[90vh]">
             {/* Modal header */}
-            <div className="flex items-start justify-between p-4 border-b border-white/10 flex-shrink-0">
+            <div className="flex items-start justify-between p-5 border-b border-sage-300 flex-shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_STYLES[selectedItem.severity]?.dot ?? 'bg-zinc-500'}`} />
-                <span className="text-[11px] font-semibold text-white leading-tight">{selectedItem.title}</span>
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_STYLES[selectedItem.severity]?.dot ?? 'bg-sage-400'}`} />
+                <span className="text-sm font-semibold text-sage-900 leading-tight">{selectedItem.title}</span>
               </div>
-              <button onClick={closeModal} className="ml-3 flex-shrink-0 text-zinc-500 hover:text-white transition-colors">
+              <button onClick={closeModal} className="ml-3 flex-shrink-0 text-sage-400 hover:text-sage-900 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="overflow-y-auto flex-1 p-4 space-y-4">
+            <div className="overflow-y-auto flex-1 p-5 space-y-4">
               {/* Meta badges */}
               <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1 text-zinc-500">
+                <div className="flex items-center gap-1 text-sage-500">
                   <MapPin className="w-2.5 h-2.5" />
-                  <span className="text-[8px] uppercase tracking-wider">{selectedItem.location_name}</span>
+                  <span className="text-[10px]">{selectedItem.location_name}</span>
                 </div>
                 {selectedItem.category && (
-                  <span className="text-[7px] font-mono uppercase tracking-widest text-zinc-600 border border-white/10 px-1 py-px">
+                  <span className="text-[10px] text-sage-500 bg-sage-300 px-1.5 py-px rounded-full">
                     {COMPLIANCE_CATEGORY_LABELS[selectedItem.category] ?? selectedItem.category}
                   </span>
                 )}
-                <span className={`text-[7px] font-mono uppercase tracking-widest px-1 py-px ${SEVERITY_STYLES[selectedItem.severity]?.badge}`}>
+                <span className={`text-[10px] px-1.5 py-px ${SEVERITY_STYLES[selectedItem.severity]?.badge}`}>
                   {SEVERITY_STYLES[selectedItem.severity]?.label}
                 </span>
                 {selectedItem.effective_date && (
-                  <span className="text-[7px] font-mono text-zinc-500 border border-white/5 px-1 py-px">
+                  <span className="text-[10px] text-sage-500 bg-sage-200 px-1.5 py-px rounded-full">
                     Effective {new Date(`${selectedItem.effective_date}T00:00:00`).toLocaleDateString()}
                     {selectedItem.days_until != null && (
-                      <span className={selectedItem.days_until <= 30 ? ' text-red-400' : selectedItem.days_until <= 60 ? ' text-amber-400' : ' text-zinc-400'}>
+                      <span className={selectedItem.days_until <= 30 ? ' text-sage-900 font-semibold' : selectedItem.days_until <= 60 ? ' text-sage-600' : ''}>
                         {' '}· {selectedItem.days_until <= 0 ? 'Today' : `${selectedItem.days_until}d`}
                       </span>
                     )}
@@ -570,23 +543,23 @@ function ComplianceDashboardWidget() {
 
               {/* Description */}
               {selectedItem.description && (
-                <div className="bg-zinc-900/50 border border-white/5 p-3">
-                  <p className="text-[9px] text-zinc-400 leading-relaxed">{selectedItem.description}</p>
+                <div className="bg-sage-200 rounded-2xl p-3">
+                  <p className="text-xs text-sage-500 leading-relaxed">{selectedItem.description}</p>
                 </div>
               )}
 
               {/* Next action / playbook */}
               {(selectedItem.next_action || selectedItem.recommended_playbook) && (
-                <div className="space-y-1">
+                <div className="space-y-2">
                   {selectedItem.next_action && (
-                    <div className="text-[9px] text-zinc-400">
-                      <span className="text-[7px] uppercase tracking-widest text-zinc-600 block mb-0.5">Recommended Action</span>
+                    <div className="text-xs text-sage-500">
+                      <span className="text-[10px] text-sage-400 block mb-0.5">Recommended Action</span>
                       {selectedItem.next_action}
                     </div>
                   )}
                   {selectedItem.recommended_playbook && (
-                    <div className="text-[9px] text-zinc-400">
-                      <span className="text-[7px] uppercase tracking-widest text-zinc-600 block mb-0.5">Playbook</span>
+                    <div className="text-xs text-sage-500">
+                      <span className="text-[10px] text-sage-400 block mb-0.5">Playbook</span>
                       {selectedItem.recommended_playbook}
                     </div>
                   )}
@@ -596,11 +569,11 @@ function ComplianceDashboardWidget() {
               {/* Affected employees */}
               {selectedItem.affected_employee_count > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <Users className="w-3 h-3 text-zinc-600" />
-                  <span className="text-[8px] text-zinc-500">
+                  <Users className="w-3 h-3 text-sage-400" />
+                  <span className="text-[10px] text-sage-500">
                     {selectedItem.affected_employee_count} employee{selectedItem.affected_employee_count !== 1 ? 's' : ''} affected
                     {selectedItem.affected_employee_sample.length > 0 && (
-                      <span className="text-zinc-600"> — {selectedItem.affected_employee_sample.slice(0, 3).join(', ')}{selectedItem.affected_employee_count > 3 ? ` +${selectedItem.affected_employee_count - 3} more` : ''}</span>
+                      <span className="text-sage-400"> — {selectedItem.affected_employee_sample.slice(0, 3).join(', ')}{selectedItem.affected_employee_count > 3 ? ` +${selectedItem.affected_employee_count - 3} more` : ''}</span>
                     )}
                   </span>
                 </div>
@@ -608,7 +581,7 @@ function ComplianceDashboardWidget() {
 
               {/* Financial exposure */}
               {selectedItem.estimated_financial_impact && (
-                <div className="text-[8px] text-red-300/80 bg-red-500/5 border border-red-500/10 px-2 py-1">
+                <div className="text-xs text-sage-600 bg-sage-200 rounded-2xl px-3 py-2">
                   Exposure: {selectedItem.estimated_financial_impact}
                 </div>
               )}
@@ -619,24 +592,24 @@ function ComplianceDashboardWidget() {
                   href={selectedItem.source_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-[8px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="flex items-center gap-1 text-xs text-sage-500 hover:text-sage-900 transition-colors"
                 >
-                  <ExternalLink className="w-2.5 h-2.5" />
+                  <ExternalLink className="w-3 h-3" />
                   View source
                 </a>
               )}
 
               {/* Divider */}
-              <div className="border-t border-white/5" />
+              <div className="border-t border-sage-300" />
 
               {/* Assign */}
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[7px] uppercase tracking-widest text-zinc-500 mb-1.5">Assign To</label>
+                  <label className="block text-[10px] text-sage-500 mb-1.5">Assign To</label>
                   <select
                     value={modalOwnerId}
                     onChange={(e) => setModalOwnerId(e.target.value)}
-                    className="w-full bg-zinc-900 border border-white/10 text-zinc-200 text-[10px] px-2 py-1.5 focus:outline-none focus:border-white/20"
+                    className="w-full bg-white border border-sage-300 rounded-xl text-sage-900 text-xs px-3 py-2 focus:outline-none focus:border-sage-900"
                   >
                     <option value="">— Unassigned —</option>
                     {assignableUsers.map(u => (
@@ -649,16 +622,16 @@ function ComplianceDashboardWidget() {
                 </div>
 
                 <div>
-                  <label className="block text-[7px] uppercase tracking-widest text-zinc-500 mb-1.5">Turnaround Time</label>
+                  <label className="block text-[10px] text-sage-500 mb-1.5">Turnaround Time</label>
                   <div className="flex flex-wrap gap-1.5">
                     {TURNAROUND_OPTIONS.map(opt => (
                       <button
                         key={opt.days}
                         onClick={() => setModalTurnaround(modalTurnaround === opt.days ? null : opt.days)}
-                        className={`px-2 py-1 text-[8px] font-mono uppercase tracking-widest border transition-colors ${
+                        className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
                           modalTurnaround === opt.days
-                            ? 'bg-white text-black border-white'
-                            : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-zinc-200'
+                            ? 'bg-sage-900 text-sage-100'
+                            : 'bg-sage-200 text-sage-500 hover:text-sage-900'
                         }`}
                       >
                         {opt.label}
@@ -666,7 +639,7 @@ function ComplianceDashboardWidget() {
                     ))}
                   </div>
                   {modalTurnaround !== null && (
-                    <p className="mt-1.5 text-[8px] text-zinc-500">
+                    <p className="mt-1.5 text-xs text-sage-500">
                       Due date will be set to {(() => {
                         const d = new Date();
                         d.setDate(d.getDate() + modalTurnaround);
@@ -678,18 +651,18 @@ function ComplianceDashboardWidget() {
               </div>
 
               {modalError && (
-                <p className="text-[8px] text-red-400 uppercase tracking-wider">{modalError}</p>
+                <p className="text-xs text-sage-900">{modalError}</p>
               )}
             </div>
 
             {/* Modal footer */}
-            <div className="p-4 border-t border-white/10 flex items-center justify-between gap-2 flex-shrink-0">
+            <div className="p-5 border-t border-sage-300 flex items-center justify-between gap-2 flex-shrink-0">
               <div className="flex items-center gap-2">
                 {selectedItem.action_status !== 'actioned' && (
                   <button
                     onClick={() => void markActioned(selectedItem)}
                     disabled={modalSaving}
-                    className="px-3 py-1.5 text-[8px] uppercase tracking-widest border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 hover:border-emerald-400/50 disabled:opacity-50 transition-colors"
+                    className="px-4 py-2 text-xs rounded-full bg-sage-200 text-sage-600 hover:text-sage-900 disabled:opacity-50 transition-colors"
                   >
                     Mark Actioned
                   </button>
@@ -699,7 +672,7 @@ function ComplianceDashboardWidget() {
                     const params = new URLSearchParams({ location_id: selectedItem.location_id, tab: 'upcoming', legislation_id: selectedItem.legislation_id });
                     navigate(`/app/matcha/compliance?${params.toString()}`);
                   }}
-                  className="px-3 py-1.5 text-[8px] uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="px-4 py-2 text-xs text-sage-500 hover:text-sage-900 transition-colors"
                 >
                   Full View
                 </button>
@@ -707,14 +680,14 @@ function ComplianceDashboardWidget() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={closeModal}
-                  className="px-3 py-1.5 text-[8px] uppercase tracking-widest border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-colors"
+                  className="px-4 py-2 text-xs rounded-full bg-sage-200 text-sage-500 hover:text-sage-900 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => void saveModalChanges()}
                   disabled={modalSaving || (modalOwnerId === (selectedItem.action_owner_id ?? '') && modalTurnaround === null)}
-                  className="px-3 py-1.5 text-[8px] uppercase tracking-widest bg-white text-black hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="px-4 py-2 text-xs rounded-full bg-sage-900 text-sage-100 hover:bg-sage-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {modalSaving ? 'Saving…' : 'Save'}
                 </button>
@@ -799,7 +772,6 @@ export function Dashboard() {
       value: dashStats ? String(dashStats.active_policies) : '-',
       change: dashStats?.active_policies === 0 ? 'No policies yet' : 'Active',
       icon: FileText,
-      color: 'text-emerald-500',
       path: '/app/matcha/policies'
     },
     {
@@ -807,7 +779,6 @@ export function Dashboard() {
       value: dashStats ? String(dashStats.pending_signatures) : '-',
       change: dashStats?.pending_signatures === 0 ? 'All signed' : 'Action required',
       icon: Clock,
-      color: 'text-amber-500',
       path: '/app/matcha/policies'
     },
     {
@@ -815,7 +786,6 @@ export function Dashboard() {
       value: dashStats ? String(dashStats.total_employees) : '-',
       change: dashStats?.total_employees === 0 ? 'No employees yet' : 'Active',
       icon: Users,
-      color: 'text-white',
       path: '/app/matcha/employees'
     },
     {
@@ -823,7 +793,6 @@ export function Dashboard() {
       value: dashStats ? `${dashStats.compliance_rate}%` : '-',
       change: dashStats?.compliance_rate === 0 ? 'No data yet' : 'Current',
       icon: CheckCircle2,
-      color: 'text-emerald-500',
       path: '/app/matcha/compliance'
     },
   ];
@@ -844,30 +813,31 @@ export function Dashboard() {
   return (
     <>
     <OnboardingWizard />
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-6 sm:px-8 lg:px-10 py-10 min-h-screen bg-sage-200">
     <CompanyProfileBanner />
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-white/10 pb-4">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4">
         <div>
           <div className="flex items-center gap-3 mb-1.5">
-             <div className="px-1.5 py-0.5 border border-emerald-500/20 bg-emerald-900/10 text-emerald-400 text-[8px] uppercase tracking-widest font-mono rounded">
+             <div className="px-2.5 py-0.5 bg-sage-100 text-sage-600 text-xs rounded-full">
                 Live Overview
              </div>
           </div>
-          <h1 className="text-2xl font-bold tracking-tighter text-white uppercase">
+          <h1 className="text-2xl font-bold tracking-tighter text-sage-900 uppercase">
             Command Center
           </h1>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => navigate('/app/matcha/policies/new')}
-            className="px-4 py-2 border border-white/20 hover:bg-white hover:text-black text-[10px] font-mono uppercase tracking-widest transition-all"
+            className="px-4 py-2 rounded-full bg-sage-100 text-sage-900 hover:bg-sage-300 text-xs font-medium transition-all"
           >
             New Policy
           </button>
           <button
             onClick={() => navigate('/app/matcha/offer-letters')}
-            className="px-4 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] font-mono uppercase tracking-widest transition-all font-bold"
+            className="px-4 py-2 bg-sage-900 text-sage-100 hover:bg-sage-800 rounded-full text-xs font-bold transition-all"
           >
             Create Offer
           </button>
@@ -879,28 +849,21 @@ export function Dashboard() {
           <div className="space-y-6">
             {/* Stats Grid */}
             {visibleWidgets.has('stats') && (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 border border-white/10">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {stats.map((stat) => (
                   <button
                     key={stat.label}
                     onClick={() => navigate(stat.path)}
-                    className="bg-zinc-950 p-4 hover:bg-zinc-900 transition-all group relative overflow-hidden text-left"
+                    className="bg-sage-900 rounded-3xl p-6 hover:bg-sage-800 transition-all group relative overflow-hidden text-left"
                   >
-                    <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 group-hover:scale-110 transition-all duration-500">
-                       <stat.icon className="w-10 h-10 text-white" strokeWidth={0.5} />
+                    <div className="absolute top-0 right-0 p-3 text-sage-800 group-hover:scale-110 transition-all duration-500">
+                       <stat.icon className="w-10 h-10" strokeWidth={0.5} />
                     </div>
 
                     <div className="relative z-10">
-                      <div className="flex items-center gap-2 mb-2">
-                         <div className={`p-1 rounded bg-white/5 ${stat.color}`}>
-                            <stat.icon className="w-3 h-3" />
-                         </div>
-                         <span className="text-[8px] uppercase tracking-[0.2em] text-zinc-500 font-bold">{stat.label}</span>
-                      </div>
-
-                      <div className="text-xl font-light text-white mb-0.5 tabular-nums tracking-tight group-hover:text-emerald-400 transition-colors">{stat.value}</div>
-                      <div className="flex items-center gap-2 text-[8px] font-mono text-zinc-500 uppercase">
-                         <span className="w-1 h-1 bg-zinc-700 rounded-full" />
+                      <div className="text-xs text-sage-600 uppercase tracking-wider mb-3">{stat.label}</div>
+                      <div className="text-4xl font-light font-mono text-sage-100 mb-1 tabular-nums">{stat.value}</div>
+                      <div className="text-xs text-sage-600">
                          {stat.change}
                       </div>
                     </div>
@@ -912,34 +875,34 @@ export function Dashboard() {
 
             {/* Quick Setup — shown for new businesses with no employees and no policies */}
             {visibleWidgets.has('setup') && dashStats && dashStats.total_employees === 0 && dashStats.active_policies === 0 && (
-              <Collapsible title="Quick Setup" icon={Activity}>
-                <div className="p-4 bg-zinc-900/10">
+              <Collapsible title="Quick Setup" icon={Activity} variant="light">
+                <div className="p-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
                       onClick={() => navigate('/app/matcha/company')}
-                      className="flex items-center gap-3 p-3 border border-white/10 hover:border-white/30 hover:bg-white/5 transition-all group text-left"
+                      className="flex items-center gap-3 p-4 bg-sage-200 rounded-2xl hover:bg-sage-300 transition-all group text-left"
                     >
-                      <div className="p-1.5 bg-white/5 group-hover:bg-white/10 transition-colors">
-                        <Building className="w-3.5 h-3.5 text-zinc-400 group-hover:text-white transition-colors" />
+                      <div className="p-2 bg-sage-300 rounded-xl group-hover:bg-sage-400 transition-colors">
+                        <Building className="w-4 h-4 text-sage-900" />
                       </div>
                       <div className="flex-1">
-                        <div className="text-[11px] text-white font-medium group-hover:text-white transition-colors">Company Profile</div>
-                        <div className="text-[8px] text-zinc-500 uppercase tracking-wider mt-0.5">Set up company info</div>
+                        <div className="text-sm text-sage-900 font-medium">Company Profile</div>
+                        <div className="text-xs text-sage-500 mt-0.5">Set up company info</div>
                       </div>
-                      <ArrowUpRight className="w-3 h-3 text-zinc-600 group-hover:text-white transition-colors" />
+                      <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 transition-colors" />
                     </button>
                     <button
                       onClick={() => navigate('/app/matcha/employees')}
-                      className="flex items-center gap-3 p-3 border border-white/10 hover:border-white/30 hover:bg-white/5 transition-all group text-left"
+                      className="flex items-center gap-3 p-4 bg-sage-200 rounded-2xl hover:bg-sage-300 transition-all group text-left"
                     >
-                      <div className="p-1.5 bg-white/5 group-hover:bg-white/10 transition-colors">
-                        <UserPlus className="w-3.5 h-3.5 text-zinc-400 group-hover:text-white transition-colors" />
+                      <div className="p-2 bg-sage-300 rounded-xl group-hover:bg-sage-400 transition-colors">
+                        <UserPlus className="w-4 h-4 text-sage-900" />
                       </div>
                       <div className="flex-1">
-                        <div className="text-[11px] text-white font-medium group-hover:text-white transition-colors">Add Employees</div>
-                        <div className="text-[8px] text-zinc-500 uppercase tracking-wider mt-0.5">Import team via CSV</div>
+                        <div className="text-sm text-sage-900 font-medium">Add Employees</div>
+                        <div className="text-xs text-sage-500 mt-0.5">Import team via CSV</div>
                       </div>
-                      <ArrowUpRight className="w-3 h-3 text-zinc-600 group-hover:text-white transition-colors" />
+                      <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 transition-colors" />
                     </button>
                   </div>
                 </div>
@@ -951,6 +914,7 @@ export function Dashboard() {
                 { id: 'overview', label: 'Overview', icon: LayoutDashboard },
                 { id: 'operations', label: 'Operations', icon: History },
               ]}
+              variant="light"
             >
               {(activeTab) => (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -958,34 +922,34 @@ export function Dashboard() {
                     <>
                       <div className="lg:col-span-2 space-y-4">
                         {visibleWidgets.has('actions') && (
-                          <div className="border border-white/10 bg-zinc-900/30 p-4 h-fit">
-                            <h2 className="text-[9px] font-bold text-white uppercase tracking-[0.2em] mb-3">Pending Actions</h2>
-                            <div className="space-y-1.5">
+                          <div className="bg-sage-100 rounded-3xl p-6 h-fit">
+                            <h2 className="text-base font-semibold text-sage-900 mb-4">Pending Actions</h2>
+                            <div className="space-y-2">
                               {ptoSummary && ptoSummary.pending_count > 0 && (
                                 <div
                                   onClick={() => navigate('/app/matcha/pto')}
-                                  className="p-2.5 bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 cursor-pointer hover:bg-amber-500/20 transition-colors"
+                                  className="bg-sage-200 rounded-2xl p-4 flex items-start gap-3 cursor-pointer hover:bg-sage-300 transition-colors group"
                                 >
-                                    <Calendar className="w-3.5 h-3.5 text-amber-500 mt-0.5" />
+                                    <Calendar className="w-4 h-4 text-sage-500 mt-0.5" />
                                     <div className="flex-1">
-                                      <div className="text-[11px] text-amber-200 font-medium mb-0.5">PTO Requests Pending</div>
-                                      <div className="text-[9px] text-amber-500/70">{ptoSummary.pending_count} request{ptoSummary.pending_count !== 1 ? 's' : ''} awaiting approval</div>
+                                      <div className="text-sm text-sage-900 font-medium mb-0.5">PTO Requests Pending</div>
+                                      <div className="text-xs text-sage-500">{ptoSummary.pending_count} request{ptoSummary.pending_count !== 1 ? 's' : ''} awaiting approval</div>
                                     </div>
-                                    <ArrowUpRight className="w-3 h-3 text-amber-500 ml-auto" />
+                                    <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 ml-auto transition-colors" />
                                 </div>
                               )}
                               {dashStats?.pending_incidents.map((incident) => (
                                 <div
                                   key={incident.id}
                                   onClick={() => navigate(`/app/ir/incidents/${incident.id}`)}
-                                  className="p-2.5 bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 cursor-pointer hover:bg-amber-500/20 transition-colors"
+                                  className="bg-sage-200 rounded-2xl p-4 flex items-start gap-3 cursor-pointer hover:bg-sage-300 transition-colors group"
                                 >
-                                    <div className="mt-1.5 w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
+                                    <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-sage-500 animate-pulse flex-shrink-0" />
                                     <div className="flex-1">
-                                      <div className="text-[11px] text-amber-200 font-medium mb-0.5">{incident.title}</div>
-                                      <div className="text-[9px] text-amber-500/70">{incident.incident_number} &bull; {incident.severity.charAt(0).toUpperCase() + incident.severity.slice(1)} Priority</div>
+                                      <div className="text-sm text-sage-900 font-medium mb-0.5">{incident.title}</div>
+                                      <div className="text-xs text-sage-500">{incident.incident_number} &bull; {incident.severity.charAt(0).toUpperCase() + incident.severity.slice(1)} Priority</div>
                                     </div>
-                                    <ArrowUpRight className="w-3 h-3 text-amber-500 ml-auto" />
+                                    <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 ml-auto transition-colors" />
                                 </div>
                               ))}
                               {showComplianceImpact && compliancePendingActions.map((item) => {
@@ -1001,46 +965,42 @@ export function Dashboard() {
                                       });
                                       navigate(`/app/matcha/compliance?${params.toString()}`);
                                     }}
-                                    className={`p-2.5 border flex items-start gap-3 cursor-pointer transition-colors ${
-                                      isCritical
-                                        ? 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20'
-                                        : 'bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/20'
-                                    }`}
+                                    className="bg-sage-200 rounded-2xl p-4 flex items-start gap-3 cursor-pointer hover:bg-sage-300 transition-colors group"
                                   >
-                                      <div className={`mt-1.5 w-1 h-1 rounded-full ${isCritical ? 'bg-red-500 animate-pulse' : 'bg-amber-500'}`} />
+                                      <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isCritical ? 'bg-sage-900 animate-pulse' : 'bg-sage-500'}`} />
                                       <div className="flex-1">
-                                        <div className={`text-[11px] font-medium mb-0.5 ${isCritical ? 'text-red-200' : 'text-amber-200'}`}>{item.title}</div>
-                                        <div className={`text-[9px] ${isCritical ? 'text-red-300/70' : 'text-amber-500/70'}`}>
+                                        <div className="text-sm text-sage-900 font-medium mb-0.5">{item.title}</div>
+                                        <div className="text-xs text-sage-500">
                                           Compliance &bull; {item.action_owner_name || 'Unassigned'} &bull; {item.sla_state.replace('_', ' ')}
                                         </div>
                                       </div>
-                                      <ArrowUpRight className={`w-3 h-3 ml-auto ${isCritical ? 'text-red-400' : 'text-amber-500'}`} />
+                                      <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 ml-auto transition-colors" />
                                   </div>
                                 );
                               })}
                               {(!ptoSummary || ptoSummary.pending_count === 0)
                                 && (!dashStats || dashStats.pending_incidents.length === 0)
                                 && (!showComplianceImpact || compliancePendingActions.length === 0) && (
-                                <div className="p-3 text-center">
-                                  <CheckCircle2 className="w-4 h-4 text-zinc-700 mx-auto mb-1.5" />
-                                  <p className="text-[9px] text-zinc-500 uppercase tracking-wider">All caught up</p>
+                                <div className="p-4 text-center">
+                                  <CheckCircle2 className="w-5 h-5 text-sage-400 mx-auto mb-1.5" />
+                                  <p className="text-sm text-sage-400">All caught up</p>
                                 </div>
                               )}
                             </div>
                           </div>
                         )}
-                        
+
                         {visibleWidgets.has('pto') && ptoSummary && ptoSummary.upcoming_time_off > 0 && (
-                          <div className="border border-white/10 bg-zinc-900/30 p-4">
-                              <div className="flex items-center justify-between mb-3">
-                                <h2 className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">Upcoming Time Off</h2>
-                                <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+                          <div className="bg-sage-100 rounded-3xl p-6">
+                              <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-base font-semibold text-sage-900">Upcoming Time Off</h2>
+                                <Calendar className="w-4 h-4 text-sage-400" />
                               </div>
-                              <div className="text-xl font-light text-white mb-0.5">{ptoSummary.upcoming_time_off}</div>
-                              <div className="text-[9px] text-zinc-500 uppercase tracking-wider">employees out (30d)</div>
+                              <div className="text-4xl font-light font-mono text-sage-900 mb-1 tabular-nums">{ptoSummary.upcoming_time_off}</div>
+                              <div className="text-xs text-sage-500">employees out (30d)</div>
                               <button
                                 onClick={() => navigate('/app/matcha/pto')}
-                                className="mt-3 w-full text-center py-1.5 border border-white/10 text-[8px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white hover:border-white/30 transition-colors"
+                                className="mt-4 rounded-full bg-sage-200 text-sage-900 hover:bg-sage-300 px-4 py-2 text-xs transition-colors"
                               >
                                 View Calendar
                               </button>
@@ -1050,41 +1010,39 @@ export function Dashboard() {
 
                       <div className="space-y-4">
                         {visibleWidgets.has('compliance') && (
-                          <div className="border border-white/10 bg-zinc-900/30 p-4 relative overflow-hidden group h-fit">
-                            <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-[40px] pointer-events-none" />
-
+                          <div className="bg-sage-900 rounded-3xl p-6 relative overflow-hidden group h-fit">
                             <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">Policy Signature Coverage</h2>
-                                <ShieldAlert className="w-3.5 h-3.5 text-emerald-500" />
+                                <h2 className="text-base font-semibold text-sage-100">Policy Signature Coverage</h2>
+                                <ShieldAlert className="w-4 h-4 text-sage-600" />
                             </div>
 
                             <div className="relative w-32 h-32 mx-auto mb-4">
                                 <svg className="w-full h-full transform -rotate-90">
-                                  <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-zinc-800" />
+                                  <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-sage-800" />
                                   <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent"
                                     strokeDasharray={2 * Math.PI * 58}
                                     strokeDashoffset={(2 * Math.PI * 58) - (complianceRate / 100) * (2 * Math.PI * 58)}
-                                    className="text-emerald-500 transition-all duration-1000"
+                                    className="text-sage-100 transition-all duration-1000"
                                   />
                                 </svg>
                                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                  <span className="text-2xl font-light text-white">{complianceRate > 0 ? `${complianceRate}%` : '--'}</span>
-                                  <span className="text-[8px] uppercase tracking-widest text-zinc-500 mt-0.5">{complianceRate > 0 ? 'Signed' : 'No data'}</span>
+                                  <span className="text-2xl font-light text-sage-100">{complianceRate > 0 ? `${complianceRate}%` : '--'}</span>
+                                  <span className="text-xs text-sage-600 mt-0.5">{complianceRate > 0 ? 'Signed' : 'No data'}</span>
                                 </div>
                             </div>
 
                             {dashStats && dashStats.active_policies > 0 ? (
                               <div className="space-y-2">
-                                <div className="flex justify-between text-[8px] text-zinc-400 uppercase tracking-wider">
+                                <div className="flex justify-between text-xs text-sage-600">
                                     <span>Signatures</span>
-                                    <span className="text-white">{complianceRate}%</span>
+                                    <span className="text-sage-100">{complianceRate}%</span>
                                 </div>
-                                <div className="w-full bg-zinc-800 h-1 rounded-full overflow-hidden">
-                                    <div className="bg-emerald-500 h-full transition-all duration-1000" style={{ width: `${complianceRate}%` }} />
+                                <div className="w-full bg-sage-800 h-1 rounded-full overflow-hidden">
+                                    <div className="bg-sage-100 h-full transition-all duration-1000" style={{ width: `${complianceRate}%` }} />
                                 </div>
                               </div>
                             ) : (
-                              <p className="text-[8px] text-zinc-600 text-center uppercase tracking-wider">Create policies to track</p>
+                              <p className="text-xs text-sage-600 text-center">Create policies to track</p>
                             )}
                           </div>
                         )}
@@ -1101,12 +1059,12 @@ export function Dashboard() {
                   {activeTab === 'operations' && (
                     <div className="lg:col-span-3 space-y-4">
                       {visibleWidgets.has('activity') && (
-                        <div className="border border-white/10 bg-zinc-900/30">
-                          <div className="p-3 border-b border-white/10 flex justify-between items-center">
-                            <h2 className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">System Activity</h2>
-                            <Activity className="w-3.5 h-3.5 text-zinc-500" />
+                        <div className="bg-sage-100 rounded-3xl overflow-hidden">
+                          <div className="p-4 border-b border-sage-300 flex justify-between items-center">
+                            <h2 className="text-base font-semibold text-sage-900">System Activity</h2>
+                            <Activity className="w-4 h-4 text-sage-400" />
                           </div>
-                          <div className="divide-y divide-white/5">
+                          <div className="divide-y divide-sage-200">
                             {dashStats && dashStats.recent_activity.length > 0 ? (
                               dashStats.recent_activity.map((item, i) => {
                                 const ts = new Date(item.timestamp);
@@ -1114,35 +1072,35 @@ export function Dashboard() {
                                 const isToday = new Date().toDateString() === ts.toDateString();
                                 const dateLabel = isToday ? 'TODAY' : ts.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase();
                                 return (
-                                  <div key={i} className="p-2.5 flex items-center justify-between hover:bg-white/5 transition-colors group">
+                                  <div key={i} className="p-3 flex items-center justify-between hover:bg-sage-200 transition-colors group">
                                     <div className="flex items-center gap-3">
-                                      <div className="font-mono text-[8px] text-zinc-500 w-12">
+                                      <div className="font-mono text-xs text-sage-400 w-12">
                                         {timeStr}
                                       </div>
                                       <div className="flex items-center gap-2.5">
-                                        <div className={`w-1 h-1 rounded-full ${
-                                            item.type === 'success' ? 'bg-emerald-500' :
-                                            item.type === 'warning' ? 'bg-amber-500 animate-pulse' : 'bg-zinc-600'
+                                        <div className={`w-1.5 h-1.5 rounded-full ${
+                                            item.type === 'success' ? 'bg-sage-900' :
+                                            item.type === 'warning' ? 'bg-sage-500 animate-pulse' : 'bg-sage-400'
                                         }`} />
-                                        <span className="text-[11px] text-zinc-300 group-hover:text-white transition-colors">{item.action}</span>
+                                        <span className="text-sm text-sage-900">{item.action}</span>
                                       </div>
                                     </div>
-                                    <div className="hidden sm:block text-[8px] font-mono text-zinc-600 uppercase tracking-widest border border-white/5 px-1.5 py-0.5 rounded">
+                                    <div className="hidden sm:block text-xs text-sage-500 bg-sage-200 px-2 py-0.5 rounded-full">
                                       {dateLabel}
                                     </div>
                                   </div>
                                 );
                               })
                             ) : (
-                              <div className="p-4 text-center">
-                                <Activity className="w-5 h-5 text-zinc-700 mx-auto mb-1.5" />
-                                <p className="text-[11px] text-zinc-500">No recent activity</p>
+                              <div className="p-6 text-center">
+                                <Activity className="w-5 h-5 text-sage-400 mx-auto mb-1.5" />
+                                <p className="text-sm text-sage-500">No recent activity</p>
                               </div>
                             )}
                           </div>
                           {dashStats && dashStats.recent_activity.length > 0 && (
-                            <div className="p-2.5 border-t border-white/10 bg-white/5">
-                              <button className="w-full text-center text-[8px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors">
+                            <div className="p-3 border-t border-sage-300 bg-sage-200">
+                              <button className="w-full text-center text-xs text-sage-500 hover:text-sage-900 transition-colors">
                                   Full Log
                               </button>
                             </div>
@@ -1151,42 +1109,42 @@ export function Dashboard() {
                       )}
 
                       {visibleWidgets.has('incidents') && dashStats?.incident_summary && dashStats.incident_summary.total_open > 0 && (
-                        <div className="border border-white/10 bg-zinc-900/30">
-                          <div className="p-3 border-b border-white/10 flex justify-between items-center">
-                            <h2 className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">Incidents</h2>
-                            <ShieldAlert className="w-3.5 h-3.5 text-zinc-500" />
+                        <div className="bg-sage-100 rounded-3xl overflow-hidden">
+                          <div className="p-4 border-b border-sage-300 flex justify-between items-center">
+                            <h2 className="text-base font-semibold text-sage-900">Incidents</h2>
+                            <ShieldAlert className="w-4 h-4 text-sage-400" />
                           </div>
-                          <div className="p-4">
+                          <div className="p-5">
                             <div className="flex items-baseline gap-2.5 mb-4">
-                              <span className="text-2xl font-light text-white tabular-nums">{dashStats.incident_summary.total_open}</span>
-                              <span className="text-[8px] uppercase tracking-[0.2em] text-zinc-500 font-bold">Open Incident{dashStats.incident_summary.total_open !== 1 ? 's' : ''}</span>
+                              <span className="text-3xl font-light text-sage-900 tabular-nums">{dashStats.incident_summary.total_open}</span>
+                              <span className="text-xs text-sage-500 font-medium">Open Incident{dashStats.incident_summary.total_open !== 1 ? 's' : ''}</span>
                               {dashStats.incident_summary.recent_7_days > 0 && (
-                                <span className="ml-auto text-[8px] font-mono text-amber-500 border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                                <span className="ml-auto text-xs bg-sage-200 text-sage-600 px-2 py-0.5 rounded-full">
                                   +{dashStats.incident_summary.recent_7_days}
                                 </span>
                               )}
                             </div>
-                            <div className="grid grid-cols-4 gap-px bg-white/10">
+                            <div className="grid grid-cols-4 gap-3">
                               {([
-                                { label: 'Crit', count: dashStats.incident_summary.critical, color: 'text-red-400', bg: 'bg-red-500' },
-                                { label: 'High', count: dashStats.incident_summary.high, color: 'text-orange-400', bg: 'bg-orange-500' },
-                                { label: 'Med', count: dashStats.incident_summary.medium, color: 'text-amber-400', bg: 'bg-amber-500' },
-                                { label: 'Low', count: dashStats.incident_summary.low, color: 'text-zinc-400', bg: 'bg-zinc-500' },
+                                { label: 'Crit', count: dashStats.incident_summary.critical, color: 'text-sage-900', bg: 'bg-sage-900' },
+                                { label: 'High', count: dashStats.incident_summary.high, color: 'text-sage-700', bg: 'bg-sage-700' },
+                                { label: 'Med', count: dashStats.incident_summary.medium, color: 'text-sage-500', bg: 'bg-sage-500' },
+                                { label: 'Low', count: dashStats.incident_summary.low, color: 'text-sage-400', bg: 'bg-sage-400' },
                               ] as const).map((sev) => (
-                                <div key={sev.label} className="bg-zinc-950 p-2 text-center">
-                                  <div className={`text-lg font-light tabular-nums ${sev.count > 0 ? sev.color : 'text-zinc-700'}`}>{sev.count}</div>
+                                <div key={sev.label} className="bg-sage-200 rounded-2xl p-3 text-center">
+                                  <div className={`text-xl font-light tabular-nums ${sev.count > 0 ? sev.color : 'text-sage-400'}`}>{sev.count}</div>
                                   <div className="flex items-center justify-center gap-1 mt-1">
-                                    <span className={`w-1 h-1 rounded-full ${sev.count > 0 ? sev.bg : 'bg-zinc-800'}`} />
-                                    <span className="text-[7px] uppercase tracking-widest text-zinc-500">{sev.label}</span>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${sev.count > 0 ? sev.bg : 'bg-sage-300'}`} />
+                                    <span className="text-[10px] text-sage-500">{sev.label}</span>
                                   </div>
                                 </div>
                               ))}
                             </div>
                           </div>
-                          <div className="p-2.5 border-t border-white/10 bg-white/5">
+                          <div className="p-3 border-t border-sage-300 bg-sage-200">
                             <button
                               onClick={() => navigate('/app/ir/incidents')}
-                              className="w-full text-center text-[8px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors"
+                              className="w-full text-center text-xs text-sage-500 hover:text-sage-900 transition-colors"
                             >
                               View All
                             </button>
@@ -1201,6 +1159,7 @@ export function Dashboard() {
           </div>
         )}
       </WidgetContainer>
+    </div>
     </div>
     </>
   );

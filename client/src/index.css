@@ -14,7 +14,19 @@
   --color-matcha-800: #166534;
   --color-matcha-900: #14532d;
   --color-matcha-950: #052e16;
-  
+
+  --color-sage-50: #f0f1ec;
+  --color-sage-100: #e3e4db;
+  --color-sage-200: #d5d6cc;
+  --color-sage-300: #c8c9c0;
+  --color-sage-400: #a8a99f;
+  --color-sage-500: #8a8b82;
+  --color-sage-600: #6b6d63;
+  --color-sage-700: #4d4f47;
+  --color-sage-800: #2a2d27;
+  --color-sage-900: #1c1f1a;
+  --color-sage-950: #0e100d;
+
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
