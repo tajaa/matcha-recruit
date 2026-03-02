@@ -187,6 +187,14 @@ const EMPLOYEE_CYCLE_STEPS = [
   },
 ];
 
+type EmployeeEmptyState = {
+  title: string;
+  description: string;
+  actionLabel: string | null;
+  action: (() => void) | null;
+  icon: 'add' | 'invited' | 'terminated';
+};
+
 export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' | 'directory' }) {
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -256,6 +264,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       googleWorkspaceStatus?.connected &&
       googleWorkspaceStatus.status === 'connected'
   );
+  const showFirstEmployeeBanner = employees.length === 0 && (mode === 'onboarding' || filter === '');
 
   const resetAddEmployeeForm = useCallback(() => {
     setNewEmployee({
@@ -838,6 +847,63 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   }
 
   const googleBadge = googleAutoProvisionBadge();
+  const emptyState: EmployeeEmptyState = (() => {
+    if (mode === 'onboarding') {
+      return {
+        title: 'Onboard your first employee',
+        description: 'Your directory is empty. Use the lifecycle wizard below to pick the fastest onboarding path.',
+        actionLabel: 'Add Employee',
+        action: () => {
+          resetAddEmployeeForm();
+          setShowAddModal(true);
+        },
+        icon: 'add',
+      };
+    }
+
+    if (filter === 'terminated') {
+      return {
+        title: 'No terminated employees yet',
+        description: 'Employees will show up here after they have been marked as terminated in the system.',
+        actionLabel: null,
+        action: null,
+        icon: 'terminated',
+      };
+    }
+
+    if (filter === 'invited') {
+      return {
+        title: 'No pending invites',
+        description: 'Employees will show up here after you send them a portal invitation.',
+        actionLabel: null,
+        action: null,
+        icon: 'invited',
+      };
+    }
+
+    if (filter === 'active') {
+      return {
+        title: 'No active employees yet',
+        description: 'Use the onboarding wizard to add your first employee, then active employees will appear here.',
+        actionLabel: 'Onboard New Employee',
+        action: () => navigate('/app/matcha/onboarding?tab=employees'),
+        icon: 'add',
+      };
+    }
+
+    return {
+      title: 'No employees found',
+      description: 'Use the onboarding wizard to add your first employee, then they will appear here.',
+      actionLabel: 'Onboard New Employee',
+      action: () => navigate('/app/matcha/onboarding?tab=employees'),
+      icon: 'add',
+    };
+  })();
+  const EmptyStateIcon = emptyState.icon === 'terminated'
+    ? UserX
+    : emptyState.icon === 'invited'
+      ? Mail
+      : Plus;
 
   return (
     <div className="max-w-7xl mx-auto space-y-8 overflow-x-hidden">
@@ -988,7 +1054,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         title="Employee Lifecycle"
       />
 
-      {employees.length === 0 && (
+      {showFirstEmployeeBanner && (
         <div className="border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-[11px] text-amber-100">
           <p className="font-bold uppercase tracking-wider text-amber-300">No employees yet</p>
           <p className="mt-1 text-amber-100/80">
@@ -1056,36 +1122,21 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       {employees.length === 0 ? (
         <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
           <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-            <Plus size={24} className="text-zinc-600" />
+            <EmptyStateIcon size={24} className="text-zinc-600" />
           </div>
-          {mode === 'directory' ? (
-            <>
-              <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">No employees found</h3>
-              <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Use the onboarding wizard to add your first employee, then they will appear here.</p>
+          <>
+            <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">{emptyState.title}</h3>
+            <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">{emptyState.description}</p>
+            {emptyState.action && emptyState.actionLabel && (
               <button
-                onClick={() => navigate('/app/matcha/onboarding?tab=employees')}
+                onClick={emptyState.action}
                 className="flex items-center gap-2 mx-auto px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
               >
                 <Plus size={14} />
-                Onboard New Employee
+                {emptyState.actionLabel}
               </button>
-            </>
-          ) : (
-            <>
-              <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">Onboard your first employee</h3>
-              <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Your directory is empty. Use the lifecycle wizard below to pick the fastest onboarding path.</p>
-              <button
-                onClick={() => {
-                  resetAddEmployeeForm();
-                  setShowAddModal(true);
-                }}
-                className="flex items-center gap-2 mx-auto px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
-              >
-                <Plus size={14} />
-                Add Employee
-              </button>
-            </>
-          )}
+            )}
+          </>
         </div>
       ) : (
         <div data-tour="emp-list" className="space-y-px bg-white/10 border border-white/10">
