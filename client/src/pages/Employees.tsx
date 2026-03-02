@@ -77,6 +77,28 @@ interface BatchCreateResult {
   errors: BatchCreateError[];
 }
 
+async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+
+  if (contentType.includes('application/json')) {
+    const payload = await response.json().catch(() => null);
+    if (payload && typeof payload === 'object') {
+      const data = payload as { detail?: unknown; message?: unknown; error?: unknown };
+      const candidate = data.detail ?? data.message ?? data.error;
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate;
+      }
+    }
+  }
+
+  const text = (await response.text().catch(() => '')).trim();
+  if (!text || /^internal server error$/i.test(text)) {
+    return fallback;
+  }
+
+  return text;
+}
+
 function sanitizeEmailLocalPart(value: string): string {
   return value
     .normalize('NFKD')
@@ -313,12 +335,12 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       });
 
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || 'Failed to fetch employees');
+        throw new Error(await readErrorMessage(response, 'Failed to fetch employees'));
       }
 
       const data = await response.json();
       setEmployees(data);
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -475,8 +497,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       });
 
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Failed to add employee');
+        throw new Error(await readErrorMessage(response, 'Failed to add employee'));
       }
 
       const createdEmployee = await response.json();
@@ -510,8 +531,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       });
 
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Failed to send invitation');
+        throw new Error(await readErrorMessage(response, 'Failed to send invitation'));
       }
 
       fetchEmployees();
@@ -570,8 +590,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       );
 
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Failed to upload CSV');
+        throw new Error(await readErrorMessage(response, 'Failed to upload CSV'));
       }
 
       const result = await response.json();
@@ -778,12 +797,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           });
 
           if (!response.ok) {
-            const data = await response.json().catch(() => ({} as { detail?: string }));
             failed += 1;
             errors.push({
               row_number: idx + 1,
               name: `${row.first_name} ${row.last_name}`.trim() || `Row ${idx + 1}`,
-              error: data.detail || 'Failed to create employee',
+              error: await readErrorMessage(response, 'Failed to create employee'),
             });
             continue;
           }
@@ -970,6 +988,16 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         title="Employee Lifecycle"
       />
 
+      {employees.length === 0 && (
+        <div className="border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-[11px] text-amber-100">
+          <p className="font-bold uppercase tracking-wider text-amber-300">No employees yet</p>
+          <p className="mt-1 text-amber-100/80">
+            Use the Employee Lifecycle wizard to choose the best path for your first hires:
+            Add Employee for one person, Batch Wizard for a few, or Bulk CSV if you already have a spreadsheet.
+          </p>
+        </div>
+      )}
+
       {mode === 'onboarding' && (
         <div className="border border-white/10 bg-zinc-900/40 p-4 text-[11px] text-zinc-300 space-y-1">
           <p className="uppercase tracking-wider text-zinc-400">Onboarding flows</p>
@@ -1033,7 +1061,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           {mode === 'directory' ? (
             <>
               <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">No employees found</h3>
-              <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Onboard employees first to see them here.</p>
+              <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Use the onboarding wizard to add your first employee, then they will appear here.</p>
               <button
                 onClick={() => navigate('/app/matcha/onboarding?tab=employees')}
                 className="flex items-center gap-2 mx-auto px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
@@ -1045,7 +1073,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           ) : (
             <>
               <h3 className="text-white text-sm font-bold mb-1 uppercase tracking-wide">Onboard your first employee</h3>
-              <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Your directory is empty. Start your onboarding process now.</p>
+              <p className="text-zinc-500 text-xs mb-6 font-mono uppercase">Your directory is empty. Use the lifecycle wizard below to pick the fastest onboarding path.</p>
               <button
                 onClick={() => {
                   resetAddEmployeeForm();

@@ -65,6 +65,44 @@ def _coerce_bool(value, default: bool = True) -> bool:
     return default
 
 
+async def _column_exists(conn, table_name: str, column_name: str) -> bool:
+    return bool(
+        await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = $1 AND column_name = $2
+            )
+            """,
+            table_name,
+            column_name,
+        )
+    )
+
+
+async def _employee_compensation_fields_available(conn) -> bool:
+    has_pay_classification, has_pay_rate, has_work_city = await asyncio.gather(
+        _column_exists(conn, "employees", "pay_classification"),
+        _column_exists(conn, "employees", "pay_rate"),
+        _column_exists(conn, "employees", "work_city"),
+    )
+    return has_pay_classification and has_pay_rate and has_work_city
+
+
+def _employee_compensation_values(
+    row,
+    compensation_fields_available: bool,
+) -> tuple[Optional[str], Optional[float], Optional[str]]:
+    if not compensation_fields_available:
+        return None, None, None
+    return (
+        row["pay_classification"],
+        float(row["pay_rate"]) if row["pay_rate"] is not None else None,
+        row["work_city"],
+    )
+
+
 # Request/Response Models
 class EmployeeCreateRequest(BaseModel):
     email: Optional[EmailStr] = None  # Legacy alias for work_email
@@ -467,13 +505,20 @@ async def list_employees(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
+        compensation_fields_available = await _employee_compensation_fields_available(conn)
+        compensation_select = (
+            "e.pay_classification, e.pay_rate, e.work_city,"
+            if compensation_fields_available
+            else "NULL::VARCHAR AS pay_classification, NULL::NUMERIC AS pay_rate, NULL::VARCHAR AS work_city,"
+        )
+
         # Build query based on status filter
-        base_query = """
+        base_query = f"""
             SELECT
                 e.id, e.email, e.personal_email, e.first_name, e.last_name, e.work_state,
                 e.employment_type, e.start_date, e.termination_date,
                 e.manager_id, e.user_id, e.created_at,
-                e.pay_classification, e.pay_rate, e.work_city,
+                {compensation_select}
                 m.first_name || ' ' || m.last_name as manager_name,
                 (
                     SELECT status FROM employee_invitations
@@ -496,29 +541,35 @@ async def list_employees(
 
         rows = await conn.fetch(base_query, company_id)
 
-        return [
-            EmployeeListResponse(
-                id=row["id"],
-                email=row["email"],
-                work_email=row["email"],
-                personal_email=row["personal_email"],
-                first_name=row["first_name"],
-                last_name=row["last_name"],
-                work_state=row["work_state"],
-                employment_type=row["employment_type"],
-                start_date=str(row["start_date"]) if row["start_date"] else None,
-                termination_date=str(row["termination_date"]) if row["termination_date"] else None,
-                manager_id=row["manager_id"],
-                manager_name=row["manager_name"],
-                user_id=row["user_id"],
-                invitation_status=row["invitation_status"],
-                pay_classification=row["pay_classification"],
-                pay_rate=float(row["pay_rate"]) if row["pay_rate"] is not None else None,
-                work_city=row["work_city"],
-                created_at=row["created_at"],
+        responses = []
+        for row in rows:
+            pay_classification, pay_rate, work_city = _employee_compensation_values(
+                row, compensation_fields_available
             )
-            for row in rows
-        ]
+            responses.append(
+                EmployeeListResponse(
+                    id=row["id"],
+                    email=row["email"],
+                    work_email=row["email"],
+                    personal_email=row["personal_email"],
+                    first_name=row["first_name"],
+                    last_name=row["last_name"],
+                    work_state=row["work_state"],
+                    employment_type=row["employment_type"],
+                    start_date=str(row["start_date"]) if row["start_date"] else None,
+                    termination_date=str(row["termination_date"]) if row["termination_date"] else None,
+                    manager_id=row["manager_id"],
+                    manager_name=row["manager_name"],
+                    user_id=row["user_id"],
+                    invitation_status=row["invitation_status"],
+                    pay_classification=pay_classification,
+                    pay_rate=pay_rate,
+                    work_city=work_city,
+                    created_at=row["created_at"],
+                )
+            )
+
+        return responses
 
 
 @router.post("", response_model=EmployeeDetailResponse)
@@ -531,6 +582,7 @@ async def create_employee(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
+        compensation_fields_available = await _employee_compensation_fields_available(conn)
         work_email = request.resolved_work_email()
 
         # Check if email already exists for this company
@@ -549,29 +601,54 @@ async def create_employee(
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid start_date format. Use YYYY-MM-DD")
 
-        # Create employee record
-        row = await conn.fetchrow(
-            """
-            INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, address, manager_id, pay_classification, pay_rate, work_city)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            RETURNING id, org_id, email, first_name, last_name, work_state, employment_type,
-                      start_date, termination_date, manager_id, user_id, personal_email, phone, address,
-                      emergency_contact, pay_classification, pay_rate, work_city, created_at, updated_at
-            """,
-            company_id,
-            work_email,
-            str(request.personal_email).strip().lower() if request.personal_email else None,
-            request.first_name,
-            request.last_name,
-            request.work_state,
-            request.employment_type,
-            start_date,
-            request.address.strip() if request.address else None,
-            request.manager_id,
-            request.pay_classification,
-            request.pay_rate,
-            request.work_city.strip() if request.work_city else None,
-        )
+        if compensation_fields_available:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, address, manager_id, pay_classification, pay_rate, work_city)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                RETURNING id, org_id, email, first_name, last_name, work_state, employment_type,
+                          start_date, termination_date, manager_id, user_id, personal_email, phone, address,
+                          emergency_contact, pay_classification, pay_rate, work_city, created_at, updated_at
+                """,
+                company_id,
+                work_email,
+                str(request.personal_email).strip().lower() if request.personal_email else None,
+                request.first_name,
+                request.last_name,
+                request.work_state,
+                request.employment_type,
+                start_date,
+                request.address.strip() if request.address else None,
+                request.manager_id,
+                request.pay_classification,
+                request.pay_rate,
+                request.work_city.strip() if request.work_city else None,
+            )
+        else:
+            if request.pay_classification or request.pay_rate is not None or request.work_city:
+                logger.warning(
+                    "Skipping employee compensation fields until employees schema is migrated for company %s",
+                    company_id,
+                )
+            row = await conn.fetchrow(
+                """
+                INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, address, manager_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING id, org_id, email, first_name, last_name, work_state, employment_type,
+                          start_date, termination_date, manager_id, user_id, personal_email, phone, address,
+                          emergency_contact, created_at, updated_at
+                """,
+                company_id,
+                work_email,
+                str(request.personal_email).strip().lower() if request.personal_email else None,
+                request.first_name,
+                request.last_name,
+                request.work_state,
+                request.employment_type,
+                start_date,
+                request.address.strip() if request.address else None,
+                request.manager_id,
+            )
 
         # Auto-assign active onboarding task templates to the new employee
         try:
@@ -632,6 +709,10 @@ async def create_employee(
         except Exception:
             logger.exception("Unable to evaluate integration connection statuses for company %s", company_id)
 
+        pay_classification, pay_rate, work_city = _employee_compensation_values(
+            row, compensation_fields_available
+        )
+
         response = EmployeeDetailResponse(
             id=row["id"],
             email=row["email"],
@@ -647,9 +728,9 @@ async def create_employee(
             manager_name=None,
             user_id=row["user_id"],
             invitation_status=None,
-            pay_classification=row["pay_classification"],
-            pay_rate=float(row["pay_rate"]) if row["pay_rate"] is not None else None,
-            work_city=row["work_city"],
+            pay_classification=pay_classification,
+            pay_rate=pay_rate,
+            work_city=work_city,
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -686,6 +767,7 @@ async def get_employee(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
+        compensation_fields_available = await _employee_compensation_fields_available(conn)
         row = await conn.fetchrow(
             """
             SELECT
@@ -706,6 +788,10 @@ async def get_employee(
         if not row:
             raise HTTPException(status_code=404, detail="Employee not found")
 
+        pay_classification, pay_rate, work_city = _employee_compensation_values(
+            row, compensation_fields_available
+        )
+
         return EmployeeDetailResponse(
             id=row["id"],
             email=row["email"],
@@ -721,9 +807,9 @@ async def get_employee(
             manager_name=row["manager_name"],
             user_id=row["user_id"],
             invitation_status=row["invitation_status"],
-            pay_classification=row["pay_classification"],
-            pay_rate=float(row["pay_rate"]) if row["pay_rate"] is not None else None,
-            work_city=row["work_city"],
+            pay_classification=pay_classification,
+            pay_rate=pay_rate,
+            work_city=work_city,
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -742,6 +828,7 @@ async def update_employee(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
+        compensation_fields_available = await _employee_compensation_fields_available(conn)
         # Check employee exists
         existing = await conn.fetchval(
             "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
@@ -827,17 +914,17 @@ async def update_employee(
             values.append(request.address)
             param_num += 1
 
-        if request.pay_classification is not None:
+        if compensation_fields_available and request.pay_classification is not None:
             updates.append(f"pay_classification = ${param_num}")
             values.append(request.pay_classification)
             param_num += 1
 
-        if request.pay_rate is not None:
+        if compensation_fields_available and request.pay_rate is not None:
             updates.append(f"pay_rate = ${param_num}")
             values.append(request.pay_rate)
             param_num += 1
 
-        if request.work_city is not None:
+        if compensation_fields_available and request.work_city is not None:
             updates.append(f"work_city = ${param_num}")
             values.append(request.work_city.strip())
             param_num += 1
@@ -873,6 +960,10 @@ async def update_employee(
             employee_id
         )
 
+        pay_classification, pay_rate, work_city = _employee_compensation_values(
+            row, compensation_fields_available
+        )
+
         return EmployeeDetailResponse(
             id=row["id"],
             email=row["email"],
@@ -888,9 +979,9 @@ async def update_employee(
             manager_name=manager_name,
             user_id=row["user_id"],
             invitation_status=invitation_status,
-            pay_classification=row["pay_classification"],
-            pay_rate=float(row["pay_rate"]) if row["pay_rate"] is not None else None,
-            work_city=row["work_city"],
+            pay_classification=pay_classification,
+            pay_rate=pay_rate,
+            work_city=work_city,
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -1065,6 +1156,7 @@ async def bulk_upload_employees_csv(
     employee_ids = []
 
     async with get_connection() as conn:
+        compensation_fields_available = await _employee_compensation_fields_available(conn)
         for row_num, row in enumerate(csv_reader, start=2):  # Start at 2 to account for header
             try:
                 # Validate email format
@@ -1189,20 +1281,34 @@ async def bulk_upload_employees_csv(
                         manager_id = manager['id']
 
                 # Create employee record
-                employee = await conn.fetchrow(
-                    """
-                    INSERT INTO employees (
-                        org_id, email, personal_email, first_name, last_name, work_state,
+                if compensation_fields_available:
+                    employee = await conn.fetchrow(
+                        """
+                        INSERT INTO employees (
+                            org_id, email, personal_email, first_name, last_name, work_state,
+                            employment_type, start_date, manager_id, phone,
+                            pay_classification, pay_rate, work_city
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                        RETURNING id
+                        """,
+                        company_id, email, personal_email, first_name, last_name, work_state,
                         employment_type, start_date, manager_id, phone,
                         pay_classification, pay_rate, work_city
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                    RETURNING id
-                    """,
-                    company_id, email, personal_email, first_name, last_name, work_state,
-                    employment_type, start_date, manager_id, phone,
-                    pay_classification, pay_rate, work_city
-                )
+                else:
+                    employee = await conn.fetchrow(
+                        """
+                        INSERT INTO employees (
+                            org_id, email, personal_email, first_name, last_name, work_state,
+                            employment_type, start_date, manager_id, phone
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        RETURNING id
+                        """,
+                        company_id, email, personal_email, first_name, last_name, work_state,
+                        employment_type, start_date, manager_id, phone
+                    )
 
                 employee_ids.append(employee['id'])
                 created += 1
