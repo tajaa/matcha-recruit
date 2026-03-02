@@ -54,18 +54,18 @@ type HorizonDays = 30 | 60 | 90;
 
 const SEVERITY_STYLES: Record<string, { dot: string; badge: string; label: string }> = {
   critical: {
-    dot: 'bg-sage-900 animate-pulse',
-    badge: 'bg-sage-200 text-sage-900 rounded-full',
+    dot: 'bg-zinc-900 animate-pulse',
+    badge: 'bg-stone-200 text-zinc-900 rounded-full',
     label: 'Critical',
   },
   warning: {
-    dot: 'bg-sage-500',
-    badge: 'bg-sage-200 text-sage-600 rounded-full',
+    dot: 'bg-stone-400',
+    badge: 'bg-stone-200 text-stone-600 rounded-full',
     label: 'Warning',
   },
   info: {
-    dot: 'bg-sage-400',
-    badge: 'bg-sage-200 text-sage-500 rounded-full',
+    dot: 'bg-stone-300',
+    badge: 'bg-stone-200 text-stone-500 rounded-full',
     label: 'Info',
   },
 };
@@ -131,27 +131,27 @@ function CompanyProfileBanner() {
   };
 
   return (
-    <div className="relative bg-sage-100 rounded-3xl p-6 mb-6 animate-in fade-in slide-in-from-top-2 duration-500">
+    <div className="relative bg-stone-100 rounded-2xl p-6 mb-6 animate-in fade-in slide-in-from-top-2 duration-500">
       <button
         onClick={dismiss}
-        className="absolute top-4 right-4 text-sage-400 hover:text-sage-900 transition-colors"
+        className="absolute top-4 right-4 text-stone-400 hover:text-zinc-900 transition-colors"
         aria-label="Dismiss"
       >
         <X className="w-4 h-4" />
       </button>
       <div className="flex items-start gap-4">
-        <div className="p-2.5 bg-sage-200 rounded-2xl shrink-0">
-          <Sparkles className="w-5 h-5 text-sage-900" />
+        <div className="p-2.5 bg-stone-200 rounded-xl shrink-0">
+          <Sparkles className="w-5 h-5 text-zinc-900" />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-base font-semibold text-sage-900 mb-1">Complete your company profile</h3>
-          <p className="text-sm text-sage-500 leading-relaxed mb-3">
+          <h3 className="text-base text-zinc-900 mb-1">Complete your company profile</h3>
+          <p className="text-sm text-stone-500 leading-relaxed mb-3">
             Add your headquarters location, benefits, and employment defaults so the AI can pre-fill offer letters,
             give jurisdiction-aware guidance, and generate better documents without extra questions.
           </p>
           <button
             onClick={() => { dismiss(); navigate('/app/matcha/company'); }}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-sage-900 text-sage-100 hover:bg-sage-800 rounded-full text-xs font-bold transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl text-xs font-bold transition-colors"
           >
             Set Up Profile
             <ChevronRight className="w-3 h-3" />
@@ -286,32 +286,32 @@ function ComplianceDashboardWidget() {
 
   const getSlaStyle = (slaState: ComplianceDashboardItem['sla_state']) => {
     if (slaState === 'overdue') {
-      return { label: 'Overdue', badge: 'bg-sage-200 text-sage-900 rounded-full', dueText: 'text-sage-900' };
+      return { label: 'Overdue', badge: 'bg-stone-200 text-zinc-900 rounded-full', dueText: 'text-zinc-900' };
     }
     if (slaState === 'due_soon') {
-      return { label: 'Due Soon', badge: 'bg-sage-200 text-sage-600 rounded-full', dueText: 'text-sage-600' };
+      return { label: 'Due Soon', badge: 'bg-stone-200 text-stone-600 rounded-full', dueText: 'text-stone-600' };
     }
     if (slaState === 'completed') {
-      return { label: 'Completed', badge: 'bg-sage-300 text-sage-500 rounded-full', dueText: 'text-sage-500' };
+      return { label: 'Completed', badge: 'bg-stone-100 text-stone-400 rounded-full', dueText: 'text-stone-400' };
     }
     if (slaState === 'unassigned') {
-      return { label: 'Unassigned', badge: 'bg-sage-300 text-sage-500 rounded-full', dueText: 'text-sage-500' };
+      return { label: 'Unassigned', badge: 'bg-stone-100 text-stone-400 rounded-full', dueText: 'text-stone-400' };
     }
-    return { label: 'On Track', badge: 'bg-sage-300 text-sage-500 rounded-full', dueText: 'text-sage-500' };
+    return { label: 'On Track', badge: 'bg-stone-100 text-stone-400 rounded-full', dueText: 'text-stone-400' };
   };
 
   const criticalCount = data?.coming_up.filter(i => i.severity === 'critical').length ?? 0;
   const warningCount = data?.coming_up.filter(i => i.severity === 'warning').length ?? 0;
 
   return (
-    <div className="bg-sage-100 rounded-3xl overflow-hidden">
+    <div className="bg-stone-100 rounded-2xl overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-sage-300 flex items-center justify-between">
+      <div className="p-4 border-b border-stone-200 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <ShieldAlert className="w-4 h-4 text-sage-500" />
-          <h2 className="text-base font-semibold text-sage-900">Compliance Impact</h2>
+          <ShieldAlert className="w-4 h-4 text-stone-400" />
+          <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">Compliance Impact</div>
           {criticalCount > 0 && (
-            <span className="px-2 py-0.5 text-[10px] font-medium bg-sage-200 text-sage-900 rounded-full">
+            <span className="px-2 py-0.5 text-[10px] font-bold bg-stone-200 text-zinc-900 rounded-full uppercase tracking-widest">
               {criticalCount} critical
             </span>
           )}
@@ -324,8 +324,8 @@ function ComplianceDashboardWidget() {
               onClick={() => setHorizon(d)}
               className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
                 horizon === d
-                  ? 'bg-sage-900 text-sage-100'
-                  : 'bg-sage-200 text-sage-500 hover:text-sage-900'
+                  ? 'bg-zinc-900 text-zinc-50'
+                  : 'bg-stone-200 text-stone-500 hover:text-zinc-900'
               }`}
             >
               {d}d
@@ -336,7 +336,7 @@ function ComplianceDashboardWidget() {
 
       {/* KPI row */}
       {data && (
-        <div className="grid grid-cols-3 md:grid-cols-7 gap-px bg-sage-300 border-b border-sage-300">
+        <div className="grid grid-cols-3 md:grid-cols-7 gap-px bg-stone-300 border-b border-stone-200">
           {[
             { label: 'Locations', value: data.kpis.total_locations },
             { label: 'Unread Alerts', value: data.kpis.unread_alerts },
@@ -346,9 +346,9 @@ function ComplianceDashboardWidget() {
             { label: 'Assigned', value: data.kpis.assigned_actions },
             { label: 'Unassigned', value: data.kpis.unassigned_actions },
           ].map(kpi => (
-            <div key={kpi.label} className="bg-sage-200 p-2.5 text-center">
-              <div className={`text-lg font-light tabular-nums ${kpi.value > 0 ? 'text-sage-900' : 'text-sage-400'}`}>{kpi.value}</div>
-              <div className="text-[8px] uppercase tracking-widest text-sage-500 mt-0.5">{kpi.label}</div>
+            <div key={kpi.label} className="bg-stone-200 p-2.5 text-center">
+              <div className={`text-lg font-light tabular-nums ${kpi.value > 0 ? 'text-zinc-900' : 'text-stone-400'}`}>{kpi.value}</div>
+              <div className="text-[8px] uppercase tracking-widest text-stone-500 mt-0.5">{kpi.label}</div>
             </div>
           ))}
         </div>
@@ -358,22 +358,22 @@ function ComplianceDashboardWidget() {
       <div className="p-3 space-y-2">
         {loading && (
           <div className="p-6 text-center">
-            <div className="w-4 h-4 border-2 border-sage-300 border-t-sage-900 rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-xs text-sage-500">Loading</p>
+            <div className="w-4 h-4 border-2 border-stone-300 border-t-zinc-900 rounded-full animate-spin mx-auto mb-2" />
+            <p className="text-xs text-stone-500">Loading</p>
           </div>
         )}
 
         {error && !loading && (
           <div className="p-4 text-center">
-            <TriangleAlert className="w-4 h-4 text-sage-400 mx-auto mb-1.5" />
-            <p className="text-xs text-sage-500">Failed to load</p>
+            <TriangleAlert className="w-4 h-4 text-stone-400 mx-auto mb-1.5" />
+            <p className="text-xs text-stone-500">Failed to load</p>
           </div>
         )}
 
         {!loading && !error && data && data.coming_up.length === 0 && (
           <div className="p-4 text-center">
-            <CheckCircle2 className="w-4 h-4 text-sage-400 mx-auto mb-1.5" />
-            <p className="text-xs text-sage-500">No upcoming changes in {horizon}d window</p>
+            <CheckCircle2 className="w-4 h-4 text-stone-400 mx-auto mb-1.5" />
+            <p className="text-xs text-stone-500">No upcoming changes in {horizon}d window</p>
           </div>
         )}
 
@@ -384,10 +384,10 @@ function ComplianceDashboardWidget() {
             ? item.days_until <= 0 ? 'Today' : `${item.days_until}d`
             : '—';
           const daysColor = item.days_until != null && item.days_until <= 30
-            ? 'text-sage-900 font-semibold'
+            ? 'text-zinc-900 font-semibold'
             : item.days_until != null && item.days_until <= 60
-            ? 'text-sage-600'
-            : 'text-sage-400';
+            ? 'text-stone-600'
+            : 'text-stone-400';
           const sla = getSlaStyle(item.sla_state);
           const dueLabel = formatDateLabel(item.action_due_date);
 
@@ -403,13 +403,13 @@ function ComplianceDashboardWidget() {
               }}
               role="button"
               tabIndex={0}
-              className="w-full text-left p-3.5 bg-sage-200 rounded-2xl hover:bg-sage-300 transition-all group cursor-pointer"
+              className="w-full text-left p-3.5 bg-stone-200 rounded-xl hover:bg-stone-300 transition-all group cursor-pointer"
             >
               <div className="flex items-start gap-2.5">
                 <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${sev.dot}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2 mb-1">
-                    <span className="text-sm text-sage-900 font-medium leading-tight truncate">
+                    <span className="text-sm text-zinc-900 font-medium leading-tight truncate">
                       {item.title}
                     </span>
                     <span className={`text-xs font-mono tabular-nums flex-shrink-0 ${daysColor}`}>
@@ -418,13 +418,13 @@ function ComplianceDashboardWidget() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 text-sage-500">
+                    <div className="flex items-center gap-1 text-stone-500">
                       <MapPin className="w-2.5 h-2.5" />
                       <span className="text-[10px]">{item.location_name}</span>
                     </div>
 
                     {categoryLabel && (
-                      <span className="text-[10px] text-sage-500 bg-sage-300 px-1.5 py-px rounded-full">
+                      <span className="text-[10px] text-stone-600 bg-stone-300 px-1.5 py-px rounded-full">
                         {categoryLabel}
                       </span>
                     )}
@@ -438,39 +438,39 @@ function ComplianceDashboardWidget() {
                   </div>
 
                   <div className="mt-1.5 space-y-1">
-                    <div className="text-xs text-sage-500">
-                      <span className="text-sage-400">Next:</span> {item.next_action || 'Review legal impact and assign an owner.'}
+                    <div className="text-xs text-stone-500">
+                      <span className="text-stone-400">Next:</span> {item.next_action || 'Review legal impact and assign an owner.'}
                     </div>
-                    <div className="flex items-center gap-3 flex-wrap text-[10px] text-sage-500">
-                      <span>Owner: <span className="text-sage-900">{item.action_owner_name || 'Unassigned'}</span></span>
+                    <div className="flex items-center gap-3 flex-wrap text-[10px] text-stone-500">
+                      <span>Owner: <span className="text-zinc-900">{item.action_owner_name || 'Unassigned'}</span></span>
                       <span className={sla.dueText}>Due: {dueLabel}</span>
                     </div>
 
                     {item.estimated_financial_impact && (
-                      <div className="text-[10px] text-sage-600">
+                      <div className="text-[10px] text-stone-600">
                         Exposure: {item.estimated_financial_impact}
                       </div>
                     )}
 
                     {item.affected_employee_count > 0 && (
                       <div className="mt-1 flex items-center gap-1.5">
-                        <Users className="w-2.5 h-2.5 text-sage-400" />
-                        <span className="text-[10px] text-sage-500">
+                        <Users className="w-2.5 h-2.5 text-stone-400" />
+                        <span className="text-[10px] text-stone-500">
                           {item.affected_employee_count} employee{item.affected_employee_count !== 1 ? 's' : ''}
                           {item.affected_employee_sample.length > 0 && (
-                            <span className="text-sage-400">
+                            <span className="text-stone-400">
                               {' '}— {item.affected_employee_sample.slice(0, 3).join(', ')}
                               {item.affected_employee_count > 3 ? ` +${item.affected_employee_count - 3} more` : ''}
                             </span>
                           )}
                         </span>
-                        <span className="text-[9px] text-sage-400 font-mono">~est</span>
+                        <span className="text-[9px] text-stone-400 font-mono">~est</span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                <ChevronRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 transition-colors flex-shrink-0 mt-0.5" />
+                <ChevronRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 transition-colors flex-shrink-0 mt-0.5" />
               </div>
             </div>
           );
@@ -479,9 +479,9 @@ function ComplianceDashboardWidget() {
 
       {/* Footer */}
       {data && data.coming_up.length > 0 && (
-        <div className="p-3 border-t border-sage-300 bg-sage-200 flex items-center justify-between">
+        <div className="p-3 border-t border-stone-200 bg-stone-200 flex items-center justify-between">
           {(criticalCount > 0 || warningCount > 0) && (
-            <span className="text-[10px] text-sage-500">
+            <span className="text-[10px] text-stone-500">
               {criticalCount > 0 && `${criticalCount} critical`}
               {criticalCount > 0 && warningCount > 0 && ' · '}
               {warningCount > 0 && `${warningCount} warning`}
@@ -489,7 +489,7 @@ function ComplianceDashboardWidget() {
           )}
           <button
             onClick={() => navigate('/app/matcha/compliance?tab=upcoming')}
-            className="ml-auto text-xs text-sage-500 hover:text-sage-900 transition-colors"
+            className="ml-auto text-xs text-stone-500 hover:text-zinc-900 transition-colors"
           >
             Full Compliance View
           </button>
@@ -502,14 +502,14 @@ function ComplianceDashboardWidget() {
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
           onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
         >
-          <div className="w-full max-w-lg bg-sage-100 rounded-3xl shadow-2xl flex flex-col max-h-[90vh]">
+          <div className="w-full max-w-lg bg-stone-100 rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
             {/* Modal header */}
-            <div className="flex items-start justify-between p-5 border-b border-sage-300 flex-shrink-0">
+            <div className="flex items-start justify-between p-5 border-b border-stone-200 flex-shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_STYLES[selectedItem.severity]?.dot ?? 'bg-sage-400'}`} />
-                <span className="text-sm font-semibold text-sage-900 leading-tight">{selectedItem.title}</span>
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_STYLES[selectedItem.severity]?.dot ?? 'bg-stone-400'}`} />
+                <span className="text-sm font-semibold text-zinc-900 leading-tight">{selectedItem.title}</span>
               </div>
-              <button onClick={closeModal} className="ml-3 flex-shrink-0 text-sage-400 hover:text-sage-900 transition-colors">
+              <button onClick={closeModal} className="ml-3 flex-shrink-0 text-stone-400 hover:text-zinc-900 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -517,12 +517,12 @@ function ComplianceDashboardWidget() {
             <div className="overflow-y-auto flex-1 p-5 space-y-4">
               {/* Meta badges */}
               <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1 text-sage-500">
+                <div className="flex items-center gap-1 text-stone-500">
                   <MapPin className="w-2.5 h-2.5" />
                   <span className="text-[10px]">{selectedItem.location_name}</span>
                 </div>
                 {selectedItem.category && (
-                  <span className="text-[10px] text-sage-500 bg-sage-300 px-1.5 py-px rounded-full">
+                  <span className="text-[10px] text-stone-500 bg-stone-300 px-1.5 py-px rounded-full">
                     {COMPLIANCE_CATEGORY_LABELS[selectedItem.category] ?? selectedItem.category}
                   </span>
                 )}
@@ -530,10 +530,10 @@ function ComplianceDashboardWidget() {
                   {SEVERITY_STYLES[selectedItem.severity]?.label}
                 </span>
                 {selectedItem.effective_date && (
-                  <span className="text-[10px] text-sage-500 bg-sage-200 px-1.5 py-px rounded-full">
+                  <span className="text-[10px] text-stone-500 bg-stone-200 px-1.5 py-px rounded-full">
                     Effective {new Date(`${selectedItem.effective_date}T00:00:00`).toLocaleDateString()}
                     {selectedItem.days_until != null && (
-                      <span className={selectedItem.days_until <= 30 ? ' text-sage-900 font-semibold' : selectedItem.days_until <= 60 ? ' text-sage-600' : ''}>
+                      <span className={selectedItem.days_until <= 30 ? ' text-zinc-900 font-semibold' : selectedItem.days_until <= 60 ? ' text-stone-600' : ''}>
                         {' '}· {selectedItem.days_until <= 0 ? 'Today' : `${selectedItem.days_until}d`}
                       </span>
                     )}
@@ -543,8 +543,8 @@ function ComplianceDashboardWidget() {
 
               {/* Description */}
               {selectedItem.description && (
-                <div className="bg-sage-200 rounded-2xl p-3">
-                  <p className="text-xs text-sage-500 leading-relaxed">{selectedItem.description}</p>
+                <div className="bg-stone-200 rounded-xl p-3">
+                  <p className="text-xs text-stone-500 leading-relaxed">{selectedItem.description}</p>
                 </div>
               )}
 
@@ -552,14 +552,14 @@ function ComplianceDashboardWidget() {
               {(selectedItem.next_action || selectedItem.recommended_playbook) && (
                 <div className="space-y-2">
                   {selectedItem.next_action && (
-                    <div className="text-xs text-sage-500">
-                      <span className="text-[10px] text-sage-400 block mb-0.5">Recommended Action</span>
+                    <div className="text-xs text-stone-500">
+                      <span className="text-[10px] text-stone-400 block mb-0.5">Recommended Action</span>
                       {selectedItem.next_action}
                     </div>
                   )}
                   {selectedItem.recommended_playbook && (
-                    <div className="text-xs text-sage-500">
-                      <span className="text-[10px] text-sage-400 block mb-0.5">Playbook</span>
+                    <div className="text-xs text-stone-500">
+                      <span className="text-[10px] text-stone-400 block mb-0.5">Playbook</span>
                       {selectedItem.recommended_playbook}
                     </div>
                   )}
@@ -569,11 +569,11 @@ function ComplianceDashboardWidget() {
               {/* Affected employees */}
               {selectedItem.affected_employee_count > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <Users className="w-3 h-3 text-sage-400" />
-                  <span className="text-[10px] text-sage-500">
+                  <Users className="w-3 h-3 text-stone-400" />
+                  <span className="text-[10px] text-stone-500">
                     {selectedItem.affected_employee_count} employee{selectedItem.affected_employee_count !== 1 ? 's' : ''} affected
                     {selectedItem.affected_employee_sample.length > 0 && (
-                      <span className="text-sage-400"> — {selectedItem.affected_employee_sample.slice(0, 3).join(', ')}{selectedItem.affected_employee_count > 3 ? ` +${selectedItem.affected_employee_count - 3} more` : ''}</span>
+                      <span className="text-stone-400"> — {selectedItem.affected_employee_sample.slice(0, 3).join(', ')}{selectedItem.affected_employee_count > 3 ? ` +${selectedItem.affected_employee_count - 3} more` : ''}</span>
                     )}
                   </span>
                 </div>
@@ -581,7 +581,7 @@ function ComplianceDashboardWidget() {
 
               {/* Financial exposure */}
               {selectedItem.estimated_financial_impact && (
-                <div className="text-xs text-sage-600 bg-sage-200 rounded-2xl px-3 py-2">
+                <div className="text-xs text-stone-600 bg-stone-200 rounded-xl px-3 py-2">
                   Exposure: {selectedItem.estimated_financial_impact}
                 </div>
               )}
@@ -592,7 +592,7 @@ function ComplianceDashboardWidget() {
                   href={selectedItem.source_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-sage-500 hover:text-sage-900 transition-colors"
+                  className="flex items-center gap-1 text-xs text-stone-400 hover:text-zinc-900 transition-colors"
                 >
                   <ExternalLink className="w-3 h-3" />
                   View source
@@ -600,16 +600,16 @@ function ComplianceDashboardWidget() {
               )}
 
               {/* Divider */}
-              <div className="border-t border-sage-300" />
+              <div className="border-t border-stone-200" />
 
               {/* Assign */}
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[10px] text-sage-500 mb-1.5">Assign To</label>
+                  <label className="block text-[10px] text-stone-500 mb-1.5">Assign To</label>
                   <select
                     value={modalOwnerId}
                     onChange={(e) => setModalOwnerId(e.target.value)}
-                    className="w-full bg-white border border-sage-300 rounded-xl text-sage-900 text-xs px-3 py-2 focus:outline-none focus:border-sage-900"
+                    className="w-full bg-white border border-stone-300 rounded-xl text-zinc-900 text-xs px-3 py-2 focus:outline-none focus:border-stone-400"
                   >
                     <option value="">— Unassigned —</option>
                     {assignableUsers.map(u => (
@@ -622,16 +622,16 @@ function ComplianceDashboardWidget() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] text-sage-500 mb-1.5">Turnaround Time</label>
+                  <label className="block text-[10px] text-stone-500 mb-1.5">Turnaround Time</label>
                   <div className="flex flex-wrap gap-1.5">
                     {TURNAROUND_OPTIONS.map(opt => (
                       <button
                         key={opt.days}
                         onClick={() => setModalTurnaround(modalTurnaround === opt.days ? null : opt.days)}
-                        className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
+                        className={`px-3 py-1.5 text-xs rounded-xl transition-colors ${
                           modalTurnaround === opt.days
-                            ? 'bg-sage-900 text-sage-100'
-                            : 'bg-sage-200 text-sage-500 hover:text-sage-900'
+                            ? 'bg-zinc-900 text-zinc-50'
+                            : 'bg-stone-200 text-stone-500 hover:text-zinc-900'
                         }`}
                       >
                         {opt.label}
@@ -639,7 +639,7 @@ function ComplianceDashboardWidget() {
                     ))}
                   </div>
                   {modalTurnaround !== null && (
-                    <p className="mt-1.5 text-xs text-sage-500">
+                    <p className="mt-1.5 text-xs text-stone-500">
                       Due date will be set to {(() => {
                         const d = new Date();
                         d.setDate(d.getDate() + modalTurnaround);
@@ -651,18 +651,18 @@ function ComplianceDashboardWidget() {
               </div>
 
               {modalError && (
-                <p className="text-xs text-sage-900">{modalError}</p>
+                <p className="text-xs text-zinc-900">{modalError}</p>
               )}
             </div>
 
             {/* Modal footer */}
-            <div className="p-5 border-t border-sage-300 flex items-center justify-between gap-2 flex-shrink-0">
+            <div className="p-5 border-t border-stone-200 flex items-center justify-between gap-2 flex-shrink-0">
               <div className="flex items-center gap-2">
                 {selectedItem.action_status !== 'actioned' && (
                   <button
                     onClick={() => void markActioned(selectedItem)}
                     disabled={modalSaving}
-                    className="px-4 py-2 text-xs rounded-full bg-sage-200 text-sage-600 hover:text-sage-900 disabled:opacity-50 transition-colors"
+                    className="px-4 py-2 text-xs rounded-xl bg-stone-200 text-stone-600 hover:text-zinc-900 disabled:opacity-50 transition-colors"
                   >
                     Mark Actioned
                   </button>
@@ -672,7 +672,7 @@ function ComplianceDashboardWidget() {
                     const params = new URLSearchParams({ location_id: selectedItem.location_id, tab: 'upcoming', legislation_id: selectedItem.legislation_id });
                     navigate(`/app/matcha/compliance?${params.toString()}`);
                   }}
-                  className="px-4 py-2 text-xs text-sage-500 hover:text-sage-900 transition-colors"
+                  className="px-4 py-2 text-xs text-stone-400 hover:text-zinc-900 transition-colors"
                 >
                   Full View
                 </button>
@@ -680,14 +680,14 @@ function ComplianceDashboardWidget() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={closeModal}
-                  className="px-4 py-2 text-xs rounded-full bg-sage-200 text-sage-500 hover:text-sage-900 transition-colors"
+                  className="px-4 py-2 text-xs rounded-xl bg-stone-200 text-stone-500 hover:text-zinc-900 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => void saveModalChanges()}
                   disabled={modalSaving || (modalOwnerId === (selectedItem.action_owner_id ?? '') && modalTurnaround === null)}
-                  className="px-4 py-2 text-xs rounded-full bg-sage-900 text-sage-100 hover:bg-sage-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="px-4 py-2 text-xs rounded-xl bg-zinc-900 text-zinc-50 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {modalSaving ? 'Saving…' : 'Save'}
                 </button>
@@ -813,31 +813,31 @@ export function Dashboard() {
   return (
     <>
     <OnboardingWizard />
-    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-6 sm:px-8 lg:px-10 py-10 min-h-screen bg-sage-200">
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-6 sm:px-8 lg:px-10 py-10 min-h-screen bg-stone-300">
     <CompanyProfileBanner />
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4">
         <div>
           <div className="flex items-center gap-3 mb-1.5">
-             <div className="px-2.5 py-0.5 bg-sage-100 text-sage-600 text-xs rounded-full">
+             <div className="px-2.5 py-0.5 bg-stone-200 text-stone-600 text-[10px] uppercase tracking-widest font-bold rounded-full">
                 Live Overview
              </div>
           </div>
-          <h1 className="text-2xl font-bold tracking-tighter text-sage-900 uppercase">
+          <h1 className="text-4xl font-bold tracking-tighter text-zinc-900 uppercase">
             Command Center
           </h1>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => navigate('/app/matcha/policies/new')}
-            className="px-4 py-2 rounded-full bg-sage-100 text-sage-900 hover:bg-sage-300 text-xs font-medium transition-all"
+            className="px-4 py-2 border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900 rounded-xl text-xs font-bold uppercase tracking-wider transition-all"
           >
             New Policy
           </button>
           <button
             onClick={() => navigate('/app/matcha/offer-letters')}
-            className="px-4 py-2 bg-sage-900 text-sage-100 hover:bg-sage-800 rounded-full text-xs font-bold transition-all"
+            className="px-4 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl text-xs font-bold uppercase tracking-wider transition-all"
           >
             Create Offer
           </button>
@@ -854,16 +854,16 @@ export function Dashboard() {
                   <button
                     key={stat.label}
                     onClick={() => navigate(stat.path)}
-                    className="bg-sage-900 rounded-3xl p-6 hover:bg-sage-800 transition-all group relative overflow-hidden text-left"
+                    className="bg-zinc-900 rounded-2xl p-6 hover:bg-zinc-800 transition-all group relative overflow-hidden text-left"
                   >
-                    <div className="absolute top-0 right-0 p-3 text-sage-800 group-hover:scale-110 transition-all duration-500">
+                    <div className="absolute top-0 right-0 p-3 text-zinc-800 group-hover:scale-110 transition-all duration-500">
                        <stat.icon className="w-10 h-10" strokeWidth={0.5} />
                     </div>
 
                     <div className="relative z-10">
-                      <div className="text-xs text-sage-600 uppercase tracking-wider mb-3">{stat.label}</div>
-                      <div className="text-4xl font-light font-mono text-sage-100 mb-1 tabular-nums">{stat.value}</div>
-                      <div className="text-xs text-sage-600">
+                      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-3">{stat.label}</div>
+                      <div className="text-4xl font-light font-mono text-zinc-50 mb-1 tabular-nums">{stat.value}</div>
+                      <div className="text-[10px] text-zinc-500 font-mono">
                          {stat.change}
                       </div>
                     </div>
@@ -880,29 +880,29 @@ export function Dashboard() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
                       onClick={() => navigate('/app/matcha/company')}
-                      className="flex items-center gap-3 p-4 bg-sage-200 rounded-2xl hover:bg-sage-300 transition-all group text-left"
+                      className="flex items-center gap-3 p-4 bg-stone-200 rounded-xl hover:bg-stone-300 transition-all group text-left"
                     >
-                      <div className="p-2 bg-sage-300 rounded-xl group-hover:bg-sage-400 transition-colors">
-                        <Building className="w-4 h-4 text-sage-900" />
+                      <div className="p-2 bg-stone-300 rounded-lg">
+                        <Building className="w-4 h-4 text-zinc-900" />
                       </div>
                       <div className="flex-1">
-                        <div className="text-sm text-sage-900 font-medium">Company Profile</div>
-                        <div className="text-xs text-sage-500 mt-0.5">Set up company info</div>
+                        <div className="text-sm text-zinc-900 font-medium">Company Profile</div>
+                        <div className="text-xs text-stone-500 mt-0.5">Set up company info</div>
                       </div>
-                      <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 transition-colors" />
+                      <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 transition-colors" />
                     </button>
                     <button
                       onClick={() => navigate('/app/matcha/employees')}
-                      className="flex items-center gap-3 p-4 bg-sage-200 rounded-2xl hover:bg-sage-300 transition-all group text-left"
+                      className="flex items-center gap-3 p-4 bg-stone-200 rounded-xl hover:bg-stone-300 transition-all group text-left"
                     >
-                      <div className="p-2 bg-sage-300 rounded-xl group-hover:bg-sage-400 transition-colors">
-                        <UserPlus className="w-4 h-4 text-sage-900" />
+                      <div className="p-2 bg-stone-300 rounded-lg">
+                        <UserPlus className="w-4 h-4 text-zinc-900" />
                       </div>
                       <div className="flex-1">
-                        <div className="text-sm text-sage-900 font-medium">Add Employees</div>
-                        <div className="text-xs text-sage-500 mt-0.5">Import team via CSV</div>
+                        <div className="text-sm text-zinc-900 font-medium">Add Employees</div>
+                        <div className="text-xs text-stone-500 mt-0.5">Import team via CSV</div>
                       </div>
-                      <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 transition-colors" />
+                      <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 transition-colors" />
                     </button>
                   </div>
                 </div>
@@ -922,34 +922,34 @@ export function Dashboard() {
                     <>
                       <div className="lg:col-span-2 space-y-4">
                         {visibleWidgets.has('actions') && (
-                          <div className="bg-sage-100 rounded-3xl p-6 h-fit">
-                            <h2 className="text-base font-semibold text-sage-900 mb-4">Pending Actions</h2>
+                          <div className="bg-stone-100 rounded-2xl p-6 h-fit">
+                            <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold mb-4">Pending Actions</div>
                             <div className="space-y-2">
                               {ptoSummary && ptoSummary.pending_count > 0 && (
                                 <div
                                   onClick={() => navigate('/app/matcha/pto')}
-                                  className="bg-sage-200 rounded-2xl p-4 flex items-start gap-3 cursor-pointer hover:bg-sage-300 transition-colors group"
+                                  className="bg-stone-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-stone-300 transition-colors group"
                                 >
-                                    <Calendar className="w-4 h-4 text-sage-500 mt-0.5" />
+                                    <Calendar className="w-4 h-4 text-stone-500 mt-0.5" />
                                     <div className="flex-1">
-                                      <div className="text-sm text-sage-900 font-medium mb-0.5">PTO Requests Pending</div>
-                                      <div className="text-xs text-sage-500">{ptoSummary.pending_count} request{ptoSummary.pending_count !== 1 ? 's' : ''} awaiting approval</div>
+                                      <div className="text-sm text-zinc-900 font-medium mb-0.5">PTO Requests Pending</div>
+                                      <div className="text-xs text-stone-500">{ptoSummary.pending_count} request{ptoSummary.pending_count !== 1 ? 's' : ''} awaiting approval</div>
                                     </div>
-                                    <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 ml-auto transition-colors" />
+                                    <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 ml-auto transition-colors" />
                                 </div>
                               )}
                               {dashStats?.pending_incidents.map((incident) => (
                                 <div
                                   key={incident.id}
                                   onClick={() => navigate(`/app/ir/incidents/${incident.id}`)}
-                                  className="bg-sage-200 rounded-2xl p-4 flex items-start gap-3 cursor-pointer hover:bg-sage-300 transition-colors group"
+                                  className="bg-stone-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-stone-300 transition-colors group"
                                 >
-                                    <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-sage-500 animate-pulse flex-shrink-0" />
+                                    <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-stone-500 animate-pulse flex-shrink-0" />
                                     <div className="flex-1">
-                                      <div className="text-sm text-sage-900 font-medium mb-0.5">{incident.title}</div>
-                                      <div className="text-xs text-sage-500">{incident.incident_number} &bull; {incident.severity.charAt(0).toUpperCase() + incident.severity.slice(1)} Priority</div>
+                                      <div className="text-sm text-zinc-900 font-medium mb-0.5">{incident.title}</div>
+                                      <div className="text-xs text-stone-500">{incident.incident_number} &bull; {incident.severity.charAt(0).toUpperCase() + incident.severity.slice(1)} Priority</div>
                                     </div>
-                                    <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 ml-auto transition-colors" />
+                                    <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 ml-auto transition-colors" />
                                 </div>
                               ))}
                               {showComplianceImpact && compliancePendingActions.map((item) => {
@@ -965,16 +965,16 @@ export function Dashboard() {
                                       });
                                       navigate(`/app/matcha/compliance?${params.toString()}`);
                                     }}
-                                    className="bg-sage-200 rounded-2xl p-4 flex items-start gap-3 cursor-pointer hover:bg-sage-300 transition-colors group"
+                                    className="bg-stone-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-stone-300 transition-colors group"
                                   >
-                                      <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isCritical ? 'bg-sage-900 animate-pulse' : 'bg-sage-500'}`} />
+                                      <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isCritical ? 'bg-zinc-900 animate-pulse' : 'bg-stone-500'}`} />
                                       <div className="flex-1">
-                                        <div className="text-sm text-sage-900 font-medium mb-0.5">{item.title}</div>
-                                        <div className="text-xs text-sage-500">
+                                        <div className="text-sm text-zinc-900 font-medium mb-0.5">{item.title}</div>
+                                        <div className="text-xs text-stone-500">
                                           Compliance &bull; {item.action_owner_name || 'Unassigned'} &bull; {item.sla_state.replace('_', ' ')}
                                         </div>
                                       </div>
-                                      <ArrowUpRight className="w-3.5 h-3.5 text-sage-400 group-hover:text-sage-900 ml-auto transition-colors" />
+                                      <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 ml-auto transition-colors" />
                                   </div>
                                 );
                               })}
@@ -982,8 +982,8 @@ export function Dashboard() {
                                 && (!dashStats || dashStats.pending_incidents.length === 0)
                                 && (!showComplianceImpact || compliancePendingActions.length === 0) && (
                                 <div className="p-4 text-center">
-                                  <CheckCircle2 className="w-5 h-5 text-sage-400 mx-auto mb-1.5" />
-                                  <p className="text-sm text-sage-400">All caught up</p>
+                                  <CheckCircle2 className="w-5 h-5 text-stone-400 mx-auto mb-1.5" />
+                                  <p className="text-sm text-stone-400">All caught up</p>
                                 </div>
                               )}
                             </div>
@@ -991,16 +991,16 @@ export function Dashboard() {
                         )}
 
                         {visibleWidgets.has('pto') && ptoSummary && ptoSummary.upcoming_time_off > 0 && (
-                          <div className="bg-sage-100 rounded-3xl p-6">
+                          <div className="bg-stone-100 rounded-2xl p-6">
                               <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-base font-semibold text-sage-900">Upcoming Time Off</h2>
-                                <Calendar className="w-4 h-4 text-sage-400" />
+                                <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">Upcoming Time Off</div>
+                                <Calendar className="w-4 h-4 text-stone-400" />
                               </div>
-                              <div className="text-4xl font-light font-mono text-sage-900 mb-1 tabular-nums">{ptoSummary.upcoming_time_off}</div>
-                              <div className="text-xs text-sage-500">employees out (30d)</div>
+                              <div className="text-4xl font-light font-mono text-zinc-900 mb-1 tabular-nums">{ptoSummary.upcoming_time_off}</div>
+                              <div className="text-[10px] text-stone-500 font-mono">employees out (30d)</div>
                               <button
                                 onClick={() => navigate('/app/matcha/pto')}
-                                className="mt-4 rounded-full bg-sage-200 text-sage-900 hover:bg-sage-300 px-4 py-2 text-xs transition-colors"
+                                className="mt-4 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors"
                               >
                                 View Calendar
                               </button>
@@ -1010,39 +1010,39 @@ export function Dashboard() {
 
                       <div className="space-y-4">
                         {visibleWidgets.has('compliance') && (
-                          <div className="bg-sage-900 rounded-3xl p-6 relative overflow-hidden group h-fit">
+                          <div className="bg-zinc-900 rounded-2xl p-6 relative overflow-hidden group h-fit">
                             <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-base font-semibold text-sage-100">Policy Signature Coverage</h2>
-                                <ShieldAlert className="w-4 h-4 text-sage-600" />
+                                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Policy Signature Coverage</div>
+                                <ShieldAlert className="w-4 h-4 text-zinc-600" />
                             </div>
 
                             <div className="relative w-32 h-32 mx-auto mb-4">
                                 <svg className="w-full h-full transform -rotate-90">
-                                  <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-sage-800" />
+                                  <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-zinc-800" />
                                   <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent"
                                     strokeDasharray={2 * Math.PI * 58}
                                     strokeDashoffset={(2 * Math.PI * 58) - (complianceRate / 100) * (2 * Math.PI * 58)}
-                                    className="text-sage-100 transition-all duration-1000"
+                                    className="text-zinc-100 transition-all duration-1000"
                                   />
                                 </svg>
                                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                  <span className="text-2xl font-light text-sage-100">{complianceRate > 0 ? `${complianceRate}%` : '--'}</span>
-                                  <span className="text-xs text-sage-600 mt-0.5">{complianceRate > 0 ? 'Signed' : 'No data'}</span>
+                                  <span className="text-2xl font-light text-zinc-50">{complianceRate > 0 ? `${complianceRate}%` : '--'}</span>
+                                  <span className="text-xs text-zinc-500 mt-0.5">{complianceRate > 0 ? 'Signed' : 'No data'}</span>
                                 </div>
                             </div>
 
                             {dashStats && dashStats.active_policies > 0 ? (
                               <div className="space-y-2">
-                                <div className="flex justify-between text-xs text-sage-600">
+                                <div className="flex justify-between text-xs text-zinc-400">
                                     <span>Signatures</span>
-                                    <span className="text-sage-100">{complianceRate}%</span>
+                                    <span className="text-zinc-100">{complianceRate}%</span>
                                 </div>
-                                <div className="w-full bg-sage-800 h-1 rounded-full overflow-hidden">
-                                    <div className="bg-sage-100 h-full transition-all duration-1000" style={{ width: `${complianceRate}%` }} />
+                                <div className="w-full bg-zinc-800 h-1 rounded-full overflow-hidden">
+                                    <div className="bg-zinc-100 h-full transition-all duration-1000" style={{ width: `${complianceRate}%` }} />
                                 </div>
                               </div>
                             ) : (
-                              <p className="text-xs text-sage-600 text-center">Create policies to track</p>
+                              <p className="text-xs text-zinc-500 text-center">Create policies to track</p>
                             )}
                           </div>
                         )}
@@ -1059,12 +1059,12 @@ export function Dashboard() {
                   {activeTab === 'operations' && (
                     <div className="lg:col-span-3 space-y-4">
                       {visibleWidgets.has('activity') && (
-                        <div className="bg-sage-100 rounded-3xl overflow-hidden">
-                          <div className="p-4 border-b border-sage-300 flex justify-between items-center">
-                            <h2 className="text-base font-semibold text-sage-900">System Activity</h2>
-                            <Activity className="w-4 h-4 text-sage-400" />
+                        <div className="bg-stone-100 rounded-2xl overflow-hidden">
+                          <div className="p-4 border-b border-stone-200 flex justify-between items-center">
+                            <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">System Activity</div>
+                            <Activity className="w-4 h-4 text-stone-400" />
                           </div>
-                          <div className="divide-y divide-sage-200">
+                          <div className="divide-y divide-stone-200">
                             {dashStats && dashStats.recent_activity.length > 0 ? (
                               dashStats.recent_activity.map((item, i) => {
                                 const ts = new Date(item.timestamp);
@@ -1072,20 +1072,20 @@ export function Dashboard() {
                                 const isToday = new Date().toDateString() === ts.toDateString();
                                 const dateLabel = isToday ? 'TODAY' : ts.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase();
                                 return (
-                                  <div key={i} className="p-3 flex items-center justify-between hover:bg-sage-200 transition-colors group">
+                                  <div key={i} className="p-3 flex items-center justify-between hover:bg-stone-50 transition-colors group">
                                     <div className="flex items-center gap-3">
-                                      <div className="font-mono text-xs text-sage-400 w-12">
+                                      <div className="font-mono text-xs text-stone-400 w-12">
                                         {timeStr}
                                       </div>
                                       <div className="flex items-center gap-2.5">
                                         <div className={`w-1.5 h-1.5 rounded-full ${
-                                            item.type === 'success' ? 'bg-sage-900' :
-                                            item.type === 'warning' ? 'bg-sage-500 animate-pulse' : 'bg-sage-400'
+                                            item.type === 'success' ? 'bg-zinc-900' :
+                                            item.type === 'warning' ? 'bg-stone-400 animate-pulse' : 'bg-stone-300'
                                         }`} />
-                                        <span className="text-sm text-sage-900">{item.action}</span>
+                                        <span className="text-sm text-zinc-900">{item.action}</span>
                                       </div>
                                     </div>
-                                    <div className="hidden sm:block text-xs text-sage-500 bg-sage-200 px-2 py-0.5 rounded-full">
+                                    <div className="hidden sm:block text-xs text-stone-500 bg-stone-200 px-2 py-0.5 rounded-full">
                                       {dateLabel}
                                     </div>
                                   </div>
@@ -1093,14 +1093,14 @@ export function Dashboard() {
                               })
                             ) : (
                               <div className="p-6 text-center">
-                                <Activity className="w-5 h-5 text-sage-400 mx-auto mb-1.5" />
-                                <p className="text-sm text-sage-500">No recent activity</p>
+                                <Activity className="w-5 h-5 text-stone-400 mx-auto mb-1.5" />
+                                <p className="text-sm text-stone-500">No recent activity</p>
                               </div>
                             )}
                           </div>
                           {dashStats && dashStats.recent_activity.length > 0 && (
-                            <div className="p-3 border-t border-sage-300 bg-sage-200">
-                              <button className="w-full text-center text-xs text-sage-500 hover:text-sage-900 transition-colors">
+                            <div className="p-3 border-t border-stone-200 bg-stone-200">
+                              <button className="w-full text-center text-xs text-stone-500 hover:text-zinc-900 transition-colors">
                                   Full Log
                               </button>
                             </div>
@@ -1109,42 +1109,42 @@ export function Dashboard() {
                       )}
 
                       {visibleWidgets.has('incidents') && dashStats?.incident_summary && dashStats.incident_summary.total_open > 0 && (
-                        <div className="bg-sage-100 rounded-3xl overflow-hidden">
-                          <div className="p-4 border-b border-sage-300 flex justify-between items-center">
-                            <h2 className="text-base font-semibold text-sage-900">Incidents</h2>
-                            <ShieldAlert className="w-4 h-4 text-sage-400" />
+                        <div className="bg-stone-100 rounded-2xl overflow-hidden">
+                          <div className="p-4 border-b border-stone-200 flex justify-between items-center">
+                            <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">Incidents</div>
+                            <ShieldAlert className="w-4 h-4 text-stone-400" />
                           </div>
                           <div className="p-5">
                             <div className="flex items-baseline gap-2.5 mb-4">
-                              <span className="text-3xl font-light text-sage-900 tabular-nums">{dashStats.incident_summary.total_open}</span>
-                              <span className="text-xs text-sage-500 font-medium">Open Incident{dashStats.incident_summary.total_open !== 1 ? 's' : ''}</span>
+                              <span className="text-3xl font-light text-zinc-900 tabular-nums">{dashStats.incident_summary.total_open}</span>
+                              <span className="text-xs text-stone-500 font-medium">Open Incident{dashStats.incident_summary.total_open !== 1 ? 's' : ''}</span>
                               {dashStats.incident_summary.recent_7_days > 0 && (
-                                <span className="ml-auto text-xs bg-sage-200 text-sage-600 px-2 py-0.5 rounded-full">
+                                <span className="ml-auto text-xs bg-stone-200 text-stone-600 px-2 py-0.5 rounded-full">
                                   +{dashStats.incident_summary.recent_7_days}
                                 </span>
                               )}
                             </div>
                             <div className="grid grid-cols-4 gap-3">
                               {([
-                                { label: 'Crit', count: dashStats.incident_summary.critical, color: 'text-sage-900', bg: 'bg-sage-900' },
-                                { label: 'High', count: dashStats.incident_summary.high, color: 'text-sage-700', bg: 'bg-sage-700' },
-                                { label: 'Med', count: dashStats.incident_summary.medium, color: 'text-sage-500', bg: 'bg-sage-500' },
-                                { label: 'Low', count: dashStats.incident_summary.low, color: 'text-sage-400', bg: 'bg-sage-400' },
+                                { label: 'Crit', count: dashStats.incident_summary.critical, color: 'text-zinc-900', bg: 'bg-zinc-900' },
+                                { label: 'High', count: dashStats.incident_summary.high, color: 'text-stone-700', bg: 'bg-stone-700' },
+                                { label: 'Med', count: dashStats.incident_summary.medium, color: 'text-stone-500', bg: 'bg-stone-500' },
+                                { label: 'Low', count: dashStats.incident_summary.low, color: 'text-stone-400', bg: 'bg-stone-400' },
                               ] as const).map((sev) => (
-                                <div key={sev.label} className="bg-sage-200 rounded-2xl p-3 text-center">
-                                  <div className={`text-xl font-light tabular-nums ${sev.count > 0 ? sev.color : 'text-sage-400'}`}>{sev.count}</div>
+                                <div key={sev.label} className="bg-stone-200 rounded-xl p-3 text-center">
+                                  <div className={`text-xl font-light tabular-nums ${sev.count > 0 ? sev.color : 'text-stone-400'}`}>{sev.count}</div>
                                   <div className="flex items-center justify-center gap-1 mt-1">
-                                    <span className={`w-1.5 h-1.5 rounded-full ${sev.count > 0 ? sev.bg : 'bg-sage-300'}`} />
-                                    <span className="text-[10px] text-sage-500">{sev.label}</span>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${sev.count > 0 ? sev.bg : 'bg-stone-300'}`} />
+                                    <span className="text-[10px] text-stone-500">{sev.label}</span>
                                   </div>
                                 </div>
                               ))}
                             </div>
                           </div>
-                          <div className="p-3 border-t border-sage-300 bg-sage-200">
+                          <div className="p-3 border-t border-stone-200 bg-stone-200">
                             <button
                               onClick={() => navigate('/app/ir/incidents')}
-                              className="w-full text-center text-xs text-sage-500 hover:text-sage-900 transition-colors"
+                              className="w-full text-center text-xs text-stone-500 hover:text-zinc-900 transition-colors"
                             >
                               View All
                             </button>
