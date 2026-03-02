@@ -3,10 +3,13 @@ import asyncio
 import html
 import json
 import logging
+import mimetypes
+import posixpath
 import re
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlparse
 from uuid import UUID
 
 from ...database import get_connection
@@ -18,6 +21,198 @@ logger = logging.getLogger(__name__)
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 VALID_REVIEW_REQUEST_STATUSES = {"pending", "sent", "failed", "submitted"}
+MATCHA_WORK_STORAGE_ROOT = "matcha-work"
+
+
+def _should_enforce_company_scoped_matcha_work_storage() -> bool:
+    storage = get_storage()
+    return bool(storage.s3_client and storage.bucket)
+
+
+def build_matcha_work_thread_storage_prefix(company_id: UUID, thread_id: UUID, asset_kind: str) -> str:
+    return f"{MATCHA_WORK_STORAGE_ROOT}/companies/{company_id}/threads/{thread_id}/{asset_kind}"
+
+
+def _storage_key_from_path(path: Optional[str]) -> Optional[str]:
+    if not path or not isinstance(path, str):
+        return None
+
+    storage = get_storage()
+    if storage.cloudfront_domain:
+        cloudfront_prefix = f"https://{storage.cloudfront_domain}/"
+        if path.startswith(cloudfront_prefix):
+            return path[len(cloudfront_prefix):]
+
+    if path.startswith("s3://"):
+        parts = path[5:].split("/", 1)
+        return parts[1] if len(parts) > 1 else ""
+
+    return None
+
+
+def _storage_path_has_prefix(path: Optional[str], prefix: str) -> bool:
+    key = _storage_key_from_path(path)
+    return bool(key and key.startswith(f"{prefix}/"))
+
+
+def _storage_filename(path: Optional[str], default_filename: str) -> str:
+    key = _storage_key_from_path(path)
+    if key:
+        filename = posixpath.basename(key)
+        if filename:
+            return filename
+
+    if path:
+        filename = posixpath.basename(urlparse(path).path)
+        if filename:
+            return filename
+
+    return default_filename
+
+
+async def _migrate_matcha_work_asset_to_scope(
+    path: str,
+    *,
+    company_id: UUID,
+    thread_id: UUID,
+    asset_kind: str,
+    default_filename: str,
+) -> str:
+    if not _should_enforce_company_scoped_matcha_work_storage():
+        return path
+
+    expected_prefix = build_matcha_work_thread_storage_prefix(company_id, thread_id, asset_kind)
+    if _storage_path_has_prefix(path, expected_prefix):
+        return path
+
+    storage = get_storage()
+    if not storage.is_supported_storage_path(path):
+        return path
+
+    file_bytes = await storage.download_file(path)
+    filename = _storage_filename(path, default_filename)
+    content_type = mimetypes.guess_type(filename)[0]
+    scoped_path = await storage.upload_file(
+        file_bytes,
+        filename,
+        prefix=expected_prefix,
+        content_type=content_type,
+    )
+
+    if scoped_path != path:
+        try:
+            await storage.delete_file(path)
+        except Exception as exc:
+            logger.warning("Failed to delete legacy Matcha Work asset %s after migration: %s", path, exc)
+
+    return scoped_path
+
+
+async def ensure_matcha_work_thread_storage_scope(
+    thread_id: UUID,
+    company_id: UUID,
+    current_state: dict,
+) -> dict:
+    if not _should_enforce_company_scoped_matcha_work_storage():
+        return current_state
+    if not isinstance(current_state, dict) or not current_state:
+        return current_state
+
+    normalized_state = dict(current_state)
+    changed = False
+
+    top_level_cover = normalized_state.get("cover_image_url")
+    if isinstance(top_level_cover, str) and top_level_cover:
+        scoped_cover = await _migrate_matcha_work_asset_to_scope(
+            top_level_cover,
+            company_id=company_id,
+            thread_id=thread_id,
+            asset_kind="covers",
+            default_filename="cover.png",
+        )
+        if scoped_cover != top_level_cover:
+            normalized_state["cover_image_url"] = scoped_cover
+            changed = True
+
+    presentation = normalized_state.get("presentation")
+    if isinstance(presentation, dict):
+        normalized_presentation = dict(presentation)
+        presentation_cover = normalized_presentation.get("cover_image_url")
+        if isinstance(presentation_cover, str) and presentation_cover:
+            scoped_cover = await _migrate_matcha_work_asset_to_scope(
+                presentation_cover,
+                company_id=company_id,
+                thread_id=thread_id,
+                asset_kind="covers",
+                default_filename="cover.png",
+            )
+            if scoped_cover != presentation_cover:
+                normalized_presentation["cover_image_url"] = scoped_cover
+                normalized_state["presentation"] = normalized_presentation
+                changed = True
+
+    images = normalized_state.get("images")
+    if isinstance(images, list) and images:
+        scoped_images: list[str] = []
+        image_changed = False
+        for index, image_path in enumerate(images):
+            if not isinstance(image_path, str) or not image_path:
+                scoped_images.append(image_path)
+                continue
+            scoped_image = await _migrate_matcha_work_asset_to_scope(
+                image_path,
+                company_id=company_id,
+                thread_id=thread_id,
+                asset_kind="images",
+                default_filename=f"image-{index + 1}.jpg",
+            )
+            scoped_images.append(scoped_image)
+            image_changed = image_changed or scoped_image != image_path
+        if image_changed:
+            normalized_state["images"] = scoped_images
+            changed = True
+
+    if changed:
+        async with get_connection() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """
+                    SELECT current_state
+                    FROM mw_threads
+                    WHERE id=$1 AND company_id=$2
+                    FOR UPDATE
+                    """,
+                    thread_id,
+                    company_id,
+                )
+                if row is not None:
+                    latest_state = _parse_jsonb(row["current_state"])
+                    merged_state = dict(latest_state)
+
+                    if "cover_image_url" in normalized_state:
+                        merged_state["cover_image_url"] = normalized_state["cover_image_url"]
+                    if "images" in normalized_state:
+                        merged_state["images"] = normalized_state["images"]
+                    if isinstance(normalized_state.get("presentation"), dict):
+                        latest_presentation = latest_state.get("presentation")
+                        merged_presentation = dict(latest_presentation) if isinstance(latest_presentation, dict) else {}
+                        if "cover_image_url" in normalized_state["presentation"]:
+                            merged_presentation["cover_image_url"] = normalized_state["presentation"]["cover_image_url"]
+                        merged_state["presentation"] = merged_presentation
+
+                    await conn.execute(
+                        """
+                        UPDATE mw_threads
+                        SET current_state=$1
+                        WHERE id=$2 AND company_id=$3
+                        """,
+                        json.dumps(merged_state),
+                        thread_id,
+                        company_id,
+                    )
+                    normalized_state = merged_state
+
+    return normalized_state
 
 
 def _parse_jsonb(value) -> dict:
@@ -1018,9 +1213,14 @@ async def list_versions(thread_id: UUID, include_state: bool = False) -> list[di
             ]
 
 
-async def _get_cached_pdf_url(thread_id: UUID, version: int, is_draft: bool) -> Optional[str]:
+async def _get_cached_pdf_url(
+    thread_id: UUID,
+    version: int,
+    is_draft: bool,
+    expected_prefix: Optional[str] = None,
+) -> Optional[str]:
     async with get_connection() as conn:
-        return await conn.fetchval(
+        pdf_url = await conn.fetchval(
             """
             SELECT pdf_url
             FROM mw_pdf_cache
@@ -1030,6 +1230,10 @@ async def _get_cached_pdf_url(thread_id: UUID, version: int, is_draft: bool) -> 
             version,
             is_draft,
         )
+    if expected_prefix and _should_enforce_company_scoped_matcha_work_storage():
+        if not _storage_path_has_prefix(pdf_url, expected_prefix):
+            return None
+    return pdf_url
 
 
 async def _cache_pdf_url(
@@ -1054,11 +1258,13 @@ async def generate_pdf(
     state: dict,
     thread_id: UUID,
     version: int,
+    company_id: UUID,
     is_draft: bool = True,
     logo_src: Optional[str] = None,
 ) -> Optional[str]:
     """Check cache → render HTML → WeasyPrint → S3 → cache URL."""
-    cached = await _get_cached_pdf_url(thread_id, version, is_draft)
+    expected_prefix = build_matcha_work_thread_storage_prefix(company_id, thread_id, "pdfs")
+    cached = await _get_cached_pdf_url(thread_id, version, is_draft, expected_prefix=expected_prefix)
     if cached:
         return cached
 
@@ -1113,7 +1319,7 @@ async def generate_pdf(
         pdf_url = await get_storage().upload_file(
             pdf_bytes,
             filename,
-            prefix=f"matcha-work/{thread_id}",
+            prefix=expected_prefix,
             content_type="application/pdf",
         )
     except Exception as e:
@@ -1240,10 +1446,11 @@ async def generate_presentation_pdf(
     state: dict,
     thread_id: UUID,
     version: int,
+    company_id: UUID,
 ) -> Optional[str]:
     """Render presentation slides to PDF via WeasyPrint and upload to S3."""
-    cache_key = f"pres_{version}"
-    cached = await _get_cached_pdf_url(thread_id, version, is_draft=False)
+    expected_prefix = build_matcha_work_thread_storage_prefix(company_id, thread_id, "presentation-pdfs")
+    cached = await _get_cached_pdf_url(thread_id, version, is_draft=False, expected_prefix=expected_prefix)
     if cached:
         return cached
 
@@ -1270,7 +1477,7 @@ async def generate_presentation_pdf(
         pdf_url = await get_storage().upload_file(
             pdf_bytes,
             filename,
-            prefix=f"matcha-work/{thread_id}",
+            prefix=expected_prefix,
             content_type="application/pdf",
         )
     except Exception as e:
@@ -1281,7 +1488,13 @@ async def generate_presentation_pdf(
     return pdf_url
 
 
-async def generate_cover_image(presentation_title: str, subtitle: Optional[str] = None) -> Optional[str]:
+async def generate_cover_image(
+    presentation_title: str,
+    subtitle: Optional[str] = None,
+    *,
+    company_id: UUID,
+    thread_id: UUID,
+) -> Optional[str]:
     """Generate a cover image via Gemini 3.1 Flash Image and upload to S3."""
     import os
     try:
@@ -1324,10 +1537,11 @@ async def generate_cover_image(presentation_title: str, subtitle: Optional[str] 
         image_bytes, mime_type = result
         ext = "png" if "png" in mime_type else "jpg"
         filename = f"cover_{secrets.token_hex(8)}.{ext}"
+        prefix = build_matcha_work_thread_storage_prefix(company_id, thread_id, "covers")
         url = await get_storage().upload_file(
             image_bytes,
             filename,
-            prefix="matcha-work/covers",
+            prefix=prefix,
             content_type=mime_type,
         )
         return url
@@ -1560,7 +1774,13 @@ async def send_offer_letter_draft(
     draft_result = await save_offer_letter_draft(thread_id, company_id)
 
     version = int(thread_row["version"] or 0)
-    pdf_url = await generate_pdf(state, thread_id, version, is_draft=True)
+    pdf_url = await generate_pdf(
+        state,
+        thread_id,
+        version,
+        is_draft=True,
+        company_id=company_id,
+    )
     if not pdf_url:
         raise ValueError("Unable to generate draft PDF")
 
@@ -1688,6 +1908,8 @@ async def generate_workbook_presentation(thread_id: UUID, company_id: UUID) -> d
     cover_url = await generate_cover_image(
         presentation_title=initial_presentation.get("title") or "Presentation",
         subtitle=initial_presentation.get("subtitle"),
+        company_id=company_id,
+        thread_id=thread_id,
     )
 
     async with get_connection() as conn:
@@ -1789,7 +2011,13 @@ async def finalize_thread(thread_id: UUID, company_id: UUID) -> dict:
     pdf_url = None
     if _infer_skill_from_state(current_state) == "offer_letter":
         # Generate final PDF outside the transaction (CPU-bound, may be slow)
-        pdf_url = await generate_pdf(current_state, thread_id, version, is_draft=False)
+        pdf_url = await generate_pdf(
+            current_state,
+            thread_id,
+            version,
+            is_draft=False,
+            company_id=company_id,
+        )
 
     return {
         "thread_id": thread_id,

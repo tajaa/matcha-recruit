@@ -534,13 +534,19 @@ async def _apply_ai_updates_and_operations(
             inferred = _infer_skill_from_state(current_state)
             if inferred == "offer_letter":
                 pdf_url = await doc_svc.generate_pdf(
-                    current_state, thread_id, current_version, is_draft=True
+                    current_state,
+                    thread_id,
+                    current_version,
+                    is_draft=True,
+                    company_id=company_id,
                 )
             elif inferred == "presentation" and not current_state.get("cover_image_url"):
                 # Generate a cover image the first time slides are created
                 cover_url = await doc_svc.generate_cover_image(
                     presentation_title=str(current_state.get("presentation_title") or "Presentation"),
                     subtitle=current_state.get("subtitle"),
+                    company_id=company_id,
+                    thread_id=thread_id,
                 )
                 if cover_url:
                     cover_result = await doc_svc.apply_update(thread_id, {"cover_image_url": cover_url})
@@ -846,14 +852,20 @@ async def upload_thread_images(
     thread = await doc_svc.get_thread(thread_id, company_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    existing: list[str] = (thread.get("current_state") or {}).get("images") or []
-    if len(existing) + len(files) > 4:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Maximum 4 images allowed. You already have {len(existing)}.",
-        )
 
     try:
+        thread["current_state"] = await doc_svc.ensure_matcha_work_thread_storage_scope(
+            thread_id,
+            company_id,
+            thread.get("current_state") or {},
+        )
+        existing: list[str] = (thread.get("current_state") or {}).get("images") or []
+        if len(existing) + len(files) > 4:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum 4 images allowed. You already have {len(existing)}.",
+            )
+
         uploaded_urls: list[str] = []
         for file in files:
             if not file.content_type or not file.content_type.startswith("image/"):
@@ -864,7 +876,7 @@ async def upload_thread_images(
             url = await get_storage().upload_file(
                 content,
                 file.filename or "image.jpg",
-                prefix=f"matcha-work-images/{thread_id}",
+                prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "images"),
                 content_type=file.content_type,
             )
             uploaded_urls.append(url)
@@ -956,6 +968,12 @@ async def get_thread(
     thread = await doc_svc.get_thread(thread_id, company_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread["current_state"] = await doc_svc.ensure_matcha_work_thread_storage_scope(
+        thread_id,
+        company_id,
+        thread["current_state"],
+    )
 
     messages = await doc_svc.get_thread_messages(thread_id)
 
@@ -1344,7 +1362,13 @@ async def revert_thread(
 
     pdf_url = None
     if _infer_skill_from_state(new_state) == "offer_letter":
-        pdf_url = await doc_svc.generate_pdf(new_state, thread_id, new_version, is_draft=True)
+        pdf_url = await doc_svc.generate_pdf(
+            new_state,
+            thread_id,
+            new_version,
+            is_draft=True,
+            company_id=company_id,
+        )
 
     return SendMessageResponse(
         user_message=_row_to_message(system_msg),
@@ -1429,7 +1453,13 @@ async def get_pdf(
         state = ver_map[target_version]["state_json"]
 
     is_draft = thread["status"] != "finalized"
-    pdf_url = await doc_svc.generate_pdf(state, thread_id, target_version, is_draft=is_draft)
+    pdf_url = await doc_svc.generate_pdf(
+        state,
+        thread_id,
+        target_version,
+        is_draft=is_draft,
+        company_id=company_id,
+    )
 
     if pdf_url is None:
         raise HTTPException(status_code=503, detail="PDF generation unavailable")
@@ -1465,7 +1495,13 @@ async def proxy_pdf(
         state = ver_map[target_version]["state_json"]
 
     is_draft = thread["status"] != "finalized"
-    pdf_url = await doc_svc.generate_pdf(state, thread_id, target_version, is_draft=is_draft)
+    pdf_url = await doc_svc.generate_pdf(
+        state,
+        thread_id,
+        target_version,
+        is_draft=is_draft,
+        company_id=company_id,
+    )
 
     if pdf_url is None:
         raise HTTPException(status_code=503, detail="PDF generation unavailable")
@@ -1649,7 +1685,11 @@ async def get_presentation_pdf(
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    state = thread.get("current_state") or {}
+    state = await doc_svc.ensure_matcha_work_thread_storage_scope(
+        thread_id,
+        company_id,
+        thread.get("current_state") or {},
+    )
     if _infer_skill_from_state(state) not in ("presentation", "workbook"):
         raise HTTPException(status_code=400, detail="Presentation PDF is only available for presentation and workbook threads")
 
@@ -1668,7 +1708,12 @@ async def get_presentation_pdf(
     else:
         pdf_state = state
 
-    pdf_url = await doc_svc.generate_presentation_pdf(pdf_state, thread_id, version)
+    pdf_url = await doc_svc.generate_presentation_pdf(
+        pdf_state,
+        thread_id,
+        version,
+        company_id=company_id,
+    )
     if not pdf_url:
         raise HTTPException(status_code=500, detail="Failed to generate presentation PDF")
 
