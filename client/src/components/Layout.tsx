@@ -692,6 +692,11 @@ export function Layout() {
       } else {
         document.documentElement.classList.remove('theme-light-pages');
       }
+      if (themeMode === 'dark') {
+        document.documentElement.classList.add('theme-dark');
+      } else {
+        document.documentElement.classList.remove('theme-dark');
+      }
     }
   }, [themeMode]);
 
