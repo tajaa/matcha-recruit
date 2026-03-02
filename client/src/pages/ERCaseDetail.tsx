@@ -1240,11 +1240,11 @@ export function ERCaseDetail() {
   ]);
 
   if (loading) {
-    return <div className="text-center py-12 text-zinc-500 text-xs uppercase tracking-wider">Loading...</div>;
+    return <div className="text-center py-12 text-stone-400 text-xs uppercase tracking-wider">Loading...</div>;
   }
 
   if (!erCase) {
-    return <div className="text-center py-12 text-zinc-500 text-xs uppercase tracking-wider">Case not found</div>;
+    return <div className="text-center py-12 text-stone-400 text-xs uppercase tracking-wider">Case not found</div>;
   }
 
   const completedDocs = documents.filter(d => d.processing_status === 'completed');
@@ -1274,29 +1274,30 @@ export function ERCaseDetail() {
   );
 
   return (
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen bg-stone-300">
     <div className="max-w-5xl mx-auto space-y-12">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
           <button
             onClick={() => navigate('/app/matcha/er-copilot')}
-            className="text-xs text-zinc-500 hover:text-zinc-900 mb-4 flex items-center gap-1 uppercase tracking-wider"
+            className="text-sm text-zinc-500 hover:text-zinc-900 mb-4 flex items-center gap-1 uppercase tracking-wider"
           >
             <ChevronLeft size={12} />
             Back to Cases
           </button>
           <div className="flex items-center gap-3 mb-2">
-            <span className="text-[10px] text-zinc-400 font-mono tracking-wide">{erCase.case_number}</span>
-            <span className={`text-[10px] uppercase tracking-wide font-medium ${STATUS_COLORS[erCase.status]}`}>
+            <span className="text-xs text-zinc-500 font-mono tracking-wide">{erCase.case_number}</span>
+            <span className={`text-xs uppercase tracking-wide font-medium ${STATUS_COLORS[erCase.status]}`}>
               {erCase.status.replace('_', ' ')}
             </span>
           </div>
-          <h1 className="text-2xl font-light text-zinc-900 dark:text-zinc-100 tracking-tight">{erCase.title}</h1>
+          <h1 className="text-3xl font-light text-zinc-900 tracking-tight">{erCase.title}</h1>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowExportModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-zinc-500 hover:text-zinc-800 uppercase tracking-wider transition-colors border border-zinc-200 hover:border-zinc-400"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-stone-500 hover:text-zinc-900 uppercase tracking-wider transition-colors border border-stone-300 hover:border-stone-400 rounded-lg"
           >
             <Download size={12} />
             Export
@@ -1306,7 +1307,7 @@ export function ERCaseDetail() {
               value={erCase.status}
               onChange={(e) => handleStatusChange(e.target.value as ERCaseStatus)}
               disabled={statusUpdating}
-              className={`w-full px-2 py-1.5 bg-transparent border-b border-zinc-200 text-xs text-zinc-600 focus:outline-none focus:border-zinc-400 cursor-pointer ${
+              className={`w-full px-2 py-1.5 bg-transparent border-b border-stone-200 text-xs text-zinc-600 focus:outline-none focus:border-stone-400 cursor-pointer ${
                 statusUpdating ? 'opacity-50' : ''
               }`}
             >
@@ -1319,38 +1320,38 @@ export function ERCaseDetail() {
       </div>
 
       {showAssistancePanel && (
-        <div className="border border-zinc-200 bg-zinc-50/70 p-4 space-y-2">
-          <p className="text-[10px] uppercase tracking-widest text-zinc-500">Investigation Assistance Intake</p>
+        <div className="border border-stone-200 bg-stone-100 p-4 space-y-2 rounded-2xl">
+          <p className="text-xs uppercase tracking-widest text-stone-500">Investigation Assistance Intake</p>
           {assistanceAnswers && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs text-zinc-600">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm text-zinc-700">
               <div>
-                <span className="text-zinc-400 uppercase tracking-wide text-[10px]">Complaint Format</span>
+                <span className="text-xs text-stone-400 uppercase tracking-wide">Complaint Format</span>
                 <p className="mt-1">{assistanceAnswers.complaint_format || 'unknown'}</p>
               </div>
               <div>
-                <span className="text-zinc-400 uppercase tracking-wide text-[10px]">Immediate Risk</span>
+                <span className="text-xs text-stone-400 uppercase tracking-wide">Immediate Risk</span>
                 <p className="mt-1">{assistanceAnswers.immediate_risk || 'unsure'}</p>
               </div>
               <div>
-                <span className="text-zinc-400 uppercase tracking-wide text-[10px]">Primary Goal</span>
+                <span className="text-xs text-stone-400 uppercase tracking-wide">Primary Goal</span>
                 <p className="mt-1">{formatIntakeObjective(assistanceAnswers.objective)}</p>
               </div>
               <div>
-                <span className="text-zinc-400 uppercase tracking-wide text-[10px]">Witnesses</span>
+                <span className="text-xs text-stone-400 uppercase tracking-wide">Witnesses</span>
                 <p className="mt-1">{assistanceAnswers.witnesses || 'Not provided'}</p>
               </div>
             </div>
           )}
           {assistanceAnswers?.additional_notes && (
-            <p className="text-xs text-zinc-600">Notes: {assistanceAnswers.additional_notes}</p>
+            <p className="text-sm text-zinc-700">Notes: {assistanceAnswers.additional_notes}</p>
           )}
           {autoAssistMessage && (
-            <p className={`text-xs ${
+            <p className={`text-sm ${
               autoAssistStatus === 'completed'
                 ? 'text-emerald-700'
                 : autoAssistStatus === 'running'
                   ? 'text-amber-700'
-                  : 'text-zinc-600'
+                  : 'text-stone-600'
             }`}>
               {autoAssistMessage}
             </p>
@@ -1361,14 +1362,14 @@ export function ERCaseDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
         {/* Left: Documents */}
         <div className="lg:col-span-1 space-y-6">
-          <div className="flex justify-between items-center border-b border-zinc-200 pb-2">
-            <h2 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Evidence</h2>
+          <div className="flex justify-between items-center border-b border-stone-200 pb-2">
+            <h2 className="text-xs font-medium text-stone-500 uppercase tracking-wider">Evidence</h2>
             <div className="flex items-center gap-3">
               {hasUnprocessedDocs && (
                 <button
                   onClick={handleReprocessAllDocs}
                   disabled={reprocessingAll}
-                  className="text-[10px] text-amber-600 hover:text-amber-500 flex items-center gap-1 uppercase tracking-wide font-medium disabled:opacity-50"
+                  className="text-xs text-amber-600 hover:text-amber-500 flex items-center gap-1 uppercase tracking-wide font-medium disabled:opacity-50"
                   title="Reprocess all pending/failed documents"
                 >
                   <RefreshCw size={10} className={reprocessingAll ? 'animate-spin' : ''} />
@@ -1377,7 +1378,7 @@ export function ERCaseDetail() {
               )}
               <button
                 onClick={() => setShowUploadModal(true)}
-                className="text-[10px] text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 flex items-center gap-1 uppercase tracking-wide font-medium"
+                className="text-xs text-zinc-900 hover:text-zinc-600 flex items-center gap-1 uppercase tracking-wide font-medium"
               >
                 <Upload size={10} />
                 Upload
@@ -1396,25 +1397,25 @@ export function ERCaseDetail() {
                   <div key={doc.id} className="py-2 flex items-start justify-between group">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-0.5">
-                        <span className={`text-[10px] uppercase tracking-wide font-medium ${DOC_TYPE_COLORS[doc.document_type]}`}>
+                        <span className={`text-xs uppercase tracking-wide font-medium ${DOC_TYPE_COLORS[doc.document_type]}`}>
                           {doc.document_type}
                         </span>
                         {doc.processing_status === 'pending' && (
-                          <span className="text-[10px] text-zinc-400">Pending</span>
+                          <span className="text-xs text-zinc-500">Pending</span>
                         )}
                         {doc.processing_status === 'processing' && (
-                          <span className="text-[10px] text-amber-500">Processing...</span>
+                          <span className="text-xs text-amber-500">Processing...</span>
                         )}
                         {doc.processing_status === 'completed' && (
-                          <span className="text-[10px] text-emerald-500">✓</span>
+                          <span className="text-xs text-emerald-600">✓</span>
                         )}
                         {doc.processing_status === 'failed' && (
-                          <span className="text-[10px] text-red-500">Failed</span>
+                          <span className="text-xs text-red-500">Failed</span>
                         )}
                       </div>
-                      <p className="text-xs text-zinc-900 dark:text-zinc-100 truncate hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer" title={doc.filename}>{doc.filename}</p>
+                      <p className="text-sm text-zinc-900 truncate hover:text-zinc-700 cursor-pointer" title={doc.filename}>{doc.filename}</p>
                       {doc.processing_error && (
-                        <p className="text-[10px] text-red-400 truncate" title={doc.processing_error}>{doc.processing_error}</p>
+                        <p className="text-xs text-red-500 truncate" title={doc.processing_error}>{doc.processing_error}</p>
                       )}
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
@@ -1445,7 +1446,7 @@ export function ERCaseDetail() {
               {erCase.status === 'pending_determination' ? (
                 /* Determination Panel — replaces guidance when in determination mode */
                 <div ref={determinationPanelRef} className="space-y-4">
-                  <h3 className="text-[10px] uppercase tracking-wider text-zinc-500">Case Determination</h3>
+                  <h3 className="text-xs uppercase tracking-wider text-zinc-600">Case Determination</h3>
 
                   {/* Loading state — Analysis Console */}
                   {outcomeLoading && (
@@ -1514,12 +1515,12 @@ export function ERCaseDetail() {
                     <div className="space-y-3">
                       {outcomeAnalysis.case_summary && (
                         <div className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm animate-fade-in-up" style={{ animationDelay: '0ms' }}>
-                          <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Case Summary</p>
-                          <p className="text-xs text-zinc-700 leading-relaxed">{outcomeAnalysis.case_summary}</p>
+                          <p className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Case Summary</p>
+                          <p className="text-sm text-zinc-800 leading-relaxed">{outcomeAnalysis.case_summary}</p>
                         </div>
                       )}
 
-                      <p className="text-[10px] uppercase tracking-wide text-zinc-500 animate-fade-in-up" style={{ animationDelay: '80ms' }}>Recommended Outcomes</p>
+                      <p className="text-xs uppercase tracking-wide text-zinc-600 animate-fade-in-up" style={{ animationDelay: '80ms' }}>Recommended Outcomes</p>
 
                       {outcomeAnalysis.outcomes.map((outcome, idx) => {
                         const isSelected = selectedOutcomeIdx === idx;
@@ -1538,7 +1539,7 @@ export function ERCaseDetail() {
                           <button
                             key={idx}
                             onClick={() => setSelectedOutcomeIdx(isSelected ? null : idx)}
-                            className={`w-full text-left border rounded-sm p-3 space-y-2 transition-colors animate-fade-in-up ${
+                            className={`w-full text-left border rounded-xl p-3 space-y-2 transition-colors animate-fade-in-up ${
                               isSelected
                                 ? 'border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900'
                                 : 'border-zinc-200 bg-white hover:border-zinc-400'
@@ -1550,10 +1551,10 @@ export function ERCaseDetail() {
                                 <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${
                                   isSelected ? 'border-zinc-900 bg-zinc-900' : 'border-zinc-300'
                                 }`} />
-                                <span className="text-xs font-medium text-zinc-900 truncate">{outcome.action_label}</span>
+                                <span className="text-sm font-medium text-zinc-900 truncate">{outcome.action_label}</span>
                               </div>
                               <div className="flex items-center gap-1.5 flex-shrink-0">
-                                <span className={`text-[10px] uppercase tracking-wide font-medium ${detColor}`}>
+                                <span className={`text-xs uppercase tracking-wide font-medium ${detColor}`}>
                                   {outcome.determination}
                                 </span>
                                 <span className={`px-1.5 py-0.5 text-[9px] uppercase tracking-wide rounded ${confColor}`}>
@@ -1561,20 +1562,20 @@ export function ERCaseDetail() {
                                 </span>
                               </div>
                             </div>
-                            <p className="text-xs text-zinc-700 leading-relaxed">{outcome.reasoning}</p>
+                            <p className="text-sm text-zinc-800 leading-relaxed">{outcome.reasoning}</p>
                             {isSelected && (
                               <div className="pt-2 border-t border-zinc-200 space-y-1.5">
                                 <div>
-                                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">Policy Basis</span>
-                                  <p className="text-xs text-zinc-600 mt-0.5">{outcome.policy_basis}</p>
+                                  <span className="text-xs uppercase tracking-wide text-zinc-500">Policy Basis</span>
+                                  <p className="text-sm text-zinc-700 mt-0.5">{outcome.policy_basis}</p>
                                 </div>
                                 <div>
-                                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">HR Considerations</span>
-                                  <p className="text-xs text-zinc-600 mt-0.5">{outcome.hr_considerations}</p>
+                                  <span className="text-xs uppercase tracking-wide text-zinc-500">HR Considerations</span>
+                                  <p className="text-sm text-zinc-700 mt-0.5">{outcome.hr_considerations}</p>
                                 </div>
                                 <div>
-                                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">Precedent</span>
-                                  <p className="text-xs text-zinc-600 mt-0.5">{outcome.precedent_note}</p>
+                                  <span className="text-xs uppercase tracking-wide text-zinc-500">Precedent</span>
+                                  <p className="text-sm text-zinc-700 mt-0.5">{outcome.precedent_note}</p>
                                 </div>
                               </div>
                             )}
@@ -1583,12 +1584,12 @@ export function ERCaseDetail() {
                       })}
 
                       {outcomeAnalysis.outcomes.length === 0 && (
-                        <p className="text-xs text-zinc-400">No outcome recommendations generated. Please review the case manually.</p>
+                        <p className="text-sm text-zinc-500">No outcome recommendations generated. Please review the case manually.</p>
                       )}
 
                       {/* Determination notes */}
                       <div>
-                        <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                        <label className="block text-xs uppercase tracking-wider text-zinc-500 mb-1.5">
                           Determination Notes <span className="text-red-500">*</span>
                         </label>
                         <textarea
@@ -1596,7 +1597,7 @@ export function ERCaseDetail() {
                           onChange={(e) => setDeterminationNotes(e.target.value)}
                           placeholder="Document your reasoning for this determination..."
                           rows={4}
-                          className="w-full px-3 py-2 text-xs text-zinc-900 bg-white border border-zinc-200 rounded-sm focus:outline-none focus:border-zinc-400 resize-none"
+                          className="w-full px-3 py-2 text-sm text-zinc-900 bg-white border border-stone-300 rounded-xl focus:outline-none focus:border-stone-400 resize-none"
                         />
                       </div>
 
@@ -1604,13 +1605,13 @@ export function ERCaseDetail() {
                       <button
                         onClick={handleCloseCase}
                         disabled={closingCase || selectedOutcomeIdx === null || !determinationNotes.trim()}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-zinc-900 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed rounded-sm"
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider bg-zinc-900 text-zinc-50 hover:bg-zinc-800 transition-all rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <CheckCircle size={14} />
                         {closingCase ? 'Closing Case...' : 'Close Case & Finalize'}
                       </button>
 
-                      <p className="text-[10px] text-zinc-400">
+                      <p className="text-xs text-zinc-500">
                         Model: {outcomeAnalysis.model}
                       </p>
                     </div>
@@ -1618,14 +1619,14 @@ export function ERCaseDetail() {
 
                   {/* Error state */}
                   {outcomeError && !outcomeLoading && (
-                    <div className="border border-red-200 bg-red-50 p-3 rounded-sm space-y-2">
+                    <div className="border border-red-200 bg-red-50 p-3 rounded-xl space-y-2">
                       <div className="flex items-start gap-2">
                         <AlertTriangle size={12} className="text-red-500 mt-0.5 shrink-0" />
-                        <p className="text-xs text-red-700">{outcomeError}</p>
+                        <p className="text-sm text-red-700">{outcomeError}</p>
                       </div>
                       <button
                         onClick={() => { setOutcomeError(null); fetchOutcomeAnalysis(); }}
-                        className="text-[10px] uppercase tracking-wider font-medium text-red-700 hover:text-red-900"
+                        className="text-xs uppercase tracking-wider font-medium text-red-700 hover:text-red-900"
                       >
                         Retry
                       </button>
@@ -1635,10 +1636,10 @@ export function ERCaseDetail() {
                   {/* No analysis yet and not loading */}
                   {!outcomeAnalysis && !outcomeLoading && !outcomeError && (
                     <div className="text-center py-4">
-                      <p className="text-xs text-zinc-400 mb-2">Outcome analysis not yet generated.</p>
+                      <p className="text-sm text-zinc-500 mb-2">Outcome analysis not yet generated.</p>
                       <button
                         onClick={fetchOutcomeAnalysis}
-                        className="text-xs text-zinc-700 hover:text-zinc-900 uppercase tracking-wider font-medium"
+                        className="text-sm text-zinc-700 hover:text-zinc-900 uppercase tracking-wider font-medium"
                       >
                         Generate Analysis
                       </button>
@@ -1648,12 +1649,12 @@ export function ERCaseDetail() {
               ) : (
                 /* Normal guidance section */
                 <>
-                  <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Suggested Guidance</h3>
+                  <h3 className="text-xs uppercase tracking-wider text-zinc-600 mb-3">Suggested Guidance</h3>
 
                   {showDeterminationBanner && (
-                    <div className="border border-amber-200 bg-amber-50 p-3 rounded-sm mb-3 space-y-2">
-                      <p className="text-xs font-medium text-amber-900">Ready for a determination?</p>
-                      <p className="text-xs text-amber-800 leading-relaxed">
+                    <div className="border border-amber-200 bg-amber-50 p-3 rounded-xl mb-3 space-y-2">
+                      <p className="text-sm font-medium text-amber-900">Ready for a determination?</p>
+                      <p className="text-sm text-amber-800 leading-relaxed">
                         The current case file contains evidence that appears to meet the standard of
                         'preponderance of the evidence.' Continuing to investigate may produce diminishing returns.
                       </p>
@@ -1664,12 +1665,12 @@ export function ERCaseDetail() {
                               <div className="h-full bg-amber-600 rounded-full"
                                    style={{ width: `${Math.round(latestGuidancePayload.determination_confidence * 100)}%` }} />
                             </div>
-                            <span className="text-[10px] font-mono text-amber-700">
+                            <span className="text-xs font-mono text-amber-700">
                               {Math.round(latestGuidancePayload.determination_confidence * 100)}%
                             </span>
                           </div>
                           {latestGuidancePayload.determination_signals?.map((s, i) => (
-                            <p key={i} className="text-[10px] text-amber-600">&middot; {s}</p>
+                            <p key={i} className="text-xs text-amber-600">&middot; {s}</p>
                           ))}
                         </div>
                       )}
@@ -1696,7 +1697,7 @@ export function ERCaseDetail() {
                             }
                           }}
                           disabled={determinationAccepting}
-                          className="text-xs font-medium text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1 rounded-sm disabled:opacity-50"
+                          className="text-xs font-medium text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1 rounded-lg disabled:opacity-50"
                         >
                           {determinationAccepting ? 'Working...' : 'Proceed to case determination'}
                         </button>
@@ -1725,7 +1726,7 @@ export function ERCaseDetail() {
                         </button>
                       </div>
                       {latestGuidancePayload?.cards && latestGuidancePayload.cards.length > 0 && (
-                        <p className="text-[10px] text-amber-600 mt-1">
+                        <p className="text-xs text-amber-600 mt-1">
                           Still open: {latestGuidancePayload.cards.slice(0, 2).map(c => c.title).join(', ')}
                         </p>
                       )}
@@ -1734,10 +1735,10 @@ export function ERCaseDetail() {
 
                   {latestGuidanceNote ? (
                     <div className="space-y-2">
-                      <div className="border border-emerald-200 bg-emerald-50 p-2.5 rounded-sm">
+                      <div className="border border-emerald-200 bg-emerald-50 p-3 rounded-xl">
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-[10px] uppercase tracking-wide text-emerald-700">Next Steps</span>
-                          <span className="text-[10px] text-zinc-400">
+                          <span className="text-xs uppercase tracking-wide text-emerald-700">Next Steps</span>
+                          <span className="text-xs text-zinc-500">
                             {new Date(latestGuidancePayload?.generated_at || latestGuidanceNote.created_at).toLocaleString('en-US', {
                               month: 'short',
                               day: 'numeric',
@@ -1746,11 +1747,11 @@ export function ERCaseDetail() {
                             })}
                           </span>
                         </div>
-                        <p className="text-xs text-zinc-700 whitespace-pre-wrap leading-relaxed">
+                        <p className="text-sm text-zinc-800 whitespace-pre-wrap leading-relaxed">
                           {latestGuidancePayload?.summary || latestGuidanceNote.content}
                         </p>
                         {latestGuidancePayload && (
-                          <p className="mt-1 text-[10px] text-zinc-500">
+                          <p className="mt-1 text-xs text-zinc-500">
                             Model: {latestGuidancePayload.model}{latestGuidancePayload.fallback_used ? ' (fallback)' : ''}
                           </p>
                         )}
@@ -1762,38 +1763,38 @@ export function ERCaseDetail() {
                             const state = getCardState(card.id);
                             const stateLabel = state === 'done' ? 'Completed' : state === 'dismissed' ? 'Dismissed' : 'Pending';
                             return (
-                              <div key={card.id} className="border border-zinc-200 bg-white p-2.5 rounded-sm space-y-2">
+                              <div key={card.id} className="border border-stone-200 bg-stone-50 p-2.5 rounded-xl space-y-2">
                                 <div className="flex items-center justify-between gap-2">
-                                  <p className="text-xs font-medium text-zinc-800">{card.title}</p>
+                                  <p className="text-sm font-medium text-zinc-900">{card.title}</p>
                                   <span className={`px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded ${guidancePriorityStyle(card.priority)}`}>
                                     {card.priority}
                                   </span>
                                 </div>
-                                <p className="text-xs text-zinc-700">{card.recommendation}</p>
-                                <p className="text-[11px] text-zinc-500">{card.rationale}</p>
+                                <p className="text-sm text-zinc-800">{card.recommendation}</p>
+                                <p className="text-xs text-zinc-600">{card.rationale}</p>
                                 {card.blockers.length > 0 && (
-                                  <p className="text-[11px] text-zinc-500">Blockers: {card.blockers.join('; ')}</p>
+                                  <p className="text-xs text-zinc-600">Blockers: {card.blockers.join('; ')}</p>
                                 )}
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">{stateLabel}</span>
+                                  <span className="text-xs uppercase tracking-wide text-zinc-500">{stateLabel}</span>
                                   <div className="flex items-center gap-2">
                                     <button
                                       onClick={() => void updateGuidanceCardState(card.id, 'done')}
-                                      className="text-[10px] uppercase tracking-wide text-emerald-700 hover:text-emerald-600 disabled:opacity-40"
+                                      className="text-xs uppercase tracking-wide text-emerald-700 hover:text-emerald-600 disabled:opacity-40"
                                       disabled={state === 'done'}
                                     >
                                       Mark Done
                                     </button>
                                     <button
                                       onClick={() => void updateGuidanceCardState(card.id, 'dismissed')}
-                                      className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-700 disabled:opacity-40"
+                                      className="text-xs uppercase tracking-wide text-zinc-500 hover:text-zinc-700 disabled:opacity-40"
                                       disabled={state === 'dismissed'}
                                     >
                                       Dismiss
                                     </button>
                                     <button
                                       onClick={() => void handleGuidanceAction(card)}
-                                      className="text-[10px] uppercase tracking-wide text-blue-700 hover:text-blue-600 disabled:opacity-50"
+                                      className="text-xs uppercase tracking-wide text-blue-700 hover:text-blue-600 disabled:opacity-50"
                                       disabled={guidanceActionBusyId === card.id}
                                     >
                                       {guidanceActionBusyId === card.id ? 'Working...' : card.action.label}
@@ -1807,7 +1808,7 @@ export function ERCaseDetail() {
                       ) : null}
                     </div>
                   ) : (
-                    <p className="text-xs text-zinc-400">No guidance yet. Complete assistance intake and analysis to generate next steps.</p>
+                    <p className="text-sm text-zinc-500">No guidance yet. Complete assistance intake and analysis to generate next steps.</p>
                   )}
                 </>
               )}
@@ -1816,16 +1817,16 @@ export function ERCaseDetail() {
 
           {showAssistancePanel && erCase.status !== 'pending_determination' && (
             <div className="pt-4 border-t border-zinc-200">
-              <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Case Notes</h3>
+              <h3 className="text-xs uppercase tracking-wider text-stone-600 mb-3">Case Notes</h3>
               {caseNotes.length === 0 ? (
-                <p className="text-xs text-zinc-400">No notes yet.</p>
+                <p className="text-sm text-stone-500">No notes yet.</p>
               ) : (
                 <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
                   {caseNotes.slice(-10).reverse().map((note) => (
                     <div key={note.id} className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] uppercase tracking-wide text-zinc-500">{formatCaseNoteType(note.note_type)}</span>
-                        <span className="text-[10px] text-zinc-400">
+                        <span className="text-xs uppercase tracking-wide text-zinc-600">{formatCaseNoteType(note.note_type)}</span>
+                        <span className="text-xs text-zinc-500">
                           {new Date(note.created_at).toLocaleString('en-US', {
                             month: 'short',
                             day: 'numeric',
@@ -1834,7 +1835,7 @@ export function ERCaseDetail() {
                           })}
                         </span>
                       </div>
-                      <p className="text-xs text-zinc-700 whitespace-pre-wrap">{note.content}</p>
+                      <p className="text-sm text-zinc-800 whitespace-pre-wrap leading-relaxed">{note.content}</p>
                     </div>
                   ))}
                 </div>
@@ -1844,14 +1845,14 @@ export function ERCaseDetail() {
 
           {/* Always-visible Case Notes & Add Note */}
           <div className="pt-4 border-t border-zinc-200 space-y-3">
-            <h3 className="text-[10px] uppercase tracking-wider text-zinc-500">Case Notes</h3>
+            <h3 className="text-xs uppercase tracking-wider text-stone-600">Case Notes</h3>
             {caseNotes.length > 0 && (
               <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
                 {caseNotes.slice(-10).reverse().map((note) => (
                   <div key={note.id} className="border border-zinc-200 bg-zinc-50 p-2.5 rounded-sm">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] uppercase tracking-wide text-zinc-500">{formatCaseNoteType(note.note_type)}</span>
-                      <span className="text-[10px] text-zinc-400">
+                      <span className="text-xs uppercase tracking-wide text-zinc-600">{formatCaseNoteType(note.note_type)}</span>
+                      <span className="text-xs text-zinc-500">
                         {new Date(note.created_at).toLocaleString('en-US', {
                           month: 'short',
                           day: 'numeric',
@@ -1860,7 +1861,7 @@ export function ERCaseDetail() {
                         })}
                       </span>
                     </div>
-                    <p className="text-xs text-zinc-700 whitespace-pre-wrap">{note.content}</p>
+                    <p className="text-sm text-zinc-800 whitespace-pre-wrap leading-relaxed">{note.content}</p>
                   </div>
                 ))}
               </div>
@@ -1871,12 +1872,12 @@ export function ERCaseDetail() {
                 onChange={(e) => setNewNoteContent(e.target.value)}
                 placeholder="Add a note..."
                 rows={2}
-                className="w-full px-3 py-2 text-xs text-zinc-900 bg-white border border-zinc-200 rounded-sm focus:outline-none focus:border-zinc-400 resize-none"
+                className="w-full px-3 py-2 text-sm text-zinc-900 bg-white border border-stone-300 rounded-xl focus:outline-none focus:border-stone-400 resize-none"
               />
               <button
                 onClick={handleAddNote}
                 disabled={addingNote || !newNoteContent.trim()}
-                className="text-[10px] uppercase tracking-wider font-medium text-zinc-700 hover:text-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-xs uppercase tracking-wider font-medium text-zinc-700 hover:text-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {addingNote ? 'Adding...' : 'Add Note'}
               </button>
@@ -1887,7 +1888,7 @@ export function ERCaseDetail() {
         {/* Right: Analysis */}
         <div className="lg:col-span-2 space-y-6">
           {/* Tabs */}
-          <div className="flex items-center justify-between border-b border-zinc-200 pb-px">
+          <div className="flex items-center justify-between border-b border-stone-200 pb-px">
             <div className="flex gap-6">
               {[
                 { id: 'timeline', label: 'Timeline', icon: Clock },
@@ -1899,7 +1900,7 @@ export function ERCaseDetail() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id as AnalysisTab)}
-                    className={`pb-2 text-[10px] font-medium uppercase tracking-wider transition-colors flex items-center gap-2 border-b-2 ${
+                    className={`pb-2 text-xs font-medium uppercase tracking-wider transition-colors flex items-center gap-2 border-b-2 ${
                       activeTab === tab.id
                         ? 'border-zinc-900 text-zinc-900'
                         : 'border-transparent text-zinc-400 hover:text-zinc-600'
@@ -1916,7 +1917,7 @@ export function ERCaseDetail() {
                 className={`px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded-l border ${
                   analysisModel === 'flash'
                     ? 'bg-zinc-900 text-white border-zinc-900'
-                    : 'bg-white text-zinc-400 border-zinc-200 hover:text-zinc-600'
+                    : 'bg-white text-zinc-400 border-stone-200 hover:text-stone-600'
                 }`}
               >
                 Flash
@@ -1926,7 +1927,7 @@ export function ERCaseDetail() {
                 className={`px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded-r border border-l-0 ${
                   analysisModel === 'pro'
                     ? 'bg-zinc-900 text-white border-zinc-900'
-                    : 'bg-white text-zinc-400 border-zinc-200 hover:text-zinc-600'
+                    : 'bg-white text-zinc-400 border-stone-200 hover:text-stone-600'
                 }`}
               >
                 Pro
@@ -1935,9 +1936,9 @@ export function ERCaseDetail() {
           </div>
 
           {analysisError && (
-            <div className="mb-4 flex items-start gap-2 rounded border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30 px-3 py-2">
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
               <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-red-700 dark:text-red-400 flex-1">{analysisError}</p>
+              <p className="text-sm text-red-700 flex-1">{analysisError}</p>
               <button onClick={() => setAnalysisError(null)} className="text-red-400 hover:text-red-600">
                 <X size={12} />
               </button>
@@ -1952,14 +1953,14 @@ export function ERCaseDetail() {
                   <button
                     onClick={handleGenerateTimeline}
                     disabled={analysisLoading === 'timeline' || completedNonPolicyDocs.length === 0}
-                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
+                    className="text-xs uppercase tracking-wider font-medium text-zinc-900 hover:text-zinc-600 disabled:opacity-50"
                   >
                     {analysisLoading === 'timeline' ? 'Generating...' : 'Regenerate Analysis'}
                   </button>
                 </div>
 
                 {timelineSummary && (
-                  <div className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed font-serif">
+                  <div className="text-base text-zinc-700 leading-relaxed font-serif">
                     {timelineSummary}
                   </div>
                 )}
@@ -1971,25 +1972,25 @@ export function ERCaseDetail() {
                         <RefreshCw size={20} className="animate-spin text-zinc-500" />
                         <span>{analysisProgress?.step || 'Analyzing documents and reconstructing timeline...'}</span>
                         {analysisProgress?.detail && (
-                          <span className="text-[10px] text-zinc-500">{analysisProgress.detail}</span>
+                          <span className="text-xs text-zinc-500">{analysisProgress.detail}</span>
                         )}
                       </div>
                     ) : (
                       <div>
                         <p className="mb-2">No timeline generated yet.</p>
-                        <p className="text-[10px] text-zinc-500">
+                        <p className="text-xs text-zinc-500">
                           Click "Regenerate Analysis" to reconstruct a timeline from your uploaded documents.
                         </p>
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="relative pl-2 space-y-8 border-l border-zinc-200 ml-2">
+                  <div className="relative pl-2 space-y-8 border-l border-stone-200 ml-2">
                     {timeline.map((event, i) => (
                       <div key={i} className="relative pl-6">
                         <div className="absolute left-[-3px] top-1.5 w-1.5 h-1.5 rounded-full bg-zinc-300" />
                         <div className="flex items-center gap-3 mb-1">
-                          <span className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
+                          <span className="text-sm font-medium text-zinc-900">
                             {event.date} {event.time && <span className="text-zinc-400 font-normal">at {event.time}</span>}
                           </span>
                           <span className={`text-[9px] uppercase tracking-wide font-medium ${
@@ -2000,18 +2001,18 @@ export function ERCaseDetail() {
                             {event.confidence}
                           </span>
                         </div>
-                        <p className="text-zinc-800 dark:text-zinc-200 text-sm mb-2">{event.description}</p>
+                        <p className="text-zinc-900 text-base leading-relaxed mb-2">{event.description}</p>
                         
                         <div className="flex flex-wrap gap-2 mb-2">
                           {event.participants.map(p => (
-                            <span key={p} className="text-[10px] text-zinc-500 uppercase tracking-wide">
+                            <span key={p} className="text-xs text-zinc-500 uppercase tracking-wide">
                               {p}
                             </span>
                           ))}
                         </div>
 
                         {event.evidence_quote && (
-                          <div className="text-xs text-zinc-500 italic pl-2 border-l border-zinc-200">
+                          <div className="text-sm text-zinc-600 italic pl-2 border-l border-stone-200">
                             "{event.evidence_quote}"
                           </div>
                         )}
@@ -2021,11 +2022,11 @@ export function ERCaseDetail() {
                 )}
 
                 {timelineGaps.length > 0 && (
-                  <div className="pt-6 border-t border-zinc-100">
-                    <h4 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-3">Identified Gaps</h4>
+                  <div className="pt-6 border-t border-stone-200">
+                    <h4 className="text-xs font-medium text-zinc-600 uppercase tracking-wider mb-3">Identified Gaps</h4>
                     <ul className="space-y-2">
                       {timelineGaps.map((gap, i) => (
-                        <li key={i} className="text-xs text-zinc-600 flex items-start gap-2">
+                        <li key={i} className="text-sm text-zinc-700 flex items-start gap-2">
                           <span className="text-amber-500 mt-0.5">•</span>
                           {gap}
                         </li>
@@ -2043,14 +2044,14 @@ export function ERCaseDetail() {
                   <button
                     onClick={handleGenerateDiscrepancies}
                     disabled={analysisLoading === 'discrepancies' || completedNonPolicyDocs.length < 2}
-                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
+                    className="text-xs uppercase tracking-wider font-medium text-zinc-900 hover:text-zinc-600 disabled:opacity-50"
                   >
                     {analysisLoading === 'discrepancies' ? 'Analyzing...' : 'Analyze Documents'}
                   </button>
                 </div>
 
                 {discrepancySummary && (
-                  <div className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed font-serif">
+                  <div className="text-base text-zinc-700 leading-relaxed font-serif">
                     {discrepancySummary}
                   </div>
                 )}
@@ -2062,13 +2063,13 @@ export function ERCaseDetail() {
                         <RefreshCw size={20} className="animate-spin text-zinc-500" />
                         <span>{analysisProgress?.step || 'Comparing statements and detecting discrepancies...'}</span>
                         {analysisProgress?.detail && (
-                          <span className="text-[10px] text-zinc-500">{analysisProgress.detail}</span>
+                          <span className="text-xs text-zinc-500">{analysisProgress.detail}</span>
                         )}
                       </div>
                     ) : discrepancySummary ? (
                       <div>
                         <p className="mb-2">No conflicting statements detected.</p>
-                        <p className="text-[10px] text-zinc-500">
+                        <p className="text-xs text-zinc-500">
                           Analyzed {completedNonPolicyDocs.length} documents.
                           All witness accounts appear consistent on key facts.
                         </p>
@@ -2076,14 +2077,14 @@ export function ERCaseDetail() {
                     ) : completedNonPolicyDocs.length < 2 ? (
                       <div>
                         <p className="mb-2">Upload at least 2 non-policy documents to run analysis.</p>
-                        <p className="text-[10px] text-zinc-500">
+                        <p className="text-xs text-zinc-500">
                           Discrepancy detection compares statements across multiple documents.
                         </p>
                       </div>
                     ) : (
                       <div>
                         <p className="mb-2">No analysis run yet.</p>
-                        <p className="text-[10px] text-zinc-500">
+                        <p className="text-xs text-zinc-500">
                           Click "Analyze Documents" to compare statements and detect discrepancies.
                         </p>
                       </div>
@@ -2094,22 +2095,22 @@ export function ERCaseDetail() {
                     {discrepancies.map((disc, i) => (
                       <div key={i} className="border-b border-zinc-100 pb-8 last:border-0 last:pb-0">
                         <div className="flex items-center gap-3 mb-2">
-                          <span className={`text-[10px] uppercase tracking-wide font-medium ${
+                          <span className={`text-xs uppercase tracking-wide font-medium ${
                             disc.severity === 'high' ? 'text-red-600' :
                             disc.severity === 'medium' ? 'text-amber-600' :
                             'text-zinc-500'
                           }`}>
                             {disc.severity} Severity
                           </span>
-                          <span className="text-[10px] text-zinc-400 uppercase tracking-wide">•</span>
-                          <span className="text-[10px] text-zinc-500 uppercase tracking-wide">{disc.type}</span>
+                          <span className="text-xs text-zinc-400">•</span>
+                          <span className="text-xs text-zinc-500 uppercase tracking-wide">{disc.type}</span>
                         </div>
                         
-                        <p className="text-zinc-900 dark:text-zinc-100 text-sm font-medium mb-4">{disc.description}</p>
+                        <p className="text-zinc-900 text-base font-medium mb-4 leading-relaxed">{disc.description}</p>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
                           <div>
-                            <p className="text-[10px] text-zinc-500 mb-1 uppercase tracking-wide">
+                            <p className="text-xs text-zinc-500 mb-1 uppercase tracking-wide">
                               {disc.statement_1?.speaker || 'Source 1'}
                             </p>
                             <p className="text-xs text-zinc-600 italic border-l border-zinc-200 pl-2">
@@ -2117,7 +2118,7 @@ export function ERCaseDetail() {
                             </p>
                           </div>
                           <div>
-                            <p className="text-[10px] text-zinc-500 mb-1 uppercase tracking-wide">
+                            <p className="text-xs text-zinc-500 mb-1 uppercase tracking-wide">
                               {disc.statement_2?.speaker || 'Source 2'}
                             </p>
                             <p className="text-xs text-zinc-600 italic border-l border-zinc-200 pl-2">
@@ -2126,7 +2127,7 @@ export function ERCaseDetail() {
                           </div>
                         </div>
                         
-                        <div className="text-xs text-zinc-500 bg-zinc-50 p-3 rounded-sm">
+                        <div className="text-sm text-zinc-600 bg-stone-50 p-3 rounded-xl">
                           {disc.analysis}
                         </div>
                       </div>
@@ -2143,14 +2144,14 @@ export function ERCaseDetail() {
                   <button
                     onClick={handleRunPolicyCheck}
                     disabled={analysisLoading === 'policy' || completedNonPolicyDocs.length === 0}
-                    className="text-[10px] uppercase tracking-wider font-medium text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50"
+                    className="text-xs uppercase tracking-wider font-medium text-zinc-900 hover:text-zinc-600 disabled:opacity-50"
                   >
                     {analysisLoading === 'policy' ? 'Checking...' : 'Run Policy Check'}
                   </button>
                 </div>
 
                 {policiesChecked > 0 && (
-                  <div className="flex items-center gap-3 text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
+                  <div className="flex items-center gap-3 text-xs font-mono text-zinc-600 uppercase tracking-wider">
                     <span>{policiesChecked} {policiesChecked === 1 ? 'source' : 'sources'} checked</span>
                     <span className="text-zinc-700">·</span>
                     <span className={violations.length > 0 ? 'text-red-400' : 'text-emerald-400'}>
@@ -2166,13 +2167,13 @@ export function ERCaseDetail() {
                         <RefreshCw size={20} className="animate-spin text-zinc-500" />
                         <span>{analysisProgress?.step || 'Checking evidence against policy documents...'}</span>
                         {analysisProgress?.detail && (
-                          <span className="text-[10px] text-zinc-500">{analysisProgress.detail}</span>
+                          <span className="text-xs text-zinc-500">{analysisProgress.detail}</span>
                         )}
                       </div>
                     ) : policiesChecked > 0 ? (
                       <div>
                         <p className="mb-2">No policy violations identified.</p>
-                        <p className="text-[10px] text-zinc-500">
+                        <p className="text-xs text-zinc-500">
                           Evidence was reviewed against all active company policies.
                           No clear violations were found.
                         </p>
@@ -2180,7 +2181,7 @@ export function ERCaseDetail() {
                     ) : (
                       <div>
                         <p className="mb-2">No policy check run yet.</p>
-                        <p className="text-[10px] text-zinc-500">
+                        <p className="text-xs text-zinc-500">
                           Click "Run Policy Check" to compare evidence against all active company policies.
                         </p>
                       </div>
@@ -2189,30 +2190,30 @@ export function ERCaseDetail() {
                 ) : (
                   <div className="space-y-8">
                     {violations.map((v, i) => (
-                      <div key={i} className="border-b border-zinc-100 dark:border-zinc-800 pb-8 last:border-0 last:pb-0">
+                      <div key={i} className="border-b border-zinc-100 pb-8 last:border-0 last:pb-0">
                         <div className="flex items-center gap-2 mb-2">
-                          <span className={`text-[10px] uppercase tracking-wide font-medium ${
+                          <span className={`text-xs uppercase tracking-wide font-medium ${
                             v.severity === 'major' ? 'text-red-600' : 'text-amber-600'
                           }`}>
                             {v.severity} Violation
                           </span>
                         </div>
 
-                        <h4 className="text-zinc-900 dark:text-zinc-100 text-sm font-medium mb-2">{v.policy_section}</h4>
+                        <h4 className="text-zinc-900 text-base font-medium mb-2">{v.policy_section}</h4>
                         <div className="mb-4">
-                          <p className="text-xs text-zinc-500 dark:text-zinc-400 italic">"{v.policy_text}"</p>
+                          <p className="text-sm text-zinc-600 italic">"{v.policy_text}"</p>
                         </div>
 
-                        <div className="space-y-3 pl-3 border-l-2 border-zinc-100 dark:border-zinc-700">
+                        <div className="space-y-3 pl-3 border-l-2 border-zinc-100">
                           {v.evidence.map((e, j) => (
                             <div key={j}>
-                              <p className="text-xs text-zinc-700 dark:text-zinc-300 mb-1">"{e.quote}"</p>
-                              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">→ {e.how_it_violates}</p>
+                              <p className="text-sm text-zinc-800 mb-1 leading-relaxed">"{e.quote}"</p>
+                              <p className="text-xs text-zinc-600 uppercase tracking-wide">→ {e.how_it_violates}</p>
                               {e.source_document_id && (() => {
                                 const doc = documents.find(d => d.id === e.source_document_id);
                                 const label = doc?.filename || e.source_document_id.slice(0, 8);
                                 return (
-                                  <p className="text-[9px] text-zinc-600 dark:text-zinc-600 font-mono mt-1">
+                                  <p className="text-[10px] text-zinc-500 font-mono mt-1">
                                     Source: {label}{e.location ? ` · ${e.location}` : ''}
                                   </p>
                                 );
@@ -2243,7 +2244,7 @@ export function ERCaseDetail() {
                       onChange={(e) => setSearchQuery(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                       placeholder="Search evidence using natural language..."
-                      className="w-full pl-10 pr-4 py-2 bg-white border border-zinc-200 rounded text-sm text-zinc-900 focus:outline-none focus:border-zinc-400 focus:ring-0"
+                      className="w-full pl-10 pr-4 py-2 bg-white border border-stone-300 rounded-xl text-sm text-zinc-900 focus:outline-none focus:border-stone-400 focus:ring-0"
                     />
                   </div>
                   <Button 
@@ -2258,19 +2259,19 @@ export function ERCaseDetail() {
                 {searchResults.length > 0 ? (
                   <div className="space-y-4">
                     {searchResults.map((result, i) => (
-                      <div key={i} className="bg-white border border-zinc-200 rounded p-4 shadow-sm hover:border-zinc-300 transition-colors">
+                      <div key={i} className="bg-stone-50 border border-stone-200 rounded-xl p-4 hover:border-stone-300 transition-colors">
                         <div className="flex items-center gap-2 mb-2">
-                          <span className={`px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded border ${DOC_TYPE_COLORS[result.document_type]}`}>
+                          <span className={`px-1.5 py-0.5 text-xs uppercase tracking-wide rounded-lg border ${DOC_TYPE_COLORS[result.document_type]}`}>
                             {result.document_type}
                           </span>
-                          <span className="text-xs text-zinc-500 font-medium">{result.source_file}</span>
-                          <span className="text-[10px] text-zinc-400 ml-auto font-mono">
+                          <span className="text-sm text-zinc-600 font-medium">{result.source_file}</span>
+                          <span className="text-xs text-zinc-500 ml-auto font-mono">
                             {(result.similarity * 100).toFixed(0)}% Match
                           </span>
                         </div>
                         
                         {result.speaker && (
-                          <p className="text-xs text-zinc-500 mb-1 font-medium uppercase tracking-wide">{result.speaker}</p>
+                          <p className="text-xs text-zinc-600 mb-1 font-medium uppercase tracking-wide">{result.speaker}</p>
                         )}
                         
                         <div className="text-sm text-zinc-800 leading-relaxed bg-zinc-50 p-3 rounded border border-zinc-100">
@@ -2279,7 +2280,7 @@ export function ERCaseDetail() {
                         
                         {result.line_range && (
                           <div className="mt-2 flex justify-end">
-                            <span className="text-[10px] text-zinc-400">Lines {result.line_range}</span>
+                            <span className="text-xs text-zinc-500">Lines {result.line_range}</span>
                           </div>
                         )}
                       </div>
@@ -2300,25 +2301,25 @@ export function ERCaseDetail() {
 
       {/* Upload Modal */}
       {showUploadModal && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-white shadow-2xl rounded-sm flex flex-col max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-4 border-b border-zinc-100">
-              <h3 className="text-sm font-light text-zinc-900 uppercase tracking-wider">Upload Document</h3>
-              <button 
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md bg-stone-100 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-stone-200">
+              <h3 className="text-sm font-bold text-zinc-900 uppercase tracking-wider">Upload Document</h3>
+              <button
                 onClick={() => setShowUploadModal(false)}
-                className="text-zinc-400 hover:text-zinc-600 transition-colors"
+                className="text-stone-400 hover:text-zinc-900 transition-colors"
               >
                 <X size={20} />
               </button>
             </div>
             
-            <div className="p-6 space-y-4">
+            <div className="px-6 py-6 space-y-4">
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Document Type</label>
+                <label className="block text-xs uppercase tracking-wider text-stone-500 mb-1.5">Document Type</label>
                 <select
                   value={uploadDocType}
                   onChange={(e) => setUploadDocType(e.target.value as ERDocumentType)}
-                  className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 focus:outline-none focus:border-zinc-400"
+                  className="w-full bg-white border border-stone-300 rounded-xl text-zinc-900 text-sm px-3 py-2 focus:outline-none focus:border-stone-400"
                 >
                   {DOC_TYPE_OPTIONS.map(opt => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -2340,41 +2341,41 @@ export function ERCaseDetail() {
 
       {/* Export Modal */}
       {showExportModal && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm bg-white border border-zinc-200 shadow-2xl">
-            <div className="flex items-center justify-between p-5 border-b border-zinc-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm bg-stone-100 rounded-2xl shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-stone-200">
               <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-wider">Export Case File</h3>
               <button
                 onClick={() => { setShowExportModal(false); setExportPassword(''); setExportError(null); }}
-                className="text-zinc-400 hover:text-zinc-600 transition-colors"
+                className="text-stone-400 hover:text-zinc-900 transition-colors"
               >
                 <X size={16} />
               </button>
             </div>
-            <div className="p-5 space-y-4">
-              <p className="text-[11px] text-zinc-500">
+            <div className="px-6 py-6 space-y-4">
+              <p className="text-xs text-stone-500">
                 Export a password-protected PDF containing the full case file, documents, analyses, and notes.
               </p>
               {exportError && (
-                <div className="text-[11px] text-red-500 bg-red-50 px-3 py-2 border border-red-200">
+                <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-xl border border-red-200">
                   {exportError}
                 </div>
               )}
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">PDF Password</label>
+                <label className="block text-xs uppercase tracking-wider text-stone-500 mb-1.5">PDF Password</label>
                 <input
                   type="password"
                   value={exportPassword}
                   onChange={(e) => setExportPassword(e.target.value)}
                   placeholder="Min 4 characters"
-                  className="w-full px-3 py-2 bg-white border border-zinc-200 text-sm text-zinc-900 focus:outline-none focus:border-zinc-400"
+                  className="w-full bg-white border border-stone-300 text-zinc-900 text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400"
                   onKeyDown={(e) => { if (e.key === 'Enter' && exportPassword.length >= 4) handleExport(); }}
                 />
               </div>
               <button
                 onClick={handleExport}
                 disabled={exporting || exportPassword.length < 4}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-zinc-900 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Download size={14} />
                 {exporting ? 'Generating…' : 'Export Case File'}
@@ -2383,6 +2384,7 @@ export function ERCaseDetail() {
           </div>
         </div>
       , document.body)}
+    </div>
     </div>
   );
 }

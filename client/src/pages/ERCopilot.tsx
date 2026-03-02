@@ -24,17 +24,17 @@ const STATUS_TABS: { label: string; value: ERCaseStatus | 'all' }[] = [
 ];
 
 const STATUS_COLORS: Record<ERCaseStatus, string> = {
-  open: 'text-white',
-  in_review: 'text-amber-400',
-  pending_determination: 'text-orange-400',
-  closed: 'text-zinc-500',
+  open: 'text-zinc-900',
+  in_review: 'text-stone-600',
+  pending_determination: 'text-stone-500',
+  closed: 'text-stone-400',
 };
 
 const STATUS_DOTS: Record<ERCaseStatus, string> = {
-  open: 'bg-white',
-  in_review: 'bg-amber-500',
-  pending_determination: 'bg-orange-500',
-  closed: 'bg-zinc-700',
+  open: 'bg-zinc-900',
+  in_review: 'bg-stone-500',
+  pending_determination: 'bg-stone-400',
+  closed: 'bg-stone-300',
 };
 
 const STATUS_LABELS: Record<ERCaseStatus, string> = {
@@ -390,19 +390,20 @@ export function ERCopilot() {
   const isBusy = creating || uploading || savingAssistance;
 
   return (
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen bg-stone-300">
     <div className="max-w-5xl mx-auto">
-      <div className="flex justify-between items-start mb-12 border-b border-white/10 pb-8">
+      <div className="flex justify-between items-start mb-12 pb-8">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">ER Copilot</h1>
+            <h1 className="text-4xl font-bold tracking-tighter text-zinc-900 uppercase">ER Copilot</h1>
             <FeatureGuideTrigger guideId="er-copilot" />
           </div>
-          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Investigation Assistant</p>
+          <p className="text-xs text-stone-500 mt-2 font-mono tracking-wide uppercase">Investigation Assistant</p>
         </div>
         <button
           data-tour="er-new-case"
           onClick={openCreateModal}
-          className="px-6 py-2 bg-white text-black text-xs font-bold hover:bg-zinc-200 uppercase tracking-wider transition-colors"
+          className="px-5 py-2 text-xs uppercase tracking-wider font-bold bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all"
         >
           New Case
         </button>
@@ -418,15 +419,15 @@ export function ERCopilot() {
         storageKey="er-wizard-collapsed-v1"
       />
 
-      <div data-tour="er-tabs" className="flex gap-8 mb-px border-b border-white/10">
+      <div data-tour="er-tabs" className="flex gap-8 mb-px border-b border-stone-200">
         {STATUS_TABS.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setActiveTab(tab.value)}
             className={`pb-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2 ${
               activeTab === tab.value
-                ? 'border-white text-white'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                ? 'border-zinc-900 text-zinc-900'
+                : 'border-transparent text-stone-400 hover:text-stone-600'
             }`}
           >
             {tab.label}
@@ -436,21 +437,21 @@ export function ERCopilot() {
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[20vh]">
-          <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading...</div>
+          <div className="text-xs text-stone-400 uppercase tracking-wider animate-pulse">Loading...</div>
         </div>
       ) : cases.length === 0 ? (
-        <div className="text-center py-24 border border-dashed border-white/10 bg-white/5 mt-8">
-          <div className="text-xs text-zinc-500 mb-4 font-mono uppercase tracking-wider">No cases found</div>
+        <div className="text-center py-24 border border-dashed border-stone-300 bg-stone-100 rounded-2xl mt-8">
+          <div className="text-xs text-stone-500 mb-4 font-mono uppercase tracking-wider">No cases found</div>
           <button
             onClick={openCreateModal}
-            className="text-xs text-white hover:text-zinc-300 font-bold uppercase tracking-wider underline underline-offset-4"
+            className="text-xs text-zinc-900 hover:text-stone-600 font-bold uppercase tracking-wider underline underline-offset-4"
           >
             Create first case
           </button>
         </div>
       ) : (
-        <div data-tour="er-case-list" className="space-y-px bg-white/10 border border-white/10 mt-8">
-          <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950 border-b border-white/10">
+        <div data-tour="er-case-list" className="bg-stone-100 rounded-2xl overflow-hidden mt-8">
+          <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-stone-400 uppercase tracking-widest font-bold border-b border-stone-200">
             <div className="w-8"></div>
             <div className="w-24">ID</div>
             <div className="flex-1">Title</div>
@@ -459,27 +460,28 @@ export function ERCopilot() {
             <div className="w-8"></div>
           </div>
 
+          <div className="divide-y divide-stone-200">
           {cases.map((erCase) => (
             <div
               data-tour="er-case-row"
               key={erCase.id}
-              className="group flex items-center gap-4 py-4 px-4 cursor-pointer bg-zinc-950 hover:bg-zinc-900 transition-colors"
+              className="group flex items-center gap-4 py-4 px-4 cursor-pointer hover:bg-stone-50 transition-colors"
               onClick={() => navigate(`/app/matcha/er-copilot/${erCase.id}`)}
             >
               <div className="w-8 flex justify-center">
-                <div className={`w-1.5 h-1.5 rounded-full ${STATUS_DOTS[erCase.status] || 'bg-zinc-700'}`} />
+                <div className={`w-1.5 h-1.5 rounded-full ${STATUS_DOTS[erCase.status] || 'bg-stone-300'}`} />
               </div>
 
-              <div className="w-24 text-[10px] text-zinc-500 font-mono group-hover:text-zinc-400">
+              <div className="w-24 text-[10px] text-stone-500 font-mono">
                 {erCase.case_number}
               </div>
 
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-bold text-white truncate group-hover:text-zinc-300">
+                <h3 className="text-sm font-bold text-zinc-900 truncate group-hover:text-stone-600">
                   {erCase.title}
                 </h3>
                 {erCase.description && (
-                  <p className="text-[10px] text-zinc-500 mt-1 truncate max-w-lg font-mono">{erCase.description}</p>
+                  <p className="text-[10px] text-stone-400 mt-1 truncate max-w-lg font-mono">{erCase.description}</p>
                 )}
               </div>
 
@@ -487,26 +489,27 @@ export function ERCopilot() {
                 {STATUS_LABELS[erCase.status]}
               </div>
 
-              <div className="w-24 text-right text-[10px] text-zinc-500 font-mono">
+              <div className="w-24 text-right text-[10px] text-stone-500 font-mono">
                 {formatDate(erCase.created_at)}
               </div>
 
-              <div className="w-8 flex justify-center text-zinc-600 group-hover:text-white">
+              <div className="w-8 flex justify-center text-stone-300 group-hover:text-zinc-900">
                 <ChevronRight className="w-4 h-4" />
               </div>
             </div>
           ))}
+          </div>
         </div>
       )}
 
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-white/10">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider">{STEP_TITLES[createStep]}</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg bg-stone-100 rounded-2xl shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-stone-200">
+              <h3 className="text-sm font-bold text-zinc-900 uppercase tracking-wider">{STEP_TITLES[createStep]}</h3>
               <button
                 onClick={resetCreateFlow}
-                className="text-zinc-500 hover:text-white transition-colors disabled:opacity-40"
+                className="text-stone-400 hover:text-zinc-900 transition-colors disabled:opacity-40"
                 disabled={isBusy}
               >
                 <X size={20} />
@@ -514,34 +517,34 @@ export function ERCopilot() {
             </div>
 
             {createError && (
-              <div className="px-6 pt-4 text-xs text-red-400 uppercase tracking-wide">
+              <div className="px-6 pt-4 text-xs text-red-600 uppercase tracking-wide">
                 {createError}
               </div>
             )}
 
-            <div className="p-8 space-y-6">
+            <div className="px-6 py-6 space-y-5">
               {createStep === 'details' && (
                 <>
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Case Title</label>
+                    <label className="block text-[10px] uppercase tracking-wider text-stone-500 mb-2">Case Title</label>
                     <input
                       type="text"
                       value={formData.title}
                       onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                       placeholder="e.g., Harassment Allegation - Sales Team"
-                      className="w-full px-0 py-2 bg-transparent border-b border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-white transition-colors"
+                      className="w-full bg-white border border-stone-300 text-zinc-900 text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors"
                       autoFocus
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Description</label>
+                    <label className="block text-[10px] uppercase tracking-wider text-stone-500 mb-2">Description</label>
                     <textarea
                       value={formData.description || ''}
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                       placeholder="Brief summary of the allegation or incident..."
                       rows={4}
-                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-white/20 resize-none transition-colors"
+                      className="w-full bg-white border border-stone-300 text-zinc-900 text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 resize-none transition-colors"
                     />
                   </div>
                 </>
@@ -549,8 +552,8 @@ export function ERCopilot() {
 
               {createStep === 'documents_prompt' && (
                 <div className="space-y-4">
-                  <p className="text-sm text-zinc-200">Do you have any documents to upload?</p>
-                  <p className="text-xs text-zinc-500 uppercase tracking-wide">
+                  <p className="text-sm text-zinc-900">Do you have any documents to upload?</p>
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">
                     You can upload interviews, emails, policies, or other evidence now.
                   </p>
                 </div>
@@ -559,11 +562,11 @@ export function ERCopilot() {
               {createStep === 'documents_upload' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Document Type</label>
+                    <label className="block text-[10px] uppercase tracking-wider text-stone-500 mb-1.5">Document Type</label>
                     <select
                       value={uploadDocType}
                       onChange={(e) => setUploadDocType(e.target.value as ERDocumentType)}
-                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500"
+                      className="w-full bg-white border border-stone-300 rounded-xl text-zinc-900 text-sm px-3 py-2 focus:outline-none focus:border-stone-400"
                       disabled={uploading}
                     >
                       {DOC_TYPE_OPTIONS.map(opt => (
@@ -581,11 +584,11 @@ export function ERCopilot() {
                     description="Supports PDF, DOCX, TXT, CSV, JSON"
                   />
 
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide">
+                  <p className="text-[10px] text-stone-500 uppercase tracking-wide">
                     Upload now, then choose whether to start investigation assistance.
                   </p>
                   {uploadedCount > 0 && (
-                    <p className="text-[10px] text-emerald-400 uppercase tracking-wide">
+                    <p className="text-[10px] text-zinc-900 uppercase tracking-wide">
                       Uploaded {uploadedCount} file{uploadedCount === 1 ? '' : 's'}.
                     </p>
                   )}
@@ -594,8 +597,8 @@ export function ERCopilot() {
 
               {createStep === 'assistance_prompt' && (
                 <div className="space-y-4">
-                  <p className="text-sm text-zinc-200">Would you like investigation assistance?</p>
-                  <p className="text-xs text-zinc-500 uppercase tracking-wide">
+                  <p className="text-sm text-zinc-900">Would you like investigation assistance?</p>
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">
                     {uploadedCount > 0
                       ? 'We can auto-review uploaded evidence and keep updating guidance as new documents are added.'
                       : 'We can start from your description and keep updating guidance as documents are uploaded later.'}
@@ -606,7 +609,7 @@ export function ERCopilot() {
               {createStep === 'assistance_questions' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                    <label className="block text-[10px] uppercase tracking-wider text-stone-500 mb-1.5">
                       {getPrimaryAssistanceQuestion(formData.description || '')}
                     </label>
                     <select
@@ -615,7 +618,7 @@ export function ERCopilot() {
                         ...assistanceData,
                         complaintFormat: e.target.value as 'verbal' | 'written' | 'both' | 'unknown',
                       })}
-                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500"
+                      className="w-full bg-white border border-stone-300 rounded-xl text-zinc-900 text-sm px-3 py-2 focus:outline-none focus:border-stone-400"
                     >
                       <option value="unknown">Unknown</option>
                       <option value="written">In writing</option>
@@ -625,7 +628,7 @@ export function ERCopilot() {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                    <label className="block text-[10px] uppercase tracking-wider text-stone-500 mb-1.5">
                       Immediate Safety Risk?
                     </label>
                     <select
@@ -634,7 +637,7 @@ export function ERCopilot() {
                         ...assistanceData,
                         immediateRisk: e.target.value as ERIntakeImmediateRisk,
                       })}
-                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500"
+                      className="w-full bg-white border border-stone-300 rounded-xl text-zinc-900 text-sm px-3 py-2 focus:outline-none focus:border-stone-400"
                     >
                       <option value="unsure">Unsure</option>
                       <option value="yes">Yes</option>
@@ -643,7 +646,7 @@ export function ERCopilot() {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                    <label className="block text-[10px] uppercase tracking-wider text-stone-500 mb-1.5">
                       Primary Goal
                     </label>
                     <select
@@ -652,7 +655,7 @@ export function ERCopilot() {
                         ...assistanceData,
                         objective: e.target.value as ERIntakeObjective,
                       })}
-                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500"
+                      className="w-full bg-white border border-stone-300 rounded-xl text-zinc-900 text-sm px-3 py-2 focus:outline-none focus:border-stone-400"
                     >
                       <option value="general">General guidance</option>
                       <option value="timeline">Build timeline first</option>
@@ -662,7 +665,7 @@ export function ERCopilot() {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                    <label className="block text-[10px] uppercase tracking-wider text-stone-500 mb-1.5">
                       Known Witnesses (Optional)
                     </label>
                     <input
@@ -670,12 +673,12 @@ export function ERCopilot() {
                       value={assistanceData.witnesses}
                       onChange={(e) => setAssistanceData({ ...assistanceData, witnesses: e.target.value })}
                       placeholder="Names or roles"
-                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-zinc-500"
+                      className="w-full bg-white border border-stone-300 text-zinc-900 text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                    <label className="block text-[10px] uppercase tracking-wider text-stone-500 mb-1.5">
                       Notes (Optional)
                     </label>
                     <textarea
@@ -683,20 +686,20 @@ export function ERCopilot() {
                       onChange={(e) => setAssistanceData({ ...assistanceData, notes: e.target.value })}
                       rows={3}
                       placeholder="Anything the copilot should prioritize"
-                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-zinc-500 resize-none"
+                      className="w-full bg-white border border-stone-300 text-zinc-900 text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 resize-none transition-colors"
                     />
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="flex justify-between items-center p-6 border-t border-white/10 bg-zinc-900/50">
+            <div className="flex justify-between items-center px-6 py-4 border-t border-stone-200">
               <div>
                 {createStep !== 'details' ? (
                   <button
                     onClick={handleBackStep}
                     disabled={isBusy}
-                    className="px-4 py-2 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40 flex items-center gap-1"
+                    className="px-4 py-2 text-stone-500 hover:text-zinc-900 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40 flex items-center gap-1"
                   >
                     <ArrowLeft size={12} />
                     Back
@@ -705,7 +708,7 @@ export function ERCopilot() {
                   <button
                     onClick={resetCreateFlow}
                     disabled={isBusy}
-                    className="px-4 py-2 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
+                    className="px-4 py-2 text-stone-500 hover:text-zinc-900 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
                   >
                     Cancel
                   </button>
@@ -716,7 +719,7 @@ export function ERCopilot() {
                 <button
                   onClick={handleCreateDetails}
                   disabled={creating || !formData.title?.trim() || !formData.description?.trim()}
-                  className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-5 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {creating ? 'Creating...' : 'Continue'}
                 </button>
@@ -726,13 +729,13 @@ export function ERCopilot() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setCreateStep('assistance_prompt')}
-                    className="px-4 py-2 text-zinc-300 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors"
+                    className="px-4 py-2 text-stone-500 hover:text-zinc-900 text-xs font-bold uppercase tracking-wider transition-colors"
                   >
                     No
                   </button>
                   <button
                     onClick={() => setCreateStep('documents_upload')}
-                    className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+                    className="px-5 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-all"
                   >
                     Yes, Upload
                   </button>
@@ -743,7 +746,7 @@ export function ERCopilot() {
                 <button
                   onClick={() => setCreateStep('assistance_prompt')}
                   disabled={uploading}
-                  className="px-4 py-2 text-zinc-300 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
+                  className="px-4 py-2 text-stone-500 hover:text-zinc-900 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
                 >
                   Skip Upload
                 </button>
@@ -753,13 +756,13 @@ export function ERCopilot() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleGoToCase(false)}
-                    className="px-4 py-2 text-zinc-300 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors"
+                    className="px-4 py-2 text-stone-500 hover:text-zinc-900 text-xs font-bold uppercase tracking-wider transition-colors"
                   >
                     No
                   </button>
                   <button
                     onClick={() => setCreateStep('assistance_questions')}
-                    className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+                    className="px-5 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-all"
                   >
                     Yes
                   </button>
@@ -770,7 +773,7 @@ export function ERCopilot() {
                 <button
                   onClick={handleSaveAssistanceIntake}
                   disabled={savingAssistance}
-                  className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-5 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {savingAssistance ? 'Starting...' : 'Start Assistance'}
                 </button>
@@ -779,6 +782,7 @@ export function ERCopilot() {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }
