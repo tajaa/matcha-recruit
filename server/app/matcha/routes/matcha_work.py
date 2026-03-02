@@ -63,11 +63,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_feature("matcha_work"))])
 public_router = APIRouter()
 
-VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys())
+VALID_OFFER_LETTER_FIELDS = set(OfferLetterDocument.model_fields.keys()) - {"company_logo_url"}
 VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
-VALID_WORKBOOK_FIELDS = set(WorkbookDocument.model_fields.keys())
+VALID_WORKBOOK_FIELDS = set(WorkbookDocument.model_fields.keys()) - {"images"}
 VALID_ONBOARDING_FIELDS = set(OnboardingDocument.model_fields.keys())
-VALID_PRESENTATION_FIELDS = set(PresentationDocument.model_fields.keys())
+VALID_PRESENTATION_FIELDS = set(PresentationDocument.model_fields.keys()) - {"cover_image_url"}
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 
@@ -995,18 +995,18 @@ async def send_message(
     if thread["status"] == "archived":
         raise HTTPException(status_code=400, detail="Cannot send messages to an archived thread")
 
+    if current_user.role != "admin":
+        await billing_service.check_credits(company_id)
+
     # Save user message
     user_msg = await doc_svc.add_message(thread_id, "user", body.content)
 
     # Fetch message history for context (sliding window handled by AI provider)
-    messages = await doc_svc.get_thread_messages(thread_id)
+    messages = await doc_svc.get_thread_messages(thread_id, limit=20)
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
     _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)
-
-    if current_user.role != "admin":
-        await billing_service.check_credits(company_id)
 
     # Call AI with company context
     ai_provider = get_ai_provider()
@@ -1117,18 +1117,18 @@ async def send_message_stream(
     if thread["status"] == "archived":
         raise HTTPException(status_code=400, detail="Cannot send messages to an archived thread")
 
+    if current_user.role != "admin":
+        await billing_service.check_credits(company_id)
+
     # Save user message before streaming
     user_msg = await doc_svc.add_message(thread_id, "user", body.content)
 
     # Fetch message history for context (sliding window handled by AI provider)
-    messages = await doc_svc.get_thread_messages(thread_id)
+    messages = await doc_svc.get_thread_messages(thread_id, limit=20)
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
     _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)
-
-    if current_user.role != "admin":
-        await billing_service.check_credits(company_id)
 
     ai_provider = get_ai_provider()
     profile = await doc_svc.get_company_profile_for_ai(company_id)
@@ -1694,7 +1694,7 @@ async def update_thread_title(
             UPDATE mw_threads
             SET title=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, created_at, updated_at
+            RETURNING id, title, status, version, is_pinned, created_at, updated_at, current_state
             """,
             body.title,
             thread_id,
@@ -1704,7 +1704,14 @@ async def update_thread_title(
         raise HTTPException(status_code=404, detail="Thread not found")
     await doc_svc.sync_element_record(thread_id)
 
-    return ThreadListItem(**dict(row))
+    row_dict = dict(row)
+    current_state = _json_object(row_dict.pop("current_state", {}))
+    return ThreadListItem(
+        **{
+            **row_dict,
+            "task_type": _infer_skill_from_state(current_state),
+        }
+    )
 
 
 @router.post("/threads/{thread_id}/pin", response_model=ThreadListItem)

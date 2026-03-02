@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { matchaWork } from '../api/client';
-import type { MWThread, MWThreadStatus } from '../types/matcha-work';
+import type { MWTaskType, MWThread, MWThreadStatus } from '../types/matcha-work';
 
 type StatusFilter = 'all' | MWThreadStatus;
 
@@ -24,6 +24,24 @@ function sortThreads(rows: MWThread[]): MWThread[] {
     if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
     return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
   });
+}
+
+function getThreadTypeLabel(taskType: MWTaskType): string {
+  switch (taskType) {
+    case 'chat':
+      return 'chat';
+    case 'review':
+      return 'anonymized review';
+    case 'workbook':
+      return 'HR workbook';
+    case 'onboarding':
+      return 'employee onboarding';
+    case 'presentation':
+      return 'presentation';
+    case 'offer_letter':
+    default:
+      return 'offer letter';
+  }
 }
 
 export default function MatchaWorkChats() {
@@ -183,7 +201,7 @@ export default function MatchaWorkChats() {
                   {thread.title}
                 </p>
                 <p className="text-xs text-zinc-500 light:text-black/50 mt-0.5">
-                  {thread.task_type === 'review' ? 'anonymized review' : thread.task_type === 'workbook' ? 'HR workbook' : thread.task_type === 'onboarding' ? 'employee onboarding' : 'offer letter'} · v{thread.version} · Updated{' '}
+                  {getThreadTypeLabel(thread.task_type)} · v{thread.version} · Updated{' '}
                   {formatDate(thread.updated_at)}
                 </p>
               </div>

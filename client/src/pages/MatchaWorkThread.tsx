@@ -10,7 +10,7 @@ import type {
   MWUsageSummaryResponse,
   MWReviewRequestStatus,
 } from '../types/matcha-work';
-import type { HandbookListItem } from '../types';
+import type { CurrentUserResponse, HandbookListItem } from '../types';
 import { ApiRequestError, handbooks, matchaWork, adminPlatformSettings, getAccessToken } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { LogoUpload } from '../components/matcha-work/LogoUpload';
@@ -380,12 +380,76 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
 }
 
 // Simple thread cache — avoids re-fetching when switching between threads
-const threadCache = new Map<string, { thread: MWThreadDetail; versions: MWDocumentVersion[]; pdfUrl: string | null; ts: number }>();
+type ThreadCacheEntry = {
+  thread: MWThreadDetail;
+  versions: MWDocumentVersion[];
+  pdfUrl: string | null;
+  ts: number;
+};
+
+type AccountCacheEntry = {
+  usage: MWUsageSummaryResponse | null;
+  balance: number | null;
+  ts: number;
+};
+
+const threadCachesByScope = new Map<string, Map<string, ThreadCacheEntry>>();
 const THREAD_CACHE_TTL = 60_000; // 60 seconds
 
 // Account-level cache (usage + billing) — shared across threads
-let accountCache: { usage: MWUsageSummaryResponse | null; balance: number | null; ts: number } | null = null;
+const accountCacheByScope = new Map<string, AccountCacheEntry>();
 const ACCOUNT_CACHE_TTL = 120_000; // 2 minutes
+
+function getMatchaWorkCompanyId(profile: CurrentUserResponse['profile'] | null): string | null {
+  if (profile && 'company_id' in profile && typeof profile.company_id === 'string') {
+    return profile.company_id;
+  }
+  return null;
+}
+
+function getMatchaWorkCacheScope(userId: string | null | undefined, companyId: string | null): string | null {
+  if (!userId) return null;
+  return companyId ? `${userId}:${companyId}` : userId;
+}
+
+function getThreadCache(scope: string | null): Map<string, ThreadCacheEntry> | null {
+  if (!scope) return null;
+  let cache = threadCachesByScope.get(scope);
+  if (!cache) {
+    cache = new Map<string, ThreadCacheEntry>();
+    threadCachesByScope.set(scope, cache);
+  }
+  return cache;
+}
+
+function setThreadCacheEntry(scope: string | null, threadId: string, entry: ThreadCacheEntry): void {
+  const cache = getThreadCache(scope);
+  if (!cache) return;
+  cache.set(threadId, entry);
+  if (cache.size > 10) {
+    const oldest = [...cache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+    if (oldest) cache.delete(oldest[0]);
+  }
+}
+
+function invalidateThreadCacheEntry(scope: string | null, threadId: string): void {
+  getThreadCache(scope)?.delete(threadId);
+}
+
+function getAccountCache(scope: string | null): AccountCacheEntry | null {
+  if (!scope) return null;
+  return accountCacheByScope.get(scope) || null;
+}
+
+function setAccountCacheEntry(scope: string | null, entry: AccountCacheEntry): void {
+  if (!scope) return;
+  accountCacheByScope.set(scope, entry);
+}
+
+function invalidateAccountCache(scope: string | null): void {
+  if (!scope) return;
+  accountCacheByScope.delete(scope);
+}
 
 export default function MatchaWorkThread() {
   const { threadId } = useParams<{ threadId: string }>();
@@ -423,9 +487,10 @@ export default function MatchaWorkThread() {
   const [activeHandbooks, setActiveHandbooks] = useState<HandbookListItem[]>([]);
   const [selectedHandbook, setSelectedHandbook] = useState<{ id: string; title: string } | null>(null);
 
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [matchaWorkModelMode, setMatchaWorkModelMode] = useState<'light' | 'heavy'>('light');
+  const cacheScope = getMatchaWorkCacheScope(user?.id, getMatchaWorkCompanyId(profile));
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -438,9 +503,11 @@ export default function MatchaWorkThread() {
     if (!threadId) return;
     try {
       setTokenUsage(null);
+      setError(null);
+      const scopedThreadCache = getThreadCache(cacheScope);
 
       // Serve from cache instantly if available
-      const cached = threadCache.get(threadId);
+      const cached = scopedThreadCache?.get(threadId);
       if (cached && Date.now() - cached.ts < THREAD_CACHE_TTL) {
         setThread(cached.thread);
         setMessages(cached.thread.messages);
@@ -457,9 +524,10 @@ export default function MatchaWorkThread() {
       }
 
       // Load account-level data from cache or fetch
-      if (accountCache && Date.now() - accountCache.ts < ACCOUNT_CACHE_TTL) {
-        setUsageSummary(accountCache.usage);
-        setCreditBalance(accountCache.balance);
+      const cachedAccount = getAccountCache(cacheScope);
+      if (cachedAccount && Date.now() - cachedAccount.ts < ACCOUNT_CACHE_TTL) {
+        setUsageSummary(cachedAccount.usage);
+        setCreditBalance(cachedAccount.balance);
       } else {
         // Fire these in background — don't block thread rendering
         Promise.all([
@@ -469,7 +537,7 @@ export default function MatchaWorkThread() {
           const balance = typeof billingData?.credits_remaining === 'number' ? billingData.credits_remaining : null;
           setUsageSummary(usageData);
           setCreditBalance(balance);
-          accountCache = { usage: usageData, balance, ts: Date.now() };
+          setAccountCacheEntry(cacheScope, { usage: usageData, balance, ts: Date.now() });
         });
       }
 
@@ -503,18 +571,18 @@ export default function MatchaWorkThread() {
       }
 
       // Update cache
-      threadCache.set(threadId, { thread: threadData, versions: verData, pdfUrl: pdfUrlResult, ts: Date.now() });
-      // Evict old entries (keep last 10 threads)
-      if (threadCache.size > 10) {
-        const oldest = [...threadCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
-        if (oldest) threadCache.delete(oldest[0]);
-      }
+      setThreadCacheEntry(cacheScope, threadId, {
+        thread: threadData,
+        versions: verData,
+        pdfUrl: pdfUrlResult,
+        ts: Date.now(),
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load thread');
     } finally {
       setLoading(false);
     }
-  }, [threadId]);
+  }, [cacheScope, threadId]);
 
   useEffect(() => {
     loadThread();
@@ -597,6 +665,8 @@ export default function MatchaWorkThread() {
         if (event.type === 'complete') {
           const resp = event.data;
           receivedComplete = true;
+          invalidateThreadCacheEntry(cacheScope, threadId);
+          invalidateAccountCache(cacheScope);
           setMessages((prev) => [...prev, resp.user_message, resp.assistant_message]);
           setThread((prev) =>
             prev
@@ -743,6 +813,7 @@ export default function MatchaWorkThread() {
     try {
       setError(null);
       const resp = await matchaWork.uploadLogo(threadId, file);
+      invalidateThreadCacheEntry(cacheScope, threadId);
       // Update thread state immediately
       setThread((prev) =>
         prev
@@ -774,6 +845,7 @@ export default function MatchaWorkThread() {
     try {
       setSending(true);
       const resp = await matchaWork.revert(threadId, version);
+      invalidateThreadCacheEntry(cacheScope, threadId);
       setMessages((prev) => [...prev, resp.user_message, resp.assistant_message]);
       if (thread) {
         setThread((prev) => prev ? { ...prev, current_state: resp.current_state, version: resp.version, ...(resp.task_type ? { task_type: resp.task_type } : {}) } : prev);
@@ -794,6 +866,7 @@ export default function MatchaWorkThread() {
     try {
       setFinalizing(true);
       const resp = await matchaWork.finalize(threadId);
+      invalidateThreadCacheEntry(cacheScope, threadId);
       setThread((prev) => prev ? { ...prev, status: 'finalized' } : prev);
       if (resp.pdf_url) setPdfUrl(resp.pdf_url);
       setShowFinalizeConfirm(false);
@@ -810,6 +883,7 @@ export default function MatchaWorkThread() {
       setSavingDraft(true);
       setError(null);
       const resp = await matchaWork.saveDraft(threadId);
+      invalidateThreadCacheEntry(cacheScope, threadId);
       setThread((prev) =>
         prev ? { ...prev, linked_offer_letter_id: resp.linked_offer_letter_id } : prev
       );
@@ -859,6 +933,7 @@ export default function MatchaWorkThread() {
         custom_message: reviewEmailMessage.trim() || undefined,
       });
       setShowReviewRequestsModal(false);
+      invalidateThreadCacheEntry(cacheScope, threadId);
       await loadThread();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send review requests');
@@ -901,6 +976,7 @@ export default function MatchaWorkThread() {
       setGeneratingPresentation(true);
       setError(null);
       await matchaWork.generatePresentation(threadId);
+      invalidateThreadCacheEntry(cacheScope, threadId);
       await loadThread();
       setActiveTab('preview');
     } catch (err) {
@@ -929,6 +1005,7 @@ export default function MatchaWorkThread() {
         `Distributed handbook v${result.handbook_version} to ${result.assigned_count} employees (${result.skipped_existing_count} already assigned).`
       );
       setShowHandbookDistributeModal(false);
+      invalidateThreadCacheEntry(cacheScope, threadId);
       await loadThread();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send handbook signatures');

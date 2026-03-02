@@ -522,6 +522,12 @@ async def get_thread(thread_id: UUID, company_id: UUID) -> Optional[dict]:
         return d
 
 
+def _thread_list_item_from_row(row: dict) -> dict:
+    item = dict(row)
+    item["task_type"] = _infer_skill_from_state(_parse_jsonb(item.pop("current_state", {})))
+    return item
+
+
 async def list_threads(
     company_id: UUID,
     status: Optional[str] = None,
@@ -532,7 +538,7 @@ async def list_threads(
         if status:
             rows = await conn.fetch(
                 """
-                SELECT id, title, status, version, is_pinned, created_at, updated_at
+                SELECT id, title, status, version, is_pinned, created_at, updated_at, current_state
                 FROM mw_threads
                 WHERE company_id=$1 AND status=$2
                 ORDER BY is_pinned DESC, updated_at DESC
@@ -546,7 +552,7 @@ async def list_threads(
         else:
             rows = await conn.fetch(
                 """
-                SELECT id, title, status, version, is_pinned, created_at, updated_at
+                SELECT id, title, status, version, is_pinned, created_at, updated_at, current_state
                 FROM mw_threads
                 WHERE company_id=$1
                 ORDER BY is_pinned DESC, updated_at DESC
@@ -556,7 +562,7 @@ async def list_threads(
                 limit,
                 offset,
             )
-        return [dict(r) for r in rows]
+        return [_thread_list_item_from_row(dict(r)) for r in rows]
 
 
 async def list_elements(
@@ -702,7 +708,7 @@ async def set_thread_pinned(
             UPDATE mw_threads
             SET is_pinned=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, created_at, updated_at
+            RETURNING id, title, status, version, is_pinned, created_at, updated_at, current_state
             """,
             is_pinned,
             thread_id,
@@ -711,22 +717,39 @@ async def set_thread_pinned(
         if row is None:
             return None
         await _sync_element_for_thread(conn, thread_id)
-        return dict(row)
+        return _thread_list_item_from_row(dict(row))
 
 
 
 
-async def get_thread_messages(thread_id: UUID) -> list[dict]:
+async def get_thread_messages(thread_id: UUID, limit: int | None = None) -> list[dict]:
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, thread_id, role, content, version_created, created_at
-            FROM mw_messages
-            WHERE thread_id=$1
-            ORDER BY created_at ASC
-            """,
-            thread_id,
-        )
+        if limit is not None:
+            rows = await conn.fetch(
+                """
+                SELECT id, thread_id, role, content, version_created, created_at
+                FROM (
+                    SELECT id, thread_id, role, content, version_created, created_at
+                    FROM mw_messages
+                    WHERE thread_id=$1
+                    ORDER BY created_at DESC
+                    LIMIT $2
+                ) recent_messages
+                ORDER BY created_at ASC
+                """,
+                thread_id,
+                limit,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, thread_id, role, content, version_created, created_at
+                FROM mw_messages
+                WHERE thread_id=$1
+                ORDER BY created_at ASC
+                """,
+                thread_id,
+            )
         return [dict(r) for r in rows]
 
 
@@ -1644,6 +1667,30 @@ async def send_offer_letter_draft(
 async def generate_workbook_presentation(thread_id: UUID, company_id: UUID) -> dict:
     """Generate slide-ready presentation state from a workbook thread."""
     async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT current_state, status
+            FROM mw_threads
+            WHERE id=$1 AND company_id=$2
+            """,
+            thread_id,
+            company_id,
+        )
+    if row is None:
+        raise ValueError("Thread not found")
+    if row["status"] == "archived":
+        raise ValueError("Cannot generate a presentation for an archived thread")
+    if row["status"] == "finalized":
+        raise ValueError("Cannot generate a presentation for a finalized thread")
+
+    initial_state = _parse_jsonb(row["current_state"])
+    initial_presentation = _build_workbook_presentation_state(initial_state)
+    cover_url = await generate_cover_image(
+        presentation_title=initial_presentation.get("title") or "Presentation",
+        subtitle=initial_presentation.get("subtitle"),
+    )
+
+    async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
@@ -1664,10 +1711,6 @@ async def generate_workbook_presentation(thread_id: UUID, company_id: UUID) -> d
 
             current_state = _parse_jsonb(row["current_state"])
             presentation = _build_workbook_presentation_state(current_state)
-            cover_url = await generate_cover_image(
-                presentation_title=presentation.get("title") or "Presentation",
-                subtitle=presentation.get("subtitle"),
-            )
             if cover_url:
                 presentation["cover_image_url"] = cover_url
             merged_state = {**current_state, "presentation": presentation}
@@ -1869,16 +1912,34 @@ async def send_review_requests(
     pending_requests: list[dict] = []
     async with get_connection() as conn:
         async with conn.transaction():
+            existing_rows = await conn.fetch(
+                """
+                SELECT recipient_email, status
+                FROM mw_review_requests
+                WHERE thread_id=$1
+                  AND recipient_email = ANY($2::text[])
+                FOR UPDATE
+                """,
+                thread_id,
+                normalized_recipients,
+            )
+            existing_status_by_email = {
+                str(row["recipient_email"]).strip().lower(): str(row["status"] or "pending")
+                for row in existing_rows
+            }
             await conn.execute(
                 """
                 DELETE FROM mw_review_requests
                 WHERE thread_id=$1
+                  AND status != 'submitted'
                   AND NOT (recipient_email = ANY($2::text[]))
                 """,
                 thread_id,
                 normalized_recipients,
             )
             for email in normalized_recipients:
+                if existing_status_by_email.get(email) == "submitted":
+                    continue
                 token = secrets.token_urlsafe(24)
                 row = await conn.fetchrow(
                     """
