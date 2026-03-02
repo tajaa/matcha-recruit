@@ -1779,18 +1779,18 @@ export function ERCaseDetail() {
                                   <p className="text-xs text-stone-400">Blocked by: {card.blockers.join('; ')}</p>
                                 )}
                                 <div className="flex items-center justify-between pt-2 border-t border-stone-200">
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-4">
                                     <button
                                       onClick={() => void updateGuidanceCardState(card.id, 'done')}
                                       disabled={state === 'done'}
-                                      className="text-xs uppercase tracking-wide text-stone-400 hover:text-zinc-900 disabled:opacity-30 transition-colors"
+                                      className="text-[10px] uppercase tracking-widest text-stone-400 hover:text-zinc-900 disabled:opacity-30 transition-colors font-bold"
                                     >
                                       Done
                                     </button>
                                     <button
                                       onClick={() => void updateGuidanceCardState(card.id, 'dismissed')}
                                       disabled={state === 'dismissed'}
-                                      className="text-xs uppercase tracking-wide text-stone-400 hover:text-zinc-900 disabled:opacity-30 transition-colors"
+                                      className="text-[10px] uppercase tracking-widest text-stone-400 hover:text-zinc-900 disabled:opacity-30 transition-colors font-bold"
                                     >
                                       Dismiss
                                     </button>
@@ -1798,9 +1798,9 @@ export function ERCaseDetail() {
                                   <button
                                     onClick={() => void handleGuidanceAction(card)}
                                     disabled={guidanceActionBusyId === card.id}
-                                    className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-40"
+                                    className="text-[10px] font-bold uppercase tracking-widest text-stone-500 hover:text-zinc-900 transition-colors disabled:opacity-40"
                                   >
-                                    {guidanceActionBusyId === card.id ? 'Working...' : card.action.label}
+                                    {guidanceActionBusyId === card.id ? 'Working…' : card.action.label} →
                                   </button>
                                 </div>
                               </div>
