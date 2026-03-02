@@ -82,12 +82,21 @@ async def _column_exists(conn, table_name: str, column_name: str) -> bool:
 
 
 async def _employee_compensation_fields_available(conn) -> bool:
-    has_pay_classification, has_pay_rate, has_work_city = await asyncio.gather(
-        _column_exists(conn, "employees", "pay_classification"),
-        _column_exists(conn, "employees", "pay_rate"),
-        _column_exists(conn, "employees", "work_city"),
+    columns = await conn.fetch(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'employees'
+          AND column_name = ANY($1::text[])
+        """,
+        ["pay_classification", "pay_rate", "work_city"],
     )
-    return has_pay_classification and has_pay_rate and has_work_city
+    existing = {row["column_name"] for row in columns}
+    return {
+        "pay_classification",
+        "pay_rate",
+        "work_city",
+    }.issubset(existing)
 
 
 def _employee_compensation_values(
