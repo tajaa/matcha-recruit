@@ -812,7 +812,7 @@ function ComplianceDashboardWidget() {
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const { user, hasFeature } = useAuth();
+  const { user, hasFeature, platformFeatures } = useAuth();
   const [ptoSummary, setPtoSummary] = useState<PTOSummary | null>(null);
   const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
   const [compliancePendingActions, setCompliancePendingActions] = useState<ComplianceDashboardItem[]>([]);
@@ -820,8 +820,10 @@ export function Dashboard() {
   useEffect(() => {
     const token = getAccessToken();
     const headers = { Authorization: `Bearer ${token}` };
+    const canUsePlatformFeature = (feature: string) =>
+      platformFeatures.size === 0 || platformFeatures.has(feature);
 
-    if (hasFeature('time_off')) {
+    if (hasFeature('time_off') && canUsePlatformFeature('time_off')) {
       fetch(`${API_BASE}/employees/pto/summary`, { headers })
         .then(r => r.ok ? r.json() : null)
         .then(data => data && setPtoSummary(data))
@@ -832,9 +834,12 @@ export function Dashboard() {
       .then(r => r.ok ? r.json() : null)
       .then(data => data && setDashStats(data))
       .catch(err => console.error('Failed to fetch dashboard stats:', err));
-  }, [hasFeature]);
+  }, [hasFeature, platformFeatures]);
 
-  const showComplianceImpact = user?.role === 'client' && hasFeature('compliance');
+  const showComplianceImpact =
+    user?.role === 'client' &&
+    hasFeature('compliance') &&
+    (platformFeatures.size === 0 || platformFeatures.has('compliance'));
   const isLight = useIsLightMode();
   const t = isLight ? LT : DK;
 

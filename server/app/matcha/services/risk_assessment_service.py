@@ -11,7 +11,7 @@ Computes a live risk score across 5 dimensions for a company:
 import json
 import logging
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from typing import Any, Optional
 from uuid import UUID
 
@@ -336,12 +336,12 @@ async def compute_legislative_dimension(company_id: UUID, conn) -> DimensionResu
         JOIN business_locations bl ON bl.jurisdiction_id = jl.jurisdiction_id
         WHERE bl.company_id = $1
           AND jl.current_status IN ('passed', 'signed', 'effective_soon')
-          AND jl.expected_effective_date > NOW()
+          AND jl.expected_effective_date > CURRENT_DATE
         """,
         company_id,
     )
 
-    now = datetime.now(timezone.utc)
+    today = datetime.now(timezone.utc).date()
     within_30 = 0
     within_90 = 0
     within_180 = 0
@@ -350,9 +350,12 @@ async def compute_legislative_dimension(company_id: UUID, conn) -> DimensionResu
         effective_date = row["expected_effective_date"]
         if effective_date is None:
             continue
-        if hasattr(effective_date, 'tzinfo') and effective_date.tzinfo is None:
-            effective_date = effective_date.replace(tzinfo=timezone.utc)
-        days_until = (effective_date - now).days
+        if isinstance(effective_date, datetime):
+            effective_date = effective_date.date()
+        if not isinstance(effective_date, date):
+            continue
+
+        days_until = (effective_date - today).days
         if days_until < 30:
             within_30 += 1
         elif days_until < 90:

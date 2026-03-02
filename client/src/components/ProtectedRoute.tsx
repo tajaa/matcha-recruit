@@ -10,8 +10,11 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, roles, requiredFeature, anyRequiredFeature }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, user, hasFeature } = useAuth();
+  const { isAuthenticated, isLoading, user, hasFeature, platformFeatures } = useAuth();
   const location = useLocation();
+
+  const hasPlatformFeature = (feature: string) =>
+    platformFeatures.size === 0 || platformFeatures.has(feature);
 
   if (isLoading) {
     return (
@@ -34,14 +37,14 @@ export function ProtectedRoute({ children, roles, requiredFeature, anyRequiredFe
   }
 
   // Check feature flags (admin always passes via hasFeature)
-  if (requiredFeature && !hasFeature(requiredFeature)) {
+  if (requiredFeature && (!hasFeature(requiredFeature) || !hasPlatformFeature(requiredFeature))) {
     if (user?.role === 'employee') {
       return <Navigate to="/app/portal-unavailable" replace />;
     }
     return <Navigate to="/app" replace />;
   }
 
-  if (anyRequiredFeature && !anyRequiredFeature.some(f => hasFeature(f))) {
+  if (anyRequiredFeature && !anyRequiredFeature.some(f => hasFeature(f) && hasPlatformFeature(f))) {
     if (user?.role === 'employee') {
       return <Navigate to="/app/portal-unavailable" replace />;
     }
