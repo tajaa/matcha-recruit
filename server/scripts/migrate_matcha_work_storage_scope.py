@@ -78,7 +78,12 @@ async def migrate_pdf_cache() -> tuple[int, int]:
             print(f"skipped unsupported pdf cache url: thread={thread_id} url={pdf_url}")
             continue
 
-        pdf_bytes = await storage.download_file(pdf_url)
+        try:
+            pdf_bytes = await storage.download_file(pdf_url)
+        except Exception as exc:
+            print(f"skipped unreadable pdf: thread={thread_id} url={pdf_url}: {exc}")
+            continue
+
         filename = doc_svc._storage_filename(
             pdf_url,
             f"v{row['version']}{'_draft' if row['is_draft'] else ''}.pdf",
