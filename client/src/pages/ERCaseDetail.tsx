@@ -1734,11 +1734,12 @@ export function ERCaseDetail() {
                   )}
 
                   {latestGuidanceNote ? (
-                    <div className="space-y-2">
-                      <div className="border border-emerald-200 bg-emerald-50 p-3 rounded-xl">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs uppercase tracking-wide text-emerald-700">Next Steps</span>
-                          <span className="text-xs text-zinc-500">
+                    <div className="space-y-3">
+                      {/* Summary card */}
+                      <div className="bg-stone-100 border border-stone-200 rounded-2xl p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-xs uppercase tracking-widest text-stone-500 font-bold">Summary</span>
+                          <span className="text-xs text-stone-400 font-mono">
                             {new Date(latestGuidancePayload?.generated_at || latestGuidanceNote.created_at).toLocaleString('en-US', {
                               month: 'short',
                               day: 'numeric',
@@ -1747,59 +1748,60 @@ export function ERCaseDetail() {
                             })}
                           </span>
                         </div>
-                        <p className="text-sm text-zinc-800 whitespace-pre-wrap leading-relaxed">
+                        <p className="text-sm text-zinc-800 leading-relaxed">
                           {latestGuidancePayload?.summary || latestGuidanceNote.content}
                         </p>
                         {latestGuidancePayload && (
-                          <p className="mt-1 text-xs text-zinc-500">
-                            Model: {latestGuidancePayload.model}{latestGuidancePayload.fallback_used ? ' (fallback)' : ''}
+                          <p className="mt-3 text-xs text-stone-400 font-mono">
+                            {latestGuidancePayload.model}{latestGuidancePayload.fallback_used ? ' · fallback' : ''}
                           </p>
                         )}
                       </div>
 
+                      {/* Action cards */}
                       {latestGuidancePayload?.cards.length ? (
-                        <div className="space-y-2">
+                        <div className="space-y-3">
                           {latestGuidancePayload.cards.map((card) => {
                             const state = getCardState(card.id);
-                            const stateLabel = state === 'done' ? 'Completed' : state === 'dismissed' ? 'Dismissed' : 'Pending';
                             return (
-                              <div key={card.id} className="border border-stone-200 bg-stone-50 p-2.5 rounded-xl space-y-2">
-                                <div className="flex items-center justify-between gap-2">
-                                  <p className="text-sm font-medium text-zinc-900">{card.title}</p>
-                                  <span className={`px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded ${guidancePriorityStyle(card.priority)}`}>
+                              <div key={card.id} className={`bg-stone-100 border rounded-2xl p-4 space-y-2 transition-opacity ${
+                                state === 'done' || state === 'dismissed' ? 'opacity-50' : 'border-stone-200'
+                              }`}>
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="text-sm font-bold text-zinc-900 leading-snug">{card.title}</p>
+                                  <span className={`flex-shrink-0 px-2 py-0.5 text-[10px] uppercase tracking-wide font-bold rounded-lg ${guidancePriorityStyle(card.priority)}`}>
                                     {card.priority}
                                   </span>
                                 </div>
-                                <p className="text-sm text-zinc-800">{card.recommendation}</p>
-                                <p className="text-xs text-zinc-600">{card.rationale}</p>
+                                <p className="text-sm text-zinc-700 leading-relaxed">{card.recommendation}</p>
+                                <p className="text-xs text-stone-500 leading-relaxed">{card.rationale}</p>
                                 {card.blockers.length > 0 && (
-                                  <p className="text-xs text-zinc-600">Blockers: {card.blockers.join('; ')}</p>
+                                  <p className="text-xs text-stone-400">Blocked by: {card.blockers.join('; ')}</p>
                                 )}
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="text-xs uppercase tracking-wide text-zinc-500">{stateLabel}</span>
-                                  <div className="flex items-center gap-2">
+                                <div className="flex items-center justify-between pt-2 border-t border-stone-200">
+                                  <div className="flex items-center gap-3">
                                     <button
                                       onClick={() => void updateGuidanceCardState(card.id, 'done')}
-                                      className="text-xs uppercase tracking-wide text-emerald-700 hover:text-emerald-600 disabled:opacity-40"
                                       disabled={state === 'done'}
+                                      className="text-xs uppercase tracking-wide text-stone-400 hover:text-zinc-900 disabled:opacity-30 transition-colors"
                                     >
-                                      Mark Done
+                                      Done
                                     </button>
                                     <button
                                       onClick={() => void updateGuidanceCardState(card.id, 'dismissed')}
-                                      className="text-xs uppercase tracking-wide text-zinc-500 hover:text-zinc-700 disabled:opacity-40"
                                       disabled={state === 'dismissed'}
+                                      className="text-xs uppercase tracking-wide text-stone-400 hover:text-zinc-900 disabled:opacity-30 transition-colors"
                                     >
                                       Dismiss
                                     </button>
-                                    <button
-                                      onClick={() => void handleGuidanceAction(card)}
-                                      className="text-xs uppercase tracking-wide text-blue-700 hover:text-blue-600 disabled:opacity-50"
-                                      disabled={guidanceActionBusyId === card.id}
-                                    >
-                                      {guidanceActionBusyId === card.id ? 'Working...' : card.action.label}
-                                    </button>
                                   </div>
+                                  <button
+                                    onClick={() => void handleGuidanceAction(card)}
+                                    disabled={guidanceActionBusyId === card.id}
+                                    className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-40"
+                                  >
+                                    {guidanceActionBusyId === card.id ? 'Working...' : card.action.label}
+                                  </button>
                                 </div>
                               </div>
                             );
@@ -1808,7 +1810,7 @@ export function ERCaseDetail() {
                       ) : null}
                     </div>
                   ) : (
-                    <p className="text-sm text-zinc-500">No guidance yet. Complete assistance intake and analysis to generate next steps.</p>
+                    <p className="text-sm text-stone-500">No guidance yet. Complete assistance intake and analysis to generate next steps.</p>
                   )}
                 </>
               )}
