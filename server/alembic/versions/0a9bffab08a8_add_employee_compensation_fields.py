@@ -19,12 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
-        ALTER TABLE employees ADD COLUMN pay_classification VARCHAR(10)
-            CHECK (pay_classification IN ('hourly', 'exempt'));
-        ALTER TABLE employees ADD COLUMN pay_rate DECIMAL(12, 2);
-        ALTER TABLE employees ADD COLUMN work_city VARCHAR(100);
-    """)
+    op.execute("ALTER TABLE employees ADD COLUMN pay_classification VARCHAR(10) CHECK (pay_classification IN ('hourly', 'exempt'))")
+    op.execute("ALTER TABLE employees ADD COLUMN pay_rate DECIMAL(12, 2)")
+    op.execute("ALTER TABLE employees ADD COLUMN work_city VARCHAR(100)")
     op.create_index("idx_employees_pay_classification", "employees", ["pay_classification"])
     op.create_index("idx_employees_work_city", "employees", ["work_city"])
 
@@ -32,8 +29,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("idx_employees_work_city", table_name="employees")
     op.drop_index("idx_employees_pay_classification", table_name="employees")
-    op.execute("""
-        ALTER TABLE employees DROP COLUMN IF EXISTS work_city;
-        ALTER TABLE employees DROP COLUMN IF EXISTS pay_rate;
-        ALTER TABLE employees DROP COLUMN IF EXISTS pay_classification;
-    """)
+    op.execute("ALTER TABLE employees DROP COLUMN IF EXISTS work_city")
+    op.execute("ALTER TABLE employees DROP COLUMN IF EXISTS pay_rate")
+    op.execute("ALTER TABLE employees DROP COLUMN IF EXISTS pay_classification")
