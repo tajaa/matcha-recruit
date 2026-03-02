@@ -5,19 +5,12 @@ struct PreviewPanelView: View {
     let currentState: [String: AnyCodable]
     let pdfData: Data?
     let isLoading: Bool
+    let taskType: MWTaskType?
     var threadId: String?
     @Binding var selectedSlideIndex: Int?
 
-    private var inferredSkill: String {
-        if currentState["candidate_name"] != nil || currentState["position_title"] != nil ||
-           currentState["salary"] != nil {
-            return "offer_letter"
-        }
-        if currentState["overall_rating"] != nil || currentState["review_title"] != nil { return "review" }
-        if currentState["sections"] != nil || currentState["workbook_title"] != nil { return "workbook" }
-        if currentState["presentation_title"] != nil || currentState["slides"] != nil { return "presentation" }
-        if currentState["employees"] != nil { return "onboarding" }
-        return "chat"
+    private var resolvedTaskType: MWTaskType {
+        taskType ?? inferMWTaskType(from: currentState)
     }
 
     var body: some View {
@@ -32,18 +25,18 @@ struct PreviewPanelView: View {
                         .foregroundColor(.secondary)
                 }
             } else {
-                switch inferredSkill {
-                case "offer_letter":
+                switch resolvedTaskType {
+                case .offerLetter:
                     OfferLetterPreview(pdfData: pdfData)
-                case "review":
+                case .review:
                     ReviewPreview(state: currentState)
-                case "workbook":
+                case .workbook:
                     WorkbookPreview(state: currentState)
-                case "presentation":
+                case .presentation:
                     PresentationPreview(state: currentState, threadId: threadId, selectedSlideIndex: $selectedSlideIndex)
-                case "onboarding":
+                case .onboarding:
                     OnboardingPreview(state: currentState)
-                default:
+                case .chat:
                     EmptyPreviewView()
                 }
             }

@@ -16,6 +16,7 @@ struct ThreadDetailView: View {
                     currentState: viewModel.currentState,
                     pdfData: viewModel.pdfData,
                     isLoading: viewModel.isLoadingPDF,
+                    taskType: viewModel.thread?.taskType,
                     threadId: viewModel.thread?.id,
                     selectedSlideIndex: Bindable(viewModel).selectedSlideIndex
                 )

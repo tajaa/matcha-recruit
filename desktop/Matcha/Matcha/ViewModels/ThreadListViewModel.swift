@@ -10,6 +10,17 @@ class ThreadListViewModel {
 
     private let service = MatchaWorkService.shared
 
+    private func sortThreads(_ rows: [MWThread]) -> [MWThread] {
+        rows.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned && !rhs.isPinned
+            }
+            let lhsDate = parseMWDate(lhs.lastActivityAt) ?? .distantPast
+            let rhsDate = parseMWDate(rhs.lastActivityAt) ?? .distantPast
+            return lhsDate > rhsDate
+        }
+    }
+
     var filteredThreads: [MWThread] {
         guard let filter = filterStatus, !filter.isEmpty else { return threads }
         return threads.filter { $0.status == filter }
@@ -21,7 +32,7 @@ class ThreadListViewModel {
         do {
             let loaded = try await service.listThreads(status: filterStatus)
             await MainActor.run {
-                threads = loaded
+                threads = sortThreads(loaded)
                 isLoading = false
             }
         } catch {
@@ -39,7 +50,7 @@ class ThreadListViewModel {
                 initialMessage: initialMessage
             )
             await MainActor.run {
-                threads.insert(thread, at: 0)
+                threads = sortThreads([thread] + threads.filter { $0.id != thread.id })
             }
             return thread
         } catch {
@@ -51,11 +62,9 @@ class ThreadListViewModel {
     func togglePin(thread: MWThread) async {
         let newPinned = !thread.isPinned
         do {
-            try await service.setPinned(id: thread.id, pinned: newPinned)
+            let updated = try await service.setPinned(id: thread.id, pinned: newPinned)
             await MainActor.run {
-                if let idx = threads.firstIndex(where: { $0.id == thread.id }) {
-                    threads[idx].isPinned = newPinned
-                }
+                threads = sortThreads(threads.map { $0.id == thread.id ? updated : $0 })
             }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }

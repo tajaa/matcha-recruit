@@ -6,51 +6,155 @@ private extension Data {
     }
 }
 
+private struct MWCacheEntry<Value> {
+    let value: Value
+    let expiresAt: Date
+
+    var isValid: Bool {
+        expiresAt > Date()
+    }
+}
+
 class MatchaWorkService {
     static let shared = MatchaWorkService()
     private let client = APIClient.shared
     private let basePath = "/matcha-work"
+    private let cacheTTL: TimeInterval = 60
+    private var cacheScope: String?
+    private var threadListCache: [String: MWCacheEntry<[MWThread]>] = [:]
+    private var threadDetailCache: [String: MWCacheEntry<MWThreadDetail>] = [:]
+    private var versionsCache: [String: MWCacheEntry<[MWDocumentVersion]>] = [:]
+    private var pdfCache: [String: MWCacheEntry<Data>] = [:]
     private init() {}
 
-    func listThreads(status: String? = nil) async throws -> [MWThread] {
-        var path = "\(basePath)/threads?limit=50"
-        if let status = status { path += "&status=\(status)" }
-        return try await client.request(method: "GET", path: path)
+    private func cachedValue<Value>(_ entry: MWCacheEntry<Value>?) -> Value? {
+        guard let entry else { return nil }
+        guard entry.isValid else { return nil }
+        return entry.value
     }
 
-    func getThread(id: String) async throws -> MWThreadDetail {
-        return try await client.request(method: "GET", path: "\(basePath)/threads/\(id)")
+    private func makeListCacheKey(status: String?) -> String {
+        status ?? "__all__"
+    }
+
+    private func makePDFCacheKey(threadId: String, version: Int?) -> String {
+        "\(threadId):\(version.map(String.init) ?? "latest")"
+    }
+
+    func updateCacheScope(_ scope: String?) {
+        guard cacheScope != scope else { return }
+        cacheScope = scope
+        clearCaches()
+    }
+
+    func clearCaches() {
+        threadListCache.removeAll()
+        threadDetailCache.removeAll()
+        versionsCache.removeAll()
+        pdfCache.removeAll()
+    }
+
+    func invalidateThread(threadId: String) {
+        threadDetailCache.removeValue(forKey: threadId)
+        versionsCache.removeValue(forKey: threadId)
+        pdfCache = pdfCache.filter { !$0.key.hasPrefix("\(threadId):") }
+        threadListCache.removeAll()
+    }
+
+    func listThreads(status: String? = nil, forceRefresh: Bool = false) async throws -> [MWThread] {
+        let cacheKey = makeListCacheKey(status: status)
+        if !forceRefresh, let cached = cachedValue(threadListCache[cacheKey]) {
+            return cached
+        }
+
+        var path = "\(basePath)/threads?limit=50"
+        if let status = status { path += "&status=\(status)" }
+        let threads: [MWThread] = try await client.request(method: "GET", path: path)
+        threadListCache[cacheKey] = MWCacheEntry(
+            value: threads,
+            expiresAt: Date().addingTimeInterval(cacheTTL)
+        )
+        return threads
+    }
+
+    func getThread(id: String, forceRefresh: Bool = false) async throws -> MWThreadDetail {
+        if !forceRefresh, let cached = cachedValue(threadDetailCache[id]) {
+            return cached
+        }
+
+        let detail: MWThreadDetail = try await client.request(method: "GET", path: "\(basePath)/threads/\(id)")
+        threadDetailCache[id] = MWCacheEntry(
+            value: detail,
+            expiresAt: Date().addingTimeInterval(cacheTTL)
+        )
+        return detail
     }
 
     func createThread(title: String?, initialMessage: String?) async throws -> MWThread {
         let body = MWCreateThreadRequest(title: title, initialMessage: initialMessage)
         let response: MWCreateThreadResponse = try await client.request(method: "POST", path: "\(basePath)/threads", body: body)
+        threadListCache.removeAll()
         return response.toThread()
     }
 
     func deleteThread(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/threads/\(id)")
+        invalidateThread(threadId: id)
     }
 
-    func setPinned(id: String, pinned: Bool) async throws {
+    func setPinned(id: String, pinned: Bool) async throws -> MWThread {
         let body = MWPinRequest(pinned: pinned)
-        _ = try await client.requestData(method: "POST", path: "\(basePath)/threads/\(id)/pin", body: body)
+        let thread: MWThread = try await client.request(
+            method: "POST",
+            path: "\(basePath)/threads/\(id)/pin",
+            body: body
+        )
+        invalidateThread(threadId: id)
+        return thread
     }
 
-    func getVersions(threadId: String) async throws -> [MWDocumentVersion] {
-        return try await client.request(method: "GET", path: "\(basePath)/threads/\(threadId)/versions")
+    func getVersions(threadId: String, forceRefresh: Bool = false) async throws -> [MWDocumentVersion] {
+        if !forceRefresh, let cached = cachedValue(versionsCache[threadId]) {
+            return cached
+        }
+
+        let versions: [MWDocumentVersion] = try await client.request(
+            method: "GET",
+            path: "\(basePath)/threads/\(threadId)/versions"
+        )
+        versionsCache[threadId] = MWCacheEntry(
+            value: versions,
+            expiresAt: Date().addingTimeInterval(cacheTTL)
+        )
+        return versions
     }
 
-    func revertThread(id: String, version: Int) async throws -> MWThread {
+    func revertThread(id: String, version: Int) async throws -> MWSendMessageResponse {
         let body = MWRevertRequest(version: version)
-        return try await client.request(method: "POST", path: "\(basePath)/threads/\(id)/revert", body: body)
+        let response: MWSendMessageResponse = try await client.request(
+            method: "POST",
+            path: "\(basePath)/threads/\(id)/revert",
+            body: body
+        )
+        invalidateThread(threadId: id)
+        return response
     }
 
-    func finalizeThread(id: String) async throws -> MWThread {
-        return try await client.request(method: "POST", path: "\(basePath)/threads/\(id)/finalize")
+    func finalizeThread(id: String) async throws -> MWFinalizeResponse {
+        let response: MWFinalizeResponse = try await client.request(
+            method: "POST",
+            path: "\(basePath)/threads/\(id)/finalize"
+        )
+        invalidateThread(threadId: id)
+        return response
     }
 
-    func getPDFData(threadId: String, version: Int? = nil) async throws -> Data {
+    func getPDFData(threadId: String, version: Int? = nil, forceRefresh: Bool = false) async throws -> Data {
+        let cacheKey = makePDFCacheKey(threadId: threadId, version: version)
+        if !forceRefresh, let cached = cachedValue(pdfCache[cacheKey]) {
+            return cached
+        }
+
         var path = "\(basePath)/threads/\(threadId)/pdf"
         if let v = version { path += "?version=\(v)" }
         // Step 1: get the signed URL from the backend
@@ -58,6 +162,10 @@ class MatchaWorkService {
         // Step 2: download the actual PDF bytes from the CDN URL
         guard let url = URL(string: response.pdfUrl) else { throw APIError.invalidURL }
         let (data, _) = try await URLSession.shared.data(from: url)
+        pdfCache[cacheKey] = MWCacheEntry(
+            value: data,
+            expiresAt: Date().addingTimeInterval(cacheTTL)
+        )
         return data
     }
 
@@ -106,7 +214,9 @@ class MatchaWorkService {
             throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
         }
         struct ImagesResponse: Decodable { let images: [String] }
-        return try JSONDecoder().decode(ImagesResponse.self, from: data).images
+        let images = try JSONDecoder().decode(ImagesResponse.self, from: data).images
+        invalidateThread(threadId: threadId)
+        return images
     }
 
     func removeImage(threadId: String, imageUrl: String) async throws -> [String] {
@@ -114,6 +224,7 @@ class MatchaWorkService {
         let path = "\(basePath)/threads/\(threadId)/images?url=\(encoded)"
         struct ImagesResponse: Decodable { let images: [String] }
         let result: ImagesResponse = try await client.request(method: "DELETE", path: path)
+        invalidateThread(threadId: threadId)
         return result.images
     }
 }

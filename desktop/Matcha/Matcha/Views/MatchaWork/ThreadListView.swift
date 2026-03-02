@@ -1,5 +1,17 @@
 import SwiftUI
 
+private let threadListOutputFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    return formatter
+}()
+
+private func formatThreadDate(_ iso: String) -> String {
+    guard let date = parseMWDate(iso) else { return iso }
+    return threadListOutputFormatter.string(from: date)
+}
+
 struct ThreadListView: View {
     @Environment(AppState.self) private var appState
     @Bindable var viewModel: ThreadListViewModel
@@ -68,6 +80,7 @@ struct ThreadListView: View {
                     ForEach(filterOptions, id: \.label) { option in
                         Button {
                             viewModel.filterStatus = option.value
+                            Task { await viewModel.loadThreads() }
                         } label: {
                             Text(option.label)
                                 .font(.system(size: 11, weight: .medium))
@@ -153,6 +166,9 @@ struct ThreadListView: View {
         .confirmationDialog("Delete thread?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 if let thread = threadToDelete {
+                    if appState.selectedThreadId == thread.id {
+                        appState.selectedThreadId = nil
+                    }
                     Task { await viewModel.deleteThread(thread: thread) }
                 }
             }
@@ -189,10 +205,10 @@ struct ThreadRowView: View {
                 }
             }
             HStack(spacing: 6) {
-                Spacer()
-                Text("v\(thread.version)")
-                    .font(.system(size: 10, design: .monospaced))
+                Text("\(thread.resolvedTaskType.label) · v\(thread.version) · Updated \(formatThreadDate(thread.lastActivityAt))")
+                    .font(.system(size: 10))
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
             }
         }
         .padding(.vertical, 2)

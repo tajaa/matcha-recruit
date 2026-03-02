@@ -1,16 +1,87 @@
 import Foundation
 
+private let mwISO8601WithFractionalSeconds: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+}()
+
+private let mwISO8601DateFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter
+}()
+
+func parseMWDate(_ iso: String) -> Date? {
+    mwISO8601WithFractionalSeconds.date(from: iso) ?? mwISO8601DateFormatter.date(from: iso)
+}
+
+enum MWTaskType: String, Codable {
+    case offerLetter = "offer_letter"
+    case review
+    case workbook
+    case onboarding
+    case presentation
+    case chat
+
+    var label: String {
+        switch self {
+        case .chat:
+            return "chat"
+        case .review:
+            return "anonymized review"
+        case .workbook:
+            return "HR workbook"
+        case .onboarding:
+            return "employee onboarding"
+        case .presentation:
+            return "presentation"
+        case .offerLetter:
+            return "offer letter"
+        }
+    }
+}
+
+func inferMWTaskType(from state: [String: AnyCodable]) -> MWTaskType {
+    if state["candidate_name"] != nil || state["position_title"] != nil || state["salary"] != nil {
+        return .offerLetter
+    }
+    if state["overall_rating"] != nil || state["review_title"] != nil || state["review_request_statuses"] != nil {
+        return .review
+    }
+    if state["sections"] != nil || state["workbook_title"] != nil {
+        return .workbook
+    }
+    if state["presentation_title"] != nil || state["slides"] != nil {
+        return .presentation
+    }
+    if state["employees"] != nil || state["batch_status"] != nil {
+        return .onboarding
+    }
+    return .chat
+}
+
 struct MWThread: Codable, Identifiable {
     let id: String
     var title: String
+    var taskType: MWTaskType?
     var status: String
     var version: Int
     var isPinned: Bool
     let createdAt: String
     var updatedAt: String?
 
+    var resolvedTaskType: MWTaskType {
+        taskType ?? .chat
+    }
+
+    var lastActivityAt: String {
+        updatedAt ?? createdAt
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, title, status, version
+        case taskType = "task_type"
         case isPinned = "is_pinned"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -20,7 +91,9 @@ struct MWThread: Codable, Identifiable {
 struct MWCreateThreadResponse: Codable {
     let id: String
     let title: String
+    let taskType: MWTaskType?
     let status: String
+    let currentState: [String: AnyCodable]
     let version: Int
     let isPinned: Bool
     let createdAt: String
@@ -29,6 +102,8 @@ struct MWCreateThreadResponse: Codable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, version
+        case taskType = "task_type"
+        case currentState = "current_state"
         case isPinned = "is_pinned"
         case createdAt = "created_at"
         case assistantReply = "assistant_reply"
@@ -36,7 +111,7 @@ struct MWCreateThreadResponse: Codable {
     }
 
     func toThread() -> MWThread {
-        MWThread(id: id, title: title, status: status,
+        MWThread(id: id, title: title, taskType: taskType, status: status,
                  version: version, isPinned: isPinned, createdAt: createdAt, updatedAt: nil)
     }
 }
@@ -61,6 +136,7 @@ struct MWMessage: Codable, Identifiable {
 struct MWThreadDetail: Codable {
     let id: String
     let title: String
+    let taskType: MWTaskType?
     let status: String
     let version: Int
     let isPinned: Bool
@@ -69,13 +145,18 @@ struct MWThreadDetail: Codable {
     let messages: [MWMessage]
     let currentState: [String: AnyCodable]
 
+    var resolvedTaskType: MWTaskType {
+        taskType ?? inferMWTaskType(from: currentState)
+    }
+
     var thread: MWThread {
-        MWThread(id: id, title: title, status: status,
+        MWThread(id: id, title: title, taskType: taskType, status: status,
                  version: version, isPinned: isPinned, createdAt: createdAt, updatedAt: updatedAt)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, version, messages
+        case taskType = "task_type"
         case isPinned = "is_pinned"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -88,6 +169,7 @@ struct MWSendMessageResponse: Codable {
     let assistantMessage: MWMessage?
     let currentState: [String: AnyCodable]?
     let version: Int?
+    let taskType: MWTaskType?
     let pdfUrl: String?
     let tokenUsage: MWTokenUsage?
 
@@ -96,22 +178,23 @@ struct MWSendMessageResponse: Codable {
         case userMessage = "user_message"
         case assistantMessage = "assistant_message"
         case currentState = "current_state"
+        case taskType = "task_type"
         case pdfUrl = "pdf_url"
         case tokenUsage = "token_usage"
     }
 }
 
 struct MWTokenUsage: Codable {
-    let inputTokens: Int?
-    let outputTokens: Int?
+    let promptTokens: Int?
+    let completionTokens: Int?
     let totalTokens: Int?
     let costDollars: Double?
     let model: String?
     let estimated: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case inputTokens = "input_tokens"
-        case outputTokens = "output_tokens"
+        case promptTokens = "prompt_tokens"
+        case completionTokens = "completion_tokens"
         case totalTokens = "total_tokens"
         case costDollars = "cost_dollars"
         case model, estimated
@@ -119,7 +202,7 @@ struct MWTokenUsage: Codable {
 
     /// Formatted display string, e.g. "1.2k tok · $0.0012"
     var displayText: String? {
-        let total = totalTokens ?? ((inputTokens ?? 0) + (outputTokens ?? 0))
+        let total = totalTokens ?? ((promptTokens ?? 0) + (completionTokens ?? 0))
         guard total > 0 else { return nil }
         let tokStr = total >= 1000 ? String(format: "%.1fk", Double(total) / 1000.0) : "\(total)"
         let prefix = (estimated == true) ? "~" : ""
@@ -158,6 +241,21 @@ struct MWPinRequest: Codable {
 
 struct MWRevertRequest: Codable {
     let version: Int
+}
+
+struct MWFinalizeResponse: Codable {
+    let threadId: String
+    let status: String
+    let version: Int
+    let pdfUrl: String?
+    let linkedOfferLetterId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case threadId = "thread_id"
+        case status, version
+        case pdfUrl = "pdf_url"
+        case linkedOfferLetterId = "linked_offer_letter_id"
+    }
 }
 
 // AnyCodable for flexible JSON

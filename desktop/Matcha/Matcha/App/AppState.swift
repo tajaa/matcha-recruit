@@ -8,6 +8,12 @@ class AppState {
     var showSkills: Bool = false
 
     init() {
+        APIClient.shared.onUnauthorized = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.didLogout()
+            }
+        }
         Task {
             await restoreSession()
         }
@@ -17,6 +23,7 @@ class AppState {
     func didLogin(user: UserInfo) {
         currentUser = user
         isAuthenticated = true
+        MatchaWorkService.shared.updateCacheScope(user.id)
     }
 
     @MainActor
@@ -24,6 +31,8 @@ class AppState {
         currentUser = nil
         isAuthenticated = false
         selectedThreadId = nil
+        showSkills = false
+        MatchaWorkService.shared.updateCacheScope(nil)
         APIClient.shared.accessToken = nil
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)
         KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
