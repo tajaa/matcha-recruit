@@ -1185,6 +1185,16 @@ export function Compliance() {
                                                                                                     {RATE_TYPE_LABELS[req.rate_type] || req.rate_type.replace(/_/g, ' ')}
                                                                                                 </span>
                                                                                             )}
+                                                                                            {(req.affected_employee_count ?? 0) > 0 && (
+                                                                                                <span className="px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 text-[8px] uppercase tracking-widest text-violet-400 font-bold rounded-xs">
+                                                                                                    {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
+                                                                                                </span>
+                                                                                            )}
+                                                                                            {(req.min_wage_violation_count ?? 0) > 0 && (
+                                                                                                <span className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 text-[8px] uppercase tracking-widest text-red-400 font-bold rounded-xs">
+                                                                                                    {req.min_wage_violation_count} below threshold
+                                                                                                </span>
+                                                                                            )}
                                                                                             <span className="text-zinc-600 text-[9px] font-mono uppercase tracking-tighter">
                                                                                                 Node: {req.jurisdiction_name}
                                                                                             </span>
@@ -1277,6 +1287,11 @@ export function Compliance() {
                                                                     {confidence && (
                                                                         <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${confidence.color}`}>
                                                                             {confidence.tag} {confidence.label}
+                                                                        </span>
+                                                                    )}
+                                                                    {(alert.affected_employee_count ?? 0) > 0 && (
+                                                                        <span className="text-[8px] px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 rounded-xs font-bold uppercase tracking-widest text-violet-400">
+                                                                            {alert.affected_employee_count} employee{alert.affected_employee_count !== 1 ? 's' : ''}
                                                                         </span>
                                                                     )}
                                                                     {alert.created_at && (

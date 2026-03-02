@@ -78,11 +78,24 @@ class EmployeeCreateRequest(BaseModel):
     start_date: Optional[str] = None
     manager_id: Optional[UUID] = None
     skip_google_workspace_provisioning: bool = False
+    pay_classification: Optional[str] = None
+    pay_rate: Optional[Decimal] = None
+    work_city: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_work_email_present(self):
         if not self.work_email and not self.email:
             raise ValueError("work_email (or legacy email) is required")
+        return self
+
+    @model_validator(mode="after")
+    def validate_pay_fields(self):
+        if self.pay_rate is not None and self.pay_classification is None:
+            raise ValueError("pay_classification is required when pay_rate is provided")
+        if self.pay_classification is not None and self.pay_classification not in ("hourly", "exempt"):
+            raise ValueError("pay_classification must be 'hourly' or 'exempt'")
+        if self.pay_rate is not None and self.pay_rate < 0:
+            raise ValueError("pay_rate must be >= 0")
         return self
 
     def resolved_work_email(self) -> str:
@@ -102,6 +115,17 @@ class EmployeeUpdateRequest(BaseModel):
     manager_id: Optional[UUID] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    pay_classification: Optional[str] = None
+    pay_rate: Optional[Decimal] = None
+    work_city: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_pay_fields(self):
+        if self.pay_classification is not None and self.pay_classification not in ("hourly", "exempt"):
+            raise ValueError("pay_classification must be 'hourly' or 'exempt'")
+        if self.pay_rate is not None and self.pay_rate < 0:
+            raise ValueError("pay_rate must be >= 0")
+        return self
 
 
 class EmployeeListResponse(BaseModel):
@@ -119,6 +143,9 @@ class EmployeeListResponse(BaseModel):
     manager_name: Optional[str]
     user_id: Optional[UUID]
     invitation_status: Optional[str]
+    pay_classification: Optional[str] = None
+    pay_rate: Optional[float] = None
+    work_city: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -446,6 +473,7 @@ async def list_employees(
                 e.id, e.email, e.personal_email, e.first_name, e.last_name, e.work_state,
                 e.employment_type, e.start_date, e.termination_date,
                 e.manager_id, e.user_id, e.created_at,
+                e.pay_classification, e.pay_rate, e.work_city,
                 m.first_name || ' ' || m.last_name as manager_name,
                 (
                     SELECT status FROM employee_invitations
@@ -484,6 +512,9 @@ async def list_employees(
                 manager_name=row["manager_name"],
                 user_id=row["user_id"],
                 invitation_status=row["invitation_status"],
+                pay_classification=row["pay_classification"],
+                pay_rate=float(row["pay_rate"]) if row["pay_rate"] is not None else None,
+                work_city=row["work_city"],
                 created_at=row["created_at"],
             )
             for row in rows
@@ -521,11 +552,11 @@ async def create_employee(
         # Create employee record
         row = await conn.fetchrow(
             """
-            INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, address, manager_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, address, manager_id, pay_classification, pay_rate, work_city)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING id, org_id, email, first_name, last_name, work_state, employment_type,
                       start_date, termination_date, manager_id, user_id, personal_email, phone, address,
-                      emergency_contact, created_at, updated_at
+                      emergency_contact, pay_classification, pay_rate, work_city, created_at, updated_at
             """,
             company_id,
             work_email,
@@ -537,6 +568,9 @@ async def create_employee(
             start_date,
             request.address.strip() if request.address else None,
             request.manager_id,
+            request.pay_classification,
+            request.pay_rate,
+            request.work_city.strip() if request.work_city else None,
         )
 
         # Auto-assign active onboarding task templates to the new employee
@@ -613,6 +647,9 @@ async def create_employee(
             manager_name=None,
             user_id=row["user_id"],
             invitation_status=None,
+            pay_classification=row["pay_classification"],
+            pay_rate=float(row["pay_rate"]) if row["pay_rate"] is not None else None,
+            work_city=row["work_city"],
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -684,6 +721,9 @@ async def get_employee(
             manager_name=row["manager_name"],
             user_id=row["user_id"],
             invitation_status=row["invitation_status"],
+            pay_classification=row["pay_classification"],
+            pay_rate=float(row["pay_rate"]) if row["pay_rate"] is not None else None,
+            work_city=row["work_city"],
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -787,6 +827,21 @@ async def update_employee(
             values.append(request.address)
             param_num += 1
 
+        if request.pay_classification is not None:
+            updates.append(f"pay_classification = ${param_num}")
+            values.append(request.pay_classification)
+            param_num += 1
+
+        if request.pay_rate is not None:
+            updates.append(f"pay_rate = ${param_num}")
+            values.append(request.pay_rate)
+            param_num += 1
+
+        if request.work_city is not None:
+            updates.append(f"work_city = ${param_num}")
+            values.append(request.work_city.strip())
+            param_num += 1
+
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -833,6 +888,9 @@ async def update_employee(
             manager_name=manager_name,
             user_id=row["user_id"],
             invitation_status=invitation_status,
+            pay_classification=row["pay_classification"],
+            pay_rate=float(row["pay_rate"]) if row["pay_rate"] is not None else None,
+            work_city=row["work_city"],
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -917,7 +975,8 @@ async def download_bulk_upload_template(
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=[
         'email', 'personal_email', 'first_name', 'last_name', 'work_state',
-        'employment_type', 'start_date', 'manager_email', 'job_title', 'phone'
+        'employment_type', 'start_date', 'manager_email', 'job_title', 'phone',
+        'pay_classification', 'pay_rate', 'work_city'
     ])
     writer.writeheader()
 
@@ -932,7 +991,10 @@ async def download_bulk_upload_template(
         'start_date': '2026-02-01',
         'manager_email': 'manager@example.com',
         'job_title': 'Software Engineer',
-        'phone': '555-1234'
+        'phone': '555-1234',
+        'pay_classification': 'hourly',
+        'pay_rate': '18.50',
+        'work_city': 'San Francisco'
     })
 
     output.seek(0)
@@ -1069,6 +1131,44 @@ async def bulk_upload_employees_csv(
                 job_title = row.get('job_title', '').strip() or None
                 phone = row.get('phone', '').strip() or None
 
+                # Parse compensation fields
+                pay_classification = row.get('pay_classification', '').strip().lower() or None
+                if pay_classification and pay_classification not in ('hourly', 'exempt'):
+                    errors.append({
+                        "row": row_num,
+                        "email": email,
+                        "error": f"Invalid pay_classification '{pay_classification}'. Must be 'hourly' or 'exempt'"
+                    })
+                    failed += 1
+                    continue
+
+                pay_rate = None
+                pay_rate_str = row.get('pay_rate', '').strip()
+                if pay_rate_str:
+                    try:
+                        pay_rate = Decimal(pay_rate_str)
+                        if pay_rate < 0:
+                            raise ValueError("negative")
+                    except (ValueError, Exception):
+                        errors.append({
+                            "row": row_num,
+                            "email": email,
+                            "error": f"Invalid pay_rate '{pay_rate_str}'. Must be a non-negative number"
+                        })
+                        failed += 1
+                        continue
+
+                if pay_rate is not None and pay_classification is None:
+                    errors.append({
+                        "row": row_num,
+                        "email": email,
+                        "error": "pay_classification is required when pay_rate is provided"
+                    })
+                    failed += 1
+                    continue
+
+                work_city = row.get('work_city', '').strip() or None
+
                 # Parse start_date
                 start_date = None
                 if row.get('start_date', '').strip():
@@ -1093,13 +1193,15 @@ async def bulk_upload_employees_csv(
                     """
                     INSERT INTO employees (
                         org_id, email, personal_email, first_name, last_name, work_state,
-                        employment_type, start_date, manager_id, phone
+                        employment_type, start_date, manager_id, phone,
+                        pay_classification, pay_rate, work_city
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                     RETURNING id
                     """,
                     company_id, email, personal_email, first_name, last_name, work_state,
-                    employment_type, start_date, manager_id, phone
+                    employment_type, start_date, manager_id, phone,
+                    pay_classification, pay_rate, work_city
                 )
 
                 employee_ids.append(employee['id'])

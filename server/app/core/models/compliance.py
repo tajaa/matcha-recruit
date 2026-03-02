@@ -159,6 +159,8 @@ class RequirementResponse(BaseModel):
     effective_date: Optional[str] = None
     previous_value: Optional[str] = None
     last_changed_at: Optional[str] = None
+    affected_employee_count: Optional[int] = None
+    min_wage_violation_count: Optional[int] = None
 
 
 class AlertResponse(BaseModel):
@@ -179,6 +181,7 @@ class AlertResponse(BaseModel):
     alert_type: Optional[str] = None
     effective_date: Optional[str] = None
     metadata: Optional[dict] = None
+    affected_employee_count: Optional[int] = None
     created_at: str
     read_at: Optional[str] = None
 
@@ -210,6 +213,7 @@ class UpcomingLegislationResponse(BaseModel):
     source_name: Optional[str] = None
     confidence: Optional[float] = None
     days_until_effective: Optional[int] = None
+    affected_employee_count: Optional[int] = None
     created_at: str
 
 

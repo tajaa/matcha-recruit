@@ -18,6 +18,9 @@ export interface BatchEmployeeRow {
   employment_type: string;
   start_date: string;
   skip_google_workspace_provisioning: boolean;
+  pay_classification: string;
+  pay_rate: string;
+  work_city: string;
 }
 
 export interface BatchCreateError {
@@ -66,6 +69,9 @@ function createBatchRow(defaultStartDate: string): BatchEmployeeRow {
     employment_type: 'full_time',
     start_date: defaultStartDate,
     skip_google_workspace_provisioning: true,
+    pay_classification: '',
+    pay_rate: '',
+    work_city: '',
   };
 }
 
@@ -224,6 +230,9 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
           start_date: row.start_date,
           skip_google_workspace_provisioning:
             batchEmailMode === 'existing' ? row.skip_google_workspace_provisioning : false,
+          pay_classification: row.pay_classification || undefined,
+          pay_rate: row.pay_rate ? parseFloat(row.pay_rate) : undefined,
+          work_city: row.work_city || undefined,
         };
 
         try {

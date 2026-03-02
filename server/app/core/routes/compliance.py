@@ -412,6 +412,35 @@ async def get_upcoming_legislation_endpoint(
     return await get_upcoming_legislation(loc_uuid, company_id)
 
 
+@router.get("/locations/{location_id}/wage-violations")
+async def get_wage_violations_endpoint(
+    location_id: str,
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get detailed minimum wage violation data for employees at a location."""
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        loc_uuid = UUID(location_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid location ID")
+
+    from ..services.compliance_service import get_employee_impact_for_location
+
+    impact = await get_employee_impact_for_location(loc_uuid, company_id)
+    all_violations = [v for vs in impact["violations_by_rate_type"].values() for v in vs]
+    return {
+        "location_id": location_id,
+        "total_affected": impact["total_affected"],
+        "violation_count": len(all_violations),
+        "violations": all_violations,
+        "violations_by_rate_type": impact["violations_by_rate_type"],
+    }
+
+
 @router.get("/alerts", response_model=List[AlertResponse])
 async def get_alerts_endpoint(
     status: Optional[str] = None,

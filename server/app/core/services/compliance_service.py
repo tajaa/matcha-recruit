@@ -3634,6 +3634,131 @@ async def delete_location(location_id: UUID, company_id: UUID) -> bool:
         return result == "DELETE 1"
 
 
+async def get_employee_impact_for_location(
+    location_id: UUID, company_id: UUID
+) -> Dict[str, Any]:
+    """Calculate employee impact for a compliance location.
+
+    Returns total affected employees plus per-rate_type violation details.
+
+    Matching logic:
+    - If the location has a city, match employees whose work_city matches that city
+      AND work_state matches that state (precise city match).
+    - Also match office/store employees whose address contains the city name
+      (for employees created via the office workflow who lack work_state/work_city).
+    - If the location has no city (state-level only), match employees whose
+      work_state matches AND work_city is NULL (state-only remote workers).
+    """
+    from ...database import get_connection
+
+    async with get_connection() as conn:
+        # Get location state/city
+        loc = await conn.fetchrow(
+            "SELECT state, city FROM business_locations WHERE id = $1 AND company_id = $2",
+            location_id, company_id,
+        )
+        if not loc:
+            return {"total_affected": 0, "violations_by_rate_type": {}}
+
+        loc_state = loc["state"]
+        loc_city = loc["city"]
+
+        if loc_city:
+            # City-level location: match employees precisely in that city+state
+            employees = await conn.fetch(
+                """
+                SELECT id, first_name, last_name, pay_classification, pay_rate,
+                       work_city, work_state
+                FROM employees
+                WHERE org_id = $1
+                  AND termination_date IS NULL
+                  AND (
+                      -- Remote employees with explicit city+state
+                      (LOWER(work_city) = LOWER($2) AND UPPER(work_state) = UPPER($3))
+                      -- Office employees whose address contains the city (no work_state set)
+                      OR (work_state IS NULL AND work_city IS NULL
+                          AND address IS NOT NULL AND address ILIKE '%' || $2 || '%')
+                  )
+                """,
+                company_id, loc_city, loc_state,
+            )
+        else:
+            # State-level only location: match state-level remote employees
+            # who don't have a specific city (to avoid double-counting with city locations)
+            employees = await conn.fetch(
+                """
+                SELECT id, first_name, last_name, pay_classification, pay_rate,
+                       work_city, work_state
+                FROM employees
+                WHERE org_id = $1
+                  AND termination_date IS NULL
+                  AND UPPER(work_state) = UPPER($2)
+                  AND (work_city IS NULL OR work_city = '')
+                """,
+                company_id, loc_state,
+            )
+
+        total_affected = len(employees)
+
+        # Get minimum_wage requirements for this location to check violations
+        wage_reqs = await conn.fetch(
+            """
+            SELECT rate_type, numeric_value, jurisdiction_level
+            FROM compliance_requirements
+            WHERE location_id = $1 AND category = 'minimum_wage' AND numeric_value IS NOT NULL
+            ORDER BY
+                CASE jurisdiction_level
+                    WHEN 'city' THEN 1
+                    WHEN 'county' THEN 2
+                    WHEN 'state' THEN 3
+                    WHEN 'federal' THEN 4
+                    ELSE 5
+                END
+            """,
+            location_id,
+        )
+
+        # Build rate_type -> threshold map (first match wins = highest priority jurisdiction)
+        thresholds: Dict[str, float] = {}
+        for wr in wage_reqs:
+            rt = wr["rate_type"] or "general"
+            if rt not in thresholds:
+                thresholds[rt] = float(wr["numeric_value"])
+
+        # Check each employee for wage violations, bucketed by rate_type
+        violations_by_rate_type: Dict[str, list] = {}
+        for emp in employees:
+            if emp["pay_classification"] is None or emp["pay_rate"] is None:
+                continue
+
+            rate = float(emp["pay_rate"])
+            classification = emp["pay_classification"]
+
+            if classification == "hourly":
+                rate_type_key = "general"
+            elif classification == "exempt":
+                rate_type_key = "exempt_salary"
+            else:
+                continue
+
+            threshold = thresholds.get(rate_type_key)
+            if threshold is not None and rate < threshold:
+                violation = {
+                    "employee_id": str(emp["id"]),
+                    "employee_name": f"{emp['first_name']} {emp['last_name']}",
+                    "pay_classification": classification,
+                    "pay_rate": rate,
+                    "threshold": threshold,
+                    "shortfall": round(threshold - rate, 2),
+                }
+                violations_by_rate_type.setdefault(rate_type_key, []).append(violation)
+
+        return {
+            "total_affected": total_affected,
+            "violations_by_rate_type": violations_by_rate_type,
+        }
+
+
 async def get_location_requirements(
     location_id: UUID, company_id: UUID, category: Optional[str] = None
 ) -> List[RequirementResponse]:
@@ -3673,6 +3798,22 @@ async def get_location_requirements(
             row_dicts = _filter_city_level_requirements(row_dicts, state)
         _normalize_requirement_categories(row_dicts)
         filtered = await _filter_with_preemption(conn, row_dicts, state)
+
+        # Enrich with employee impact data
+        try:
+            impact = await get_employee_impact_for_location(location_id, company_id)
+            total_affected = impact["total_affected"]
+            violations_by_rt = impact["violations_by_rate_type"]
+        except Exception:
+            total_affected = None
+            violations_by_rt = {}
+
+        def _violation_count_for_row(row: dict) -> Optional[int]:
+            if row["category"] != "minimum_wage":
+                return None
+            rt = row.get("rate_type") or "general"
+            return len(violations_by_rt.get(rt, []))
+
         return [
             RequirementResponse(
                 id=str(row["id"]),
@@ -3695,6 +3836,8 @@ async def get_location_requirements(
                 last_changed_at=row["last_changed_at"].isoformat()
                 if row["last_changed_at"]
                 else None,
+                affected_employee_count=total_affected,
+                min_wage_violation_count=_violation_count_for_row(row),
             )
             for row in filtered
         ]
@@ -3740,6 +3883,39 @@ async def get_company_alerts(
                     return None
             return val
 
+        # Batch-resolve employee counts per location using precise matching
+        location_employee_counts: Dict[str, int] = {}
+        if rows:
+            location_ids = list({row["location_id"] for row in rows})
+            count_rows = await conn.fetch(
+                """
+                SELECT bl.id AS location_id, COUNT(e.id)::int AS emp_count
+                FROM business_locations bl
+                LEFT JOIN employees e
+                    ON e.org_id = bl.company_id
+                    AND e.termination_date IS NULL
+                    AND (
+                        -- City-level: precise city+state match
+                        (bl.city IS NOT NULL AND bl.city != ''
+                         AND LOWER(e.work_city) = LOWER(bl.city)
+                         AND UPPER(e.work_state) = UPPER(bl.state))
+                        -- City-level: office employees matched by address
+                        OR (bl.city IS NOT NULL AND bl.city != ''
+                            AND e.work_state IS NULL AND e.work_city IS NULL
+                            AND e.address IS NOT NULL AND e.address ILIKE '%' || bl.city || '%')
+                        -- State-only: employees with state but no specific city
+                        OR (bl.city IS NULL OR bl.city = '')
+                            AND UPPER(e.work_state) = UPPER(bl.state)
+                            AND (e.work_city IS NULL OR e.work_city = '')
+                    )
+                WHERE bl.id = ANY($1)
+                GROUP BY bl.id
+                """,
+                location_ids,
+            )
+            for cr in count_rows:
+                location_employee_counts[str(cr["location_id"])] = cr["emp_count"]
+
         return [
             AlertResponse(
                 id=str(row["id"]),
@@ -3765,6 +3941,7 @@ async def get_company_alerts(
                 if row.get("effective_date")
                 else None,
                 metadata=_parse_jsonb(row.get("metadata")),
+                affected_employee_count=location_employee_counts.get(str(row["location_id"])),
                 created_at=row["created_at"].isoformat(),
                 read_at=row["read_at"].isoformat() if row["read_at"] else None,
             )

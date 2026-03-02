@@ -59,6 +59,8 @@ export interface ComplianceRequirement {
     effective_date: string | null;
     previous_value: string | null;
     last_changed_at: string | null;
+    affected_employee_count: number | null;
+    min_wage_violation_count: number | null;
 }
 
 export interface VerificationSource {
@@ -86,6 +88,7 @@ export interface ComplianceAlert {
     alert_type: 'change' | 'new_requirement' | 'upcoming_legislation' | 'deadline_approaching' | null;
     effective_date: string | null;
     metadata: Record<string, unknown> | null;
+    affected_employee_count: number | null;
     created_at: string;
     read_at: string | null;
 }
@@ -117,6 +120,7 @@ export interface UpcomingLegislation {
     source_name: string | null;
     confidence: number | null;
     days_until_effective: number | null;
+    affected_employee_count: number | null;
     created_at: string;
 }
 

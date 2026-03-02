@@ -16,6 +16,9 @@ export interface NewEmployee {
   work_state: string;
   employment_type: string;
   start_date: string;
+  pay_classification: string;
+  pay_rate: string;
+  work_city: string;
 }
 
 function sanitizeEmailLocalPart(value: string): string {
@@ -51,6 +54,9 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
     work_state: '',
     employment_type: 'full_time',
     start_date: new Date().toISOString().split('T')[0],
+    pay_classification: '',
+    pay_rate: '',
+    work_city: '',
   });
   const [emailEntryMode, setEmailEntryMode] = useState<EmailEntryMode>(googleDomainAvailable ? 'generated' : 'existing');
   const [generatedEmailLocalPart, setGeneratedEmailLocalPart] = useState('');
@@ -71,6 +77,9 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
       work_state: '',
       employment_type: 'full_time',
       start_date: new Date().toISOString().split('T')[0],
+      pay_classification: '',
+      pay_rate: '',
+      work_city: '',
     });
     setEmailEntryMode(googleDomainAvailable ? 'generated' : 'existing');
     setGeneratedEmailLocalPart('');
@@ -137,6 +146,9 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
         start_date: newEmployee.start_date,
         skip_google_workspace_provisioning:
           emailEntryMode === 'existing' && skipGoogleAutoProvision,
+        pay_classification: newEmployee.pay_classification || undefined,
+        pay_rate: newEmployee.pay_rate ? parseFloat(newEmployee.pay_rate) : undefined,
+        work_city: newEmployee.work_city || undefined,
       };
       const response = await fetch(`${API_BASE}/employees`, {
         method: 'POST',

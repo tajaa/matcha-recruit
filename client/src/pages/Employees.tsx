@@ -24,6 +24,9 @@ interface Employee {
   manager_name: string | null;
   user_id: string | null;
   invitation_status: string | null;
+  pay_classification: string | null;
+  pay_rate: number | null;
+  work_city: string | null;
   created_at: string;
 }
 
@@ -36,6 +39,9 @@ interface NewEmployee {
   work_state: string;
   employment_type: string;
   start_date: string;
+  pay_classification: string;
+  pay_rate: string;
+  work_city: string;
 }
 
 type EmailEntryMode = 'generated' | 'existing';
@@ -54,6 +60,9 @@ interface BatchEmployeeRow {
   employment_type: string;
   start_date: string;
   skip_google_workspace_provisioning: boolean;
+  pay_classification: string;
+  pay_rate: string;
+  work_city: string;
 }
 
 interface BatchCreateError {
@@ -103,6 +112,9 @@ function createBatchRow(defaultStartDate: string): BatchEmployeeRow {
     employment_type: 'full_time',
     start_date: defaultStartDate,
     skip_google_workspace_provisioning: true,
+    pay_classification: '',
+    pay_rate: '',
+    work_city: '',
   };
 }
 
@@ -169,6 +181,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     work_state: '',
     employment_type: 'full_time',
     start_date: new Date().toISOString().split('T')[0],
+    pay_classification: '',
+    pay_rate: '',
+    work_city: '',
   });
   const [emailEntryMode, setEmailEntryMode] = useState<EmailEntryMode>('existing');
   const [generatedEmailLocalPart, setGeneratedEmailLocalPart] = useState('');
@@ -230,6 +245,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       work_state: '',
       employment_type: 'full_time',
       start_date: new Date().toISOString().split('T')[0],
+      pay_classification: '',
+      pay_rate: '',
+      work_city: '',
     });
     setEmailEntryMode(googleDomainAvailable ? 'generated' : 'existing');
     setGeneratedEmailLocalPart('');
@@ -443,6 +461,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         start_date: newEmployee.start_date,
         skip_google_workspace_provisioning:
           emailEntryMode === 'existing' && skipGoogleAutoProvision,
+        pay_classification: newEmployee.pay_classification || undefined,
+        pay_rate: newEmployee.pay_rate ? parseFloat(newEmployee.pay_rate) : undefined,
+        work_city: newEmployee.work_city || undefined,
       };
       const response = await fetch(`${API_BASE}/employees`, {
         method: 'POST',
@@ -741,6 +762,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           start_date: row.start_date,
           skip_google_workspace_provisioning:
             batchEmailMode === 'existing' ? row.skip_google_workspace_provisioning : false,
+          pay_classification: row.pay_classification || undefined,
+          pay_rate: row.pay_rate ? parseFloat(row.pay_rate) : undefined,
+          work_city: row.work_city || undefined,
         };
 
         try {
@@ -1082,7 +1106,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               <div className="grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t border-white/5 pt-4 lg:border-0 lg:pt-0">
                  <div className="lg:text-right">
                     <p className="text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden">Location</p>
-                    <p className="text-xs text-zinc-400 font-mono">{employee.work_state || '—'}</p>
+                    <p className="text-xs text-zinc-400 font-mono">{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
                  </div>
                  <div className="lg:text-right lg:w-24">
                     <p className="text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden">Type</p>
@@ -1488,6 +1512,60 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         </div>
                       </div>
 
+                      {workLocationMode === 'remote' && (
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                            Work City
+                          </label>
+                          <input
+                            type="text"
+                            value={newEmployee.work_city}
+                            onChange={(e) =>
+                              setNewEmployee({ ...newEmployee, work_city: e.target.value })
+                            }
+                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                            placeholder="San Francisco"
+                          />
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                            Pay Classification
+                          </label>
+                          <select
+                            value={newEmployee.pay_classification}
+                            onChange={(e) =>
+                              setNewEmployee({ ...newEmployee, pay_classification: e.target.value })
+                            }
+                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors"
+                          >
+                            <option value="">Not specified</option>
+                            <option value="hourly">Hourly</option>
+                            <option value="exempt">Exempt (Salaried)</option>
+                          </select>
+                        </div>
+                        {newEmployee.pay_classification && (
+                          <div>
+                            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                              {newEmployee.pay_classification === 'hourly' ? 'Hourly Rate ($)' : 'Annual Salary ($)'}
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={newEmployee.pay_rate}
+                              onChange={(e) =>
+                                setNewEmployee({ ...newEmployee, pay_rate: e.target.value })
+                              }
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700"
+                              placeholder={newEmployee.pay_classification === 'hourly' ? '18.50' : '65000'}
+                            />
+                          </div>
+                        )}
+                      </div>
+
                       <div>
                         <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
                           Start Date
@@ -1510,7 +1588,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         <p>
                           <span className="text-zinc-200">Location:</span>{' '}
                           {workLocationMode === 'remote'
-                            ? `Remote (${newEmployee.work_state || 'state required'})`
+                            ? `Remote (${newEmployee.work_city ? `${newEmployee.work_city}, ` : ''}${newEmployee.work_state || 'state required'})`
                             : `Office/Store (${newEmployee.office_location || 'location required'})`}
                         </p>
                       </div>
