@@ -1,4 +1,5 @@
 import os
+import urllib.request
 from typing import Optional
 from uuid import uuid4
 
@@ -71,6 +72,9 @@ class StorageService:
 
         if self.cloudfront_domain and path.startswith(f"https://{self.cloudfront_domain}/"):
             return True
+        # Recognize legacy CloudFront URLs from previous distributions
+        if path.startswith("https://") and ".cloudfront.net/" in path:
+            return True
         if path.startswith("s3://"):
             return True
         try:
@@ -138,6 +142,15 @@ class StorageService:
                 return response["Body"].read()
             except ClientError as e:
                 raise RuntimeError(f"Failed to download from S3: {e}")
+
+        # Handle legacy CloudFront URLs from a previous distribution via HTTP
+        if path.startswith("https://") and ".cloudfront.net/" in path:
+            try:
+                req = urllib.request.Request(path)
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return resp.read()
+            except Exception as e:
+                raise RuntimeError(f"Failed to download from legacy CloudFront URL: {e}")
 
         if path.startswith("s3://"):
             if not self.s3_client:
