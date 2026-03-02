@@ -104,6 +104,14 @@ function formatComplianceLocation(location: ComplianceAlertLocation): string {
   return 'Unlabeled location';
 }
 
+function hasEmployeeComplianceAlerts(dim: DimensionResult): boolean {
+  const rawData = dim.raw_data;
+  return (
+    typeof rawData.minimum_wage_violation_employee_count === 'number'
+    && rawData.minimum_wage_violation_employee_count > 0
+  );
+}
+
 function BandBadge({ band }: { band: Band }) {
   const c = BAND_COLOR[band];
   return (
@@ -197,6 +205,7 @@ function DimensionCard({ dimensionKey, dim }: { dimensionKey: string; dim: Dimen
 
 function isEmptyResult(data: RiskAssessmentResult): boolean {
   if (data.overall_score !== 0) return false;
+  if (hasEmployeeComplianceAlerts(data.dimensions.compliance)) return false;
   return DIMENSION_ORDER.every(k => data.dimensions[k].score === 0);
 }
 
