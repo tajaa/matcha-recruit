@@ -13,6 +13,143 @@ import type { ClientProfile } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
+// ─── theme ────────────────────────────────────────────────────────────────────
+
+function useIsLightMode(): boolean {
+  const check = () => !document.documentElement.classList.contains('theme-dark');
+  const [isLight, setIsLight] = useState(check);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setIsLight(check()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+  return isLight;
+}
+
+const LT = {
+  pageBg: 'bg-stone-300',
+  cardLight: 'bg-stone-100 rounded-2xl',
+  innerHover: 'bg-stone-200 rounded-xl hover:bg-stone-300',
+  innerEl: 'bg-stone-200 rounded-xl',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  textDim: 'text-stone-600',
+  border: 'border-stone-200',
+  divide: 'divide-stone-200',
+  footerBg: 'border-t border-stone-200 bg-stone-200',
+  rowHover: 'hover:bg-stone-50',
+  icon: 'text-stone-400',
+  arrow: 'text-stone-400 group-hover:text-zinc-900',
+  label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  kpiGap: 'bg-stone-300',
+  kpiCell: 'bg-stone-200',
+  kpiValActive: 'text-zinc-900',
+  kpiValEmpty: 'text-stone-400',
+  kpiLabelCls: 'text-stone-500',
+  horizonActive: 'bg-zinc-900 text-zinc-50',
+  horizonInactive: 'bg-stone-200 text-stone-500 hover:text-zinc-900',
+  spinner: 'border-stone-300 border-t-zinc-900',
+  modalBg: 'bg-stone-100 rounded-2xl',
+  descBox: 'bg-stone-200 rounded-xl',
+  selectCls: 'bg-white border border-stone-300 rounded-xl text-zinc-900 text-xs px-3 py-2 focus:outline-none focus:border-stone-400',
+  pillActive: 'bg-zinc-900 text-zinc-50',
+  pillInactive: 'bg-stone-200 text-stone-500 hover:text-zinc-900',
+  sevDot: { critical: 'bg-zinc-900 animate-pulse', warning: 'bg-stone-400', info: 'bg-stone-300' },
+  sevBadge: { critical: 'bg-stone-200 text-zinc-900 rounded-full', warning: 'bg-stone-200 text-stone-600 rounded-full', info: 'bg-stone-200 text-stone-500 rounded-full' },
+  sla: {
+    overdue:    { badge: 'bg-stone-200 text-zinc-900 rounded-full',  due: 'text-zinc-900' },
+    due_soon:   { badge: 'bg-stone-200 text-stone-600 rounded-full', due: 'text-stone-600' },
+    completed:  { badge: 'bg-stone-100 text-stone-400 rounded-full', due: 'text-stone-400' },
+    unassigned: { badge: 'bg-stone-100 text-stone-400 rounded-full', due: 'text-stone-400' },
+    on_track:   { badge: 'bg-stone-100 text-stone-400 rounded-full', due: 'text-stone-400' },
+  },
+  daysColor: (d: number | null | undefined) =>
+    d != null && d <= 30 ? 'text-zinc-900 font-semibold' : d != null && d <= 60 ? 'text-stone-600' : 'text-stone-400',
+  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
+  cardDarkTrack: 'text-zinc-800',
+  cardDarkTrackBg: 'bg-zinc-800',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  btnSecondary: 'border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900',
+  livePill: 'bg-stone-200 text-stone-600',
+  dateBadge: 'bg-stone-200 text-stone-500',
+  recentBadge: 'bg-stone-200 text-stone-600',
+  innerBg: 'bg-stone-300 rounded-lg',
+  footerLink: 'text-stone-500 hover:text-zinc-900',
+  activityDot: { success: 'bg-zinc-900', warning: 'bg-stone-400 animate-pulse', def: 'bg-stone-300' },
+  incidentSev: [
+    { text: 'text-zinc-900', dot: 'bg-zinc-900' },
+    { text: 'text-stone-700', dot: 'bg-stone-700' },
+    { text: 'text-stone-500', dot: 'bg-stone-500' },
+    { text: 'text-stone-400', dot: 'bg-stone-400' },
+  ],
+} as const;
+
+const DK = {
+  pageBg: 'bg-zinc-950',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  innerHover: 'bg-zinc-800 rounded-xl hover:bg-zinc-700',
+  innerEl: 'bg-zinc-800 rounded-xl',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  textDim: 'text-zinc-400',
+  border: 'border-white/10',
+  divide: 'divide-white/10',
+  footerBg: 'border-t border-white/10 bg-white/5',
+  rowHover: 'hover:bg-white/5',
+  icon: 'text-zinc-600',
+  arrow: 'text-zinc-600 group-hover:text-zinc-100',
+  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  kpiGap: 'bg-zinc-950',
+  kpiCell: 'bg-zinc-900',
+  kpiValActive: 'text-zinc-100',
+  kpiValEmpty: 'text-zinc-600',
+  kpiLabelCls: 'text-zinc-500',
+  horizonActive: 'bg-zinc-700 text-zinc-100',
+  horizonInactive: 'bg-zinc-800 text-zinc-500 hover:text-zinc-100',
+  spinner: 'border-zinc-800 border-t-zinc-100',
+  modalBg: 'bg-zinc-900 border border-white/10 rounded-2xl',
+  descBox: 'bg-zinc-800 rounded-xl',
+  selectCls: 'bg-zinc-800 border border-white/10 rounded-xl text-zinc-100 text-xs px-3 py-2 focus:outline-none focus:border-white/20',
+  pillActive: 'bg-zinc-700 text-zinc-100',
+  pillInactive: 'bg-zinc-800 text-zinc-500 hover:text-zinc-100',
+  sevDot: { critical: 'bg-zinc-100 animate-pulse', warning: 'bg-zinc-400', info: 'bg-zinc-600' },
+  sevBadge: { critical: 'bg-zinc-800 text-zinc-100 rounded-full', warning: 'bg-zinc-800 text-zinc-400 rounded-full', info: 'bg-zinc-800 text-zinc-600 rounded-full' },
+  sla: {
+    overdue:    { badge: 'bg-zinc-800 text-zinc-100 rounded-full',  due: 'text-zinc-100' },
+    due_soon:   { badge: 'bg-zinc-800 text-zinc-400 rounded-full',  due: 'text-zinc-400' },
+    completed:  { badge: 'bg-zinc-800 text-zinc-600 rounded-full',  due: 'text-zinc-600' },
+    unassigned: { badge: 'bg-zinc-800 text-zinc-600 rounded-full',  due: 'text-zinc-600' },
+    on_track:   { badge: 'bg-zinc-800 text-zinc-600 rounded-full',  due: 'text-zinc-600' },
+  },
+  daysColor: (d: number | null | undefined) =>
+    d != null && d <= 30 ? 'text-zinc-100 font-semibold' : d != null && d <= 60 ? 'text-zinc-400' : 'text-zinc-600',
+  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
+  cardDarkTrack: 'text-zinc-700',
+  cardDarkTrackBg: 'bg-zinc-700',
+  btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600',
+  btnSecondary: 'border border-white/10 hover:border-white/20 text-zinc-500 hover:text-zinc-100',
+  livePill: 'bg-zinc-800 text-zinc-400',
+  dateBadge: 'bg-zinc-800 text-zinc-500',
+  recentBadge: 'bg-zinc-800 text-zinc-400',
+  innerBg: 'bg-zinc-700 rounded-lg',
+  footerLink: 'text-zinc-500 hover:text-zinc-100',
+  activityDot: { success: 'bg-zinc-100', warning: 'bg-zinc-400 animate-pulse', def: 'bg-zinc-600' },
+  incidentSev: [
+    { text: 'text-zinc-100', dot: 'bg-zinc-100' },
+    { text: 'text-zinc-400', dot: 'bg-zinc-400' },
+    { text: 'text-zinc-500', dot: 'bg-zinc-500' },
+    { text: 'text-zinc-600', dot: 'bg-zinc-600' },
+  ],
+} as const;
+
 interface PTOSummary {
   pending_count: number;
   upcoming_time_off: number;
@@ -52,22 +189,10 @@ interface DashboardStats {
 
 type HorizonDays = 30 | 60 | 90;
 
-const SEVERITY_STYLES: Record<string, { dot: string; badge: string; label: string }> = {
-  critical: {
-    dot: 'bg-zinc-900 animate-pulse',
-    badge: 'bg-stone-200 text-zinc-900 rounded-full',
-    label: 'Critical',
-  },
-  warning: {
-    dot: 'bg-stone-400',
-    badge: 'bg-stone-200 text-stone-600 rounded-full',
-    label: 'Warning',
-  },
-  info: {
-    dot: 'bg-stone-300',
-    badge: 'bg-stone-200 text-stone-500 rounded-full',
-    label: 'Info',
-  },
+const SEVERITY_LABELS: Record<string, string> = {
+  critical: 'Critical',
+  warning: 'Warning',
+  info: 'Info',
 };
 
 const TURNAROUND_OPTIONS = [
@@ -87,6 +212,7 @@ const PROFILE_CHECK_FIELDS = ['headquarters_state', 'benefits_summary', 'default
 function CompanyProfileBanner() {
   const navigate = useNavigate();
   const { profile, user } = useAuth();
+  const t = useIsLightMode() ? LT : DK;
   const clientProfile = profile as ClientProfile | null;
   const companyId = clientProfile?.company_id;
 
@@ -131,27 +257,27 @@ function CompanyProfileBanner() {
   };
 
   return (
-    <div className="relative bg-stone-100 rounded-2xl p-6 mb-6 animate-in fade-in slide-in-from-top-2 duration-500">
+    <div className={`relative ${t.cardLight} p-6 mb-6 animate-in fade-in slide-in-from-top-2 duration-500`}>
       <button
         onClick={dismiss}
-        className="absolute top-4 right-4 text-stone-400 hover:text-zinc-900 transition-colors"
+        className={`absolute top-4 right-4 ${t.icon} hover:${t.textMain} transition-colors`}
         aria-label="Dismiss"
       >
         <X className="w-4 h-4" />
       </button>
       <div className="flex items-start gap-4">
-        <div className="p-2.5 bg-stone-200 rounded-xl shrink-0">
-          <Sparkles className="w-5 h-5 text-zinc-900" />
+        <div className={`p-2.5 ${t.innerEl} shrink-0`}>
+          <Sparkles className={`w-5 h-5 ${t.textMain}`} />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-base text-zinc-900 mb-1">Complete your company profile</h3>
-          <p className="text-sm text-stone-500 leading-relaxed mb-3">
+          <h3 className={`text-base ${t.textMain} mb-1`}>Complete your company profile</h3>
+          <p className={`text-sm ${t.textMuted} leading-relaxed mb-3`}>
             Add your headquarters location, benefits, and employment defaults so the AI can pre-fill offer letters,
             give jurisdiction-aware guidance, and generate better documents without extra questions.
           </p>
           <button
             onClick={() => { dismiss(); navigate('/app/matcha/company'); }}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl text-xs font-bold transition-colors"
+            className={`inline-flex items-center gap-2 px-4 py-2 ${t.btnPrimary} rounded-xl text-xs font-bold transition-colors`}
           >
             Set Up Profile
             <ChevronRight className="w-3 h-3" />
@@ -165,6 +291,7 @@ function CompanyProfileBanner() {
 function ComplianceDashboardWidget() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
+  const t = useIsLightMode() ? LT : DK;
   const [horizon, setHorizon] = useState<HorizonDays>(90);
   const [data, setData] = useState<ComplianceDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -285,47 +412,34 @@ function ComplianceDashboardWidget() {
   };
 
   const getSlaStyle = (slaState: ComplianceDashboardItem['sla_state']) => {
-    if (slaState === 'overdue') {
-      return { label: 'Overdue', badge: 'bg-stone-200 text-zinc-900 rounded-full', dueText: 'text-zinc-900' };
-    }
-    if (slaState === 'due_soon') {
-      return { label: 'Due Soon', badge: 'bg-stone-200 text-stone-600 rounded-full', dueText: 'text-stone-600' };
-    }
-    if (slaState === 'completed') {
-      return { label: 'Completed', badge: 'bg-stone-100 text-stone-400 rounded-full', dueText: 'text-stone-400' };
-    }
-    if (slaState === 'unassigned') {
-      return { label: 'Unassigned', badge: 'bg-stone-100 text-stone-400 rounded-full', dueText: 'text-stone-400' };
-    }
-    return { label: 'On Track', badge: 'bg-stone-100 text-stone-400 rounded-full', dueText: 'text-stone-400' };
+    const labels: Record<string, string> = { overdue: 'Overdue', due_soon: 'Due Soon', completed: 'Completed', unassigned: 'Unassigned', on_track: 'On Track' };
+    const s = t.sla[slaState] ?? t.sla.on_track;
+    return { label: labels[slaState] ?? 'On Track', badge: s.badge, dueText: s.due };
   };
 
   const criticalCount = data?.coming_up.filter(i => i.severity === 'critical').length ?? 0;
   const warningCount = data?.coming_up.filter(i => i.severity === 'warning').length ?? 0;
 
   return (
-    <div className="bg-stone-100 rounded-2xl overflow-hidden">
+    <div className={`${t.cardLight} overflow-hidden`}>
       {/* Header */}
-      <div className="p-4 border-b border-stone-200 flex items-center justify-between">
+      <div className={`p-4 ${t.border} border-b flex items-center justify-between`}>
         <div className="flex items-center gap-2.5">
-          <ShieldAlert className="w-4 h-4 text-stone-400" />
-          <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">Compliance Impact</div>
+          <ShieldAlert className={`w-4 h-4 ${t.icon}`} />
+          <div className={t.label}>Compliance Impact</div>
           {criticalCount > 0 && (
-            <span className="px-2 py-0.5 text-[10px] font-bold bg-stone-200 text-zinc-900 rounded-full uppercase tracking-widest">
+            <span className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${t.sevBadge.critical}`}>
               {criticalCount} critical
             </span>
           )}
         </div>
-        {/* Horizon selector */}
         <div className="flex gap-1.5">
           {([30, 60, 90] as HorizonDays[]).map(d => (
             <button
               key={d}
               onClick={() => setHorizon(d)}
               className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                horizon === d
-                  ? 'bg-zinc-900 text-zinc-50'
-                  : 'bg-stone-200 text-stone-500 hover:text-zinc-900'
+                horizon === d ? t.horizonActive : t.horizonInactive
               }`}
             >
               {d}d
@@ -336,7 +450,7 @@ function ComplianceDashboardWidget() {
 
       {/* KPI row */}
       {data && (
-        <div className="grid grid-cols-3 md:grid-cols-7 gap-px bg-stone-300 border-b border-stone-200">
+        <div className={`grid grid-cols-3 md:grid-cols-7 gap-px ${t.kpiGap} ${t.border} border-b`}>
           {[
             { label: 'Locations', value: data.kpis.total_locations },
             { label: 'Unread Alerts', value: data.kpis.unread_alerts },
@@ -346,9 +460,9 @@ function ComplianceDashboardWidget() {
             { label: 'Assigned', value: data.kpis.assigned_actions },
             { label: 'Unassigned', value: data.kpis.unassigned_actions },
           ].map(kpi => (
-            <div key={kpi.label} className="bg-stone-200 p-2.5 text-center">
-              <div className={`text-lg font-light tabular-nums ${kpi.value > 0 ? 'text-zinc-900' : 'text-stone-400'}`}>{kpi.value}</div>
-              <div className="text-[8px] uppercase tracking-widest text-stone-500 mt-0.5">{kpi.label}</div>
+            <div key={kpi.label} className={`${t.kpiCell} p-2.5 text-center`}>
+              <div className={`text-lg font-light tabular-nums ${kpi.value > 0 ? t.kpiValActive : t.kpiValEmpty}`}>{kpi.value}</div>
+              <div className={`text-[8px] uppercase tracking-widest ${t.kpiLabelCls} mt-0.5`}>{kpi.label}</div>
             </div>
           ))}
         </div>
@@ -358,36 +472,34 @@ function ComplianceDashboardWidget() {
       <div className="p-3 space-y-2">
         {loading && (
           <div className="p-6 text-center">
-            <div className="w-4 h-4 border-2 border-stone-300 border-t-zinc-900 rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-xs text-stone-500">Loading</p>
+            <div className={`w-4 h-4 border-2 ${t.spinner} rounded-full animate-spin mx-auto mb-2`} />
+            <p className={`text-xs ${t.textMuted}`}>Loading</p>
           </div>
         )}
 
         {error && !loading && (
           <div className="p-4 text-center">
-            <TriangleAlert className="w-4 h-4 text-stone-400 mx-auto mb-1.5" />
-            <p className="text-xs text-stone-500">Failed to load</p>
+            <TriangleAlert className={`w-4 h-4 ${t.icon} mx-auto mb-1.5`} />
+            <p className={`text-xs ${t.textMuted}`}>Failed to load</p>
           </div>
         )}
 
         {!loading && !error && data && data.coming_up.length === 0 && (
           <div className="p-4 text-center">
-            <CheckCircle2 className="w-4 h-4 text-stone-400 mx-auto mb-1.5" />
-            <p className="text-xs text-stone-500">No upcoming changes in {horizon}d window</p>
+            <CheckCircle2 className={`w-4 h-4 ${t.icon} mx-auto mb-1.5`} />
+            <p className={`text-xs ${t.textMuted}`}>No upcoming changes in {horizon}d window</p>
           </div>
         )}
 
         {!loading && !error && data && data.coming_up.map((item) => {
-          const sev = SEVERITY_STYLES[item.severity] ?? SEVERITY_STYLES.info;
+          const sevDot = t.sevDot[item.severity as keyof typeof t.sevDot] ?? t.sevDot.info;
+          const sevBadge = t.sevBadge[item.severity as keyof typeof t.sevBadge] ?? t.sevBadge.info;
+          const sevLabel = SEVERITY_LABELS[item.severity] ?? 'Info';
           const categoryLabel = item.category ? (COMPLIANCE_CATEGORY_LABELS[item.category] ?? item.category) : null;
           const daysLabel = item.days_until != null
             ? item.days_until <= 0 ? 'Today' : `${item.days_until}d`
             : '—';
-          const daysColor = item.days_until != null && item.days_until <= 30
-            ? 'text-zinc-900 font-semibold'
-            : item.days_until != null && item.days_until <= 60
-            ? 'text-stone-600'
-            : 'text-stone-400';
+          const daysColor = t.daysColor(item.days_until);
           const sla = getSlaStyle(item.sla_state);
           const dueLabel = formatDateLabel(item.action_due_date);
 
@@ -403,13 +515,13 @@ function ComplianceDashboardWidget() {
               }}
               role="button"
               tabIndex={0}
-              className="w-full text-left p-3.5 bg-stone-200 rounded-xl hover:bg-stone-300 transition-all group cursor-pointer"
+              className={`w-full text-left p-3.5 ${t.innerHover} transition-all group cursor-pointer`}
             >
               <div className="flex items-start gap-2.5">
-                <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${sev.dot}`} />
+                <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${sevDot}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2 mb-1">
-                    <span className="text-sm text-zinc-900 font-medium leading-tight truncate">
+                    <span className={`text-sm ${t.textMain} font-medium leading-tight truncate`}>
                       {item.title}
                     </span>
                     <span className={`text-xs font-mono tabular-nums flex-shrink-0 ${daysColor}`}>
@@ -418,19 +530,19 @@ function ComplianceDashboardWidget() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 text-stone-500">
+                    <div className={`flex items-center gap-1 ${t.textMuted}`}>
                       <MapPin className="w-2.5 h-2.5" />
                       <span className="text-[10px]">{item.location_name}</span>
                     </div>
 
                     {categoryLabel && (
-                      <span className="text-[10px] text-stone-600 bg-stone-300 px-1.5 py-px rounded-full">
+                      <span className={`text-[10px] ${t.textDim} ${t.innerEl} px-1.5 py-px`}>
                         {categoryLabel}
                       </span>
                     )}
 
-                    <span className={`text-[10px] px-1.5 py-px ${sev.badge}`}>
-                      {sev.label}
+                    <span className={`text-[10px] px-1.5 py-px ${sevBadge}`}>
+                      {sevLabel}
                     </span>
                     <span className={`text-[10px] px-1.5 py-px ${sla.badge}`}>
                       {sla.label}
@@ -438,39 +550,39 @@ function ComplianceDashboardWidget() {
                   </div>
 
                   <div className="mt-1.5 space-y-1">
-                    <div className="text-xs text-stone-500">
-                      <span className="text-stone-400">Next:</span> {item.next_action || 'Review legal impact and assign an owner.'}
+                    <div className={`text-xs ${t.textMuted}`}>
+                      <span className={t.textFaint}>Next:</span> {item.next_action || 'Review legal impact and assign an owner.'}
                     </div>
-                    <div className="flex items-center gap-3 flex-wrap text-[10px] text-stone-500">
-                      <span>Owner: <span className="text-zinc-900">{item.action_owner_name || 'Unassigned'}</span></span>
+                    <div className={`flex items-center gap-3 flex-wrap text-[10px] ${t.textMuted}`}>
+                      <span>Owner: <span className={t.textMain}>{item.action_owner_name || 'Unassigned'}</span></span>
                       <span className={sla.dueText}>Due: {dueLabel}</span>
                     </div>
 
                     {item.estimated_financial_impact && (
-                      <div className="text-[10px] text-stone-600">
+                      <div className={`text-[10px] ${t.textDim}`}>
                         Exposure: {item.estimated_financial_impact}
                       </div>
                     )}
 
                     {item.affected_employee_count > 0 && (
                       <div className="mt-1 flex items-center gap-1.5">
-                        <Users className="w-2.5 h-2.5 text-stone-400" />
-                        <span className="text-[10px] text-stone-500">
+                        <Users className={`w-2.5 h-2.5 ${t.icon}`} />
+                        <span className={`text-[10px] ${t.textMuted}`}>
                           {item.affected_employee_count} employee{item.affected_employee_count !== 1 ? 's' : ''}
                           {item.affected_employee_sample.length > 0 && (
-                            <span className="text-stone-400">
+                            <span className={t.textFaint}>
                               {' '}— {item.affected_employee_sample.slice(0, 3).join(', ')}
                               {item.affected_employee_count > 3 ? ` +${item.affected_employee_count - 3} more` : ''}
                             </span>
                           )}
                         </span>
-                        <span className="text-[9px] text-stone-400 font-mono">~est</span>
+                        <span className={`text-[9px] ${t.textFaint} font-mono`}>~est</span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                <ChevronRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 transition-colors flex-shrink-0 mt-0.5" />
+                <ChevronRight className={`w-3.5 h-3.5 ${t.arrow} transition-colors flex-shrink-0 mt-0.5`} />
               </div>
             </div>
           );
@@ -479,9 +591,9 @@ function ComplianceDashboardWidget() {
 
       {/* Footer */}
       {data && data.coming_up.length > 0 && (
-        <div className="p-3 border-t border-stone-200 bg-stone-200 flex items-center justify-between">
+        <div className={`p-3 ${t.footerBg} flex items-center justify-between`}>
           {(criticalCount > 0 || warningCount > 0) && (
-            <span className="text-[10px] text-stone-500">
+            <span className={`text-[10px] ${t.textMuted}`}>
               {criticalCount > 0 && `${criticalCount} critical`}
               {criticalCount > 0 && warningCount > 0 && ' · '}
               {warningCount > 0 && `${warningCount} warning`}
@@ -489,7 +601,7 @@ function ComplianceDashboardWidget() {
           )}
           <button
             onClick={() => navigate('/app/matcha/compliance?tab=upcoming')}
-            className="ml-auto text-xs text-stone-500 hover:text-zinc-900 transition-colors"
+            className={`ml-auto text-xs ${t.textMuted} hover:${t.textMain} transition-colors`}
           >
             Full Compliance View
           </button>
@@ -502,14 +614,14 @@ function ComplianceDashboardWidget() {
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
           onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
         >
-          <div className="w-full max-w-lg bg-stone-100 rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+          <div className={`w-full max-w-lg ${t.modalBg} shadow-2xl flex flex-col max-h-[90vh]`}>
             {/* Modal header */}
-            <div className="flex items-start justify-between p-5 border-b border-stone-200 flex-shrink-0">
+            <div className={`flex items-start justify-between p-5 ${t.border} border-b flex-shrink-0`}>
               <div className="flex items-center gap-2 min-w-0">
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_STYLES[selectedItem.severity]?.dot ?? 'bg-stone-400'}`} />
-                <span className="text-sm font-semibold text-zinc-900 leading-tight">{selectedItem.title}</span>
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${t.sevDot[selectedItem.severity as keyof typeof t.sevDot] ?? t.sevDot.info}`} />
+                <span className={`text-sm font-semibold ${t.textMain} leading-tight`}>{selectedItem.title}</span>
               </div>
-              <button onClick={closeModal} className="ml-3 flex-shrink-0 text-stone-400 hover:text-zinc-900 transition-colors">
+              <button onClick={closeModal} className={`ml-3 flex-shrink-0 ${t.icon} hover:${t.textMain} transition-colors`}>
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -517,23 +629,23 @@ function ComplianceDashboardWidget() {
             <div className="overflow-y-auto flex-1 p-5 space-y-4">
               {/* Meta badges */}
               <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1 text-stone-500">
+                <div className={`flex items-center gap-1 ${t.textMuted}`}>
                   <MapPin className="w-2.5 h-2.5" />
                   <span className="text-[10px]">{selectedItem.location_name}</span>
                 </div>
                 {selectedItem.category && (
-                  <span className="text-[10px] text-stone-500 bg-stone-300 px-1.5 py-px rounded-full">
+                  <span className={`text-[10px] ${t.textMuted} ${t.innerEl} px-1.5 py-px`}>
                     {COMPLIANCE_CATEGORY_LABELS[selectedItem.category] ?? selectedItem.category}
                   </span>
                 )}
-                <span className={`text-[10px] px-1.5 py-px ${SEVERITY_STYLES[selectedItem.severity]?.badge}`}>
-                  {SEVERITY_STYLES[selectedItem.severity]?.label}
+                <span className={`text-[10px] px-1.5 py-px ${t.sevBadge[selectedItem.severity as keyof typeof t.sevBadge] ?? t.sevBadge.info}`}>
+                  {SEVERITY_LABELS[selectedItem.severity] ?? 'Info'}
                 </span>
                 {selectedItem.effective_date && (
-                  <span className="text-[10px] text-stone-500 bg-stone-200 px-1.5 py-px rounded-full">
+                  <span className={`text-[10px] ${t.textMuted} ${t.innerEl} px-1.5 py-px`}>
                     Effective {new Date(`${selectedItem.effective_date}T00:00:00`).toLocaleDateString()}
                     {selectedItem.days_until != null && (
-                      <span className={selectedItem.days_until <= 30 ? ' text-zinc-900 font-semibold' : selectedItem.days_until <= 60 ? ' text-stone-600' : ''}>
+                      <span className={t.daysColor(selectedItem.days_until)}>
                         {' '}· {selectedItem.days_until <= 0 ? 'Today' : `${selectedItem.days_until}d`}
                       </span>
                     )}
@@ -543,8 +655,8 @@ function ComplianceDashboardWidget() {
 
               {/* Description */}
               {selectedItem.description && (
-                <div className="bg-stone-200 rounded-xl p-3">
-                  <p className="text-xs text-stone-500 leading-relaxed">{selectedItem.description}</p>
+                <div className={`${t.descBox} p-3`}>
+                  <p className={`text-xs ${t.textMuted} leading-relaxed`}>{selectedItem.description}</p>
                 </div>
               )}
 
@@ -552,14 +664,14 @@ function ComplianceDashboardWidget() {
               {(selectedItem.next_action || selectedItem.recommended_playbook) && (
                 <div className="space-y-2">
                   {selectedItem.next_action && (
-                    <div className="text-xs text-stone-500">
-                      <span className="text-[10px] text-stone-400 block mb-0.5">Recommended Action</span>
+                    <div className={`text-xs ${t.textMuted}`}>
+                      <span className={`text-[10px] ${t.textFaint} block mb-0.5`}>Recommended Action</span>
                       {selectedItem.next_action}
                     </div>
                   )}
                   {selectedItem.recommended_playbook && (
-                    <div className="text-xs text-stone-500">
-                      <span className="text-[10px] text-stone-400 block mb-0.5">Playbook</span>
+                    <div className={`text-xs ${t.textMuted}`}>
+                      <span className={`text-[10px] ${t.textFaint} block mb-0.5`}>Playbook</span>
                       {selectedItem.recommended_playbook}
                     </div>
                   )}
@@ -569,11 +681,11 @@ function ComplianceDashboardWidget() {
               {/* Affected employees */}
               {selectedItem.affected_employee_count > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <Users className="w-3 h-3 text-stone-400" />
-                  <span className="text-[10px] text-stone-500">
+                  <Users className={`w-3 h-3 ${t.icon}`} />
+                  <span className={`text-[10px] ${t.textMuted}`}>
                     {selectedItem.affected_employee_count} employee{selectedItem.affected_employee_count !== 1 ? 's' : ''} affected
                     {selectedItem.affected_employee_sample.length > 0 && (
-                      <span className="text-stone-400"> — {selectedItem.affected_employee_sample.slice(0, 3).join(', ')}{selectedItem.affected_employee_count > 3 ? ` +${selectedItem.affected_employee_count - 3} more` : ''}</span>
+                      <span className={t.textFaint}> — {selectedItem.affected_employee_sample.slice(0, 3).join(', ')}{selectedItem.affected_employee_count > 3 ? ` +${selectedItem.affected_employee_count - 3} more` : ''}</span>
                     )}
                   </span>
                 </div>
@@ -581,7 +693,7 @@ function ComplianceDashboardWidget() {
 
               {/* Financial exposure */}
               {selectedItem.estimated_financial_impact && (
-                <div className="text-xs text-stone-600 bg-stone-200 rounded-xl px-3 py-2">
+                <div className={`text-xs ${t.textDim} ${t.descBox} px-3 py-2`}>
                   Exposure: {selectedItem.estimated_financial_impact}
                 </div>
               )}
@@ -592,7 +704,7 @@ function ComplianceDashboardWidget() {
                   href={selectedItem.source_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-stone-400 hover:text-zinc-900 transition-colors"
+                  className={`flex items-center gap-1 text-xs ${t.textFaint} hover:${t.textMain} transition-colors`}
                 >
                   <ExternalLink className="w-3 h-3" />
                   View source
@@ -600,16 +712,16 @@ function ComplianceDashboardWidget() {
               )}
 
               {/* Divider */}
-              <div className="border-t border-stone-200" />
+              <div className={`${t.border} border-t`} />
 
               {/* Assign */}
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[10px] text-stone-500 mb-1.5">Assign To</label>
+                  <label className={`block text-[10px] ${t.textMuted} mb-1.5`}>Assign To</label>
                   <select
                     value={modalOwnerId}
                     onChange={(e) => setModalOwnerId(e.target.value)}
-                    className="w-full bg-white border border-stone-300 rounded-xl text-zinc-900 text-xs px-3 py-2 focus:outline-none focus:border-stone-400"
+                    className={`w-full ${t.selectCls}`}
                   >
                     <option value="">— Unassigned —</option>
                     {assignableUsers.map(u => (
@@ -622,16 +734,14 @@ function ComplianceDashboardWidget() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] text-stone-500 mb-1.5">Turnaround Time</label>
+                  <label className={`block text-[10px] ${t.textMuted} mb-1.5`}>Turnaround Time</label>
                   <div className="flex flex-wrap gap-1.5">
                     {TURNAROUND_OPTIONS.map(opt => (
                       <button
                         key={opt.days}
                         onClick={() => setModalTurnaround(modalTurnaround === opt.days ? null : opt.days)}
                         className={`px-3 py-1.5 text-xs rounded-xl transition-colors ${
-                          modalTurnaround === opt.days
-                            ? 'bg-zinc-900 text-zinc-50'
-                            : 'bg-stone-200 text-stone-500 hover:text-zinc-900'
+                          modalTurnaround === opt.days ? t.pillActive : t.pillInactive
                         }`}
                       >
                         {opt.label}
@@ -639,7 +749,7 @@ function ComplianceDashboardWidget() {
                     ))}
                   </div>
                   {modalTurnaround !== null && (
-                    <p className="mt-1.5 text-xs text-stone-500">
+                    <p className={`mt-1.5 text-xs ${t.textMuted}`}>
                       Due date will be set to {(() => {
                         const d = new Date();
                         d.setDate(d.getDate() + modalTurnaround);
@@ -651,18 +761,18 @@ function ComplianceDashboardWidget() {
               </div>
 
               {modalError && (
-                <p className="text-xs text-zinc-900">{modalError}</p>
+                <p className={`text-xs ${t.textMain}`}>{modalError}</p>
               )}
             </div>
 
             {/* Modal footer */}
-            <div className="p-5 border-t border-stone-200 flex items-center justify-between gap-2 flex-shrink-0">
+            <div className={`p-5 ${t.footerBg} flex items-center justify-between gap-2 flex-shrink-0`}>
               <div className="flex items-center gap-2">
                 {selectedItem.action_status !== 'actioned' && (
                   <button
                     onClick={() => void markActioned(selectedItem)}
                     disabled={modalSaving}
-                    className="px-4 py-2 text-xs rounded-xl bg-stone-200 text-stone-600 hover:text-zinc-900 disabled:opacity-50 transition-colors"
+                    className={`px-4 py-2 text-xs rounded-xl ${t.innerEl} ${t.textDim} hover:${t.textMain} disabled:opacity-50 transition-colors`}
                   >
                     Mark Actioned
                   </button>
@@ -672,7 +782,7 @@ function ComplianceDashboardWidget() {
                     const params = new URLSearchParams({ location_id: selectedItem.location_id, tab: 'upcoming', legislation_id: selectedItem.legislation_id });
                     navigate(`/app/matcha/compliance?${params.toString()}`);
                   }}
-                  className="px-4 py-2 text-xs text-stone-400 hover:text-zinc-900 transition-colors"
+                  className={`px-4 py-2 text-xs ${t.textFaint} hover:${t.textMain} transition-colors`}
                 >
                   Full View
                 </button>
@@ -680,14 +790,14 @@ function ComplianceDashboardWidget() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={closeModal}
-                  className="px-4 py-2 text-xs rounded-xl bg-stone-200 text-stone-500 hover:text-zinc-900 transition-colors"
+                  className={`px-4 py-2 text-xs rounded-xl ${t.innerEl} ${t.textMuted} hover:${t.textMain} transition-colors`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => void saveModalChanges()}
                   disabled={modalSaving || (modalOwnerId === (selectedItem.action_owner_id ?? '') && modalTurnaround === null)}
-                  className="px-4 py-2 text-xs rounded-xl bg-zinc-900 text-zinc-50 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className={`px-4 py-2 text-xs rounded-xl ${t.btnPrimary} disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
                 >
                   {modalSaving ? 'Saving…' : 'Save'}
                 </button>
@@ -725,6 +835,8 @@ export function Dashboard() {
   }, [hasFeature]);
 
   const showComplianceImpact = user?.role === 'client' && hasFeature('compliance');
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
 
   useEffect(() => {
     if (!showComplianceImpact) {
@@ -813,31 +925,31 @@ export function Dashboard() {
   return (
     <>
     <OnboardingWizard />
-    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-6 sm:px-8 lg:px-10 py-10 min-h-screen bg-stone-300">
+    <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-6 sm:px-8 lg:px-10 py-10 min-h-screen ${t.pageBg}`}>
     <CompanyProfileBanner />
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4">
         <div>
           <div className="flex items-center gap-3 mb-1.5">
-             <div className="px-2.5 py-0.5 bg-stone-200 text-stone-600 text-[10px] uppercase tracking-widest font-bold rounded-full">
+             <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] uppercase tracking-widest font-bold rounded-full`}>
                 Live Overview
              </div>
           </div>
-          <h1 className="text-4xl font-bold tracking-tighter text-zinc-900 uppercase">
+          <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
             Command Center
           </h1>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => navigate('/app/matcha/policies/new')}
-            className="px-4 py-2 border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900 rounded-xl text-xs font-bold uppercase tracking-wider transition-all"
+            className={`px-4 py-2 ${t.btnSecondary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
           >
             New Policy
           </button>
           <button
             onClick={() => navigate('/app/matcha/offer-letters')}
-            className="px-4 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl text-xs font-bold uppercase tracking-wider transition-all"
+            className={`px-4 py-2 ${t.btnPrimary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
           >
             Create Offer
           </button>
@@ -854,16 +966,16 @@ export function Dashboard() {
                   <button
                     key={stat.label}
                     onClick={() => navigate(stat.path)}
-                    className="bg-zinc-900 rounded-2xl p-6 hover:bg-zinc-800 transition-all group relative overflow-hidden text-left"
+                    className={`${t.cardDark} p-6 ${t.cardDarkHover} transition-all group relative overflow-hidden text-left`}
                   >
-                    <div className="absolute top-0 right-0 p-3 text-zinc-800 group-hover:scale-110 transition-all duration-500">
+                    <div className={`absolute top-0 right-0 p-3 ${t.cardDarkGhost} group-hover:scale-110 transition-all duration-500`}>
                        <stat.icon className="w-10 h-10" strokeWidth={0.5} />
                     </div>
 
                     <div className="relative z-10">
-                      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-3">{stat.label}</div>
+                      <div className={`${t.labelOnDark} mb-3`}>{stat.label}</div>
                       <div className="text-4xl font-light font-mono text-zinc-50 mb-1 tabular-nums">{stat.value}</div>
-                      <div className="text-[10px] text-zinc-500 font-mono">
+                      <div className={`text-[10px] ${t.textMuted} font-mono`}>
                          {stat.change}
                       </div>
                     </div>
@@ -880,29 +992,29 @@ export function Dashboard() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
                       onClick={() => navigate('/app/matcha/company')}
-                      className="flex items-center gap-3 p-4 bg-stone-200 rounded-xl hover:bg-stone-300 transition-all group text-left"
+                      className={`flex items-center gap-3 p-4 ${t.innerHover} transition-all group text-left`}
                     >
-                      <div className="p-2 bg-stone-300 rounded-lg">
-                        <Building className="w-4 h-4 text-zinc-900" />
+                      <div className={`p-2 ${t.innerBg}`}>
+                        <Building className={`w-4 h-4 ${t.textMain}`} />
                       </div>
                       <div className="flex-1">
-                        <div className="text-sm text-zinc-900 font-medium">Company Profile</div>
-                        <div className="text-xs text-stone-500 mt-0.5">Set up company info</div>
+                        <div className={`text-sm ${t.textMain} font-medium`}>Company Profile</div>
+                        <div className={`text-xs ${t.textMuted} mt-0.5`}>Set up company info</div>
                       </div>
-                      <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 transition-colors" />
+                      <ArrowUpRight className={`w-3.5 h-3.5 ${t.arrow} transition-colors`} />
                     </button>
                     <button
                       onClick={() => navigate('/app/matcha/employees')}
-                      className="flex items-center gap-3 p-4 bg-stone-200 rounded-xl hover:bg-stone-300 transition-all group text-left"
+                      className={`flex items-center gap-3 p-4 ${t.innerHover} transition-all group text-left`}
                     >
-                      <div className="p-2 bg-stone-300 rounded-lg">
-                        <UserPlus className="w-4 h-4 text-zinc-900" />
+                      <div className={`p-2 ${t.innerBg}`}>
+                        <UserPlus className={`w-4 h-4 ${t.textMain}`} />
                       </div>
                       <div className="flex-1">
-                        <div className="text-sm text-zinc-900 font-medium">Add Employees</div>
-                        <div className="text-xs text-stone-500 mt-0.5">Import team via CSV</div>
+                        <div className={`text-sm ${t.textMain} font-medium`}>Add Employees</div>
+                        <div className={`text-xs ${t.textMuted} mt-0.5`}>Import team via CSV</div>
                       </div>
-                      <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 transition-colors" />
+                      <ArrowUpRight className={`w-3.5 h-3.5 ${t.arrow} transition-colors`} />
                     </button>
                   </div>
                 </div>
@@ -922,34 +1034,34 @@ export function Dashboard() {
                     <>
                       <div className="lg:col-span-2 space-y-4">
                         {visibleWidgets.has('actions') && (
-                          <div className="bg-stone-100 rounded-2xl p-6 h-fit">
-                            <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold mb-4">Pending Actions</div>
+                          <div className={`${t.cardLight} p-6 h-fit`}>
+                            <div className={`${t.label} mb-4`}>Pending Actions</div>
                             <div className="space-y-2">
                               {ptoSummary && ptoSummary.pending_count > 0 && (
                                 <div
                                   onClick={() => navigate('/app/matcha/pto')}
-                                  className="bg-stone-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-stone-300 transition-colors group"
+                                  className={`${t.innerHover} p-4 flex items-start gap-3 cursor-pointer transition-colors group`}
                                 >
-                                    <Calendar className="w-4 h-4 text-stone-500 mt-0.5" />
+                                    <Calendar className={`w-4 h-4 ${t.textMuted} mt-0.5`} />
                                     <div className="flex-1">
-                                      <div className="text-sm text-zinc-900 font-medium mb-0.5">PTO Requests Pending</div>
-                                      <div className="text-xs text-stone-500">{ptoSummary.pending_count} request{ptoSummary.pending_count !== 1 ? 's' : ''} awaiting approval</div>
+                                      <div className={`text-sm ${t.textMain} font-medium mb-0.5`}>PTO Requests Pending</div>
+                                      <div className={`text-xs ${t.textMuted}`}>{ptoSummary.pending_count} request{ptoSummary.pending_count !== 1 ? 's' : ''} awaiting approval</div>
                                     </div>
-                                    <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 ml-auto transition-colors" />
+                                    <ArrowUpRight className={`w-3.5 h-3.5 ${t.arrow} ml-auto transition-colors`} />
                                 </div>
                               )}
                               {dashStats?.pending_incidents.map((incident) => (
                                 <div
                                   key={incident.id}
                                   onClick={() => navigate(`/app/ir/incidents/${incident.id}`)}
-                                  className="bg-stone-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-stone-300 transition-colors group"
+                                  className={`${t.innerHover} p-4 flex items-start gap-3 cursor-pointer transition-colors group`}
                                 >
-                                    <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-stone-500 animate-pulse flex-shrink-0" />
+                                    <div className={`mt-1.5 w-1.5 h-1.5 rounded-full ${t.activityDot.warning} flex-shrink-0`} />
                                     <div className="flex-1">
-                                      <div className="text-sm text-zinc-900 font-medium mb-0.5">{incident.title}</div>
-                                      <div className="text-xs text-stone-500">{incident.incident_number} &bull; {incident.severity.charAt(0).toUpperCase() + incident.severity.slice(1)} Priority</div>
+                                      <div className={`text-sm ${t.textMain} font-medium mb-0.5`}>{incident.title}</div>
+                                      <div className={`text-xs ${t.textMuted}`}>{incident.incident_number} &bull; {incident.severity.charAt(0).toUpperCase() + incident.severity.slice(1)} Priority</div>
                                     </div>
-                                    <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 ml-auto transition-colors" />
+                                    <ArrowUpRight className={`w-3.5 h-3.5 ${t.arrow} ml-auto transition-colors`} />
                                 </div>
                               ))}
                               {showComplianceImpact && compliancePendingActions.map((item) => {
@@ -965,16 +1077,16 @@ export function Dashboard() {
                                       });
                                       navigate(`/app/matcha/compliance?${params.toString()}`);
                                     }}
-                                    className="bg-stone-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-stone-300 transition-colors group"
+                                    className={`${t.innerHover} p-4 flex items-start gap-3 cursor-pointer transition-colors group`}
                                   >
-                                      <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isCritical ? 'bg-zinc-900 animate-pulse' : 'bg-stone-500'}`} />
+                                      <div className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isCritical ? t.activityDot.success + ' animate-pulse' : t.activityDot.def}`} />
                                       <div className="flex-1">
-                                        <div className="text-sm text-zinc-900 font-medium mb-0.5">{item.title}</div>
-                                        <div className="text-xs text-stone-500">
+                                        <div className={`text-sm ${t.textMain} font-medium mb-0.5`}>{item.title}</div>
+                                        <div className={`text-xs ${t.textMuted}`}>
                                           Compliance &bull; {item.action_owner_name || 'Unassigned'} &bull; {item.sla_state.replace('_', ' ')}
                                         </div>
                                       </div>
-                                      <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-zinc-900 ml-auto transition-colors" />
+                                      <ArrowUpRight className={`w-3.5 h-3.5 ${t.arrow} ml-auto transition-colors`} />
                                   </div>
                                 );
                               })}
@@ -982,8 +1094,8 @@ export function Dashboard() {
                                 && (!dashStats || dashStats.pending_incidents.length === 0)
                                 && (!showComplianceImpact || compliancePendingActions.length === 0) && (
                                 <div className="p-4 text-center">
-                                  <CheckCircle2 className="w-5 h-5 text-stone-400 mx-auto mb-1.5" />
-                                  <p className="text-sm text-stone-400">All caught up</p>
+                                  <CheckCircle2 className={`w-5 h-5 ${t.icon} mx-auto mb-1.5`} />
+                                  <p className={`text-sm ${t.textFaint}`}>All caught up</p>
                                 </div>
                               )}
                             </div>
@@ -991,16 +1103,16 @@ export function Dashboard() {
                         )}
 
                         {visibleWidgets.has('pto') && ptoSummary && ptoSummary.upcoming_time_off > 0 && (
-                          <div className="bg-stone-100 rounded-2xl p-6">
+                          <div className={`${t.cardLight} p-6`}>
                               <div className="flex items-center justify-between mb-4">
-                                <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">Upcoming Time Off</div>
-                                <Calendar className="w-4 h-4 text-stone-400" />
+                                <div className={t.label}>Upcoming Time Off</div>
+                                <Calendar className={`w-4 h-4 ${t.icon}`} />
                               </div>
-                              <div className="text-4xl font-light font-mono text-zinc-900 mb-1 tabular-nums">{ptoSummary.upcoming_time_off}</div>
-                              <div className="text-[10px] text-stone-500 font-mono">employees out (30d)</div>
+                              <div className={`text-4xl font-light font-mono ${t.textMain} mb-1 tabular-nums`}>{ptoSummary.upcoming_time_off}</div>
+                              <div className={`text-[10px] ${t.textMuted} font-mono`}>employees out (30d)</div>
                               <button
                                 onClick={() => navigate('/app/matcha/pto')}
-                                className="mt-4 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors"
+                                className={`mt-4 ${t.btnPrimary} rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors`}
                               >
                                 View Calendar
                               </button>
@@ -1010,15 +1122,15 @@ export function Dashboard() {
 
                       <div className="space-y-4">
                         {visibleWidgets.has('compliance') && (
-                          <div className="bg-zinc-900 rounded-2xl p-6 relative overflow-hidden group h-fit">
+                          <div className={`${t.cardDark} p-6 relative overflow-hidden group h-fit`}>
                             <div className="flex items-center justify-between mb-4">
-                                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Policy Signature Coverage</div>
+                                <div className={t.labelOnDark}>Policy Signature Coverage</div>
                                 <ShieldAlert className="w-4 h-4 text-zinc-600" />
                             </div>
 
                             <div className="relative w-32 h-32 mx-auto mb-4">
                                 <svg className="w-full h-full transform -rotate-90">
-                                  <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-zinc-800" />
+                                  <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" className={t.cardDarkTrack} />
                                   <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent"
                                     strokeDasharray={2 * Math.PI * 58}
                                     strokeDashoffset={(2 * Math.PI * 58) - (complianceRate / 100) * (2 * Math.PI * 58)}
@@ -1037,7 +1149,7 @@ export function Dashboard() {
                                     <span>Signatures</span>
                                     <span className="text-zinc-100">{complianceRate}%</span>
                                 </div>
-                                <div className="w-full bg-zinc-800 h-1 rounded-full overflow-hidden">
+                                <div className={`w-full ${t.cardDarkTrackBg} h-1 rounded-full overflow-hidden`}>
                                     <div className="bg-zinc-100 h-full transition-all duration-1000" style={{ width: `${complianceRate}%` }} />
                                 </div>
                               </div>
@@ -1059,12 +1171,12 @@ export function Dashboard() {
                   {activeTab === 'operations' && (
                     <div className="lg:col-span-3 space-y-4">
                       {visibleWidgets.has('activity') && (
-                        <div className="bg-stone-100 rounded-2xl overflow-hidden">
-                          <div className="p-4 border-b border-stone-200 flex justify-between items-center">
-                            <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">System Activity</div>
-                            <Activity className="w-4 h-4 text-stone-400" />
+                        <div className={`${t.cardLight} overflow-hidden`}>
+                          <div className={`p-4 border-b ${t.border} flex justify-between items-center`}>
+                            <div className={t.label}>System Activity</div>
+                            <Activity className={`w-4 h-4 ${t.icon}`} />
                           </div>
-                          <div className="divide-y divide-stone-200">
+                          <div className={`divide-y ${t.divide}`}>
                             {dashStats && dashStats.recent_activity.length > 0 ? (
                               dashStats.recent_activity.map((item, i) => {
                                 const ts = new Date(item.timestamp);
@@ -1072,20 +1184,20 @@ export function Dashboard() {
                                 const isToday = new Date().toDateString() === ts.toDateString();
                                 const dateLabel = isToday ? 'TODAY' : ts.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase();
                                 return (
-                                  <div key={i} className="p-3 flex items-center justify-between hover:bg-stone-50 transition-colors group">
+                                  <div key={i} className={`p-3 flex items-center justify-between ${t.rowHover} transition-colors group`}>
                                     <div className="flex items-center gap-3">
-                                      <div className="font-mono text-xs text-stone-400 w-12">
+                                      <div className={`font-mono text-xs ${t.textFaint} w-12`}>
                                         {timeStr}
                                       </div>
                                       <div className="flex items-center gap-2.5">
                                         <div className={`w-1.5 h-1.5 rounded-full ${
-                                            item.type === 'success' ? 'bg-zinc-900' :
-                                            item.type === 'warning' ? 'bg-stone-400 animate-pulse' : 'bg-stone-300'
+                                            item.type === 'success' ? t.activityDot.success :
+                                            item.type === 'warning' ? t.activityDot.warning : t.activityDot.def
                                         }`} />
-                                        <span className="text-sm text-zinc-900">{item.action}</span>
+                                        <span className={`text-sm ${t.textMain}`}>{item.action}</span>
                                       </div>
                                     </div>
-                                    <div className="hidden sm:block text-xs text-stone-500 bg-stone-200 px-2 py-0.5 rounded-full">
+                                    <div className={`hidden sm:block text-xs ${t.dateBadge} px-2 py-0.5 rounded-full`}>
                                       {dateLabel}
                                     </div>
                                   </div>
@@ -1093,14 +1205,14 @@ export function Dashboard() {
                               })
                             ) : (
                               <div className="p-6 text-center">
-                                <Activity className="w-5 h-5 text-stone-400 mx-auto mb-1.5" />
-                                <p className="text-sm text-stone-500">No recent activity</p>
+                                <Activity className={`w-5 h-5 ${t.icon} mx-auto mb-1.5`} />
+                                <p className={`text-sm ${t.textMuted}`}>No recent activity</p>
                               </div>
                             )}
                           </div>
                           {dashStats && dashStats.recent_activity.length > 0 && (
-                            <div className="p-3 border-t border-stone-200 bg-stone-200">
-                              <button className="w-full text-center text-xs text-stone-500 hover:text-zinc-900 transition-colors">
+                            <div className={`p-3 ${t.footerBg}`}>
+                              <button className={`w-full text-center text-xs ${t.footerLink} transition-colors`}>
                                   Full Log
                               </button>
                             </div>
@@ -1109,42 +1221,42 @@ export function Dashboard() {
                       )}
 
                       {visibleWidgets.has('incidents') && dashStats?.incident_summary && dashStats.incident_summary.total_open > 0 && (
-                        <div className="bg-stone-100 rounded-2xl overflow-hidden">
-                          <div className="p-4 border-b border-stone-200 flex justify-between items-center">
-                            <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">Incidents</div>
-                            <ShieldAlert className="w-4 h-4 text-stone-400" />
+                        <div className={`${t.cardLight} overflow-hidden`}>
+                          <div className={`p-4 border-b ${t.border} flex justify-between items-center`}>
+                            <div className={t.label}>Incidents</div>
+                            <ShieldAlert className={`w-4 h-4 ${t.icon}`} />
                           </div>
                           <div className="p-5">
                             <div className="flex items-baseline gap-2.5 mb-4">
-                              <span className="text-3xl font-light text-zinc-900 tabular-nums">{dashStats.incident_summary.total_open}</span>
-                              <span className="text-xs text-stone-500 font-medium">Open Incident{dashStats.incident_summary.total_open !== 1 ? 's' : ''}</span>
+                              <span className={`text-3xl font-light ${t.textMain} tabular-nums`}>{dashStats.incident_summary.total_open}</span>
+                              <span className={`text-xs ${t.textMuted} font-medium`}>Open Incident{dashStats.incident_summary.total_open !== 1 ? 's' : ''}</span>
                               {dashStats.incident_summary.recent_7_days > 0 && (
-                                <span className="ml-auto text-xs bg-stone-200 text-stone-600 px-2 py-0.5 rounded-full">
+                                <span className={`ml-auto text-xs ${t.recentBadge} px-2 py-0.5 rounded-full`}>
                                   +{dashStats.incident_summary.recent_7_days}
                                 </span>
                               )}
                             </div>
                             <div className="grid grid-cols-4 gap-3">
-                              {([
-                                { label: 'Crit', count: dashStats.incident_summary.critical, color: 'text-zinc-900', bg: 'bg-zinc-900' },
-                                { label: 'High', count: dashStats.incident_summary.high, color: 'text-stone-700', bg: 'bg-stone-700' },
-                                { label: 'Med', count: dashStats.incident_summary.medium, color: 'text-stone-500', bg: 'bg-stone-500' },
-                                { label: 'Low', count: dashStats.incident_summary.low, color: 'text-stone-400', bg: 'bg-stone-400' },
-                              ] as const).map((sev) => (
-                                <div key={sev.label} className="bg-stone-200 rounded-xl p-3 text-center">
-                                  <div className={`text-xl font-light tabular-nums ${sev.count > 0 ? sev.color : 'text-stone-400'}`}>{sev.count}</div>
+                              {[
+                                { label: 'Crit', count: dashStats.incident_summary.critical, color: t.incidentSev[0].text, dot: t.incidentSev[0].dot },
+                                { label: 'High', count: dashStats.incident_summary.high, color: t.incidentSev[1].text, dot: t.incidentSev[1].dot },
+                                { label: 'Med', count: dashStats.incident_summary.medium, color: t.incidentSev[2].text, dot: t.incidentSev[2].dot },
+                                { label: 'Low', count: dashStats.incident_summary.low, color: t.incidentSev[3].text, dot: t.incidentSev[3].dot },
+                              ].map((sev) => (
+                                <div key={sev.label} className={`${t.innerEl} p-3 text-center`}>
+                                  <div className={`text-xl font-light tabular-nums ${sev.count > 0 ? sev.color : t.textFaint}`}>{sev.count}</div>
                                   <div className="flex items-center justify-center gap-1 mt-1">
-                                    <span className={`w-1.5 h-1.5 rounded-full ${sev.count > 0 ? sev.bg : 'bg-stone-300'}`} />
-                                    <span className="text-[10px] text-stone-500">{sev.label}</span>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${sev.count > 0 ? sev.dot : t.activityDot.def}`} />
+                                    <span className={`text-[10px] ${t.textMuted}`}>{sev.label}</span>
                                   </div>
                                 </div>
                               ))}
                             </div>
                           </div>
-                          <div className="p-3 border-t border-stone-200 bg-stone-200">
+                          <div className={`p-3 ${t.footerBg}`}>
                             <button
                               onClick={() => navigate('/app/ir/incidents')}
-                              className="w-full text-center text-xs text-stone-500 hover:text-zinc-900 transition-colors"
+                              className={`w-full text-center text-xs ${t.footerLink} transition-colors`}
                             >
                               View All
                             </button>
