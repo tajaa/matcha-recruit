@@ -49,6 +49,84 @@ class RiskAssessmentResult:
     computed_at: datetime
 
 
+async def _collect_minimum_wage_violation_metrics(
+    company_id: UUID, conn
+) -> dict[str, Any]:
+    """Aggregate employee minimum wage violations across active locations."""
+    from ...core.services.compliance_service import get_employee_impact_for_location
+
+    location_rows = await conn.fetch(
+        """
+        SELECT id, name, city, state
+        FROM business_locations
+        WHERE company_id = $1
+          AND COALESCE(is_active, TRUE) = TRUE
+        """,
+        company_id,
+    )
+
+    violating_employee_ids: set[str] = set()
+    hourly_employee_ids: set[str] = set()
+    salary_employee_ids: set[str] = set()
+    location_summaries: list[dict[str, Any]] = []
+
+    for location in location_rows:
+        try:
+            impact = await get_employee_impact_for_location(location["id"], company_id)
+        except Exception:
+            logger.exception(
+                "Failed to compute employee impact for risk assessment location %s",
+                location["id"],
+            )
+            continue
+
+        location_employee_ids: set[str] = set()
+        violations_by_rate_type = impact.get("violations_by_rate_type", {})
+
+        for violation in violations_by_rate_type.get("general", []):
+            employee_id = violation.get("employee_id")
+            if not employee_id:
+                continue
+            violating_employee_ids.add(employee_id)
+            hourly_employee_ids.add(employee_id)
+            location_employee_ids.add(employee_id)
+
+        for violation in violations_by_rate_type.get("exempt_salary", []):
+            employee_id = violation.get("employee_id")
+            if not employee_id:
+                continue
+            violating_employee_ids.add(employee_id)
+            salary_employee_ids.add(employee_id)
+            location_employee_ids.add(employee_id)
+
+        if location_employee_ids:
+            location_summaries.append(
+                {
+                    "location_id": str(location["id"]),
+                    "location_name": location["name"],
+                    "city": location["city"],
+                    "state": location["state"],
+                    "violation_count": len(location_employee_ids),
+                }
+            )
+
+    location_summaries.sort(
+        key=lambda item: (
+            -int(item["violation_count"]),
+            (item["location_name"] or item["city"] or "").lower(),
+            (item["state"] or "").lower(),
+        )
+    )
+
+    return {
+        "minimum_wage_violation_employee_count": len(violating_employee_ids),
+        "hourly_minimum_wage_violation_count": len(hourly_employee_ids),
+        "salary_minimum_wage_violation_count": len(salary_employee_ids),
+        "locations_with_minimum_wage_violations": len(location_summaries),
+        "top_minimum_wage_violation_locations": location_summaries[:5],
+    }
+
+
 async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResult:
     """Score compliance risk based on unread alerts and check recency."""
     row = await conn.fetchrow(
@@ -68,6 +146,19 @@ async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResul
     critical_unread = int(row["critical_unread"] or 0)
     warning_unread = int(row["warning_unread"] or 0)
     last_check: Optional[datetime] = row["last_check"]
+    wage_violation_metrics = await _collect_minimum_wage_violation_metrics(company_id, conn)
+    total_wage_violations = int(
+        wage_violation_metrics["minimum_wage_violation_employee_count"] or 0
+    )
+    hourly_wage_violations = int(
+        wage_violation_metrics["hourly_minimum_wage_violation_count"] or 0
+    )
+    salary_wage_violations = int(
+        wage_violation_metrics["salary_minimum_wage_violation_count"] or 0
+    )
+    wage_violation_locations = int(
+        wage_violation_metrics["locations_with_minimum_wage_violations"] or 0
+    )
 
     score = 0
     factors = []
@@ -81,6 +172,20 @@ async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResul
     if warning_points > 0:
         score += warning_points
         factors.append(f"{warning_unread} unread warning alert{'s' if warning_unread != 1 else ''} (+{warning_points})")
+
+    if total_wage_violations > 0:
+        factors.append(
+            f"{total_wage_violations} employee{'s' if total_wage_violations != 1 else ''} below minimum wage across "
+            f"{wage_violation_locations} location{'s' if wage_violation_locations != 1 else ''}"
+        )
+    if hourly_wage_violations > 0:
+        factors.append(
+            f"{hourly_wage_violations} hourly employee{'s' if hourly_wage_violations != 1 else ''} below local minimum wage"
+        )
+    if salary_wage_violations > 0:
+        factors.append(
+            f"{salary_wage_violations} salaried employee{'s' if salary_wage_violations != 1 else ''} below exempt salary minimum"
+        )
 
     stale_points = 0
     if last_check is None:
@@ -108,6 +213,7 @@ async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResul
             "critical_unread": critical_unread,
             "warning_unread": warning_unread,
             "last_check": last_check.isoformat() if last_check else None,
+            **wage_violation_metrics,
         },
     )
 

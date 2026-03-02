@@ -35,6 +35,75 @@ const PRIORITY_COLOR: Record<string, { badge: string }> = {
   low:      { badge: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' },
 };
 
+type ComplianceAlertLocation = {
+  location_id: string;
+  location_name: string | null;
+  city: string | null;
+  state: string | null;
+  violation_count: number;
+};
+
+type ComplianceAlertMetrics = {
+  total: number;
+  hourly: number;
+  salary: number;
+  locations: number;
+  topLocations: ComplianceAlertLocation[];
+};
+
+function getComplianceAlertMetrics(dim: DimensionResult): ComplianceAlertMetrics {
+  const rawData = dim.raw_data;
+  const toNumber = (key: string) => {
+    const value = rawData[key];
+    return typeof value === 'number' ? value : 0;
+  };
+  const topLocationsRaw = rawData.top_minimum_wage_violation_locations;
+  const topLocations = Array.isArray(topLocationsRaw)
+    ? topLocationsRaw.flatMap((item) => {
+        if (!item || typeof item !== 'object') {
+          return [];
+        }
+
+        const candidate = item as Record<string, unknown>;
+        const locationId = typeof candidate.location_id === 'string' ? candidate.location_id : null;
+        const violationCount = typeof candidate.violation_count === 'number' ? candidate.violation_count : null;
+
+        if (!locationId || violationCount === null) {
+          return [];
+        }
+
+        return [{
+          location_id: locationId,
+          location_name: typeof candidate.location_name === 'string' ? candidate.location_name : null,
+          city: typeof candidate.city === 'string' ? candidate.city : null,
+          state: typeof candidate.state === 'string' ? candidate.state : null,
+          violation_count: violationCount,
+        }];
+      })
+    : [];
+
+  return {
+    total: toNumber('minimum_wage_violation_employee_count'),
+    hourly: toNumber('hourly_minimum_wage_violation_count'),
+    salary: toNumber('salary_minimum_wage_violation_count'),
+    locations: toNumber('locations_with_minimum_wage_violations'),
+    topLocations,
+  };
+}
+
+function formatComplianceLocation(location: ComplianceAlertLocation): string {
+  if (location.location_name?.trim()) {
+    return location.location_name;
+  }
+  if (location.city && location.state) {
+    return `${location.city}, ${location.state}`;
+  }
+  if (location.state) {
+    return location.state;
+  }
+  return 'Unlabeled location';
+}
+
 function BandBadge({ band }: { band: Band }) {
   const c = BAND_COLOR[band];
   return (
@@ -59,6 +128,7 @@ function ScoreBar({ score, band }: { score: number; band: Band }) {
 function DimensionCard({ dimensionKey, dim }: { dimensionKey: string; dim: DimensionResult }) {
   const meta = DIMENSION_META[dimensionKey] ?? { label: dimensionKey, weight: '' };
   const c = BAND_COLOR[dim.band];
+  const complianceMetrics = dimensionKey === 'compliance' ? getComplianceAlertMetrics(dim) : null;
 
   return (
     <div className="bg-zinc-900 border border-white/10 p-6 flex flex-col gap-5">
@@ -88,6 +158,39 @@ function DimensionCard({ dimensionKey, dim }: { dimensionKey: string; dim: Dimen
           </div>
         ))}
       </div>
+
+      {complianceMetrics && (
+        <div className="border border-white/10 bg-black/20 p-3 flex flex-col gap-3">
+          <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Employee Compliance Alerts</div>
+
+          <div className="grid grid-cols-2 gap-px bg-white/10">
+            {[
+              { label: 'Below Min Wage', value: complianceMetrics.total, tone: complianceMetrics.total > 0 ? 'text-red-400' : 'text-zinc-300' },
+              { label: 'Hourly', value: complianceMetrics.hourly, tone: complianceMetrics.hourly > 0 ? 'text-red-400' : 'text-zinc-300' },
+              { label: 'Salary', value: complianceMetrics.salary, tone: complianceMetrics.salary > 0 ? 'text-red-400' : 'text-zinc-300' },
+              { label: 'Locations', value: complianceMetrics.locations, tone: complianceMetrics.locations > 0 ? 'text-amber-400' : 'text-zinc-300' },
+            ].map((metric) => (
+              <div key={metric.label} className="bg-zinc-950 px-3 py-2">
+                <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{metric.label}</div>
+                <div className={`mt-1 text-xl font-light font-mono ${metric.tone}`}>{metric.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {complianceMetrics.topLocations.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              {complianceMetrics.topLocations.map((location) => (
+                <div key={location.location_id} className="flex items-center justify-between gap-3 text-[10px] text-zinc-400">
+                  <span className="truncate">{formatComplianceLocation(location)}</span>
+                  <span className="font-mono text-red-400">{location.violation_count}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-[10px] text-zinc-600 font-mono">No employee pay alerts detected.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
