@@ -112,8 +112,8 @@ function RangeNegotiationFlowchart() {
           </div>
           {/* Branch explanation */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
-            <div className="bg-emerald-400/5 border border-emerald-400/20 p-3">
-              <div className="font-bold uppercase tracking-wider text-emerald-400 light:text-emerald-700 mb-1">✓ Overlap Found</div>
+            <div className="bg-matcha-400/5 border border-matcha-400/20 p-3">
+              <div className="font-bold uppercase tracking-wider text-matcha-400 light:text-matcha-700 mb-1">✓ Overlap Found</div>
               <div className="text-zinc-400 light:text-black/70">Offer accepted automatically at the midpoint of the overlapping range. Both parties are notified.</div>
             </div>
             <div className="bg-amber-400/5 border border-amber-400/20 p-3">
@@ -219,7 +219,7 @@ export function OfferLetters() {
   const statusColors: Record<string, string> = {
     draft: 'text-zinc-500 light:text-black/60',
     sent: 'text-blue-400 light:text-blue-700',
-    accepted: 'text-emerald-400 light:text-emerald-700',
+    accepted: 'text-matcha-400 light:text-matcha-700',
     rejected: 'text-red-400 light:text-red-700',
     expired: 'text-zinc-600 light:text-black/50',
   };
@@ -227,7 +227,7 @@ export function OfferLetters() {
   const statusDotColors: Record<string, string> = {
     draft: 'bg-zinc-600',
     sent: 'bg-blue-500',
-    accepted: 'bg-emerald-500',
+    accepted: 'bg-matcha-500',
     rejected: 'bg-red-500',
     expired: 'bg-zinc-700',
   };
@@ -722,7 +722,7 @@ export function OfferLetters() {
           <div className="border-b border-white/10 px-4 py-3 sm:px-5">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xs font-bold text-white light:text-black uppercase tracking-widest">Offer Guidance Plus</h2>
-              <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-400/10 text-amber-300 light:text-amber-700 border border-amber-400/30">
+              <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-matcha-500/10 text-matcha-400 light:text-matcha-700 border border-matcha-500/20">
                 Plus Feature
               </span>
             </div>
@@ -835,7 +835,7 @@ export function OfferLetters() {
                     <p className="mt-1 text-sm font-bold text-white light:text-black">{Math.round(guidanceHook.guidanceResult.confidence * 100)}%</p>
                     <div className="mt-2 h-1.5 w-full bg-zinc-800 light:bg-black/[0.05]">
                       <div
-                        className="h-full bg-emerald-400 transition-all"
+                        className="h-full bg-matcha-500 transition-all"
                         style={{ width: `${Math.round(guidanceHook.guidanceResult.confidence * 100)}%` }}
                       />
                     </div>
@@ -896,7 +896,7 @@ export function OfferLetters() {
                 {letter.range_match_status && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <span className={`text-[10px] px-2 py-0.5 font-bold uppercase tracking-wider ${
-                      letter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 light:text-emerald-700 border border-emerald-400/30' :
+                      letter.range_match_status === 'matched' ? 'bg-matcha-500/10 text-matcha-400 light:text-matcha-700 border border-matcha-500/20' :
                       letter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 light:text-amber-700 border border-amber-400/30' :
                       'bg-red-400/10 text-red-400 light:text-red-700 border border-red-400/30'
                     }`}>
@@ -963,7 +963,7 @@ export function OfferLetters() {
                    </span>
                    {letter.range_match_status && (
                      <span className={`text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-wider inline-block w-fit ${
-                       letter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 light:text-emerald-700' :
+                       letter.range_match_status === 'matched' ? 'bg-matcha-500/10 text-matcha-400 light:text-matcha-700' :
                        letter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 light:text-amber-700' :
                        'bg-red-400/10 text-red-400 light:text-red-700'
                      }`}>
@@ -1366,7 +1366,7 @@ export function OfferLetters() {
                         <div data-tour="offer-range-status">
                           <label className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-widest block mb-1">Range Negotiation</label>
                           <span className={`text-xs px-2 py-1 font-bold uppercase tracking-wider inline-block ${
-                            selectedLetter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 light:text-emerald-700 border border-emerald-400/30' :
+                            selectedLetter.range_match_status === 'matched' ? 'bg-matcha-500/10 text-matcha-400 light:text-matcha-700 border border-matcha-500/20' :
                             selectedLetter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 light:text-amber-700 border border-amber-400/30' :
                             'bg-red-400/10 text-red-400 light:text-red-700 border border-red-400/30'
                           }`}>
