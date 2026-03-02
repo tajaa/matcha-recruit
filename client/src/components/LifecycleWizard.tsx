@@ -404,27 +404,27 @@ export function LifecycleWizard({
   const isCompactMode = displayMode === 'compact';
 
   return (
-    <div className={`border border-white/5 ${isCompactMode ? 'bg-zinc-900/30' : 'bg-zinc-900/30'} rounded-sm overflow-hidden mb-8 shadow-sm`}>
+    <div className={`border border-white/5 light:border-white/40 bg-zinc-900/30 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:shadow-[0_4px_16px_rgba(0,0,0,0.04),inset_0_1px_1px_rgba(255,255,255,0.6)] rounded-sm overflow-hidden mb-8`}>
       <button
         onClick={toggle}
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
       >
         <div className="flex items-center gap-4">
-          <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-zinc-500 font-mono">
+          <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-zinc-500 light:text-black/50 font-mono">
             {title}
           </span>
           <div className="flex items-center gap-2">
-            <span className="px-1.5 py-0.5 text-[8px] font-mono font-bold uppercase tracking-widest bg-zinc-800 border border-white/5 text-zinc-400">
+            <span className="px-1.5 py-0.5 text-[8px] font-mono font-bold uppercase tracking-widest bg-zinc-800 light:bg-black/[0.1] border border-white/5 light:border-black/[0.08] text-zinc-400 light:text-black/70">
               Stage 0{activeStep}
             </span>
-            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600 hidden sm:inline">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600 light:text-black/50 hidden sm:inline">
               {steps[activeStep - 1].title}
             </span>
           </div>
         </div>
         <ChevronDown
           size={14}
-          className={`text-zinc-600 transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`}
+          className={`text-zinc-600 light:text-black/40 transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`}
         />
       </button>
 
@@ -435,7 +435,7 @@ export function LifecycleWizard({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="border-t border-white/5 overflow-hidden"
+            className="border-t border-white/5 light:border-black/[0.06] overflow-hidden"
           >
             <div className="px-4 py-6">
               <div className="flex items-start justify-between gap-8 mb-6 overflow-x-auto no-scrollbar pb-2">
@@ -450,10 +450,10 @@ export function LifecycleWizard({
                         <div
                           className={`relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-500 ${
                             isComplete
-                              ? 'bg-matcha-500/10 border-matcha-500/30 text-matcha-500'
+                              ? 'bg-matcha-500/10 border-matcha-500/30 text-matcha-500 light:text-matcha-700'
                               : isActive
-                              ? 'bg-white/5 border-white/20 text-white shadow-[0_0_15px_rgba(255,255,255,0.05)]'
-                              : 'bg-zinc-900 border-white/5 text-zinc-700'
+                              ? 'bg-white/5 light:bg-zinc-700 border-white/20 light:border-zinc-500 text-white shadow-[0_0_15px_rgba(255,255,255,0.05)]'
+                              : 'bg-zinc-900 light:bg-zinc-800 border-white/5 light:border-zinc-600 text-zinc-700 light:text-zinc-300'
                           }`}
                         >
                           {isComplete ? (
@@ -464,7 +464,7 @@ export function LifecycleWizard({
                         </div>
                         <span
                           className={`mt-2 text-[8px] font-bold uppercase tracking-[0.15em] ${
-                            isActive ? 'text-white' : isComplete ? 'text-matcha-500/60' : 'text-zinc-700'
+                            isActive ? 'text-white light:text-black/80' : isComplete ? 'text-matcha-500/60 light:text-matcha-700' : 'text-zinc-700 light:text-black/30'
                           }`}
                         >
                           {step.title}
@@ -473,7 +473,7 @@ export function LifecycleWizard({
                       {idx < steps.length - 1 && (
                         <div
                           className={`w-8 h-px transition-colors duration-700 ${
-                            step.id < activeStep ? 'bg-matcha-500/20' : 'bg-white/5'
+                            step.id < activeStep ? 'bg-matcha-500/20' : 'bg-white/5 light:bg-black/[0.08]'
                           }`}
                         />
                       )}
@@ -482,9 +482,9 @@ export function LifecycleWizard({
                 })}
               </div>
 
-              <div className="p-4 bg-zinc-950/40 border border-white/5 rounded-sm">
+              <div className="p-4 bg-zinc-950/40 light:bg-zinc-700/70 border border-white/5 light:border-zinc-600/30 rounded-sm">
                 <div className="flex items-start gap-4">
-                  <div className="p-2 bg-white/5 rounded-sm text-zinc-400">
+                  <div className="p-2 bg-white/5 light:bg-zinc-600/50 rounded-sm text-zinc-400 light:text-zinc-200">
                     <StepIcon className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -492,16 +492,16 @@ export function LifecycleWizard({
                       <h4 className="text-[10px] font-bold text-white uppercase tracking-widest">
                         {steps[activeStep - 1].title}
                       </h4>
-                      <span className="text-[7px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 rounded-xs">
+                      <span className="text-[7px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-matcha-500/10 text-matcha-500 light:text-matcha-700 border border-matcha-500/20 rounded-xs">
                         Active Stage
                       </span>
                     </div>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    <p className="text-[11px] text-zinc-500 light:text-zinc-300 leading-relaxed">
                       {steps[activeStep - 1].description}
                     </p>
                     {steps[activeStep - 1].action && (
-                      <p className="text-[10px] text-zinc-400 font-mono mt-2 opacity-80">
-                        <span className="text-matcha-500">→</span> {steps[activeStep - 1].action}
+                      <p className="text-[10px] text-zinc-400 light:text-zinc-300 font-mono mt-2 opacity-80">
+                        <span className="text-matcha-500 light:text-matcha-700">→</span> {steps[activeStep - 1].action}
                       </p>
                     )}
                   </div>

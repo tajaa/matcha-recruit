@@ -77,14 +77,14 @@ const RANGE_FLOW_STEPS: RangeFlowStep[] = [
 function RangeNegotiationFlowchart() {
   const [collapsed, setCollapsed] = useState(true);
   return (
-    <div className="border border-white/10 bg-zinc-950 light:bg-black/[0.02]/60 mb-6">
+    <div className="border border-white/10 bg-zinc-950/60 light:bg-black/[0.02] mb-6">
       <button
         onClick={() => setCollapsed(c => !c)}
         className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
       >
         <div className="flex items-center gap-3">
           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 light:text-black/60">Blind Range Negotiation</span>
-          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-amber-400/10 border border-amber-400/20 text-amber-400">How It Works</span>
+          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-amber-400/10 border border-amber-400/20 text-amber-400 light:text-amber-700">How It Works</span>
         </div>
         <ChevronDown size={14} className={`text-zinc-600 transition-transform duration-200 shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
       </button>
@@ -98,7 +98,7 @@ function RangeNegotiationFlowchart() {
                 <div key={step.id} className="flex items-start">
                   <div className="flex flex-col items-center w-32">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-bold ${
-                      step.branch ? 'border-amber-400/50 bg-amber-400/10 text-amber-400' : 'border-zinc-600 bg-zinc-900 light:bg-black/[0.03] text-zinc-400 light:text-black/70'
+                      step.branch ? 'border-amber-400/50 bg-amber-400/10 text-amber-400 light:text-amber-700' : 'border-zinc-600 bg-zinc-900 light:bg-black/[0.03] text-zinc-400 light:text-black/70'
                     }`}>{step.id}</div>
                     <div className="mt-2 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-300 light:text-black/80 leading-tight px-1">{step.label}</div>
                     <div className="mt-1 text-center text-[9px] text-zinc-600 leading-tight px-1">{step.sublabel}</div>
@@ -113,11 +113,11 @@ function RangeNegotiationFlowchart() {
           {/* Branch explanation */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
             <div className="bg-emerald-400/5 border border-emerald-400/20 p-3">
-              <div className="font-bold uppercase tracking-wider text-emerald-400 mb-1">✓ Overlap Found</div>
+              <div className="font-bold uppercase tracking-wider text-emerald-400 light:text-emerald-700 mb-1">✓ Overlap Found</div>
               <div className="text-zinc-400 light:text-black/70">Offer accepted automatically at the midpoint of the overlapping range. Both parties are notified.</div>
             </div>
             <div className="bg-amber-400/5 border border-amber-400/20 p-3">
-              <div className="font-bold uppercase tracking-wider text-amber-400 mb-1">↻ No Overlap</div>
+              <div className="font-bold uppercase tracking-wider text-amber-400 light:text-amber-700 mb-1">↻ No Overlap</div>
               <div className="text-zinc-400 light:text-black/70">Direction is shared (too low / too high) but exact numbers stay private. Employer can revise and re-send up to the round limit.</div>
             </div>
           </div>
@@ -218,10 +218,10 @@ export function OfferLetters() {
 
   const statusColors: Record<string, string> = {
     draft: 'text-zinc-500 light:text-black/60',
-    sent: 'text-blue-400',
-    accepted: 'text-emerald-400',
-    rejected: 'text-red-400',
-    expired: 'text-zinc-600',
+    sent: 'text-blue-400 light:text-blue-700',
+    accepted: 'text-emerald-400 light:text-emerald-700',
+    rejected: 'text-red-400 light:text-red-700',
+    expired: 'text-zinc-600 light:text-black/50',
   };
 
   const statusDotColors: Record<string, string> = {
@@ -276,7 +276,7 @@ export function OfferLetters() {
                 {formHook.logoPreview ? (
                   <div className="flex items-center gap-4 p-3 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner rounded">
                     <img src={formHook.logoPreview} alt="Logo preview" className="h-10 max-w-[120px] object-contain" />
-                    <button type="button" onClick={removeLogo} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
+                    <button type="button" onClick={removeLogo} className="text-xs text-red-400 light:text-red-700 hover:text-red-300 flex items-center gap-1">
                       <X size={14} /> Remove
                     </button>
                   </div>
@@ -718,11 +718,11 @@ export function OfferLetters() {
       <RangeNegotiationFlowchart />
 
       {offerLettersPlusEnabled && (
-        <section className="mb-8 border border-white/10 bg-zinc-950 light:bg-black/[0.02]/70">
+        <section className="mb-8 border border-white/10 bg-zinc-950/70 light:bg-black/[0.02]">
           <div className="border-b border-white/10 px-4 py-3 sm:px-5">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xs font-bold text-white light:text-black uppercase tracking-widest">Offer Guidance Plus</h2>
-              <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-400/10 text-amber-300 border border-amber-400/30">
+              <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-400/10 text-amber-300 light:text-amber-700 border border-amber-400/30">
                 Plus Feature
               </span>
             </div>
@@ -801,11 +801,11 @@ export function OfferLetters() {
             </div>
 
             {guidanceHook.guidanceError && (
-              <p className="mt-3 text-xs text-red-400">{guidanceHook.guidanceError}</p>
+              <p className="mt-3 text-xs text-red-400 light:text-red-700">{guidanceHook.guidanceError}</p>
             )}
 
             {guidanceHook.guidanceResult && (
-              <div className="mt-5 border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-4">
+              <div className="mt-5 border border-white/10 bg-zinc-900/50 light:bg-black/[0.03] p-4">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-zinc-500 light:text-black/60">Base Salary Range</p>
@@ -896,9 +896,9 @@ export function OfferLetters() {
                 {letter.range_match_status && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <span className={`text-[10px] px-2 py-0.5 font-bold uppercase tracking-wider ${
-                      letter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/30' :
-                      letter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 border border-amber-400/30' :
-                      'bg-red-400/10 text-red-400 border border-red-400/30'
+                      letter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 light:text-emerald-700 border border-emerald-400/30' :
+                      letter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 light:text-amber-700 border border-amber-400/30' :
+                      'bg-red-400/10 text-red-400 light:text-red-700 border border-red-400/30'
                     }`}>
                       {letter.range_match_status === 'matched' && letter.matched_salary
                         ? `Matched at ${formatUsd(letter.matched_salary)}`
@@ -963,9 +963,9 @@ export function OfferLetters() {
                    </span>
                    {letter.range_match_status && (
                      <span className={`text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-wider inline-block w-fit ${
-                       letter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400' :
-                       letter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400' :
-                       'bg-red-400/10 text-red-400'
+                       letter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 light:text-emerald-700' :
+                       letter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 light:text-amber-700' :
+                       'bg-red-400/10 text-red-400 light:text-red-700'
                      }`}>
                        {letter.range_match_status === 'matched' ? 'Matched' :
                         letter.range_match_status === 'pending_candidate' ? 'Awaiting' :
@@ -990,8 +990,8 @@ export function OfferLetters() {
       {/* Create Modal (Form or Wizard) */}
       {(createMode === 'form' || createMode === 'wizard') && (
          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/80 backdrop-blur-sm p-2 sm:p-4">
-            <div className="w-full max-w-3xl h-[calc(100vh-1rem)] sm:h-auto sm:max-h-[90vh] bg-zinc-950 light:bg-black/[0.02] border border-zinc-800 shadow-2xl flex flex-col">
-               <div className="flex items-start justify-between gap-3 p-4 border-b border-white/10 sm:items-center sm:p-6">
+            <div className="w-full max-w-3xl h-[calc(100vh-1rem)] sm:h-auto sm:max-h-[90vh] bg-zinc-950 light:bg-white border border-zinc-800 light:border-black/[0.08] shadow-2xl flex flex-col">
+               <div className="flex items-start justify-between gap-3 p-4 border-b border-white/10 light:border-black/[0.08] sm:items-center sm:p-6">
                   <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <h2 className="text-base sm:text-xl font-bold text-white light:text-black uppercase tracking-tight">
                       {createMode === 'wizard' ? `Step ${formHook.wizardStep} of 5` : 'Create Offer Letter'}
@@ -1007,7 +1007,7 @@ export function OfferLetters() {
                       </div>
                     )}
                   </div>
-                  <button onClick={resetCreation} className="text-zinc-500 light:text-black/60 hover:text-white light:text-black transition-colors">
+                  <button onClick={resetCreation} className="text-zinc-500 light:text-black/60 hover:text-white light:hover:text-black transition-colors">
                      <X size={20} />
                   </button>
                </div>
@@ -1276,7 +1276,7 @@ export function OfferLetters() {
                           {formHook.logoPreview ? (
                             <div className="flex flex-wrap items-center gap-4">
                               <img src={formHook.logoPreview} alt="Logo preview" className="h-12 max-w-[150px] object-contain" />
-                              <button type="button" onClick={removeLogo} className="text-xs text-red-400 hover:text-red-300">Remove</button>
+                              <button type="button" onClick={removeLogo} className="text-xs text-red-400 light:text-red-700 hover:text-red-300">Remove</button>
                             </div>
                           ) : (
                             <button type="button" onClick={() => formHook.logoInputRef.current?.click()} className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-zinc-700 text-sm text-zinc-400 light:text-black/70 hover:border-white hover:text-white light:text-black transition-colors">
@@ -1290,8 +1290,8 @@ export function OfferLetters() {
                 )}
                </div>
 
-               <div className="flex flex-col gap-3 p-4 border-t border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-                  <Button variant="secondary" type="button" onClick={resetCreation} className="w-full sm:w-auto bg-transparent border border-zinc-700 text-zinc-300 light:text-black/80 hover:bg-zinc-800 light:bg-black/[0.05] hover:text-white light:text-black">Cancel</Button>
+               <div className="flex flex-col gap-3 p-4 border-t border-white/10 light:border-black/[0.08] bg-zinc-900/50 light:bg-black/[0.02] sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                  <Button variant="secondary" type="button" onClick={resetCreation} className="w-full sm:w-auto bg-transparent border border-zinc-700 light:border-black/[0.15] text-zinc-300 light:text-black/80 hover:bg-zinc-800 light:hover:bg-black/[0.05] hover:text-white light:hover:text-black">Cancel</Button>
                   
                   {createMode === 'wizard' ? (
                     <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
@@ -1323,20 +1323,20 @@ export function OfferLetters() {
       {/* Detail Modal (Existing View Logic) */}
       {selectedLetter && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/80 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-4xl h-[calc(100vh-1rem)] sm:h-auto sm:max-h-[90vh] flex flex-col bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner shadow-2xl overflow-hidden">
+          <div className="w-full max-w-4xl h-[calc(100vh-1rem)] sm:h-auto sm:max-h-[90vh] flex flex-col bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:border-black/[0.05] light:shadow-inner shadow-2xl overflow-hidden">
              {/* Modal Header */}
-             <div className="p-4 sm:p-6 border-b border-white/10 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between bg-zinc-950 light:bg-black/[0.02]/50">
+             <div className="p-4 sm:p-6 border-b border-white/10 light:border-black/[0.06] flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between bg-zinc-950/50 light:bg-black/[0.02]">
                 <div>
-                   <h2 className="text-xl font-bold text-white light:text-black tracking-tight">Offer Details</h2>
-                   <p className="text-xs text-zinc-500 light:text-black/60 mt-1 font-mono uppercase tracking-wide break-all">{selectedLetter.id}</p>
+                   <h2 className="text-xl font-bold text-white tracking-tight">Offer Details</h2>
+                   <p className="text-xs text-zinc-400 mt-1 font-mono uppercase tracking-wide break-all">{selectedLetter.id}</p>
                 </div>
                 <div className="flex items-center gap-2 sm:gap-4">
-                   <span className={`px-2 py-1 text-[10px] uppercase tracking-wider font-bold ${statusColors[selectedLetter.status]} bg-zinc-950 light:bg-black/[0.02] border border-white/5`}>
+                   <span className={`px-2 py-1 text-[10px] uppercase tracking-wider font-bold ${statusColors[selectedLetter.status]} bg-zinc-950 light:bg-black/[0.05] border border-white/5 light:border-black/[0.08]`}>
                       {selectedLetter.status}
                    </span>
                    <button
                     onClick={() => setSelectedLetter(null)}
-                    className="p-2 hover:bg-zinc-800 light:bg-black/[0.05] rounded-full transition-colors text-zinc-500 light:text-black/60 hover:text-white light:text-black"
+                    className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-white"
                   >
                     <X size={20} />
                   </button>
@@ -1349,16 +1349,16 @@ export function OfferLetters() {
                    {/* Left Sidebar: Metadata */}
                    <div className="space-y-6">
                       <div>
-                         <label className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-widest block mb-1">Candidate</label>
-                         <p className="text-white light:text-black font-bold">{selectedLetter.candidate_name}</p>
+                         <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Candidate</label>
+                         <p className="text-white font-bold">{selectedLetter.candidate_name}</p>
                       </div>
                       <div>
-                         <label className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-widest block mb-1">Position</label>
-                         <p className="text-zinc-300 light:text-black/80">{selectedLetter.position_title}</p>
+                         <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Position</label>
+                         <p className="text-zinc-300">{selectedLetter.position_title}</p>
                       </div>
                        <div>
-                         <label className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-widest block mb-1">Company</label>
-                         <p className="text-zinc-300 light:text-black/80">{selectedLetter.company_name}</p>
+                         <label className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Company</label>
+                         <p className="text-zinc-300">{selectedLetter.company_name}</p>
                       </div>
                       
                       {/* Range negotiation status */}
@@ -1366,9 +1366,9 @@ export function OfferLetters() {
                         <div data-tour="offer-range-status">
                           <label className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-widest block mb-1">Range Negotiation</label>
                           <span className={`text-xs px-2 py-1 font-bold uppercase tracking-wider inline-block ${
-                            selectedLetter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/30' :
-                            selectedLetter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 border border-amber-400/30' :
-                            'bg-red-400/10 text-red-400 border border-red-400/30'
+                            selectedLetter.range_match_status === 'matched' ? 'bg-emerald-400/10 text-emerald-400 light:text-emerald-700 border border-emerald-400/30' :
+                            selectedLetter.range_match_status === 'pending_candidate' ? 'bg-amber-400/10 text-amber-400 light:text-amber-700 border border-amber-400/30' :
+                            'bg-red-400/10 text-red-400 light:text-red-700 border border-red-400/30'
                           }`}>
                             {selectedLetter.range_match_status === 'matched' && selectedLetter.matched_salary
                               ? `Matched at ${formatUsd(selectedLetter.matched_salary)}`
@@ -1387,16 +1387,16 @@ export function OfferLetters() {
                       )}
 
                       <div className="pt-6 border-t border-white/10 space-y-3">
-                         <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 light:text-black/80 hover:bg-zinc-800 light:bg-black/[0.05] hover:text-white light:text-black" onClick={() => handleDownloadPdf(selectedLetter)}>Download PDF</Button>
+                         <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 light:border-black/[0.15] text-zinc-300 light:text-black/80 hover:bg-zinc-800 light:hover:bg-black/[0.05] hover:text-white light:hover:text-black" onClick={() => handleDownloadPdf(selectedLetter)}>Download PDF</Button>
                          {selectedLetter.status === 'draft' && (
-                           <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 text-zinc-300 light:text-black/80 hover:bg-zinc-800 light:bg-black/[0.05] hover:text-white light:text-black" onClick={() => handleEditDraft(selectedLetter)}>Edit Draft</Button>
+                           <Button variant="secondary" className="w-full justify-center bg-transparent border border-zinc-700 light:border-black/[0.15] text-zinc-300 light:text-black/80 hover:bg-zinc-800 light:hover:bg-black/[0.05] hover:text-white light:hover:text-black" onClick={() => handleEditDraft(selectedLetter)}>Edit Draft</Button>
                          )}
                          {selectedLetter.salary_range_min != null && selectedLetter.salary_range_max != null && !selectedLetter.range_match_status && (
-                           <Button data-tour="offer-send-range-btn" variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => { rangeHook.setShowSendRangePrompt(selectedLetter.id); rangeHook.setSendRangeEmail(selectedLetter.candidate_email || ''); }}>Send Range Offer</Button>
+                           <Button data-tour="offer-send-range-btn" variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 light:text-amber-700 hover:bg-amber-400/10" onClick={() => { rangeHook.setShowSendRangePrompt(selectedLetter.id); rangeHook.setSendRangeEmail(selectedLetter.candidate_email || ''); }}>Send Range Offer</Button>
                          )}
                          {(selectedLetter.range_match_status === 'no_match_low' || selectedLetter.range_match_status === 'no_match_high') &&
                            (selectedLetter.negotiation_round ?? 1) < (selectedLetter.max_negotiation_rounds ?? 3) && (
-                           <Button data-tour="offer-renegotiate-btn" variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => handleReNegotiate(selectedLetter.id)}>Re-negotiate</Button>
+                           <Button data-tour="offer-renegotiate-btn" variant="secondary" className="w-full justify-center bg-transparent border border-amber-400/30 text-amber-400 light:text-amber-700 hover:bg-amber-400/10" onClick={() => handleReNegotiate(selectedLetter.id)}>Re-negotiate</Button>
                          )}
                       </div>
                    </div>
@@ -1520,12 +1520,12 @@ export function OfferLetters() {
       {/* Send Range Email Prompt */}
       {rangeHook.showSendRangePrompt && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm bg-zinc-950 light:bg-black/[0.02] border border-zinc-800 shadow-2xl p-6">
+          <div className="w-full max-w-sm bg-zinc-950 light:bg-white border border-zinc-800 light:border-black/[0.08] shadow-2xl p-6">
             <h3 className="text-sm font-bold text-white light:text-black uppercase tracking-wider mb-4">Send Range Offer</h3>
             <p className="text-xs text-zinc-500 light:text-black/60 mb-4">Enter the candidate's email to send the salary range negotiation link.</p>
             <input
               type="email"
-              className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm light:text-black focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700 mb-4"
+              className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:border-black/[0.08] text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors placeholder-zinc-700 mb-4"
               placeholder="candidate@email.com"
               value={rangeHook.sendRangeEmail}
               onChange={(e) => rangeHook.setSendRangeEmail(e.target.value)}
@@ -1534,7 +1534,7 @@ export function OfferLetters() {
             <div className="flex gap-3">
               <button
                 onClick={() => { rangeHook.setShowSendRangePrompt(null); rangeHook.setSendRangeEmail(''); }}
-                className="flex-1 px-4 py-2 text-xs font-bold uppercase tracking-wider border border-zinc-700 text-zinc-400 light:text-black/70 hover:bg-zinc-800 light:bg-black/[0.05] hover:text-white light:text-black transition-colors"
+                className="flex-1 px-4 py-2 text-xs font-bold uppercase tracking-wider border border-zinc-700 light:border-black/[0.15] text-zinc-400 light:text-black/70 hover:bg-zinc-800 light:hover:bg-black/[0.05] hover:text-white light:hover:text-black transition-colors"
               >
                 Cancel
               </button>
