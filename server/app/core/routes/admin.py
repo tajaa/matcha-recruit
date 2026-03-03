@@ -4796,6 +4796,7 @@ class IndustryProfileCreate(BaseModel):
     focused_categories: list[str]
     rate_types: Optional[list[str]] = None
     category_order: list[str]
+    category_evidence: Optional[dict] = None
 
 
 class IndustryProfileUpdate(BaseModel):
@@ -4804,6 +4805,24 @@ class IndustryProfileUpdate(BaseModel):
     focused_categories: Optional[list[str]] = None
     rate_types: Optional[list[str]] = None
     category_order: Optional[list[str]] = None
+    category_evidence: Optional[dict] = None
+
+
+def _profile_row_to_dict(r) -> dict:
+    evidence = r["category_evidence"]
+    if isinstance(evidence, str):
+        evidence = json.loads(evidence)
+    return {
+        "id": str(r["id"]),
+        "name": r["name"],
+        "description": r["description"],
+        "focused_categories": list(r["focused_categories"]),
+        "rate_types": list(r["rate_types"]) if r["rate_types"] else [],
+        "category_order": list(r["category_order"]),
+        "category_evidence": evidence,
+        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+    }
 
 
 @router.get("/industry-profiles", dependencies=[Depends(require_admin)])
@@ -4812,46 +4831,26 @@ async def list_industry_profiles():
         rows = await conn.fetch(
             "SELECT * FROM industry_compliance_profiles ORDER BY name"
         )
-    return [
-        {
-            "id": str(r["id"]),
-            "name": r["name"],
-            "description": r["description"],
-            "focused_categories": list(r["focused_categories"]),
-            "rate_types": list(r["rate_types"]) if r["rate_types"] else [],
-            "category_order": list(r["category_order"]),
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
-        }
-        for r in rows
-    ]
+    return [_profile_row_to_dict(r) for r in rows]
 
 
 @router.post("/industry-profiles", dependencies=[Depends(require_admin)], status_code=201)
 async def create_industry_profile(body: IndustryProfileCreate):
+    evidence_json = json.dumps(body.category_evidence) if body.category_evidence else None
     async with get_connection() as conn:
         try:
             row = await conn.fetchrow(
                 """
-                INSERT INTO industry_compliance_profiles (name, description, focused_categories, rate_types, category_order)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO industry_compliance_profiles (name, description, focused_categories, rate_types, category_order, category_evidence)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
                 RETURNING *
                 """,
                 body.name, body.description, body.focused_categories,
-                body.rate_types or [], body.category_order,
+                body.rate_types or [], body.category_order, evidence_json,
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(status_code=409, detail="Profile name already exists")
-    return {
-        "id": str(row["id"]),
-        "name": row["name"],
-        "description": row["description"],
-        "focused_categories": list(row["focused_categories"]),
-        "rate_types": list(row["rate_types"]) if row["rate_types"] else [],
-        "category_order": list(row["category_order"]),
-        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-    }
+    return _profile_row_to_dict(row)
 
 
 @router.put("/industry-profiles/{profile_id}", dependencies=[Depends(require_admin)])
@@ -4865,6 +4864,10 @@ async def update_industry_profile(profile_id: UUID, body: IndustryProfileUpdate)
             sets.append(f"{field} = ${idx}")
             vals.append(val)
             idx += 1
+    if body.category_evidence is not None:
+        sets.append(f"category_evidence = ${idx}::jsonb")
+        vals.append(json.dumps(body.category_evidence))
+        idx += 1
     if not sets:
         raise HTTPException(status_code=400, detail="No fields to update")
     sets.append(f"updated_at = NOW()")
@@ -4876,16 +4879,7 @@ async def update_industry_profile(profile_id: UUID, body: IndustryProfileUpdate)
         )
     if not row:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return {
-        "id": str(row["id"]),
-        "name": row["name"],
-        "description": row["description"],
-        "focused_categories": list(row["focused_categories"]),
-        "rate_types": list(row["rate_types"]) if row["rate_types"] else [],
-        "category_order": list(row["category_order"]),
-        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-    }
+    return _profile_row_to_dict(row)
 
 
 @router.delete("/industry-profiles/{profile_id}", dependencies=[Depends(require_admin)])

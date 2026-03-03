@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   Database, ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
   XCircle, Loader2, RefreshCw, Layers, Globe2, Filter, Trash2, Check,
-  X, ExternalLink, Settings2, ChevronUp, GripVertical, Eye, EyeOff
+  X, ExternalLink, Settings2, ChevronUp, GripVertical, Eye, EyeOff, Plus, Info
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
@@ -10,7 +10,7 @@ import { useJurisdictionData } from '../../hooks/useJurisdictionData';
 import { useIndustryProfiles } from '../../hooks/useIndustryProfiles';
 import { useIsLightMode } from '../../hooks/useIsLightMode';
 import { api } from '../../api/client';
-import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail, IndustryProfile } from '../../api/client';
+import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail, IndustryProfile, CategoryEvidence } from '../../api/client';
 
 /* ───── Theme ───── */
 const LT = {
@@ -101,6 +101,27 @@ const CAT_LABELS: Record<string, string> = {
 
 const ALL_CATEGORIES = Object.keys(CAT_LABELS);
 const VALID_RATE_TYPES = ['general', 'tipped', 'exempt_salary', 'hotel', 'fast_food', 'healthcare'];
+
+function confidenceColor(confidence: number | undefined): 'green' | 'yellow' | 'red' | 'gray' {
+  if (confidence == null) return 'gray';
+  if (confidence >= 90) return 'green';
+  if (confidence >= 70) return 'yellow';
+  return 'red';
+}
+
+const CONF_DOT: Record<string, string> = {
+  green: 'bg-emerald-500',
+  yellow: 'bg-amber-400',
+  red: 'bg-red-400',
+  gray: 'bg-zinc-400',
+};
+
+const CONF_BADGE_BG: Record<string, string> = {
+  green: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400',
+  yellow: 'bg-amber-400/20 text-amber-700 dark:text-amber-400',
+  red: 'bg-red-400/20 text-red-600 dark:text-red-400',
+  gray: 'bg-zinc-400/20 text-zinc-500',
+};
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -786,13 +807,25 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
 
           {detail && !loading && Object.entries(grouped).map(([category, reqs]) => {
             const dimmed = focusedSet && !focusedSet.has(category);
+            const evidence = selectedProfile?.category_evidence?.[category];
+            const confColor = confidenceColor(evidence?.confidence);
             return (
             <div key={category} className={`${t.card} p-4 space-y-2 transition-opacity ${dimmed ? 'opacity-40' : ''}`}>
               <div className={`${t.label} flex items-center gap-2`}>
-                <span className={`w-2.5 h-2.5 rounded-full ${t.dotOk}`} />
+                {evidence ? (
+                  <span className={`w-2.5 h-2.5 rounded-full ${CONF_DOT[confColor]}`} title={`Confidence: ${evidence.confidence}%`} />
+                ) : (
+                  <span className={`w-2.5 h-2.5 rounded-full ${t.dotOk}`} />
+                )}
                 {CAT_LABELS[category] || category.replace(/_/g, ' ')}
                 <span className={`${t.textFaint} font-normal`}>({reqs.length})</span>
+                {evidence && evidence.confidence < 70 && (
+                  <span className="text-[9px] font-normal text-red-400 ml-1">needs review</span>
+                )}
               </div>
+              {evidence?.reason && (
+                <p className={`text-[10px] italic ${t.textFaint} -mt-0.5 leading-relaxed`}>{evidence.reason}</p>
+              )}
 
               <div className="space-y-1.5">
                 {reqs.map(req => (
@@ -876,8 +909,8 @@ function ProfileEditorModal({ t, profiles, editingProfile, onClose, onEdit, onCr
   editingProfile: IndustryProfile | null;
   onClose: () => void;
   onEdit: (p: IndustryProfile | null) => void;
-  onCreate: (data: { name: string; description?: string; focused_categories: string[]; rate_types: string[]; category_order: string[] }) => Promise<unknown>;
-  onUpdate: (args: { id: string; data: { name?: string; description?: string; focused_categories?: string[]; rate_types?: string[]; category_order?: string[] } }) => Promise<unknown>;
+  onCreate: (data: { name: string; description?: string; focused_categories: string[]; rate_types: string[]; category_order: string[]; category_evidence?: Record<string, CategoryEvidence> }) => Promise<unknown>;
+  onUpdate: (args: { id: string; data: { name?: string; description?: string; focused_categories?: string[]; rate_types?: string[]; category_order?: string[]; category_evidence?: Record<string, CategoryEvidence> } }) => Promise<unknown>;
   onDelete: (id: string) => Promise<unknown>;
 }) {
   const [formName, setFormName] = useState(editingProfile?.name ?? '');
@@ -885,10 +918,15 @@ function ProfileEditorModal({ t, profiles, editingProfile, onClose, onEdit, onCr
   const [formFocused, setFormFocused] = useState<Set<string>>(new Set(editingProfile?.focused_categories ?? ALL_CATEGORIES.slice(0, 4)));
   const [formOrder, setFormOrder] = useState<string[]>(editingProfile?.category_order ?? [...ALL_CATEGORIES]);
   const [formRateTypes, setFormRateTypes] = useState<Set<string>>(new Set(editingProfile?.rate_types ?? []));
+  const [formEvidence, setFormEvidence] = useState<Record<string, CategoryEvidence>>(editingProfile?.category_evidence ?? {});
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
+  const [newSource, setNewSource] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isNew = !editingProfile;
+
+  const today = new Date().toISOString().slice(0, 10);
 
   const resetForm = useCallback((p: IndustryProfile | null) => {
     setFormName(p?.name ?? '');
@@ -896,8 +934,44 @@ function ProfileEditorModal({ t, profiles, editingProfile, onClose, onEdit, onCr
     setFormFocused(new Set(p?.focused_categories ?? ALL_CATEGORIES.slice(0, 4)));
     setFormOrder(p?.category_order ?? [...ALL_CATEGORIES]);
     setFormRateTypes(new Set(p?.rate_types ?? []));
+    setFormEvidence(p?.category_evidence ?? {});
+    setExpandedCat(null);
     setConfirmDelete(false);
   }, []);
+
+  const updateEvidence = (cat: string, patch: Partial<CategoryEvidence>) => {
+    setFormEvidence(prev => {
+      const existing = prev[cat] ?? { reason: '', confidence: 50, sources: [], last_reviewed: null };
+      return { ...prev, [cat]: { ...existing, ...patch, last_reviewed: today } };
+    });
+  };
+
+  const addSource = (cat: string) => {
+    const trimmed = newSource.trim();
+    if (!trimmed) return;
+    const existing = formEvidence[cat];
+    if (existing?.sources?.includes(trimmed)) return;
+    updateEvidence(cat, { sources: [...(existing?.sources ?? []), trimmed] });
+    setNewSource('');
+  };
+
+  const removeSource = (cat: string, idx: number) => {
+    const sources = [...(formEvidence[cat]?.sources ?? [])];
+    sources.splice(idx, 1);
+    updateEvidence(cat, { sources });
+  };
+
+  // Profile-level confidence summary
+  const focusedConfidence = useMemo(() => {
+    const focused = formOrder.filter(c => formFocused.has(c));
+    if (focused.length === 0) return null;
+    const withEvidence = focused.filter(c => formEvidence[c]?.confidence != null);
+    if (withEvidence.length === 0) return null;
+    const avg = Math.round(withEvidence.reduce((sum, c) => sum + (formEvidence[c]?.confidence ?? 0), 0) / withEvidence.length);
+    const weak = focused.filter(c => (formEvidence[c]?.confidence ?? 0) < 70).length;
+    const missing = focused.length - withEvidence.length;
+    return { avg, weak, missing, total: focused.length };
+  }, [formOrder, formFocused, formEvidence]);
 
   const handleSave = async () => {
     if (!formName.trim()) return;
@@ -909,6 +983,7 @@ function ProfileEditorModal({ t, profiles, editingProfile, onClose, onEdit, onCr
         focused_categories: formOrder.filter(c => formFocused.has(c)),
         rate_types: [...formRateTypes],
         category_order: formOrder,
+        category_evidence: Object.keys(formEvidence).length > 0 ? formEvidence : undefined,
       };
       if (editingProfile) {
         await onUpdate({ id: editingProfile.id, data: payload });
@@ -1006,29 +1081,141 @@ function ProfileEditorModal({ t, profiles, editingProfile, onClose, onEdit, onCr
                   className={`w-full ${t.select} px-3 py-2 text-sm resize-none`} rows={2} placeholder="Optional notes" />
               </div>
 
-              {/* Category order + focus toggles */}
+              {/* Profile confidence summary */}
+              {focusedConfidence && (
+                <div className={`${t.innerEl} px-3 py-2 flex items-center gap-3`}>
+                  <Info className={`w-3.5 h-3.5 flex-shrink-0 ${t.textFaint}`} />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-xs font-medium ${t.textDim}`}>Profile confidence:</span>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${CONF_BADGE_BG[confidenceColor(focusedConfidence.avg)]}`}>
+                      {focusedConfidence.avg}%
+                    </span>
+                    {focusedConfidence.weak > 0 && (
+                      <span className="text-[10px] text-red-400">{focusedConfidence.weak} category{focusedConfidence.weak !== 1 ? 'ies' : 'y'} below 70%</span>
+                    )}
+                    {focusedConfidence.missing > 0 && (
+                      <span className={`text-[10px] ${t.textFaint}`}>{focusedConfidence.missing} without evidence</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Category order + focus toggles + evidence */}
               <div>
-                <label className={`${t.label} block mb-1`}>Categories (drag to reorder, toggle focus)</label>
+                <label className={`${t.label} block mb-1`}>Categories (reorder, toggle focus, expand for evidence)</label>
                 <div className={`${t.innerEl} p-2 space-y-0.5`}>
-                  {formOrder.map((cat, idx) => (
-                    <div key={cat} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${t.rowHover}`}>
-                      <div className="flex flex-col gap-0.5">
-                        <button onClick={() => moveCategory(idx, -1)} disabled={idx === 0}
-                          className={`${t.btnGhost} disabled:opacity-20`}><ChevronUp className="w-3 h-3" /></button>
-                        <button onClick={() => moveCategory(idx, 1)} disabled={idx === formOrder.length - 1}
-                          className={`${t.btnGhost} disabled:opacity-20`}><ChevronDown className="w-3 h-3" /></button>
+                  {formOrder.map((cat, idx) => {
+                    const ev = formEvidence[cat];
+                    const confColor = confidenceColor(ev?.confidence);
+                    const isExpanded = expandedCat === cat;
+                    return (
+                      <div key={cat}>
+                        <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${t.rowHover}`}>
+                          <div className="flex flex-col gap-0.5">
+                            <button onClick={() => moveCategory(idx, -1)} disabled={idx === 0}
+                              className={`${t.btnGhost} disabled:opacity-20`}><ChevronUp className="w-3 h-3" /></button>
+                            <button onClick={() => moveCategory(idx, 1)} disabled={idx === formOrder.length - 1}
+                              className={`${t.btnGhost} disabled:opacity-20`}><ChevronDown className="w-3 h-3" /></button>
+                          </div>
+                          <GripVertical className={`w-3.5 h-3.5 ${t.textFaint}`} />
+                          <span className={`text-sm flex-1 ${formFocused.has(cat) ? t.textMain : t.textFaint}`}>
+                            {CAT_LABELS[cat] || cat}
+                          </span>
+                          {/* confidence badge */}
+                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${CONF_BADGE_BG[confColor]}`}>
+                            {ev?.confidence != null ? `${ev.confidence}%` : '—'}
+                          </span>
+                          <button onClick={() => toggleFocused(cat)}
+                            className={`p-1 rounded transition ${formFocused.has(cat) ? t.statusOk : t.textFaint + ' opacity-40'}`}
+                            title={formFocused.has(cat) ? 'Focused (click to unfocus)' : 'Not focused (click to focus)'}>
+                            {formFocused.has(cat) ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                          </button>
+                          <button onClick={() => setExpandedCat(isExpanded ? null : cat)}
+                            className={`p-1 rounded transition ${t.btnGhost}`} title="Evidence">
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        {/* Expanded evidence panel */}
+                        <AnimatePresence>
+                          {isExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.15 }}
+                              className="overflow-hidden"
+                            >
+                              <div className={`mx-2 mb-2 p-3 rounded-lg border ${t.border} space-y-2.5`}>
+                                {/* Reason */}
+                                <div>
+                                  <label className={`text-[10px] ${t.textFaint} block mb-0.5`}>Reason</label>
+                                  <textarea
+                                    value={ev?.reason ?? ''}
+                                    onChange={e => updateEvidence(cat, { reason: e.target.value })}
+                                    className={`w-full ${t.select} px-2 py-1.5 text-xs resize-none`}
+                                    rows={2}
+                                    placeholder="Why this category ranks here..."
+                                  />
+                                </div>
+                                {/* Confidence slider */}
+                                <div>
+                                  <label className={`text-[10px] ${t.textFaint} block mb-0.5`}>Confidence</label>
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="range" min={0} max={100}
+                                      value={ev?.confidence ?? 50}
+                                      onChange={e => updateEvidence(cat, { confidence: parseInt(e.target.value) })}
+                                      className="flex-1 h-1.5 accent-emerald-500"
+                                      style={{
+                                        background: `linear-gradient(to right, ${
+                                          (ev?.confidence ?? 50) >= 90 ? '#10b981' :
+                                          (ev?.confidence ?? 50) >= 70 ? '#f59e0b' : '#ef4444'
+                                        } ${ev?.confidence ?? 50}%, transparent ${ev?.confidence ?? 50}%)`,
+                                      }}
+                                    />
+                                    <span className={`text-xs font-mono w-8 text-right font-bold ${
+                                      confColor === 'green' ? 'text-emerald-500' :
+                                      confColor === 'yellow' ? 'text-amber-500' :
+                                      confColor === 'red' ? 'text-red-400' : t.textFaint
+                                    }`}>{ev?.confidence ?? 50}</span>
+                                  </div>
+                                </div>
+                                {/* Sources */}
+                                <div>
+                                  <label className={`text-[10px] ${t.textFaint} block mb-0.5`}>Sources</label>
+                                  <div className="flex flex-wrap gap-1 mb-1.5">
+                                    {(ev?.sources ?? []).map((src, si) => (
+                                      <span key={si} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] ${t.preemptOk}`}>
+                                        {src}
+                                        <button onClick={() => removeSource(cat, si)} className="hover:opacity-70"><X className="w-2.5 h-2.5" /></button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                  <div className="flex gap-1">
+                                    <input
+                                      value={newSource}
+                                      onChange={e => setNewSource(e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSource(cat); } }}
+                                      className={`flex-1 ${t.select} px-2 py-1 text-[10px]`}
+                                      placeholder="Add source..."
+                                    />
+                                    <button onClick={() => addSource(cat)}
+                                      className={`p-1 rounded transition ${t.btnGhost}`}><Plus className="w-3 h-3" /></button>
+                                  </div>
+                                </div>
+                                {/* Last reviewed */}
+                                {ev?.last_reviewed && (
+                                  <div className={`text-[10px] ${t.textFaint}`}>
+                                    Last reviewed: {ev.last_reviewed}
+                                  </div>
+                                )}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
-                      <GripVertical className={`w-3.5 h-3.5 ${t.textFaint}`} />
-                      <span className={`text-sm flex-1 ${formFocused.has(cat) ? t.textMain : t.textFaint}`}>
-                        {CAT_LABELS[cat] || cat}
-                      </span>
-                      <button onClick={() => toggleFocused(cat)}
-                        className={`p-1 rounded transition ${formFocused.has(cat) ? t.statusOk : t.textFaint + ' opacity-40'}`}
-                        title={formFocused.has(cat) ? 'Focused (click to unfocus)' : 'Not focused (click to focus)'}>
-                        {formFocused.has(cat) ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 

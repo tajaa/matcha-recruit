@@ -2373,6 +2373,13 @@ export const adminJurisdictionData = {
 };
 
 // Industry Compliance Profiles
+export interface CategoryEvidence {
+  reason: string;
+  confidence: number;
+  sources: string[];
+  last_reviewed: string | null;
+}
+
 export interface IndustryProfile {
   id: string;
   name: string;
@@ -2380,6 +2387,7 @@ export interface IndustryProfile {
   focused_categories: string[];
   rate_types: string[];
   category_order: string[];
+  category_evidence: Record<string, CategoryEvidence> | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -2390,6 +2398,7 @@ export interface IndustryProfileCreate {
   focused_categories: string[];
   rate_types?: string[];
   category_order: string[];
+  category_evidence?: Record<string, CategoryEvidence> | null;
 }
 
 export interface IndustryProfileUpdate {
@@ -2398,6 +2407,7 @@ export interface IndustryProfileUpdate {
   focused_categories?: string[];
   rate_types?: string[];
   category_order?: string[];
+  category_evidence?: Record<string, CategoryEvidence> | null;
 }
 
 export const adminIndustryProfiles = {
