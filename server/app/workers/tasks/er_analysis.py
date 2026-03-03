@@ -187,10 +187,10 @@ async def _run_timeline_analysis(case_id: str, model_override: Optional[str] = N
 
 
 @celery_app.task(bind=True, max_retries=3)
-def run_timeline_analysis(self, case_id: str) -> dict[str, Any]:
+def run_timeline_analysis(self, case_id: str, model_override: Optional[str] = None) -> dict[str, Any]:
     """Celery task for timeline analysis."""
     try:
-        result = asyncio.run(_run_timeline_analysis(case_id))
+        result = asyncio.run(_run_timeline_analysis(case_id, model_override=model_override))
 
         publish_task_complete(
             channel=f"er_case:{case_id}",
@@ -281,10 +281,10 @@ async def _run_discrepancy_analysis(case_id: str, model_override: Optional[str] 
 
 
 @celery_app.task(bind=True, max_retries=3)
-def run_discrepancy_analysis(self, case_id: str) -> dict[str, Any]:
+def run_discrepancy_analysis(self, case_id: str, model_override: Optional[str] = None) -> dict[str, Any]:
     """Celery task for discrepancy analysis."""
     try:
-        result = asyncio.run(_run_discrepancy_analysis(case_id))
+        result = asyncio.run(_run_discrepancy_analysis(case_id, model_override=model_override))
 
         publish_task_complete(
             channel=f"er_case:{case_id}",
@@ -695,10 +695,10 @@ async def _run_policy_check(case_id: str, model_override: Optional[str] = None) 
 
 
 @celery_app.task(bind=True, max_retries=3)
-def run_policy_check(self, case_id: str) -> dict[str, Any]:
+def run_policy_check(self, case_id: str, model_override: Optional[str] = None) -> dict[str, Any]:
     """Celery task for policy check."""
     try:
-        result = asyncio.run(_run_policy_check(case_id))
+        result = asyncio.run(_run_policy_check(case_id, model_override=model_override))
 
         publish_task_complete(
             channel=f"er_case:{case_id}",

@@ -1369,7 +1369,7 @@ async def generate_timeline(
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
-        task = run_timeline_analysis.delay(str(case_id))
+        task = run_timeline_analysis.delay(str(case_id), model_override=model)
         celery_available = True
         logger.info(f"Queued timeline analysis for case {case_id}, task_id={task.id}")
         return TaskStatusResponse(
@@ -1494,7 +1494,7 @@ async def generate_discrepancies(
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
-        task = run_discrepancy_analysis.delay(str(case_id))
+        task = run_discrepancy_analysis.delay(str(case_id), model_override=model)
         celery_available = True
         logger.info(f"Queued discrepancy analysis for case {case_id}, task_id={task.id}")
         return TaskStatusResponse(
@@ -1617,7 +1617,7 @@ async def run_policy_check(
         ping_responses = celery_app.control.ping(timeout=1)
         if not ping_responses:
             raise RuntimeError("No Celery workers responded to ping")
-        task = run_policy_check_task.delay(str(case_id))
+        task = run_policy_check_task.delay(str(case_id), model_override=model)
         celery_available = True
         logger.info(f"Queued policy check for case {case_id}, task_id={task.id}")
         return TaskStatusResponse(
