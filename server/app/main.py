@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings, load_settings
-from .database import close_pool, init_db, init_pool
+from .database import close_pool, get_connection, init_db, init_pool
 from .core.services.notification_manager import (
     close_notification_manager,
     get_notification_manager,
@@ -29,6 +29,19 @@ async def lifespan(app: FastAPI):
     await init_db()
     print("[Matcha] Database initialized")
 
+    # Recover documents stuck in 'processing' from a previous crash
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """
+            UPDATE er_case_documents
+            SET processing_status = 'failed',
+                processing_error = 'Server restarted during processing. Please re-upload.'
+            WHERE processing_status = 'processing'
+            """
+        )
+        count = result.split()[-1] if result else "0"
+        if count != "0":
+            print(f"[Matcha] Recovered {count} stuck documents from previous crash")
 
     # Initialize Redis notification manager (for worker task notifications)
     await init_notification_manager(settings.redis_url)

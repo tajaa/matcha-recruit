@@ -949,9 +949,29 @@ async def upload_document(
             try:
                 from app.workers.tasks.er_document_processing import _process_document
                 logger.info(f"Starting synchronous processing for document {row['id']}")
-                result = await _process_document(str(row["id"]), str(case_id))
+                result = await asyncio.wait_for(
+                    _process_document(str(row["id"]), str(case_id)),
+                    timeout=120.0,
+                )
                 logger.info(f"Document {row['id']} processed successfully: {result}")
                 # Refresh document data after processing
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, case_id, document_type, filename, file_path, mime_type, file_size,
+                           pii_scrubbed, processing_status, processing_error, parsed_at, uploaded_by, created_at
+                    FROM er_case_documents WHERE id = $1
+                    """,
+                    row["id"],
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Document {row['id']} processing timed out after 120s")
+                await conn.execute(
+                    """UPDATE er_case_documents
+                       SET processing_status = 'failed',
+                           processing_error = 'Processing timed out. Try a smaller document.'
+                       WHERE id = $1 AND processing_status = 'processing'""",
+                    row["id"],
+                )
                 row = await conn.fetchrow(
                     """
                     SELECT id, case_id, document_type, filename, file_path, mime_type, file_size,
