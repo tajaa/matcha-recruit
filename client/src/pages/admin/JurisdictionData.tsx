@@ -1,15 +1,16 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   Database, ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
   XCircle, Loader2, RefreshCw, Layers, Globe2, Filter, Trash2, Check,
-  X, ExternalLink
+  X, ExternalLink, Settings2, ChevronUp, GripVertical, Eye, EyeOff
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { useJurisdictionData } from '../../hooks/useJurisdictionData';
+import { useIndustryProfiles } from '../../hooks/useIndustryProfiles';
 import { useIsLightMode } from '../../hooks/useIsLightMode';
 import { api } from '../../api/client';
-import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail } from '../../api/client';
+import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail, IndustryProfile } from '../../api/client';
 
 /* ───── Theme ───── */
 const LT = {
@@ -98,6 +99,9 @@ const CAT_LABELS: Record<string, string> = {
   scheduling_reporting: 'Sched',
 };
 
+const ALL_CATEGORIES = Object.keys(CAT_LABELS);
+const VALID_RATE_TYPES = ['general', 'tipped', 'exempt_salary', 'hotel', 'fast_food', 'healthcare'];
+
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
@@ -108,6 +112,7 @@ export default function JurisdictionData() {
   const isLight = useIsLightMode();
   const t = isLight ? LT : DK;
   const { data, isLoading, hardRefresh } = useJurisdictionData();
+  const { profiles, create: createProfile, update: updateProfile, remove: removeProfile } = useIndustryProfiles();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<Tab>('coverage');
   const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set());
@@ -117,6 +122,9 @@ export default function JurisdictionData() {
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [cityDetail, setCityDetail] = useState<JurisdictionDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<IndustryProfile | null>(null);
 
   const openCity = async (id: string) => {
     if (!id) return;
@@ -198,7 +206,6 @@ export default function JurisdictionData() {
   }
 
   const { summary } = data;
-  const cats = summary.required_categories;
 
   return (
     <div className={`min-h-screen ${t.pageBg} p-5 md:p-8`}>
@@ -210,13 +217,23 @@ export default function JurisdictionData() {
             <h1 className={`text-4xl tracking-tighter font-bold ${t.textMain}`}>JURISDICTION DATA</h1>
             <p className={`text-sm ${t.textMuted} mt-1`}>Compliance data repository overview</p>
           </div>
-          <button
-            onClick={() => hardRefresh()}
-            className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition ${t.btnGhost} ${t.innerEl}`}
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setEditingProfile(null); setProfileEditorOpen(true); }}
+              className={`p-1.5 rounded-lg transition ${t.btnGhost} ${t.innerEl}`}
+              title="Manage industry profiles"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={() => hardRefresh()}
+              className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition ${t.btnGhost} ${t.innerEl}`}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Refresh
+            </button>
+          </div>
         </div>
 
         {/* ── KPI Bar ── */}
@@ -246,12 +263,12 @@ export default function JurisdictionData() {
           <motion.div key={activeTab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.12 }}>
             {activeTab === 'coverage' && (
-              <CoverageTab t={t} states={data.states} cats={cats}
+              <CoverageTab t={t} states={data.states} cats={summary.required_categories}
                 expandedStates={expandedStates} toggleState={toggleState} onDelete={handleDelete}
                 onCityClick={openCity} />
             )}
             {activeTab === 'missing' && (
-              <MissingDataTab t={t} rows={missingRows} cats={cats} states={data.states}
+              <MissingDataTab t={t} rows={missingRows} cats={summary.required_categories} states={data.states}
                 filterState={filterState} setFilterState={setFilterState}
                 filterCategory={filterCategory} setFilterCategory={setFilterCategory}
                 filterStaleOnly={filterStaleOnly} setFilterStaleOnly={setFilterStaleOnly}
@@ -261,7 +278,7 @@ export default function JurisdictionData() {
               <DataQualityTab t={t} summary={summary} sources={data.structured_sources} />
             )}
             {activeTab === 'preemption' && (
-              <PreemptionTab t={t} cats={cats} matrix={preemptionMatrix.matrix} states={preemptionMatrix.states} />
+              <PreemptionTab t={t} cats={summary.required_categories} matrix={preemptionMatrix.matrix} states={preemptionMatrix.states} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -270,7 +287,24 @@ export default function JurisdictionData() {
       {/* ── City Detail Drawer ── */}
       <AnimatePresence>
         {selectedCityId && (
-          <CityDetailDrawer t={t} detail={cityDetail} loading={loadingDetail} onClose={closeCity} />
+          <CityDetailDrawer t={t} detail={cityDetail} loading={loadingDetail} onClose={closeCity}
+            profiles={profiles} onOpenProfileEditor={() => { setEditingProfile(null); setProfileEditorOpen(true); }} />
+        )}
+      </AnimatePresence>
+
+      {/* ── Profile Editor Modal ── */}
+      <AnimatePresence>
+        {profileEditorOpen && (
+          <ProfileEditorModal
+            t={t}
+            profiles={profiles}
+            editingProfile={editingProfile}
+            onClose={() => { setProfileEditorOpen(false); setEditingProfile(null); }}
+            onEdit={(p) => setEditingProfile(p)}
+            onCreate={createProfile}
+            onUpdate={updateProfile}
+            onDelete={removeProfile}
+          />
         )}
       </AnimatePresence>
     </div>
@@ -357,7 +391,9 @@ function CoverageTab({ t, states, cats, expandedStates, toggleState, onDelete, o
                       {/* legend */}
                       <div className="flex gap-3 mb-2 px-1">
                         {cats.map(c => (
-                          <span key={c} className={`text-[10px] font-mono ${t.textFaint}`}>{CAT_LABELS[c] || c}</span>
+                          <span key={c} className={`text-[10px] font-mono ${t.textFaint}`}>
+                            {CAT_LABELS[c] || c}
+                          </span>
                         ))}
                       </div>
                       {/* city rows */}
@@ -367,7 +403,8 @@ function CoverageTab({ t, states, cats, expandedStates, toggleState, onDelete, o
                           <span className={`text-sm ${t.textMain} w-40 truncate`}>{city.city}</span>
                           <div className="flex gap-1.5">
                             {cats.map(c => (
-                              <div key={c} className={`w-3 h-3 rounded-full ${city.categories_present.includes(c) ? t.dotOk : t.dotMiss}`}
+                              <div key={c}
+                                className={`w-3 h-3 rounded-full ${city.categories_present.includes(c) ? t.dotOk : t.dotMiss}`}
                                 title={`${CAT_LABELS[c] || c}: ${city.categories_present.includes(c) ? 'Present' : 'Missing'}`} />
                             ))}
                           </div>
@@ -631,19 +668,55 @@ function PreemptionTab({ t, cats, matrix, states }: {
 }
 
 /* ───── City Detail Drawer ───── */
-function CityDetailDrawer({ t, detail, loading, onClose }: {
+function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfileEditor }: {
   t: typeof LT; detail: JurisdictionDetail | null; loading: boolean; onClose: () => void;
+  profiles: IndustryProfile[]; onOpenProfileEditor: () => void;
 }) {
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+
+  const selectedProfile = useMemo(
+    () => profiles.find(p => p.id === selectedProfileId) ?? null,
+    [profiles, selectedProfileId]
+  );
+
   const grouped = useMemo(() => {
-    if (!detail) return {};
+    if (!detail) return {} as Record<string, JurisdictionDetail['requirements']>;
     const map: Record<string, JurisdictionDetail['requirements']> = {};
     for (const req of detail.requirements) {
       const cat = req.category || 'other';
       if (!map[cat]) map[cat] = [];
       map[cat].push(req);
     }
-    return map;
-  }, [detail]);
+
+    if (!selectedProfile) return map;
+
+    // Sort entries by profile's category_order
+    const focusedSet = new Set(selectedProfile.focused_categories);
+    const orderIndex = new Map(selectedProfile.category_order.map((c, i) => [c, i]));
+    const sorted: Record<string, JurisdictionDetail['requirements']> = {};
+    const entries = Object.entries(map);
+
+    entries.sort((a, b) => {
+      const aFocused = focusedSet.has(a[0]);
+      const bFocused = focusedSet.has(b[0]);
+      const aInOrder = orderIndex.has(a[0]);
+      const bInOrder = orderIndex.has(b[0]);
+
+      // Focused categories first (in category_order), then non-focused in order, then unknown
+      if (aFocused !== bFocused) return aFocused ? -1 : 1;
+      if (aInOrder && bInOrder) return (orderIndex.get(a[0])!) - (orderIndex.get(b[0])!);
+      if (aInOrder !== bInOrder) return aInOrder ? -1 : 1;
+      return 0;
+    });
+
+    for (const [k, v] of entries) sorted[k] = v;
+    return sorted;
+  }, [detail, selectedProfile]);
+
+  const focusedSet = useMemo(
+    () => selectedProfile ? new Set(selectedProfile.focused_categories) : null,
+    [selectedProfile]
+  );
 
   return (
     <>
@@ -669,6 +742,26 @@ function CityDetailDrawer({ t, detail, loading, onClose }: {
                     {detail.state}{detail.county ? ` · ${detail.county} County` : ''}
                     {' · '}{detail.requirements.length} requirement{detail.requirements.length !== 1 ? 's' : ''}
                   </p>
+                  {/* Profile selector */}
+                  <div className="flex items-center gap-1.5 mt-2">
+                    <select
+                      value={selectedProfileId ?? ''}
+                      onChange={e => setSelectedProfileId(e.target.value || null)}
+                      className={`${t.select} text-xs px-2.5 py-1`}
+                    >
+                      <option value="">All Categories</option>
+                      {profiles.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={onOpenProfileEditor}
+                      className={`p-1 rounded-lg transition ${t.btnGhost}`}
+                      title="Manage industry profiles"
+                    >
+                      <Settings2 className="w-3 h-3" />
+                    </button>
+                  </div>
                 </>
               ) : (
                 <div className={`h-8 w-48 rounded ${t.innerEl} animate-pulse`} />
@@ -691,8 +784,10 @@ function CityDetailDrawer({ t, detail, loading, onClose }: {
             </div>
           )}
 
-          {detail && !loading && Object.entries(grouped).map(([category, reqs]) => (
-            <div key={category} className={`${t.card} p-4 space-y-2`}>
+          {detail && !loading && Object.entries(grouped).map(([category, reqs]) => {
+            const dimmed = focusedSet && !focusedSet.has(category);
+            return (
+            <div key={category} className={`${t.card} p-4 space-y-2 transition-opacity ${dimmed ? 'opacity-40' : ''}`}>
               <div className={`${t.label} flex items-center gap-2`}>
                 <span className={`w-2.5 h-2.5 rounded-full ${t.dotOk}`} />
                 {CAT_LABELS[category] || category.replace(/_/g, ' ')}
@@ -731,7 +826,8 @@ function CityDetailDrawer({ t, detail, loading, onClose }: {
                 ))}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {/* legislation section */}
           {detail && !loading && detail.legislation.length > 0 && (
@@ -767,6 +863,215 @@ function CityDetailDrawer({ t, detail, loading, onClose }: {
               </div>
             </div>
           )}
+        </div>
+      </motion.div>
+    </>
+  );
+}
+
+/* ───── Profile Editor Modal ───── */
+function ProfileEditorModal({ t, profiles, editingProfile, onClose, onEdit, onCreate, onUpdate, onDelete }: {
+  t: typeof LT;
+  profiles: IndustryProfile[];
+  editingProfile: IndustryProfile | null;
+  onClose: () => void;
+  onEdit: (p: IndustryProfile | null) => void;
+  onCreate: (data: { name: string; description?: string; focused_categories: string[]; rate_types: string[]; category_order: string[] }) => Promise<unknown>;
+  onUpdate: (args: { id: string; data: { name?: string; description?: string; focused_categories?: string[]; rate_types?: string[]; category_order?: string[] } }) => Promise<unknown>;
+  onDelete: (id: string) => Promise<unknown>;
+}) {
+  const [formName, setFormName] = useState(editingProfile?.name ?? '');
+  const [formDesc, setFormDesc] = useState(editingProfile?.description ?? '');
+  const [formFocused, setFormFocused] = useState<Set<string>>(new Set(editingProfile?.focused_categories ?? ALL_CATEGORIES.slice(0, 4)));
+  const [formOrder, setFormOrder] = useState<string[]>(editingProfile?.category_order ?? [...ALL_CATEGORIES]);
+  const [formRateTypes, setFormRateTypes] = useState<Set<string>>(new Set(editingProfile?.rate_types ?? []));
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const isNew = !editingProfile;
+
+  const resetForm = useCallback((p: IndustryProfile | null) => {
+    setFormName(p?.name ?? '');
+    setFormDesc(p?.description ?? '');
+    setFormFocused(new Set(p?.focused_categories ?? ALL_CATEGORIES.slice(0, 4)));
+    setFormOrder(p?.category_order ?? [...ALL_CATEGORIES]);
+    setFormRateTypes(new Set(p?.rate_types ?? []));
+    setConfirmDelete(false);
+  }, []);
+
+  const handleSave = async () => {
+    if (!formName.trim()) return;
+    setSaving(true);
+    try {
+      const payload = {
+        name: formName.trim(),
+        description: formDesc.trim() || undefined,
+        focused_categories: formOrder.filter(c => formFocused.has(c)),
+        rate_types: [...formRateTypes],
+        category_order: formOrder,
+      };
+      if (editingProfile) {
+        await onUpdate({ id: editingProfile.id, data: payload });
+      } else {
+        await onCreate(payload);
+      }
+      onClose();
+    } catch (e: any) {
+      alert(e?.message || 'Save failed');
+    }
+    setSaving(false);
+  };
+
+  const handleDeleteProfile = async () => {
+    if (!editingProfile) return;
+    setDeleting(true);
+    try {
+      await onDelete(editingProfile.id);
+      onClose();
+    } catch (e: any) {
+      alert(e?.message || 'Delete failed');
+    }
+    setDeleting(false);
+  };
+
+  const moveCategory = (idx: number, dir: -1 | 1) => {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= formOrder.length) return;
+    const next = [...formOrder];
+    [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+    setFormOrder(next);
+  };
+
+  const toggleFocused = (cat: string) => {
+    setFormFocused(prev => {
+      const next = new Set(prev);
+      next.has(cat) ? next.delete(cat) : next.add(cat);
+      return next;
+    });
+  };
+
+  const toggleRateType = (rt: string) => {
+    setFormRateTypes(prev => {
+      const next = new Set(prev);
+      next.has(rt) ? next.delete(rt) : next.add(rt);
+      return next;
+    });
+  };
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.15 }}
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4`}>
+        <div className={`${t.card} w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl`} onClick={e => e.stopPropagation()}>
+          <div className="p-5 space-y-4">
+            {/* Modal header */}
+            <div className="flex items-center justify-between">
+              <h2 className={`text-lg font-bold ${t.textMain}`}>
+                {isNew ? 'New Industry Profile' : `Edit: ${editingProfile.name}`}
+              </h2>
+              <button onClick={onClose} className={`p-1 rounded-lg ${t.btnGhost}`}><X className="w-4 h-4" /></button>
+            </div>
+
+            {/* Profile list (when not editing a specific one and it's "new" mode) */}
+            {isNew && profiles.length > 0 && (
+              <div className="space-y-1">
+                <div className={t.label}>Existing Profiles</div>
+                <div className="space-y-1">
+                  {profiles.map(p => (
+                    <button key={p.id} onClick={() => { onEdit(p); resetForm(p); }}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm ${t.rowHover} ${t.textMain} flex items-center justify-between`}>
+                      <span>{p.name}</span>
+                      <span className={`text-[10px] ${t.textFaint}`}>{p.focused_categories.length} focused</span>
+                    </button>
+                  ))}
+                </div>
+                <div className={`border-t ${t.border} my-3`} />
+                <div className={t.label}>Create New</div>
+              </div>
+            )}
+
+            {/* Form */}
+            <div className="space-y-3">
+              <div>
+                <label className={`${t.label} block mb-1`}>Name</label>
+                <input value={formName} onChange={e => setFormName(e.target.value)}
+                  className={`w-full ${t.select} px-3 py-2 text-sm`} placeholder="e.g. Restaurant / Hospitality" />
+              </div>
+              <div>
+                <label className={`${t.label} block mb-1`}>Description</label>
+                <textarea value={formDesc} onChange={e => setFormDesc(e.target.value)}
+                  className={`w-full ${t.select} px-3 py-2 text-sm resize-none`} rows={2} placeholder="Optional notes" />
+              </div>
+
+              {/* Category order + focus toggles */}
+              <div>
+                <label className={`${t.label} block mb-1`}>Categories (drag to reorder, toggle focus)</label>
+                <div className={`${t.innerEl} p-2 space-y-0.5`}>
+                  {formOrder.map((cat, idx) => (
+                    <div key={cat} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${t.rowHover}`}>
+                      <div className="flex flex-col gap-0.5">
+                        <button onClick={() => moveCategory(idx, -1)} disabled={idx === 0}
+                          className={`${t.btnGhost} disabled:opacity-20`}><ChevronUp className="w-3 h-3" /></button>
+                        <button onClick={() => moveCategory(idx, 1)} disabled={idx === formOrder.length - 1}
+                          className={`${t.btnGhost} disabled:opacity-20`}><ChevronDown className="w-3 h-3" /></button>
+                      </div>
+                      <GripVertical className={`w-3.5 h-3.5 ${t.textFaint}`} />
+                      <span className={`text-sm flex-1 ${formFocused.has(cat) ? t.textMain : t.textFaint}`}>
+                        {CAT_LABELS[cat] || cat}
+                      </span>
+                      <button onClick={() => toggleFocused(cat)}
+                        className={`p-1 rounded transition ${formFocused.has(cat) ? t.statusOk : t.textFaint + ' opacity-40'}`}
+                        title={formFocused.has(cat) ? 'Focused (click to unfocus)' : 'Not focused (click to focus)'}>
+                        {formFocused.has(cat) ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Rate types */}
+              <div>
+                <label className={`${t.label} block mb-1`}>Rate Types</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {VALID_RATE_TYPES.map(rt => (
+                    <button key={rt} onClick={() => toggleRateType(rt)}
+                      className={`px-2.5 py-1 text-xs font-mono rounded-lg transition ${formRateTypes.has(rt) ? t.preemptOk : t.innerEl + ' ' + t.textFaint}`}>
+                      {rt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-between pt-2">
+              <div>
+                {editingProfile && !confirmDelete && (
+                  <button onClick={() => setConfirmDelete(true)}
+                    className={`text-xs ${t.statusErr} hover:underline`}>Delete profile</button>
+                )}
+                {editingProfile && confirmDelete && (
+                  <span className="flex items-center gap-2">
+                    <span className={`text-xs ${t.statusErr}`}>Confirm?</span>
+                    <button onClick={handleDeleteProfile} disabled={deleting}
+                      className={`text-xs ${t.confirmBtn} font-bold`}>{deleting ? 'Deleting...' : 'Yes, delete'}</button>
+                    <button onClick={() => setConfirmDelete(false)}
+                      className={`text-xs ${t.btnGhost}`}>Cancel</button>
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={onClose} className={`px-3 py-1.5 text-sm rounded-lg ${t.btnGhost} ${t.innerEl}`}>Cancel</button>
+                <button onClick={handleSave} disabled={saving || !formName.trim()}
+                  className={`px-4 py-1.5 text-sm rounded-lg font-medium transition bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40`}>
+                  {saving ? 'Saving...' : isNew ? 'Create' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </motion.div>
     </>

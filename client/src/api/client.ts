@@ -2372,6 +2372,48 @@ export const adminJurisdictionData = {
     request<JurisdictionDataOverview>(`/admin/jurisdictions/data-overview${bust ? '?bust=true' : ''}`),
 };
 
+// Industry Compliance Profiles
+export interface IndustryProfile {
+  id: string;
+  name: string;
+  description: string | null;
+  focused_categories: string[];
+  rate_types: string[];
+  category_order: string[];
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface IndustryProfileCreate {
+  name: string;
+  description?: string | null;
+  focused_categories: string[];
+  rate_types?: string[];
+  category_order: string[];
+}
+
+export interface IndustryProfileUpdate {
+  name?: string;
+  description?: string | null;
+  focused_categories?: string[];
+  rate_types?: string[];
+  category_order?: string[];
+}
+
+export const adminIndustryProfiles = {
+  list: (): Promise<IndustryProfile[]> =>
+    request<IndustryProfile[]>('/admin/industry-profiles'),
+
+  create: (data: IndustryProfileCreate): Promise<IndustryProfile> =>
+    request<IndustryProfile>('/admin/industry-profiles', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (id: string, data: IndustryProfileUpdate): Promise<IndustryProfile> =>
+    request<IndustryProfile>(`/admin/industry-profiles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  delete: (id: string): Promise<{ deleted: boolean }> =>
+    request<{ deleted: boolean }>(`/admin/industry-profiles/${id}`, { method: 'DELETE' }),
+};
+
 // Scheduler Admin API
 export interface SchedulerSetting {
   id: string;
@@ -3657,6 +3699,7 @@ export const api = {
   adminBeta,
   adminJurisdictions,
   adminJurisdictionData,
+  adminIndustryProfiles,
   adminSchedulers,
   adminHandbookReferences,
   blogs,

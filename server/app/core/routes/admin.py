@@ -2792,6 +2792,7 @@ async def jurisdiction_data_overview(bust: bool = False):
                 ) AS req_details
             FROM jurisdictions j
             LEFT JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = j.id
+            WHERE j.city NOT LIKE '_county_%' AND j.city <> ''
             GROUP BY j.id, j.city, j.state, j.last_verified_at
             ORDER BY j.state, j.city
         """)
@@ -4785,3 +4786,114 @@ async def update_jurisdiction_research_model_mode(
         )
     mode = prime_jurisdiction_research_model_mode_cache(body.mode)
     return {"jurisdiction_research_model_mode": mode}
+
+
+# ── Industry Compliance Profiles ──────────────────────────────────────────────
+
+class IndustryProfileCreate(BaseModel):
+    name: str = Field(..., max_length=100)
+    description: Optional[str] = None
+    focused_categories: list[str]
+    rate_types: Optional[list[str]] = None
+    category_order: list[str]
+
+
+class IndustryProfileUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = None
+    focused_categories: Optional[list[str]] = None
+    rate_types: Optional[list[str]] = None
+    category_order: Optional[list[str]] = None
+
+
+@router.get("/industry-profiles", dependencies=[Depends(require_admin)])
+async def list_industry_profiles():
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM industry_compliance_profiles ORDER BY name"
+        )
+    return [
+        {
+            "id": str(r["id"]),
+            "name": r["name"],
+            "description": r["description"],
+            "focused_categories": list(r["focused_categories"]),
+            "rate_types": list(r["rate_types"]) if r["rate_types"] else [],
+            "category_order": list(r["category_order"]),
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/industry-profiles", dependencies=[Depends(require_admin)], status_code=201)
+async def create_industry_profile(body: IndustryProfileCreate):
+    async with get_connection() as conn:
+        try:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO industry_compliance_profiles (name, description, focused_categories, rate_types, category_order)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *
+                """,
+                body.name, body.description, body.focused_categories,
+                body.rate_types or [], body.category_order,
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(status_code=409, detail="Profile name already exists")
+    return {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "description": row["description"],
+        "focused_categories": list(row["focused_categories"]),
+        "rate_types": list(row["rate_types"]) if row["rate_types"] else [],
+        "category_order": list(row["category_order"]),
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+@router.put("/industry-profiles/{profile_id}", dependencies=[Depends(require_admin)])
+async def update_industry_profile(profile_id: UUID, body: IndustryProfileUpdate):
+    sets = []
+    vals: list[Any] = []
+    idx = 1
+    for field in ("name", "description", "focused_categories", "rate_types", "category_order"):
+        val = getattr(body, field)
+        if val is not None:
+            sets.append(f"{field} = ${idx}")
+            vals.append(val)
+            idx += 1
+    if not sets:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    sets.append(f"updated_at = NOW()")
+    vals.append(profile_id)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"UPDATE industry_compliance_profiles SET {', '.join(sets)} WHERE id = ${idx} RETURNING *",
+            *vals,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "description": row["description"],
+        "focused_categories": list(row["focused_categories"]),
+        "rate_types": list(row["rate_types"]) if row["rate_types"] else [],
+        "category_order": list(row["category_order"]),
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+@router.delete("/industry-profiles/{profile_id}", dependencies=[Depends(require_admin)])
+async def delete_industry_profile(profile_id: UUID):
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM industry_compliance_profiles WHERE id = $1", profile_id
+        )
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {"deleted": True}
