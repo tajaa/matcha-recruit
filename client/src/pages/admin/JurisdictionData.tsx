@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Database, ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
   XCircle, Loader2, RefreshCw, Layers, Globe2, Filter, Trash2, Check,
