@@ -3773,6 +3773,32 @@ async def get_employee_impact_for_location(
                     if rt not in thresholds:
                         thresholds[rt] = float(sr["numeric_value"])
 
+            # Final fallback: check compliance_requirements from other same-company
+            # same-state locations at jurisdiction_level='state'. This catches exempt_salary
+            # thresholds that the AI populated for a different location in the same state.
+            still_missing = {"general", "exempt_salary"} - set(thresholds.keys())
+            if still_missing and loc_state:
+                peer_rows = await conn.fetch(
+                    """
+                    SELECT cr.rate_type, MAX(cr.numeric_value) AS numeric_value
+                    FROM compliance_requirements cr
+                    JOIN business_locations bl ON bl.id = cr.location_id
+                    WHERE bl.company_id = $1
+                      AND UPPER(bl.state) = UPPER($2)
+                      AND bl.id != $3
+                      AND cr.category = 'minimum_wage'
+                      AND cr.jurisdiction_level = 'state'
+                      AND cr.numeric_value IS NOT NULL
+                      AND cr.rate_type = ANY($4::text[])
+                    GROUP BY cr.rate_type
+                    """,
+                    company_id, loc_state, location_id, list(still_missing),
+                )
+                for pr in peer_rows:
+                    rt = pr["rate_type"] or "general"
+                    if rt not in thresholds:
+                        thresholds[rt] = float(pr["numeric_value"])
+
         # Check each employee for wage violations, bucketed by rate_type
         violations_by_rate_type: Dict[str, list] = {}
         for emp in employees:
