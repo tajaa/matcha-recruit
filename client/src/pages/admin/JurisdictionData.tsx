@@ -10,7 +10,7 @@ import { useJurisdictionData } from '../../hooks/useJurisdictionData';
 import { useIndustryProfiles } from '../../hooks/useIndustryProfiles';
 import { useIsLightMode } from '../../hooks/useIsLightMode';
 import { api } from '../../api/client';
-import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail, IndustryProfile, CategoryEvidence } from '../../api/client';
+import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail, JurisdictionDataPreemption, IndustryProfile, CategoryEvidence } from '../../api/client';
 
 /* ───── Theme ───── */
 const LT = {
@@ -309,7 +309,8 @@ export default function JurisdictionData() {
       <AnimatePresence>
         {selectedCityId && (
           <CityDetailDrawer t={t} detail={cityDetail} loading={loadingDetail} onClose={closeCity}
-            profiles={profiles} onOpenProfileEditor={() => { setEditingProfile(null); setProfileEditorOpen(true); }} />
+            profiles={profiles} onOpenProfileEditor={() => { setEditingProfile(null); setProfileEditorOpen(true); }}
+            preemptionRules={data?.preemption_rules ?? []} />
         )}
       </AnimatePresence>
 
@@ -689,11 +690,21 @@ function PreemptionTab({ t, cats, matrix, states }: {
 }
 
 /* ───── City Detail Drawer ───── */
-function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfileEditor }: {
+const LEVEL_ORDER = ['federal', 'state', 'county', 'city'] as const;
+const LEVEL_COLORS: Record<string, { border: string; bg: string; label: string }> = {
+  federal: { border: 'border-l-blue-500', bg: 'bg-blue-500/10', label: 'text-blue-600 dark:text-blue-400' },
+  state: { border: 'border-l-purple-500', bg: 'bg-purple-500/10', label: 'text-purple-600 dark:text-purple-400' },
+  county: { border: 'border-l-amber-500', bg: 'bg-amber-500/10', label: 'text-amber-600 dark:text-amber-400' },
+  city: { border: 'border-l-emerald-500', bg: 'bg-emerald-500/10', label: 'text-emerald-600 dark:text-emerald-400' },
+};
+
+function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfileEditor, preemptionRules }: {
   t: typeof LT; detail: JurisdictionDetail | null; loading: boolean; onClose: () => void;
   profiles: IndustryProfile[]; onOpenProfileEditor: () => void;
+  preemptionRules: JurisdictionDataPreemption[];
 }) {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [drawerTab, setDrawerTab] = useState<'requirements' | 'hierarchy'>('requirements');
 
   const selectedProfile = useMemo(
     () => profiles.find(p => p.id === selectedProfileId) ?? null,
@@ -738,6 +749,48 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
     () => selectedProfile ? new Set(selectedProfile.focused_categories) : null,
     [selectedProfile]
   );
+
+  // Hierarchy view: category → level → requirements[]
+  const hierarchyGrouped = useMemo(() => {
+    if (!detail) return {} as Record<string, Record<string, JurisdictionDetail['requirements']>>;
+    const map: Record<string, Record<string, JurisdictionDetail['requirements']>> = {};
+    for (const req of detail.requirements) {
+      const cat = req.category || 'other';
+      if (!map[cat]) map[cat] = {};
+      const level = req.jurisdiction_level || 'unknown';
+      if (!map[cat][level]) map[cat][level] = [];
+      map[cat][level].push(req);
+    }
+
+    if (!selectedProfile) return map;
+
+    // Sort by profile order
+    const focusedCats = new Set(selectedProfile.focused_categories);
+    const orderIndex = new Map(selectedProfile.category_order.map((c, i) => [c, i]));
+    const sorted: Record<string, Record<string, JurisdictionDetail['requirements']>> = {};
+    const entries = Object.entries(map);
+    entries.sort((a, b) => {
+      const aFocused = focusedCats.has(a[0]);
+      const bFocused = focusedCats.has(b[0]);
+      const aInOrder = orderIndex.has(a[0]);
+      const bInOrder = orderIndex.has(b[0]);
+      if (aFocused !== bFocused) return aFocused ? -1 : 1;
+      if (aInOrder && bInOrder) return (orderIndex.get(a[0])!) - (orderIndex.get(b[0])!);
+      if (aInOrder !== bInOrder) return aInOrder ? -1 : 1;
+      return 0;
+    });
+    for (const [k, v] of entries) sorted[k] = v;
+    return sorted;
+  }, [detail, selectedProfile]);
+
+  // Preemption lookup: "state|category" → { allows, notes }
+  const preemptionLookup = useMemo(() => {
+    const lookup: Record<string, { allows: boolean; notes: string | null }> = {};
+    for (const r of preemptionRules) {
+      lookup[`${r.state}|${r.category}`] = { allows: r.allows_local_override, notes: r.notes };
+    }
+    return lookup;
+  }, [preemptionRules]);
 
   return (
     <>
@@ -793,6 +846,20 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
             </button>
           </div>
 
+          {/* Drawer tab toggle */}
+          {detail && !loading && (
+            <div className={`flex gap-0.5 p-0.5 rounded-lg ${t.innerEl} w-fit`}>
+              {(['requirements', 'hierarchy'] as const).map(tab => (
+                <button key={tab} onClick={() => setDrawerTab(tab)}
+                  className={`px-3 py-1 text-[11px] font-medium rounded-md transition capitalize ${
+                    drawerTab === tab ? t.tabActive : t.tabInactive
+                  }`}>
+                  {tab === 'requirements' ? 'Requirements' : 'Hierarchy'}
+                </button>
+              ))}
+            </div>
+          )}
+
           {loading && (
             <div className="flex items-center justify-center py-16">
               <Loader2 className={`w-5 h-5 animate-spin ${t.textMuted}`} />
@@ -805,7 +872,8 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
             </div>
           )}
 
-          {detail && !loading && Object.entries(grouped).map(([category, reqs]) => {
+          {/* ── Requirements (flat) tab ── */}
+          {detail && !loading && drawerTab === 'requirements' && Object.entries(grouped).map(([category, reqs]) => {
             const dimmed = focusedSet && !focusedSet.has(category);
             const evidence = selectedProfile?.category_evidence?.[category];
             const confColor = confidenceColor(evidence?.confidence);
@@ -859,6 +927,112 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                 ))}
               </div>
             </div>
+            );
+          })}
+
+          {/* ── Hierarchy tab ── */}
+          {detail && !loading && drawerTab === 'hierarchy' && Object.entries(hierarchyGrouped).map(([category, levelMap]) => {
+            const dimmed = focusedSet && !focusedSet.has(category);
+            const evidence = selectedProfile?.category_evidence?.[category];
+            const confColor = confidenceColor(evidence?.confidence);
+            const totalReqs = Object.values(levelMap).reduce((s, arr) => s + arr.length, 0);
+            const preemption = detail.state ? preemptionLookup[`${detail.state}|${category}`] : null;
+
+            return (
+              <div key={category} className={`${t.card} p-4 space-y-3 transition-opacity ${dimmed ? 'opacity-40' : ''}`}>
+                {/* Category header */}
+                <div className="flex items-center justify-between">
+                  <div className={`${t.label} flex items-center gap-2`}>
+                    {evidence ? (
+                      <span className={`w-2.5 h-2.5 rounded-full ${CONF_DOT[confColor]}`} title={`Confidence: ${evidence.confidence}%`} />
+                    ) : (
+                      <span className={`w-2.5 h-2.5 rounded-full ${t.dotOk}`} />
+                    )}
+                    {CAT_LABELS[category] || category.replace(/_/g, ' ')}
+                    <span className={`${t.textFaint} font-normal`}>({totalReqs})</span>
+                    {evidence && evidence.confidence < 70 && (
+                      <span className="text-[9px] font-normal text-red-400 ml-1">needs review</span>
+                    )}
+                  </div>
+                  {evidence && (
+                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${CONF_BADGE_BG[confColor]}`}>
+                      {evidence.confidence}%
+                    </span>
+                  )}
+                </div>
+                {evidence?.reason && (
+                  <p className={`text-[10px] italic ${t.textFaint} -mt-1 leading-relaxed`}>{evidence.reason}</p>
+                )}
+
+                {/* Level cascade */}
+                <div className="space-y-0">
+                  {LEVEL_ORDER.map((level, li) => {
+                    const reqs = levelMap[level];
+                    const colors = LEVEL_COLORS[level] ?? LEVEL_COLORS.federal;
+                    const levelLabel = level === 'state' && detail.state ? `${level} (${detail.state})`
+                      : level === 'city' && detail.city ? `${level} (${detail.city})`
+                      : level === 'county' && detail.county ? `${level} (${detail.county})`
+                      : level;
+
+                    return (
+                      <div key={level}>
+                        {/* Connector arrow */}
+                        {li > 0 && (
+                          <div className="flex justify-center py-1">
+                            <ChevronDown className={`w-3.5 h-3.5 ${t.textFaint}`} />
+                          </div>
+                        )}
+
+                        {/* Level label */}
+                        <div className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${colors.label}`}>
+                          {levelLabel}
+                        </div>
+
+                        {reqs && reqs.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {reqs.map(req => (
+                              <div key={req.id} className={`${t.innerEl} border-l-[3px] ${colors.border} p-3 space-y-1`}>
+                                <div className="flex items-start justify-between gap-2">
+                                  <h4 className={`text-sm font-medium ${t.textMain}`}>{req.title}</h4>
+                                  {req.source_url && (
+                                    <a href={req.source_url} target="_blank" rel="noopener noreferrer"
+                                      className={`flex-shrink-0 ${t.btnGhost} transition`} title="View source">
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </a>
+                                  )}
+                                </div>
+                                {req.current_value && (
+                                  <div className={`text-sm ${t.textDim}`}>{req.current_value}</div>
+                                )}
+                                <div className={`flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono ${t.textFaint}`}>
+                                  {req.source_name && <span>Source: {req.source_name}</span>}
+                                  {req.effective_date && <span>Effective: {formatDate(req.effective_date)}</span>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className={`${t.innerEl} border-l-[3px] ${colors.border} p-2.5 opacity-40`}>
+                            <span className={`text-xs italic ${t.textFaint}`}>No {level}-level rules</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Preemption status */}
+                {preemption && (
+                  <div className={`flex items-center gap-2 pt-1 border-t ${t.border}`}>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${preemption.allows ? t.preemptOk : t.preemptNo}`}>
+                      {preemption.allows ? 'Local override allowed' : 'Preempted by state'}
+                    </span>
+                    {preemption.notes && (
+                      <span className={`text-[10px] ${t.textFaint}`}>{preemption.notes}</span>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           })}
 
