@@ -943,7 +943,7 @@ export function Compliance() {
                                                                         </span>
                                                                     )}
                                                                     {!poster.template_id && (
-                                                                        <span className="text-[9px] text-zinc-700 font-mono uppercase tracking-widest">Unavailable</span>
+                                                                        <span className={`text-[9px] ${t.textDim} font-mono uppercase tracking-widest`}>Unavailable</span>
                                                                     )}
                                                                 </div>
                                                             </div>
@@ -974,7 +974,7 @@ export function Compliance() {
                                                                         <span className={`px-2 py-1 text-[8px] font-bold uppercase tracking-widest rounded-xs border ${
                                                                             order.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
                                                                             order.status === 'shipped' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
-                                                                            order.status === 'cancelled' ? 'bg-zinc-800 text-zinc-500 border-zinc-700' :
+                                                                            order.status === 'cancelled' ? (isLight ? 'bg-stone-200 text-stone-500 border-stone-300' : 'bg-zinc-800 text-zinc-500 border-zinc-700') :
                                                                             'bg-blue-500/10 text-blue-400 border-blue-500/20'
                                                                         }`}>
                                                                             {order.status}
@@ -1014,7 +1014,7 @@ export function Compliance() {
                                                     signed: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
                                                     effective_soon: 'bg-red-500/10 text-red-400 border-red-500/20',
                                                     effective: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-                                                    dismissed: 'bg-zinc-800 text-zinc-500 border-zinc-700',
+                                                    dismissed: isLight ? 'bg-stone-200 text-stone-500 border-stone-300' : 'bg-zinc-800 text-zinc-500 border-zinc-700',
                                                 };
                                                 const isEffectiveNow = leg.days_until_effective !== null && leg.days_until_effective <= 0;
                                                 const displayStatus = isEffectiveNow ? 'effective' : leg.current_status;
@@ -1024,7 +1024,7 @@ export function Compliance() {
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-3 flex-wrap mb-2">
                                                                     <h4 className={`text-sm font-bold ${t.textMain} uppercase tracking-tight truncate`}>{leg.title}</h4>
-                                                                    <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${statusColors[displayStatus] || 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}>
+                                                                    <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${statusColors[displayStatus] || (isLight ? 'bg-stone-200 text-stone-500 border-stone-300' : 'bg-zinc-800 text-zinc-500 border-zinc-700')}`}>
                                                                         {displayStatus.replace('_', ' ')}
                                                                     </span>
                                                                     {leg.category && (
@@ -1325,7 +1325,7 @@ export function Compliance() {
                                                     animate={{ opacity: 1, y: 0 }}
                                                     key={alert.id}
                                                     className={`border rounded-sm p-5 transition-all ${getSeverityStyles(alert.severity)} ${
-                                                        alert.status === 'unread' ? 'bg-opacity-10 border-opacity-30' : 'opacity-50 bg-zinc-900/40 border-white/5'
+                                                        alert.status === 'unread' ? 'bg-opacity-10 border-opacity-30' : (isLight ? 'opacity-50 bg-stone-200/60 border-stone-300' : 'opacity-50 bg-zinc-900/40 border-white/5')
                                                     }`}
                                                 >
                                                     <div className="flex items-start justify-between gap-6">
