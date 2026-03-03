@@ -144,8 +144,14 @@ export default function JurisdictionData() {
   };
 
   const handleDelete = async (id: string) => {
-    await api.adminJurisdictions.delete(id);
-    queryClient.invalidateQueries({ queryKey: ['jurisdiction-data-overview'] });
+    try {
+      await api.adminJurisdictions.delete(id);
+    } catch (err: any) {
+      alert(err?.status === 409 ? 'Cannot delete — linked business locations exist.' : (err?.message || 'Delete failed'));
+      throw err;
+    }
+    const fresh = await api.adminJurisdictionData.overview(true);
+    queryClient.setQueryData(['jurisdiction-data-overview'], fresh);
   };
 
   const missingRows = useMemo(() => {
@@ -294,7 +300,7 @@ function DeleteBtn({ t, onDelete }: { t: typeof LT; onDelete: () => Promise<void
   if (confirming) {
     return (
       <span className="flex items-center gap-1">
-        <button onClick={async (e) => { e.stopPropagation(); setDeleting(true); await onDelete(); }}
+        <button onClick={async (e) => { e.stopPropagation(); setDeleting(true); try { await onDelete(); } catch { setDeleting(false); setConfirming(false); } }}
           className={`${t.confirmBtn} transition`} title="Confirm delete">
           <Check className="w-3.5 h-3.5" />
         </button>
