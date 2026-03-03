@@ -2866,6 +2866,7 @@ async def jurisdiction_data_overview():
             stale_count += 1
 
         city_data = {
+            "id": str(row["id"]),
             "city": row["city"],
             "categories_present": sorted(cats_present),
             "categories_missing": cats_missing,

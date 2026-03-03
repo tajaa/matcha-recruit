@@ -2317,6 +2317,7 @@ export const adminJurisdictions = {
 
 // Jurisdiction Data Overview (repository dashboard)
 export interface JurisdictionDataCitySummary {
+  id: string;
   city: string;
   categories_present: string[];
   categories_missing: string[];
