@@ -1,14 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Database, ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
-  XCircle, Loader2, RefreshCw, Layers, Globe2, Filter, Trash2, Check
+  XCircle, Loader2, RefreshCw, Layers, Globe2, Filter, Trash2, Check,
+  X, ExternalLink
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { useJurisdictionData } from '../../hooks/useJurisdictionData';
 import { useIsLightMode } from '../../hooks/useIsLightMode';
 import { api } from '../../api/client';
-import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview } from '../../api/client';
+import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail } from '../../api/client';
 
 /* ───── Theme ───── */
 const LT = {
@@ -106,13 +107,33 @@ function formatDate(iso: string | null): string {
 export default function JurisdictionData() {
   const isLight = useIsLightMode();
   const t = isLight ? LT : DK;
-  const { data, isLoading, refetch } = useJurisdictionData();
+  const { data, isLoading, hardRefresh } = useJurisdictionData();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<Tab>('coverage');
   const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set());
   const [filterState, setFilterState] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterStaleOnly, setFilterStaleOnly] = useState(false);
+  const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
+  const [cityDetail, setCityDetail] = useState<JurisdictionDetail | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const openCity = async (id: string) => {
+    if (!id) return;
+    setSelectedCityId(id);
+    setLoadingDetail(true);
+    setCityDetail(null);
+    try {
+      const detail = await api.adminJurisdictions.get(id);
+      setCityDetail(detail);
+    } catch { /* silently fail */ }
+    setLoadingDetail(false);
+  };
+
+  const closeCity = () => {
+    setSelectedCityId(null);
+    setCityDetail(null);
+  };
 
   const toggleState = (state: string) => {
     setExpandedStates(prev => {
@@ -184,7 +205,7 @@ export default function JurisdictionData() {
             <p className={`text-sm ${t.textMuted} mt-1`}>Compliance data repository overview</p>
           </div>
           <button
-            onClick={() => refetch()}
+            onClick={() => hardRefresh()}
             className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition ${t.btnGhost} ${t.innerEl}`}
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -220,14 +241,15 @@ export default function JurisdictionData() {
             exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.12 }}>
             {activeTab === 'coverage' && (
               <CoverageTab t={t} states={data.states} cats={cats}
-                expandedStates={expandedStates} toggleState={toggleState} onDelete={handleDelete} />
+                expandedStates={expandedStates} toggleState={toggleState} onDelete={handleDelete}
+                onCityClick={openCity} />
             )}
             {activeTab === 'missing' && (
               <MissingDataTab t={t} rows={missingRows} cats={cats} states={data.states}
                 filterState={filterState} setFilterState={setFilterState}
                 filterCategory={filterCategory} setFilterCategory={setFilterCategory}
                 filterStaleOnly={filterStaleOnly} setFilterStaleOnly={setFilterStaleOnly}
-                onDelete={handleDelete} />
+                onDelete={handleDelete} onCityClick={openCity} />
             )}
             {activeTab === 'quality' && (
               <DataQualityTab t={t} summary={summary} sources={data.structured_sources} />
@@ -238,6 +260,13 @@ export default function JurisdictionData() {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* ── City Detail Drawer ── */}
+      <AnimatePresence>
+        {selectedCityId && (
+          <CityDetailDrawer t={t} detail={cityDetail} loading={loadingDetail} onClose={closeCity} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -286,10 +315,11 @@ function DeleteBtn({ t, onDelete }: { t: typeof LT; onDelete: () => Promise<void
 }
 
 /* ───── Coverage Tab ───── */
-function CoverageTab({ t, states, cats, expandedStates, toggleState, onDelete }: {
+function CoverageTab({ t, states, cats, expandedStates, toggleState, onDelete, onCityClick }: {
   t: typeof LT; states: JurisdictionDataState[]; cats: string[];
   expandedStates: Set<string>; toggleState: (s: string) => void;
   onDelete: (id: string) => Promise<void>;
+  onCityClick: (id: string) => void;
 }) {
   return (
     <div className={`${t.card} p-5`}>
@@ -326,7 +356,8 @@ function CoverageTab({ t, states, cats, expandedStates, toggleState, onDelete }:
                       </div>
                       {/* city rows */}
                       {s.cities.map(city => (
-                        <div key={city.city} className={`group flex items-center gap-2 px-2 py-1.5 rounded-lg ${t.rowHover}`}>
+                        <div key={city.city} onClick={() => onCityClick(city.id)}
+                          className={`group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer ${t.rowHover}`}>
                           <span className={`text-sm ${t.textMain} w-40 truncate`}>{city.city}</span>
                           <div className="flex gap-1.5">
                             {cats.map(c => (
@@ -352,7 +383,7 @@ function CoverageTab({ t, states, cats, expandedStates, toggleState, onDelete }:
 }
 
 /* ───── Missing Data Tab ───── */
-function MissingDataTab({ t, rows, cats, states, filterState, setFilterState, filterCategory, setFilterCategory, filterStaleOnly, setFilterStaleOnly, onDelete }: {
+function MissingDataTab({ t, rows, cats, states, filterState, setFilterState, filterCategory, setFilterCategory, filterStaleOnly, setFilterStaleOnly, onDelete, onCityClick }: {
   t: typeof LT;
   rows: (JurisdictionDataCitySummary & { state: string })[];
   cats: string[];
@@ -361,6 +392,7 @@ function MissingDataTab({ t, rows, cats, states, filterState, setFilterState, fi
   filterCategory: string; setFilterCategory: (v: string) => void;
   filterStaleOnly: boolean; setFilterStaleOnly: (v: boolean) => void;
   onDelete: (id: string) => Promise<void>;
+  onCityClick: (id: string) => void;
 }) {
   const uniqueStates = useMemo(() => [...new Set(states.map(s => s.state))].sort(), [states]);
 
@@ -401,7 +433,8 @@ function MissingDataTab({ t, rows, cats, states, filterState, setFilterState, fi
             {rows.slice(0, 100).map((row, i) => (
               <tr key={`${row.state}-${row.city}-${i}`} className={`group ${t.rowHover}`}>
                 <td className={`py-2 px-2 font-mono font-bold ${t.textMain}`}>{row.state}</td>
-                <td className={`py-2 px-2 ${t.textMain}`}>{row.city}</td>
+                <td className={`py-2 px-2 ${t.textMain} cursor-pointer hover:underline`}
+                  onClick={() => onCityClick(row.id)}>{row.city}</td>
                 <td className="py-2 px-2">
                   <div className="flex flex-wrap gap-1">
                     {row.categories_missing.map(c => (
@@ -588,5 +621,148 @@ function PreemptionTab({ t, cats, matrix, states }: {
         </table>
       </div>
     </div>
+  );
+}
+
+/* ───── City Detail Drawer ───── */
+function CityDetailDrawer({ t, detail, loading, onClose }: {
+  t: typeof LT; detail: JurisdictionDetail | null; loading: boolean; onClose: () => void;
+}) {
+  const grouped = useMemo(() => {
+    if (!detail) return {};
+    const map: Record<string, JurisdictionDetail['requirements']> = {};
+    for (const req of detail.requirements) {
+      const cat = req.category || 'other';
+      if (!map[cat]) map[cat] = [];
+      map[cat].push(req);
+    }
+    return map;
+  }, [detail]);
+
+  return (
+    <>
+      {/* backdrop */}
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/40 z-40" onClick={onClose}
+      />
+      {/* panel */}
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+        className={`fixed inset-y-0 right-0 w-full max-w-2xl z-50 ${t.pageBg} shadow-2xl overflow-y-auto`}
+      >
+        <div className="p-6 space-y-5">
+          {/* header */}
+          <div className="flex items-start justify-between">
+            <div>
+              {detail ? (
+                <>
+                  <h2 className={`text-2xl font-bold tracking-tight ${t.textMain}`}>{detail.city}</h2>
+                  <p className={`text-sm ${t.textMuted} mt-0.5`}>
+                    {detail.state}{detail.county ? ` · ${detail.county} County` : ''}
+                    {' · '}{detail.requirements.length} requirement{detail.requirements.length !== 1 ? 's' : ''}
+                  </p>
+                </>
+              ) : (
+                <div className={`h-8 w-48 rounded ${t.innerEl} animate-pulse`} />
+              )}
+            </div>
+            <button onClick={onClose} className={`p-1.5 rounded-lg transition ${t.btnGhost} ${t.rowHover}`}>
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {loading && (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className={`w-5 h-5 animate-spin ${t.textMuted}`} />
+            </div>
+          )}
+
+          {detail && !loading && detail.requirements.length === 0 && (
+            <div className={`${t.card} p-8 text-center`}>
+              <p className={`text-sm ${t.textMuted}`}>No requirements data for this jurisdiction yet.</p>
+            </div>
+          )}
+
+          {detail && !loading && Object.entries(grouped).map(([category, reqs]) => (
+            <div key={category} className={`${t.card} p-4 space-y-2`}>
+              <div className={`${t.label} flex items-center gap-2`}>
+                <span className={`w-2.5 h-2.5 rounded-full ${t.dotOk}`} />
+                {CAT_LABELS[category] || category.replace(/_/g, ' ')}
+                <span className={`${t.textFaint} font-normal`}>({reqs.length})</span>
+              </div>
+
+              <div className="space-y-1.5">
+                {reqs.map(req => (
+                  <div key={req.id} className={`${t.innerEl} p-3 space-y-1.5`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className={`text-sm font-medium ${t.textMain}`}>{req.title}</h4>
+                      {req.source_url && (
+                        <a href={req.source_url} target="_blank" rel="noopener noreferrer"
+                          className={`flex-shrink-0 ${t.btnGhost} transition`} title="View source">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                    </div>
+
+                    {req.current_value && (
+                      <div className={`text-sm ${t.textDim}`}>{req.current_value}</div>
+                    )}
+
+                    {req.description && (
+                      <p className={`text-xs ${t.textFaint} leading-relaxed`}>{req.description}</p>
+                    )}
+
+                    <div className={`flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono ${t.textFaint} pt-1`}>
+                      {req.effective_date && <span>Effective: {formatDate(req.effective_date)}</span>}
+                      {req.last_verified_at && <span>Verified: {formatDate(req.last_verified_at)}</span>}
+                      {req.source_name && <span>Source: {req.source_name}</span>}
+                      {req.jurisdiction_level && <span>Level: {req.jurisdiction_level}</span>}
+                      {req.previous_value && <span>Prev: {req.previous_value}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {/* legislation section */}
+          {detail && !loading && detail.legislation.length > 0 && (
+            <div className={`${t.card} p-4 space-y-2`}>
+              <div className={t.label}>Pending Legislation ({detail.legislation.length})</div>
+              <div className="space-y-1.5">
+                {detail.legislation.map(leg => (
+                  <div key={leg.id} className={`${t.innerEl} p-3 space-y-1`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className={`text-sm font-medium ${t.textMain}`}>{leg.title}</h4>
+                      {leg.source_url && (
+                        <a href={leg.source_url} target="_blank" rel="noopener noreferrer"
+                          className={`flex-shrink-0 ${t.btnGhost} transition`}>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                    </div>
+                    <div className={`flex items-center gap-2 text-xs`}>
+                      <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${
+                        leg.current_status === 'enacted' ? t.preemptOk : t.preemptNo
+                      }`}>{leg.current_status}</span>
+                      {leg.category && <span className={t.textFaint}>{CAT_LABELS[leg.category] || leg.category}</span>}
+                    </div>
+                    {leg.impact_summary && (
+                      <p className={`text-xs ${t.textFaint} leading-relaxed`}>{leg.impact_summary}</p>
+                    )}
+                    <div className={`flex gap-4 text-[10px] font-mono ${t.textFaint}`}>
+                      {leg.expected_effective_date && <span>Expected: {formatDate(leg.expected_effective_date)}</span>}
+                      {leg.source_name && <span>Source: {leg.source_name}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </>
   );
 }

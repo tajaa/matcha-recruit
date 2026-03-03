@@ -2368,8 +2368,8 @@ export interface JurisdictionDataOverview {
 }
 
 export const adminJurisdictionData = {
-  overview: (): Promise<JurisdictionDataOverview> =>
-    request<JurisdictionDataOverview>('/admin/jurisdictions/data-overview'),
+  overview: (bust?: boolean): Promise<JurisdictionDataOverview> =>
+    request<JurisdictionDataOverview>(`/admin/jurisdictions/data-overview${bust ? '?bust=true' : ''}`),
 };
 
 // Scheduler Admin API

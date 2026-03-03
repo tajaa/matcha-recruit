@@ -2764,13 +2764,13 @@ REQUIRED_CATEGORIES = [
 
 
 @router.get("/jurisdictions/data-overview", dependencies=[Depends(require_admin)])
-async def jurisdiction_data_overview():
+async def jurisdiction_data_overview(bust: bool = False):
     """Aggregated view of the jurisdiction data repository."""
     import time
 
     global _data_overview_cache, _data_overview_cached_at
     now = time.monotonic()
-    if _data_overview_cache and (now - _data_overview_cached_at) < _DATA_OVERVIEW_CACHE_TTL:
+    if not bust and _data_overview_cache and (now - _data_overview_cached_at) < _DATA_OVERVIEW_CACHE_TTL:
         return _data_overview_cache
 
     async with get_connection() as conn:
