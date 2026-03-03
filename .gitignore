@@ -29,6 +29,9 @@ Thumbs.db
 *.log
 .landing-build-version
 
+# Local plans
+topanga-domain-setup.md
+
 # Testing
 .pytest_cache/
 .coverage

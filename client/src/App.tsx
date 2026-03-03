@@ -166,6 +166,8 @@ function LegacyJobsRedirect() {
   return <Navigate to={getAppHomePath(user?.role)} replace />;
 }
 
+const isTopangaDomain = window.location.hostname.includes('topanga');
+
 function App() {
   return (
     <AuthProvider>
@@ -174,7 +176,7 @@ function App() {
           <Suspense fallback={<PageLoader />}>
             <Routes>
               {/* Public routes */}
-              <Route path="/" element={<Landing />} />
+              <Route path="/" element={isTopangaDomain ? <TopangaResearch /> : <Landing />} />
               <Route path="/for-candidates" element={<ForCandidates />} />
               <Route path="/topanga" element={<TopangaResearch />} />
               <Route path="/work-with-us" element={<WorkWithUs />} />
