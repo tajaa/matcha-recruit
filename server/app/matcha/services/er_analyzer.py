@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from typing import Optional, Any, AsyncIterator, Callable
 
 from google import genai
-from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -411,11 +410,6 @@ class ERAnalyzer:
             model: Model to use for analysis (default: gemini-2.5-flash).
         """
         self.model = model
-        self._generation_config = (
-            types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0))
-            if "pro" in model.lower()
-            else None
-        )
 
         if vertex_project:
             self.client = genai.Client(
@@ -458,7 +452,6 @@ class ERAnalyzer:
                 response = await self.client.aio.models.generate_content(
                     model=candidate,
                     contents=prompt,
-                    config=self._generation_config,
                 )
                 if candidate != self.model:
                     logger.warning(
@@ -490,7 +483,6 @@ class ERAnalyzer:
                 response = await self.client.aio.models.generate_content_stream(
                     model=candidate,
                     contents=prompt,
-                    config=self._generation_config,
                 )
                 if candidate != self.model:
                     logger.warning(
@@ -549,7 +541,7 @@ class ERAnalyzer:
         raise RuntimeError("No Gemini model candidates were available for ER analysis")
 
     def _parse_json_response(self, text: str) -> dict[str, Any]:
-        """Parse JSON from LLM response, handling markdown code blocks."""
+        """Parse JSON from LLM response, handling markdown code blocks and preamble text."""
         text = text.strip()
 
         # Remove markdown code blocks
@@ -561,7 +553,18 @@ class ERAnalyzer:
         if text.endswith("```"):
             text = text[:-3]
 
-        return json.loads(text.strip())
+        text = text.strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Fallback: locate the outermost {...} JSON object in case of
+            # preamble text or trailing content surrounding the JSON.
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end > start:
+                return json.loads(text[start : end + 1])
+            raise
 
     def _format_documents_for_prompt(self, documents: list[dict]) -> str:
         """Format document list for inclusion in prompt."""
