@@ -319,38 +319,38 @@ function buildNotificationsWsUrl(apiBase: string): string {
 
 const LT = {
   pageBg: 'bg-stone-300',
-  card: 'bg-stone-100 rounded-2xl',
-  cardBg: 'bg-stone-100',
-  cardInner: 'bg-stone-50 rounded-xl',
+  card: 'bg-stone-200 rounded-lg',
+  cardBg: 'bg-stone-200',
+  cardInner: 'bg-white rounded-md',
   textMain: 'text-zinc-900',
   textMuted: 'text-stone-500',
   textFaint: 'text-stone-400',
   textDim: 'text-stone-600',
-  border: 'border-stone-200',
-  divide: 'divide-stone-200',
-  rowHover: 'hover:bg-stone-50',
+  border: 'border-stone-300',
+  divide: 'divide-stone-300',
+  rowHover: 'hover:bg-stone-100',
   label: 'text-[10px] text-stone-500 uppercase tracking-wider',
-  input: 'bg-white border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:border-stone-400',
-  select: 'bg-white border border-stone-300 rounded-xl text-zinc-900 focus:border-stone-400',
+  input: 'bg-white border border-stone-300 text-zinc-900 rounded-md placeholder:text-stone-400 focus:border-stone-400',
+  select: 'bg-white border border-stone-300 rounded-md text-zinc-900 focus:border-stone-400',
   btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
   btnGhost: 'text-stone-500 hover:text-zinc-900',
-  modalBg: 'bg-stone-100 rounded-2xl',
-  modalHeader: 'border-b border-stone-200',
-  tabBorder: 'border-b border-stone-200',
+  modalBg: 'bg-stone-200 rounded-lg',
+  modalHeader: 'border-b border-stone-300',
+  tabBorder: 'border-b border-stone-300',
   tabActive: 'border-zinc-900 text-zinc-900',
   tabInactive: 'border-transparent text-zinc-400 hover:text-zinc-600',
-  noteCard: 'bg-stone-50 border border-stone-200 rounded-xl',
-  assistPanel: 'border border-stone-200 bg-stone-100 rounded-2xl',
-  guidanceSummary: 'bg-stone-100 border border-stone-200 rounded-2xl',
+  noteCard: 'bg-white border border-stone-200 rounded-md',
+  assistPanel: 'border border-stone-300 bg-stone-200 rounded-lg',
+  guidanceSummary: 'bg-stone-200 border border-stone-300 rounded-lg',
   priorityHigh: 'text-red-700 bg-red-100',
   priorityMed: 'text-amber-700 bg-amber-100',
   priorityLow: 'text-zinc-600 bg-zinc-100',
-  outcomeSelected: 'border-zinc-900 bg-stone-50 ring-1 ring-zinc-900',
-  outcomeDefault: 'border-stone-200 bg-white hover:border-stone-400',
+  outcomeSelected: 'border-zinc-900 bg-white ring-1 ring-zinc-900',
+  outcomeDefault: 'border-stone-300 bg-white hover:border-stone-400',
   radioSelected: 'border-zinc-900 bg-zinc-900',
   radioDefault: 'border-stone-300',
-  borderLight: 'border-stone-200',
-  progressBar: 'bg-stone-200',
+  borderLight: 'border-stone-300',
+  progressBar: 'bg-stone-300',
   btnAction: 'text-zinc-900 hover:text-stone-600',
   spinner: 'text-stone-400',
   timelineDot: 'bg-stone-400',
@@ -364,9 +364,9 @@ const LT = {
 
 const DK = {
   pageBg: 'bg-zinc-950',
-  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  card: 'bg-zinc-900/50 border border-white/10 rounded-lg',
   cardBg: 'bg-zinc-900/50',
-  cardInner: 'bg-zinc-900 rounded-xl',
+  cardInner: 'bg-zinc-900 rounded-md',
   textMain: 'text-zinc-100',
   textMuted: 'text-zinc-500',
   textFaint: 'text-zinc-600',
@@ -375,18 +375,18 @@ const DK = {
   divide: 'divide-white/10',
   rowHover: 'hover:bg-white/5',
   label: 'text-[10px] text-zinc-500 uppercase tracking-wider',
-  input: 'bg-zinc-800 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:border-white/20',
-  select: 'bg-zinc-800 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
+  input: 'bg-zinc-800 border border-white/10 text-zinc-100 rounded-md placeholder:text-zinc-600 focus:border-white/20',
+  select: 'bg-zinc-800 border border-white/10 rounded-md text-zinc-100 focus:border-white/20',
   btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600',
   btnGhost: 'text-zinc-600 hover:text-zinc-100',
-  modalBg: 'bg-zinc-900 border border-white/10 rounded-2xl',
+  modalBg: 'bg-zinc-900 border border-white/10 rounded-lg',
   modalHeader: 'border-b border-white/10',
   tabBorder: 'border-b border-white/10',
   tabActive: 'border-zinc-100 text-zinc-100',
   tabInactive: 'border-transparent text-zinc-600 hover:text-zinc-400',
-  noteCard: 'bg-zinc-900 border border-white/10 rounded-xl',
-  assistPanel: 'border border-white/10 bg-zinc-900 rounded-2xl',
-  guidanceSummary: 'bg-zinc-900 border border-white/10 rounded-2xl',
+  noteCard: 'bg-zinc-900 border border-white/10 rounded-md',
+  assistPanel: 'border border-white/10 bg-zinc-900 rounded-lg',
+  guidanceSummary: 'bg-zinc-900 border border-white/10 rounded-lg',
   priorityHigh: 'text-red-400 bg-red-950',
   priorityMed: 'text-amber-400 bg-amber-950',
   priorityLow: 'text-zinc-400 bg-zinc-800',
@@ -1363,7 +1363,7 @@ export function ERCaseDetail() {
 
   return (
     <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
-    <div className="max-w-5xl mx-auto space-y-12">
+    <div className="max-w-5xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -1447,10 +1447,10 @@ export function ERCaseDetail() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Documents */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className={`flex justify-between items-center border-b ${t.border} pb-2`}>
+        <div className={`lg:col-span-1 space-y-0 ${t.card} p-5`}>
+          <div className={`flex justify-between items-center mb-4`}>
             <h2 className={`text-xs font-medium ${t.textMuted} uppercase tracking-wider`}>Evidence</h2>
             <div className="flex items-center gap-3">
               {hasUnprocessedDocs && (
@@ -1466,7 +1466,7 @@ export function ERCaseDetail() {
               )}
               <button
                 onClick={() => setShowUploadModal(true)}
-                className={`text-xs ${t.textMain} hover:${t.textDim} flex items-center gap-1 uppercase tracking-wide font-medium`}
+                className={`text-xs ${t.textMain} hover:${t.textDim} flex items-center gap-1.5 uppercase tracking-wide font-medium px-2.5 py-1.5 ${t.cardInner} border ${t.border}`}
               >
                 <Upload size={10} />
                 Upload
@@ -1474,39 +1474,39 @@ export function ERCaseDetail() {
             </div>
           </div>
 
-          <div className="min-h-[200px]">
+          <div className="min-h-[120px]">
             {documents.length === 0 ? (
               <div className={`${t.textFaint} text-xs py-4`}>
                 No documents uploaded.
               </div>
             ) : (
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {documents.map(doc => (
-                  <div key={doc.id} className="py-2 flex items-start justify-between group">
+                  <div key={doc.id} className={`${t.cardInner} px-3 py-2.5 flex items-start justify-between group`}>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-0.5">
-                        <span className={`text-xs uppercase tracking-wide font-medium ${DOC_TYPE_COLORS[doc.document_type]}`}>
+                        <span className={`text-[10px] uppercase tracking-wide font-semibold ${DOC_TYPE_COLORS[doc.document_type]}`}>
                           {doc.document_type}
                         </span>
                         {doc.processing_status === 'pending' && (
-                          <span className={`text-xs ${t.textMuted}`}>Pending</span>
+                          <span className={`text-[10px] ${t.textMuted}`}>Pending</span>
                         )}
                         {doc.processing_status === 'processing' && (
-                          <span className="text-xs text-amber-500">Processing...</span>
+                          <span className="text-[10px] text-amber-500">Processing...</span>
                         )}
                         {doc.processing_status === 'completed' && (
-                          <span className="text-xs text-emerald-600">✓</span>
+                          <span className="text-[10px] text-emerald-600">✓</span>
                         )}
                         {doc.processing_status === 'failed' && (
-                          <span className="text-xs text-red-500">Failed</span>
+                          <span className="text-[10px] text-red-500">Failed</span>
                         )}
                       </div>
-                      <p className={`text-sm ${t.textMain} truncate hover:${t.textDim} cursor-pointer`} title={doc.filename}>{doc.filename}</p>
+                      <p className={`text-sm ${t.textMain} truncate`} title={doc.filename}>{doc.filename}</p>
                       {doc.processing_error && (
-                        <p className="text-xs text-red-500 truncate" title={doc.processing_error}>{doc.processing_error}</p>
+                        <p className="text-xs text-red-500 truncate mt-0.5" title={doc.processing_error}>{doc.processing_error}</p>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       {(doc.processing_status === 'pending' || doc.processing_status === 'failed') && (
                         <button
                           onClick={() => handleReprocessDoc(doc.id)}
@@ -1627,7 +1627,7 @@ export function ERCaseDetail() {
                           <button
                             key={idx}
                             onClick={() => setSelectedOutcomeIdx(isSelected ? null : idx)}
-                            className={`w-full text-left border rounded-xl p-3 space-y-2 transition-colors animate-fade-in-up ${
+                            className={`w-full text-left border rounded-lg p-3 space-y-2 transition-colors animate-fade-in-up ${
                               isSelected
                                 ? t.outcomeSelected
                                 : t.outcomeDefault
@@ -1693,7 +1693,7 @@ export function ERCaseDetail() {
                       <button
                         onClick={handleCloseCase}
                         disabled={closingCase || selectedOutcomeIdx === null || !determinationNotes.trim()}
-                        className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider ${t.btnPrimary} transition-all rounded-xl disabled:opacity-40 disabled:cursor-not-allowed`}
+                        className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider ${t.btnPrimary} transition-all rounded-lg disabled:opacity-40 disabled:cursor-not-allowed`}
                       >
                         <CheckCircle size={14} />
                         {closingCase ? 'Closing Case...' : 'Close Case & Finalize'}
@@ -1707,7 +1707,7 @@ export function ERCaseDetail() {
 
                   {/* Error state */}
                   {outcomeError && !outcomeLoading && (
-                    <div className="border border-red-200 bg-red-50 p-3 rounded-xl space-y-2">
+                    <div className="border border-red-200 bg-red-50 p-3 rounded-md space-y-2">
                       <div className="flex items-start gap-2">
                         <AlertTriangle size={12} className="text-red-500 mt-0.5 shrink-0" />
                         <p className="text-sm text-red-700">{outcomeError}</p>
@@ -1740,7 +1740,7 @@ export function ERCaseDetail() {
                   <h3 className={`text-xs uppercase tracking-wider ${t.textDim} mb-3`}>Suggested Guidance</h3>
 
                   {showDeterminationBanner && (
-                    <div className="border border-amber-200 bg-amber-50 p-3 rounded-xl mb-3 space-y-2">
+                    <div className="border border-amber-200 bg-amber-50 p-3 rounded-md mb-3 space-y-2">
                       <p className="text-sm font-medium text-amber-900">Ready for a determination?</p>
                       <p className="text-sm text-amber-800 leading-relaxed">
                         The current case file contains evidence that appears to meet the standard of
@@ -1852,7 +1852,7 @@ export function ERCaseDetail() {
                           {latestGuidancePayload.cards.map((card) => {
                             const state = getCardState(card.id);
                             return (
-                              <div key={card.id} className={`border ${t.border} ${t.cardBg} rounded-2xl p-4 space-y-2 transition-opacity ${
+                              <div key={card.id} className={`border ${t.border} ${t.cardBg} rounded-lg p-4 space-y-2 transition-opacity ${
                                 state === 'done' || state === 'dismissed' ? 'opacity-50' : ''
                               }`}>
                                 <div className="flex items-start justify-between gap-2">
@@ -1934,15 +1934,15 @@ export function ERCaseDetail() {
           )}
 
           {/* Always-visible Case Notes & Add Note */}
-          <div className={`pt-4 border-t ${t.border} space-y-3`}>
-            <h3 className={`text-xs uppercase tracking-wider ${t.textDim}`}>Case Notes</h3>
+          <div className={`pt-4 mt-4 border-t ${t.border} space-y-3`}>
+            <h3 className={`text-xs uppercase tracking-wider ${t.textMuted}`}>Case Notes</h3>
             {caseNotes.length > 0 && (
-              <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+              <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
                 {caseNotes.slice(-10).reverse().map((note) => (
-                  <div key={note.id} className={`${t.noteCard} p-2.5`}>
+                  <div key={note.id} className={`${t.cardInner} px-3 py-2`}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className={`text-xs uppercase tracking-wide ${t.textDim}`}>{formatCaseNoteType(note.note_type)}</span>
-                      <span className={`text-xs ${t.textMuted}`}>
+                      <span className={`text-[10px] uppercase tracking-wide font-semibold ${t.textDim}`}>{formatCaseNoteType(note.note_type)}</span>
+                      <span className={`text-[10px] ${t.textMuted}`}>
                         {new Date(note.created_at).toLocaleString('en-US', {
                           month: 'short',
                           day: 'numeric',
@@ -1967,7 +1967,7 @@ export function ERCaseDetail() {
               <button
                 onClick={handleAddNote}
                 disabled={addingNote || !newNoteContent.trim()}
-                className={`text-xs uppercase tracking-wider font-medium ${t.textDim} hover:${t.textMain} disabled:opacity-40 disabled:cursor-not-allowed`}
+                className={`text-xs uppercase tracking-wider font-medium px-3 py-1.5 border ${t.border} ${t.cardInner} ${t.textMain} hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed transition-all`}
               >
                 {addingNote ? 'Adding...' : 'Add Note'}
               </button>
@@ -1976,7 +1976,7 @@ export function ERCaseDetail() {
         </div>
 
         {/* Right: Analysis */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className={`lg:col-span-2 ${t.card} p-5 space-y-5`}>
           {/* Tabs */}
           <div className={`flex items-center justify-between ${t.tabBorder} pb-px`}>
             <div className="flex gap-6">
@@ -2004,20 +2004,20 @@ export function ERCaseDetail() {
             <div className="flex items-center gap-1 pb-2">
               <button
                 onClick={() => setAnalysisModel('flash')}
-                className={`px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded-l border ${
+                className={`px-2.5 py-1 text-[9px] font-medium uppercase tracking-wider rounded-l-lg border ${
                   analysisModel === 'flash'
                     ? (isLight ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-zinc-100 text-zinc-900 border-zinc-100')
-                    : `${t.cardBg} ${t.textFaint} ${t.border}`
+                    : `${t.cardInner} ${t.textFaint} ${t.border}`
                 }`}
               >
                 Flash
               </button>
               <button
                 onClick={() => setAnalysisModel('pro')}
-                className={`px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded-r border border-l-0 ${
+                className={`px-2.5 py-1 text-[9px] font-medium uppercase tracking-wider rounded-r-lg border border-l-0 ${
                   analysisModel === 'pro'
                     ? (isLight ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-zinc-100 text-zinc-900 border-zinc-100')
-                    : `${t.cardBg} ${t.textFaint} ${t.border}`
+                    : `${t.cardInner} ${t.textFaint} ${t.border}`
                 }`}
               >
                 Pro
@@ -2026,7 +2026,7 @@ export function ERCaseDetail() {
           </div>
 
           {analysisError && (
-            <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
+            <div className="mb-4 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2">
               <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
               <p className="text-sm text-red-700 flex-1">{analysisError}</p>
               <button onClick={() => setAnalysisError(null)} className="text-red-400 hover:text-red-600">
@@ -2035,15 +2035,15 @@ export function ERCaseDetail() {
             </div>
           )}
 
-          <div className="min-h-[400px]">
+          <div className="min-h-[300px]">
             {/* Timeline Tab */}
             {activeTab === 'timeline' && (
-              <div className="space-y-8">
+              <div className="space-y-5">
                 <div className="flex justify-end">
                   <button
                     onClick={handleGenerateTimeline}
                     disabled={analysisLoading === 'timeline' || completedNonPolicyDocs.length === 0}
-                    className={`text-xs uppercase tracking-wider font-medium ${t.btnAction} disabled:opacity-50`}
+                    className={`text-xs uppercase tracking-wider font-medium px-3 py-1.5 border ${t.border} ${t.cardInner} ${t.textMain} hover:opacity-80 disabled:opacity-40 transition-all`}
                   >
                     {analysisLoading === 'timeline' ? 'Generating...' : 'Regenerate Analysis'}
                   </button>
@@ -2075,34 +2075,40 @@ export function ERCaseDetail() {
                     )}
                   </div>
                 ) : (
-                  <div className={`relative pl-2 space-y-8 border-l ${t.border} ml-2`}>
+                  <div className={`relative pl-3 space-y-3 border-l-2 ${t.borderLight} ml-1`}>
                     {timeline.map((event, i) => (
-                      <div key={i} className="relative pl-6">
-                        <div className={`absolute left-[-3px] top-1.5 w-1.5 h-1.5 rounded-full ${t.timelineDot}`} />
-                        <div className="flex items-center gap-3 mb-1">
-                          <span className={`text-sm font-medium ${t.textMain}`}>
+                      <div key={i} className={`relative pl-5 ${t.cardInner} p-3 ml-1`}>
+                        <div className={`absolute left-[-10px] top-4 w-2.5 h-2.5 rounded-full border-2 ${
+                          isLight ? 'bg-stone-100 border-stone-400' : 'bg-zinc-900 border-zinc-600'
+                        }`} />
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className={`text-xs font-semibold ${t.textMain}`}>
                             {event.date} {event.time && <span className={`${t.textFaint} font-normal`}>at {event.time}</span>}
                           </span>
-                          <span className={`text-[9px] uppercase tracking-wide font-medium ${
-                            event.confidence === 'high' ? 'text-emerald-600' :
-                            event.confidence === 'medium' ? 'text-amber-600' :
-                            'text-red-600'
+                          <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded ${
+                            event.confidence === 'high'
+                              ? (isLight ? 'text-emerald-700 bg-emerald-100' : 'text-emerald-400 bg-emerald-950')
+                              : event.confidence === 'medium'
+                                ? (isLight ? 'text-amber-700 bg-amber-100' : 'text-amber-400 bg-amber-950')
+                                : (isLight ? 'text-red-700 bg-red-100' : 'text-red-400 bg-red-950')
                           }`}>
                             {event.confidence}
                           </span>
                         </div>
-                        <p className={`${t.textMain} text-base leading-relaxed mb-2`}>{event.description}</p>
-                        
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          {event.participants.map(p => (
-                            <span key={p} className={`text-xs ${t.textMuted} uppercase tracking-wide`}>
-                              {p}
-                            </span>
-                          ))}
-                        </div>
+                        <p className={`${t.textMain} text-sm leading-relaxed mb-2`}>{event.description}</p>
+
+                        {event.participants.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {event.participants.map(p => (
+                              <span key={p} className={`text-[10px] ${t.textMuted} uppercase tracking-wide px-1.5 py-0.5 border ${t.border} rounded`}>
+                                {p}
+                              </span>
+                            ))}
+                          </div>
+                        )}
 
                         {event.evidence_quote && (
-                          <div className={`text-sm ${t.textDim} italic pl-2 border-l ${t.border}`}>
+                          <div className={`text-sm ${t.textDim} italic pl-3 border-l-2 ${t.borderLight} leading-relaxed`}>
                             "{event.evidence_quote}"
                           </div>
                         )}
@@ -2112,7 +2118,7 @@ export function ERCaseDetail() {
                 )}
 
                 {timelineGaps.length > 0 && (
-                  <div className={`pt-6 border-t ${t.border}`}>
+                  <div className={`pt-4 border-t ${t.border}`}>
                     <h4 className={`text-xs font-medium ${t.textDim} uppercase tracking-wider mb-3`}>Identified Gaps</h4>
                     <ul className="space-y-2">
                       {timelineGaps.map((gap, i) => (
@@ -2129,12 +2135,12 @@ export function ERCaseDetail() {
 
             {/* Discrepancies Tab */}
             {activeTab === 'discrepancies' && (
-              <div className="space-y-8">
+              <div className="space-y-5">
                 <div className="flex justify-end">
                   <button
                     onClick={handleGenerateDiscrepancies}
                     disabled={analysisLoading === 'discrepancies' || completedNonPolicyDocs.length < 2}
-                    className={`text-xs uppercase tracking-wider font-medium ${t.btnAction} disabled:opacity-50`}
+                    className={`text-xs uppercase tracking-wider font-medium px-3 py-1.5 border ${t.border} ${t.cardInner} ${t.textMain} hover:opacity-80 disabled:opacity-40 transition-all`}
                   >
                     {analysisLoading === 'discrepancies' ? 'Analyzing...' : 'Analyze Documents'}
                   </button>
@@ -2181,45 +2187,46 @@ export function ERCaseDetail() {
                     )}
                   </div>
                 ) : (
-                  <div className="space-y-8">
+                  <div className="space-y-4">
                     {discrepancies.map((disc, i) => (
-                      <div key={i} className={`border-b ${t.borderLight} pb-8 last:border-0 last:pb-0`}>
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className={`text-xs uppercase tracking-wide font-medium ${
-                            disc.severity === 'high' ? 'text-red-600' :
-                            disc.severity === 'medium' ? 'text-amber-600' :
-                            t.textMuted
+                      <div key={i} className={`${t.cardInner} p-4 space-y-3`}>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-md ${
+                            disc.severity === 'high'
+                              ? (isLight ? 'text-red-700 bg-red-100' : 'text-red-400 bg-red-950')
+                              : disc.severity === 'medium'
+                                ? (isLight ? 'text-amber-700 bg-amber-100' : 'text-amber-400 bg-amber-950')
+                                : (isLight ? 'text-stone-600 bg-stone-200' : 'text-zinc-400 bg-zinc-800')
                           }`}>
-                            {disc.severity} Severity
+                            {disc.severity}
                           </span>
-                          <span className={`text-xs ${t.textFaint}`}>•</span>
-                          <span className={`text-xs ${t.textMuted} uppercase tracking-wide`}>{disc.type}</span>
+                          <span className={`text-[10px] ${t.textMuted} uppercase tracking-wide`}>{disc.type}</span>
                         </div>
 
-                        <p className={`${t.textMain} text-base font-medium mb-4 leading-relaxed`}>{disc.description}</p>
+                        <p className={`${t.textMain} text-sm font-semibold leading-snug`}>{disc.description}</p>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
-                          <div>
-                            <p className={`text-xs ${t.textMuted} mb-1 uppercase tracking-wide`}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className={`border-l-2 ${t.borderLight} pl-3`}>
+                            <p className={`text-[10px] ${t.textMuted} mb-1 uppercase tracking-wide font-semibold`}>
                               {disc.statement_1?.speaker || 'Source 1'}
                             </p>
-                            <p className={`text-xs ${t.textDim} italic border-l ${t.borderLight} pl-2`}>
+                            <p className={`text-sm ${t.textDim} italic leading-relaxed`}>
                               "{disc.statement_1?.quote || 'No quote provided.'}"
                             </p>
                           </div>
-                          <div>
-                            <p className={`text-xs ${t.textMuted} mb-1 uppercase tracking-wide`}>
+                          <div className={`border-l-2 ${t.borderLight} pl-3`}>
+                            <p className={`text-[10px] ${t.textMuted} mb-1 uppercase tracking-wide font-semibold`}>
                               {disc.statement_2?.speaker || 'Source 2'}
                             </p>
-                            <p className={`text-xs ${t.textDim} italic border-l ${t.borderLight} pl-2`}>
+                            <p className={`text-sm ${t.textDim} italic leading-relaxed`}>
                               "{disc.statement_2?.quote || 'No quote provided.'}"
                             </p>
                           </div>
                         </div>
-                        
-                        <div className={`text-sm ${t.textDim} ${t.cardBg} p-3 rounded-xl`}>
+
+                        <p className={`text-xs ${t.textDim} leading-relaxed`}>
                           {disc.analysis}
-                        </div>
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -2229,22 +2236,22 @@ export function ERCaseDetail() {
 
             {/* Policy Check Tab */}
             {activeTab === 'policy' && (
-              <div className="space-y-8">
+              <div className="space-y-5">
                 <div className="flex justify-end">
                   <button
                     onClick={handleRunPolicyCheck}
                     disabled={analysisLoading === 'policy' || completedNonPolicyDocs.length === 0}
-                    className={`text-xs uppercase tracking-wider font-medium ${t.btnAction} disabled:opacity-50`}
+                    className={`text-xs uppercase tracking-wider font-medium px-3 py-1.5 border ${t.border} ${t.cardInner} ${t.textMain} hover:opacity-80 disabled:opacity-40 transition-all`}
                   >
                     {analysisLoading === 'policy' ? 'Checking...' : 'Run Policy Check'}
                   </button>
                 </div>
 
                 {policiesChecked > 0 && (
-                  <div className={`flex items-center gap-3 text-xs font-mono ${t.textDim} uppercase tracking-wider`}>
-                    <span>{policiesChecked} {policiesChecked === 1 ? 'source' : 'sources'} checked</span>
-                    <span className={t.textDim}>·</span>
-                    <span className={violations.length > 0 ? 'text-red-400' : 'text-emerald-400'}>
+                  <div className={`flex items-center gap-3 text-[10px] font-mono ${t.cardInner} px-3 py-2 rounded-lg`}>
+                    <span className={`${t.textDim} uppercase tracking-wider`}>{policiesChecked} {policiesChecked === 1 ? 'source' : 'sources'} checked</span>
+                    <span className={t.textFaint}>·</span>
+                    <span className={`uppercase tracking-wider font-semibold ${violations.length > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
                       {violations.length} violation{violations.length !== 1 ? 's' : ''} found
                     </span>
                   </div>
@@ -2278,27 +2285,33 @@ export function ERCaseDetail() {
                     )}
                   </div>
                 ) : (
-                  <div className="space-y-8">
+                  <div className="space-y-4">
                     {violations.map((v, i) => (
-                      <div key={i} className={`border-b ${t.borderLight} pb-8 last:border-0 last:pb-0`}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className={`text-xs uppercase tracking-wide font-medium ${
-                            v.severity === 'major' ? 'text-red-600' : 'text-amber-600'
+                      <div key={i} className={`${t.cardInner} p-4 space-y-3`}>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-md ${
+                            v.severity === 'major'
+                              ? (isLight ? 'text-red-700 bg-red-100' : 'text-red-400 bg-red-950')
+                              : (isLight ? 'text-amber-700 bg-amber-100' : 'text-amber-400 bg-amber-950')
                           }`}>
                             {v.severity} Violation
                           </span>
                         </div>
 
-                        <h4 className={`${t.textMain} text-base font-medium mb-2`}>{v.policy_section}</h4>
-                        <div className="mb-4">
-                          <p className={`text-sm ${t.textDim} italic`}>"{v.policy_text}"</p>
-                        </div>
+                        {v.policy_section && (
+                          <h4 className={`${t.textMain} text-sm font-semibold leading-snug`}>{v.policy_section}</h4>
+                        )}
+                        {v.policy_text && v.policy_text !== '""' && (
+                          <div className={`border-l-2 ${t.borderLight} pl-3`}>
+                            <p className={`text-sm ${t.textDim} italic leading-relaxed`}>"{v.policy_text}"</p>
+                          </div>
+                        )}
 
-                        <div className={`space-y-3 pl-3 border-l-2 ${t.borderLight}`}>
+                        <div className="space-y-2.5">
                           {v.evidence.map((e, j) => (
-                            <div key={j}>
-                              <p className={`text-sm ${t.textMain} mb-1 leading-relaxed`}>"{e.quote}"</p>
-                              <p className={`text-xs ${t.textDim} uppercase tracking-wide`}>→ {e.how_it_violates}</p>
+                            <div key={j} className={`border-l-2 ${t.borderLight} pl-3`}>
+                              <p className={`text-sm ${t.textMain} leading-relaxed`}>"{e.quote}"</p>
+                              <p className={`text-xs ${t.textDim} mt-1`}>→ {e.how_it_violates}</p>
                               {e.source_document_id && (() => {
                                 const doc = documents.find(d => d.id === e.source_document_id);
                                 const label = doc?.filename || e.source_document_id.slice(0, 8);
@@ -2311,10 +2324,10 @@ export function ERCaseDetail() {
                             </div>
                           ))}
                         </div>
-                        
-                        <div className={`mt-4 text-xs ${t.textMuted}`}>
+
+                        <p className={`text-xs ${t.textDim} leading-relaxed`}>
                           {v.analysis}
-                        </div>
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -2347,15 +2360,15 @@ export function ERCaseDetail() {
                 </div>
 
                 {searchResults.length > 0 ? (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {searchResults.map((result, i) => (
-                      <div key={i} className={`border ${t.border} ${t.cardBg} rounded-xl p-4 transition-colors`}>
+                      <div key={i} className={`${t.cardInner} p-4 transition-colors`}>
                         <div className="flex items-center gap-2 mb-2">
-                          <span className={`px-1.5 py-0.5 text-xs uppercase tracking-wide rounded-lg border ${DOC_TYPE_COLORS[result.document_type]}`}>
+                          <span className={`px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-semibold rounded border ${t.border} ${DOC_TYPE_COLORS[result.document_type]}`}>
                             {result.document_type}
                           </span>
-                          <span className={`text-sm ${t.textDim} font-medium`}>{result.source_file}</span>
-                          <span className={`text-xs ${t.textMuted} ml-auto font-mono`}>
+                          <span className={`text-sm ${t.textMain} font-medium`}>{result.source_file}</span>
+                          <span className={`text-[10px] ${t.textMuted} ml-auto font-mono uppercase tracking-wide`}>
                             {(result.similarity * 100).toFixed(0)}% Match
                           </span>
                         </div>
@@ -2447,7 +2460,7 @@ export function ERCaseDetail() {
                 Export a password-protected PDF containing the full case file, documents, analyses, and notes.
               </p>
               {exportError && (
-                <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-xl border border-red-200">
+                <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-md border border-red-200">
                   {exportError}
                 </div>
               )}
@@ -2465,7 +2478,7 @@ export function ERCaseDetail() {
               <button
                 onClick={handleExport}
                 disabled={exporting || exportPassword.length < 4}
-                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider ${t.btnPrimary} rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed`}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider ${t.btnPrimary} rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 <Download size={14} />
                 {exporting ? 'Generating…' : 'Export Case File'}
