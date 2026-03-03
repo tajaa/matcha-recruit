@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Optional, Any, AsyncIterator, Callable
 
 from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -410,6 +411,11 @@ class ERAnalyzer:
             model: Model to use for analysis (default: gemini-2.5-flash).
         """
         self.model = model
+        self._generation_config = (
+            types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0))
+            if "pro" in model.lower()
+            else None
+        )
 
         if vertex_project:
             self.client = genai.Client(
@@ -452,6 +458,7 @@ class ERAnalyzer:
                 response = await self.client.aio.models.generate_content(
                     model=candidate,
                     contents=prompt,
+                    config=self._generation_config,
                 )
                 if candidate != self.model:
                     logger.warning(
@@ -483,6 +490,7 @@ class ERAnalyzer:
                 response = await self.client.aio.models.generate_content_stream(
                     model=candidate,
                     contents=prompt,
+                    config=self._generation_config,
                 )
                 if candidate != self.model:
                     logger.warning(

@@ -1639,7 +1639,7 @@ export function ERCaseDetail() {
                                 <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${
                                   isSelected ? t.radioSelected : t.radioDefault
                                 }`} />
-                                <span className={`text-sm font-medium ${t.textMain} truncate`}>{outcome.action_label}</span>
+                                <span className={`text-sm font-medium ${t.textMain}`}>{outcome.action_label}</span>
                               </div>
                               <div className="flex items-center gap-1.5 flex-shrink-0">
                                 <span className={`text-xs uppercase tracking-wide font-medium ${detColor}`}>
