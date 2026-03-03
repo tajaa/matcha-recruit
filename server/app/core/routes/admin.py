@@ -2751,6 +2751,195 @@ async def delete_jurisdiction(jurisdiction_id: UUID):
         }
 
 
+# ── Jurisdiction Data Overview (repository dashboard) ────────────────────────
+
+_data_overview_cache: dict | None = None
+_data_overview_cached_at: float = 0.0
+_DATA_OVERVIEW_CACHE_TTL = 3600  # 1 hour
+
+REQUIRED_CATEGORIES = [
+    "minimum_wage", "overtime", "sick_leave", "meal_breaks",
+    "pay_frequency", "final_pay", "minor_work_permit", "scheduling_reporting",
+]
+
+
+@router.get("/jurisdictions/data-overview", dependencies=[Depends(require_admin)])
+async def jurisdiction_data_overview():
+    """Aggregated view of the jurisdiction data repository."""
+    import time
+
+    global _data_overview_cache, _data_overview_cached_at
+    now = time.monotonic()
+    if _data_overview_cache and (now - _data_overview_cached_at) < _DATA_OVERVIEW_CACHE_TTL:
+        return _data_overview_cache
+
+    async with get_connection() as conn:
+        # ── 1. All jurisdictions with their requirements ──
+        rows = await conn.fetch("""
+            SELECT
+                j.id, j.city, j.state, j.last_verified_at,
+                COALESCE(
+                    array_agg(DISTINCT jr.category) FILTER (WHERE jr.category IS NOT NULL),
+                    '{}'
+                ) AS categories,
+                COALESCE(
+                    json_agg(json_build_object(
+                        'tier', COALESCE(jr.source_tier, 3),
+                        'category', jr.category,
+                        'last_verified', jr.last_verified_at
+                    )) FILTER (WHERE jr.id IS NOT NULL),
+                    '[]'
+                ) AS req_details
+            FROM jurisdictions j
+            LEFT JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = j.id
+            GROUP BY j.id, j.city, j.state, j.last_verified_at
+            ORDER BY j.state, j.city
+        """)
+
+        # ── 2. Preemption rules ──
+        preemption_rows = await conn.fetch("""
+            SELECT state, category, allows_local_override, notes
+            FROM state_preemption_rules
+            ORDER BY state, category
+        """)
+
+        # ── 3. Structured data sources ──
+        source_rows = await conn.fetch("""
+            SELECT source_name, source_type, categories, record_count,
+                   last_fetched_at, last_fetch_status, is_active
+            FROM structured_data_sources
+            ORDER BY source_name
+        """)
+
+    # ── Build state → cities map ──
+    from datetime import datetime as dt, timezone
+    stale_cutoff = dt.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
+    req_cats = set(REQUIRED_CATEGORIES)
+
+    states_map: dict[str, dict] = {}
+    total_cities = 0
+    total_requirements = 0
+    tier_counts = {1: 0, 2: 0, 3: 0}
+    stale_count = 0
+    freshness = {"7d": 0, "30d": 0, "90d": 0, "stale": 0}
+    now_dt = dt.now(timezone.utc).replace(tzinfo=None)
+
+    for row in rows:
+        state = row["state"]
+        if state not in states_map:
+            states_map[state] = {"state": state, "cities": []}
+
+        cats_present = [c for c in (row["categories"] or []) if c in req_cats]
+        cats_missing = sorted(req_cats - set(cats_present))
+        req_list = json.loads(row["req_details"]) if isinstance(row["req_details"], str) else row["req_details"]
+
+        city_tier_counts = {1: 0, 2: 0, 3: 0}
+        for r in req_list:
+            if r.get("category"):
+                t = r.get("tier", 3)
+                if t in city_tier_counts:
+                    city_tier_counts[t] += 1
+                    tier_counts[t] += 1
+                total_requirements += 1
+                # Freshness
+                lv = r.get("last_verified")
+                if lv:
+                    if isinstance(lv, str):
+                        try:
+                            lv = dt.fromisoformat(lv.replace("Z", "+00:00")).replace(tzinfo=None)
+                        except Exception:
+                            lv = None
+                    if lv:
+                        age = (now_dt - lv).days
+                        if age <= 7:
+                            freshness["7d"] += 1
+                        elif age <= 30:
+                            freshness["30d"] += 1
+                        elif age <= 90:
+                            freshness["90d"] += 1
+                        else:
+                            freshness["stale"] += 1
+
+        last_v = row["last_verified_at"]
+        is_stale = last_v is not None and last_v < stale_cutoff
+        if is_stale:
+            stale_count += 1
+
+        city_data = {
+            "city": row["city"],
+            "categories_present": sorted(cats_present),
+            "categories_missing": cats_missing,
+            "tier_breakdown": city_tier_counts,
+            "last_verified_at": last_v.isoformat() if last_v else None,
+            "is_stale": is_stale,
+        }
+        states_map[state]["cities"].append(city_data)
+        total_cities += 1
+
+    # Enrich state entries
+    states_list = []
+    for s_data in states_map.values():
+        cities = s_data["cities"]
+        all_cats = set()
+        for c in cities:
+            all_cats.update(c["categories_present"])
+        s_data["city_count"] = len(cities)
+        s_data["coverage_pct"] = round(len(all_cats) / len(req_cats) * 100) if req_cats else 0
+        states_list.append(s_data)
+
+    unique_states = len(states_map)
+    total_req_slots = total_cities * len(req_cats)
+    category_coverage_pct = round(total_requirements / total_req_slots * 100) if total_req_slots else 0
+    tier_total = sum(tier_counts.values())
+    tier1_pct = round(tier_counts[1] / tier_total * 100) if tier_total else 0
+
+    # Preemption
+    preemption_rules = [
+        {
+            "state": r["state"],
+            "category": r["category"],
+            "allows_local_override": r["allows_local_override"],
+            "notes": r["notes"],
+        }
+        for r in preemption_rows
+    ]
+
+    # Structured sources
+    structured_sources = [
+        {
+            "source_name": r["source_name"],
+            "source_type": r["source_type"],
+            "categories": r["categories"],
+            "record_count": r["record_count"],
+            "last_fetched_at": r["last_fetched_at"].isoformat() if r["last_fetched_at"] else None,
+            "last_fetch_status": r["last_fetch_status"],
+            "is_active": r["is_active"],
+        }
+        for r in source_rows
+    ]
+
+    result = {
+        "summary": {
+            "total_states": unique_states,
+            "total_cities": total_cities,
+            "total_requirements": total_requirements,
+            "category_coverage_pct": category_coverage_pct,
+            "tier1_pct": tier1_pct,
+            "tier_breakdown": tier_counts,
+            "stale_count": stale_count,
+            "freshness": freshness,
+            "required_categories": REQUIRED_CATEGORIES,
+        },
+        "states": states_list,
+        "preemption_rules": preemption_rules,
+        "structured_sources": structured_sources,
+    }
+
+    _data_overview_cache = result
+    _data_overview_cached_at = now
+    return result
+
+
 @router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
 async def get_jurisdiction_detail(jurisdiction_id: UUID):
     """Get full detail for a jurisdiction: requirements, legislation, linked locations."""

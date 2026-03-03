@@ -2315,6 +2315,62 @@ export const adminJurisdictions = {
   },
 };
 
+// Jurisdiction Data Overview (repository dashboard)
+export interface JurisdictionDataCitySummary {
+  city: string;
+  categories_present: string[];
+  categories_missing: string[];
+  tier_breakdown: Record<string, number>;
+  last_verified_at: string | null;
+  is_stale: boolean;
+}
+
+export interface JurisdictionDataState {
+  state: string;
+  city_count: number;
+  coverage_pct: number;
+  cities: JurisdictionDataCitySummary[];
+}
+
+export interface JurisdictionDataPreemption {
+  state: string;
+  category: string;
+  allows_local_override: boolean;
+  notes: string | null;
+}
+
+export interface JurisdictionDataSource {
+  source_name: string;
+  source_type: string;
+  categories: string[];
+  record_count: number;
+  last_fetched_at: string | null;
+  last_fetch_status: string | null;
+  is_active: boolean;
+}
+
+export interface JurisdictionDataOverview {
+  summary: {
+    total_states: number;
+    total_cities: number;
+    total_requirements: number;
+    category_coverage_pct: number;
+    tier1_pct: number;
+    tier_breakdown: Record<string, number>;
+    stale_count: number;
+    freshness: Record<string, number>;
+    required_categories: string[];
+  };
+  states: JurisdictionDataState[];
+  preemption_rules: JurisdictionDataPreemption[];
+  structured_sources: JurisdictionDataSource[];
+}
+
+export const adminJurisdictionData = {
+  overview: (): Promise<JurisdictionDataOverview> =>
+    request<JurisdictionDataOverview>('/admin/jurisdictions/data-overview'),
+};
+
 // Scheduler Admin API
 export interface SchedulerSetting {
   id: string;
@@ -3599,6 +3655,7 @@ export const api = {
   irIncidents,
   adminBeta,
   adminJurisdictions,
+  adminJurisdictionData,
   adminSchedulers,
   adminHandbookReferences,
   blogs,
