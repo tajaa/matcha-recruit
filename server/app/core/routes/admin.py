@@ -3070,6 +3070,71 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
         }
 
 
+class RequirementUpdate(BaseModel):
+    """Partial update fields for a jurisdiction requirement."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    current_value: Optional[str] = None
+    effective_date: Optional[str] = None
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+
+
+@router.patch("/jurisdictions/requirements/{requirement_id}", dependencies=[Depends(require_admin)])
+async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
+    """Partially update a jurisdiction requirement (e.g. add applicability notes)."""
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+
+    set_parts = []
+    params: list[Any] = []
+    for i, (col, val) in enumerate(updates.items(), start=1):
+        set_parts.append(f"{col} = ${i}")
+        params.append(val)
+
+    params.append(requirement_id)
+    id_idx = len(params)
+
+    sql = f"""
+        UPDATE jurisdiction_requirements
+        SET {', '.join(set_parts)}, updated_at = NOW()
+        WHERE id = ${id_idx}
+        RETURNING id, requirement_key, category, jurisdiction_level, jurisdiction_name,
+                  title, description, current_value, numeric_value,
+                  source_url, source_name, effective_date, expiration_date,
+                  previous_value, last_changed_at, last_verified_at, created_at, updated_at
+    """
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(sql, *params)
+        if not row:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+
+    def fmt_date(d):
+        return d.isoformat() if d else None
+
+    return {
+        "id": str(row["id"]),
+        "requirement_key": row["requirement_key"],
+        "category": row["category"],
+        "jurisdiction_level": row["jurisdiction_level"],
+        "jurisdiction_name": row["jurisdiction_name"],
+        "title": row["title"],
+        "description": row["description"],
+        "current_value": row["current_value"],
+        "numeric_value": float(row["numeric_value"]) if row["numeric_value"] is not None else None,
+        "source_url": row["source_url"],
+        "source_name": row["source_name"],
+        "effective_date": fmt_date(row["effective_date"]),
+        "expiration_date": fmt_date(row["expiration_date"]),
+        "previous_value": row["previous_value"],
+        "last_changed_at": fmt_date(row["last_changed_at"]),
+        "last_verified_at": fmt_date(row["last_verified_at"]),
+        "updated_at": fmt_date(row["updated_at"]),
+    }
+
+
 def _to_sse(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(event)}\n\n"
 

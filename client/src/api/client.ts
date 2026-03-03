@@ -2313,6 +2313,12 @@ export const adminJurisdictions = {
     if (!response.ok) throw new Error('Failed to start top-metro batch check');
     return response;
   },
+
+  updateRequirement: (requirementId: string, data: Partial<Pick<JurisdictionRequirement, 'title' | 'description' | 'current_value' | 'effective_date' | 'source_url' | 'source_name'>>): Promise<JurisdictionRequirement> =>
+    request<JurisdictionRequirement>(`/admin/jurisdictions/requirements/${requirementId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 };
 
 // Jurisdiction Data Overview (repository dashboard)

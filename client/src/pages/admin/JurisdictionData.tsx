@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   Database, ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
   XCircle, Loader2, RefreshCw, Layers, Globe2, Filter, Trash2, Check,
-  X, ExternalLink, Settings2, ChevronUp, GripVertical, Eye, EyeOff, Plus, Info
+  X, ExternalLink, Settings2, ChevronUp, GripVertical, Eye, EyeOff, Plus, Info, Pencil, Save
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
@@ -10,7 +10,7 @@ import { useJurisdictionData } from '../../hooks/useJurisdictionData';
 import { useIndustryProfiles } from '../../hooks/useIndustryProfiles';
 import { useIsLightMode } from '../../hooks/useIsLightMode';
 import { api } from '../../api/client';
-import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail, JurisdictionDataPreemption, IndustryProfile, CategoryEvidence } from '../../api/client';
+import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail, JurisdictionDataPreemption, IndustryProfile, CategoryEvidence, JurisdictionRequirement } from '../../api/client';
 
 /* ───── Theme ───── */
 const LT = {
@@ -318,7 +318,8 @@ export default function JurisdictionData() {
         {selectedCityId && (
           <CityDetailDrawer t={t} detail={cityDetail} loading={loadingDetail} onClose={closeCity}
             profiles={profiles} onOpenProfileEditor={() => { setEditingProfile(null); setProfileEditorOpen(true); }}
-            preemptionRules={data?.preemption_rules ?? []} />
+            preemptionRules={data?.preemption_rules ?? []}
+            onDetailUpdate={setCityDetail} />
         )}
       </AnimatePresence>
 
@@ -706,13 +707,60 @@ const LEVEL_COLORS: Record<string, { border: string; bg: string; label: string }
   city: { border: 'border-l-emerald-500', bg: 'bg-emerald-500/10', label: 'text-emerald-600 dark:text-emerald-400' },
 };
 
-function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfileEditor, preemptionRules }: {
+function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfileEditor, preemptionRules, onDetailUpdate }: {
   t: typeof LT; detail: JurisdictionDetail | null; loading: boolean; onClose: () => void;
   profiles: IndustryProfile[]; onOpenProfileEditor: () => void;
   preemptionRules: JurisdictionDataPreemption[];
+  onDetailUpdate: (updated: JurisdictionDetail) => void;
 }) {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [drawerTab, setDrawerTab] = useState<'requirements' | 'hierarchy'>('requirements');
+  const [editingReqId, setEditingReqId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ title: '', description: '', current_value: '', effective_date: '', source_url: '', source_name: '' });
+  const [saving, setSaving] = useState(false);
+
+  const startEditing = useCallback((req: JurisdictionRequirement) => {
+    setEditingReqId(req.id);
+    setEditForm({
+      title: req.title || '',
+      description: req.description || '',
+      current_value: req.current_value || '',
+      effective_date: req.effective_date || '',
+      source_url: req.source_url || '',
+      source_name: req.source_name || '',
+    });
+  }, []);
+
+  const cancelEditing = useCallback(() => {
+    setEditingReqId(null);
+  }, []);
+
+  const saveEditing = useCallback(async () => {
+    if (!editingReqId || !detail) return;
+    setSaving(true);
+    try {
+      const original = detail.requirements.find(r => r.id === editingReqId);
+      if (!original) return;
+      const changes: Record<string, string> = {};
+      if (editForm.title !== (original.title || '')) changes.title = editForm.title;
+      if (editForm.description !== (original.description || '')) changes.description = editForm.description;
+      if (editForm.current_value !== (original.current_value || '')) changes.current_value = editForm.current_value;
+      if (editForm.effective_date !== (original.effective_date || '')) changes.effective_date = editForm.effective_date;
+      if (editForm.source_url !== (original.source_url || '')) changes.source_url = editForm.source_url;
+      if (editForm.source_name !== (original.source_name || '')) changes.source_name = editForm.source_name;
+      if (Object.keys(changes).length === 0) { setEditingReqId(null); return; }
+      const updated = await api.adminJurisdictions.updateRequirement(editingReqId, changes);
+      onDetailUpdate({
+        ...detail,
+        requirements: detail.requirements.map(r => r.id === updated.id ? updated : r),
+      });
+      setEditingReqId(null);
+    } catch (e) {
+      console.error('Failed to update requirement', e);
+    } finally {
+      setSaving(false);
+    }
+  }, [editingReqId, editForm, detail, onDetailUpdate]);
 
   const selectedProfile = useMemo(
     () => profiles.find(p => p.id === selectedProfileId) ?? null,
@@ -910,16 +958,67 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
               )}
 
               <div className="space-y-1.5">
-                {reqs.map(req => (
-                  <div key={req.id} className={`${t.innerEl} p-3 space-y-1.5`}>
+                {reqs.map(req => editingReqId === req.id ? (
+                  <div key={req.id} className={`${t.innerEl} p-3 space-y-2 ring-1 ring-blue-500/40`}>
+                    <div className="space-y-2">
+                      <div>
+                        <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Title</label>
+                        <input value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
+                          className={`w-full text-sm px-2 py-1 rounded ${t.select}`} />
+                      </div>
+                      <div>
+                        <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Current Value</label>
+                        <input value={editForm.current_value} onChange={e => setEditForm(f => ({ ...f, current_value: e.target.value }))}
+                          className={`w-full text-sm px-2 py-1 rounded ${t.select}`} />
+                      </div>
+                      <div>
+                        <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Description / Applicability Notes</label>
+                        <textarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                          rows={3} className={`w-full text-xs px-2 py-1 rounded ${t.select} resize-y`} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Effective Date</label>
+                          <input type="date" value={editForm.effective_date} onChange={e => setEditForm(f => ({ ...f, effective_date: e.target.value }))}
+                            className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
+                        </div>
+                        <div>
+                          <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Source Name</label>
+                          <input value={editForm.source_name} onChange={e => setEditForm(f => ({ ...f, source_name: e.target.value }))}
+                            className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
+                        </div>
+                      </div>
+                      <div>
+                        <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Source URL</label>
+                        <input value={editForm.source_url} onChange={e => setEditForm(f => ({ ...f, source_url: e.target.value }))}
+                          className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button onClick={saveEditing} disabled={saving}
+                        className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition">
+                        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Update
+                      </button>
+                      <button onClick={cancelEditing}
+                        className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition ${t.btnGhost} ${t.innerEl}`}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div key={req.id} className={`${t.innerEl} p-3 space-y-1.5 cursor-pointer group`} onClick={() => startEditing(req)}>
                     <div className="flex items-start justify-between gap-2">
                       <h4 className={`text-sm font-medium ${t.textMain}`}>{req.title}</h4>
-                      {req.source_url && (
-                        <a href={req.source_url} target="_blank" rel="noopener noreferrer"
-                          className={`flex-shrink-0 ${t.btnGhost} transition`} title="View source">
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      )}
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <Pencil className={`w-3 h-3 opacity-0 group-hover:opacity-60 transition ${t.textMuted}`} />
+                        {req.source_url && (
+                          <a href={req.source_url} target="_blank" rel="noopener noreferrer"
+                            className={`${t.btnGhost} transition`} title="View source"
+                            onClick={e => e.stopPropagation()}>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
                     </div>
 
                     {req.current_value && (
@@ -1004,19 +1103,73 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
 
                         {reqs && reqs.length > 0 ? (
                           <div className="space-y-1.5">
-                            {reqs.map(req => (
-                              <div key={req.id} className={`${t.innerEl} border-l-[3px] ${colors.border} p-3 space-y-1`}>
+                            {reqs.map(req => editingReqId === req.id ? (
+                              <div key={req.id} className={`${t.innerEl} border-l-[3px] ${colors.border} p-3 space-y-2 ring-1 ring-blue-500/40`}>
+                                <div className="space-y-2">
+                                  <div>
+                                    <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Title</label>
+                                    <input value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
+                                      className={`w-full text-sm px-2 py-1 rounded ${t.select}`} />
+                                  </div>
+                                  <div>
+                                    <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Current Value</label>
+                                    <input value={editForm.current_value} onChange={e => setEditForm(f => ({ ...f, current_value: e.target.value }))}
+                                      className={`w-full text-sm px-2 py-1 rounded ${t.select}`} />
+                                  </div>
+                                  <div>
+                                    <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Description / Applicability Notes</label>
+                                    <textarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                                      rows={3} className={`w-full text-xs px-2 py-1 rounded ${t.select} resize-y`} />
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Effective Date</label>
+                                      <input type="date" value={editForm.effective_date} onChange={e => setEditForm(f => ({ ...f, effective_date: e.target.value }))}
+                                        className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
+                                    </div>
+                                    <div>
+                                      <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Source Name</label>
+                                      <input value={editForm.source_name} onChange={e => setEditForm(f => ({ ...f, source_name: e.target.value }))}
+                                        className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Source URL</label>
+                                    <input value={editForm.source_url} onChange={e => setEditForm(f => ({ ...f, source_url: e.target.value }))}
+                                      className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 pt-1">
+                                  <button onClick={saveEditing} disabled={saving}
+                                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition">
+                                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Update
+                                  </button>
+                                  <button onClick={cancelEditing}
+                                    className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition ${t.btnGhost} ${t.innerEl}`}>
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div key={req.id} className={`${t.innerEl} border-l-[3px] ${colors.border} p-3 space-y-1 cursor-pointer group`} onClick={() => startEditing(req)}>
                                 <div className="flex items-start justify-between gap-2">
                                   <h4 className={`text-sm font-medium ${t.textMain}`}>{req.title}</h4>
-                                  {req.source_url && (
-                                    <a href={req.source_url} target="_blank" rel="noopener noreferrer"
-                                      className={`flex-shrink-0 ${t.btnGhost} transition`} title="View source">
-                                      <ExternalLink className="w-3.5 h-3.5" />
-                                    </a>
-                                  )}
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <Pencil className={`w-3 h-3 opacity-0 group-hover:opacity-60 transition ${t.textMuted}`} />
+                                    {req.source_url && (
+                                      <a href={req.source_url} target="_blank" rel="noopener noreferrer"
+                                        className={`${t.btnGhost} transition`} title="View source"
+                                        onClick={e => e.stopPropagation()}>
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                      </a>
+                                    )}
+                                  </div>
                                 </div>
                                 {req.current_value && (
                                   <div className={`text-sm ${t.textDim}`}>{req.current_value}</div>
+                                )}
+                                {req.description && (
+                                  <p className={`text-xs ${t.textFaint} leading-relaxed`}>{req.description}</p>
                                 )}
                                 <div className={`flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono ${t.textFaint}`}>
                                   {req.source_name && <span>Source: {req.source_name}</span>}
