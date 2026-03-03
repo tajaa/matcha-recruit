@@ -83,10 +83,8 @@ update_matcha() {
     log_info "Updating Matcha-Recruit..."
 
     # Only restart app containers, not shared infrastructure (postgres, redis)
-    ssh_cmd "cd ~/matcha && docker-compose pull && docker-compose up -d --no-deps matcha-backend matcha-frontend"
-
-    # Restart worker if running
-    ssh_cmd "docker restart matcha-worker 2>/dev/null || true"
+    # Use --profile worker so the Celery worker container is also created/started
+    ssh_cmd "cd ~/matcha && docker-compose --profile worker pull && docker-compose --profile worker up -d --no-deps matcha-backend matcha-frontend matcha-worker"
 
     log_success "Matcha-Recruit updated!"
 }

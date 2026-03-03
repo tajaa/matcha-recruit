@@ -33,10 +33,10 @@ def _safe_publish_progress(**kwargs) -> None:
 def _build_er_analyzer(model_override: Optional[str] = None):
     """Create ERAnalyzer using the same credential cascade as GeminiComplianceService."""
     from app.matcha.services.er_analyzer import ERAnalyzer
-    from app.config import get_settings
+    from app.config import load_settings
     import os
 
-    settings = get_settings()
+    settings = load_settings()
     model = "gemini-3.1-pro-preview" if model_override == "pro" else settings.analysis_model
 
     # Same priority as GeminiComplianceService.client:
