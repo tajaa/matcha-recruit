@@ -35,7 +35,6 @@ Update EC2 deployments by pulling latest images and restarting containers.
 OPTIONS:
     --matcha         Update Matcha-Recruit (ports 8002/8082)
     --gumm-local     Update gumm-local (ports 8004/8084)
-    --oceaneca       Update Oceaneca (ports 8001/8080)
     --all            Update all apps
     --status         Show status of all containers
     -h, --help       Show this help message
@@ -43,7 +42,6 @@ OPTIONS:
 EXAMPLES:
     $0 --matcha          # Update only Matcha
     $0 --gumm-local      # Update only gumm-local
-    $0 --oceaneca        # Update only Oceaneca
     $0 --all             # Update all apps
     $0 --status          # Check container status
 EOF
@@ -102,40 +100,6 @@ update_gumm_local() {
     log_success "gumm-local updated!"
 }
 
-update_oceaneca() {
-    log_info "Updating Oceaneca..."
-
-    local BACKEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/oceaneca-backend:latest"
-    local FRONTEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/oceaneca-frontend:latest"
-
-    # Pull new images
-    log_info "Pulling images..."
-    ssh_cmd "docker pull $BACKEND_IMAGE && docker pull $FRONTEND_IMAGE"
-
-    # Recreate app containers (they use matcha network for shared postgres/redis)
-    log_info "Recreating containers..."
-    ssh_cmd "docker rm -f oceaneca-backend oceaneca-frontend 2>/dev/null || true"
-
-    ssh_cmd "docker run -d --name oceaneca-backend \
-        --network matcha_matcha-network \
-        -p 8001:8001 \
-        --env-file ~/.env \
-        --restart unless-stopped \
-        $BACKEND_IMAGE \
-        uvicorn main:app --host 0.0.0.0 --port 8001 --workers 4 --loop asyncio"
-
-    ssh_cmd "docker run -d --name oceaneca-frontend \
-        --network matcha_matcha-network \
-        -p 8080:80 \
-        -e VITE_API_URL=https://gummfit.com \
-        --restart unless-stopped \
-        $FRONTEND_IMAGE"
-
-    ssh_cmd "sudo systemctl restart nginx || true"
-
-    log_success "Oceaneca updated!"
-}
-
 show_status() {
     log_info "Container status:"
     ssh_cmd "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
@@ -152,7 +116,6 @@ cleanup() {
 # Parse arguments
 UPDATE_MATCHA=false
 UPDATE_GUMM_LOCAL=false
-UPDATE_OCEANECA=false
 SHOW_STATUS=false
 
 if [ $# -eq 0 ]; then
@@ -170,14 +133,9 @@ while [[ $# -gt 0 ]]; do
             UPDATE_GUMM_LOCAL=true
             shift
             ;;
-        --oceaneca)
-            UPDATE_OCEANECA=true
-            shift
-            ;;
         --all)
             UPDATE_MATCHA=true
             UPDATE_GUMM_LOCAL=true
-            UPDATE_OCEANECA=true
             shift
             ;;
         --status)
@@ -202,8 +160,8 @@ if [ "$SHOW_STATUS" = true ]; then
     exit 0
 fi
 
-if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM_LOCAL" = false ] && [ "$UPDATE_OCEANECA" = false ]; then
-    log_error "No app specified. Use --matcha, --gumm-local, --oceaneca, or --all"
+if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM_LOCAL" = false ]; then
+    log_error "No app specified. Use --matcha, --gumm-local, or --all"
     exit 1
 fi
 
@@ -217,10 +175,6 @@ fi
 
 if [ "$UPDATE_GUMM_LOCAL" = true ]; then
     update_gumm_local
-fi
-
-if [ "$UPDATE_OCEANECA" = true ]; then
-    update_oceaneca
 fi
 
 cleanup
