@@ -102,6 +102,14 @@ const CAT_LABELS: Record<string, string> = {
 const ALL_CATEGORIES = Object.keys(CAT_LABELS);
 const VALID_RATE_TYPES = ['general', 'tipped', 'exempt_salary', 'hotel', 'fast_food', 'healthcare'];
 
+const INDUSTRY_SPECIFIC_RATE_TYPES = ['tipped', 'hotel', 'fast_food', 'healthcare'];
+
+function matchesProfileRateTypes(requirementKey: string, profileRateTypes: Set<string>): boolean {
+  const specificType = INDUSTRY_SPECIFIC_RATE_TYPES.find(rt => requirementKey.includes(rt));
+  if (!specificType) return true;
+  return profileRateTypes.has(specificType);
+}
+
 function confidenceColor(confidence: number | undefined): 'green' | 'yellow' | 'red' | 'gray' {
   if (confidence == null) return 'gray';
   if (confidence >= 90) return 'green';
@@ -713,8 +721,11 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
 
   const grouped = useMemo(() => {
     if (!detail) return {} as Record<string, JurisdictionDetail['requirements']>;
+    const reqs = selectedProfile?.rate_types?.length
+      ? detail.requirements.filter(r => matchesProfileRateTypes(r.requirement_key, new Set(selectedProfile.rate_types)))
+      : detail.requirements;
     const map: Record<string, JurisdictionDetail['requirements']> = {};
-    for (const req of detail.requirements) {
+    for (const req of reqs) {
       const cat = req.category || 'other';
       if (!map[cat]) map[cat] = [];
       map[cat].push(req);
@@ -753,8 +764,11 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
   // Hierarchy view: category → level → requirements[]
   const hierarchyGrouped = useMemo(() => {
     if (!detail) return {} as Record<string, Record<string, JurisdictionDetail['requirements']>>;
+    const reqs = selectedProfile?.rate_types?.length
+      ? detail.requirements.filter(r => matchesProfileRateTypes(r.requirement_key, new Set(selectedProfile.rate_types)))
+      : detail.requirements;
     const map: Record<string, Record<string, JurisdictionDetail['requirements']>> = {};
-    for (const req of detail.requirements) {
+    for (const req of reqs) {
       const cat = req.category || 'other';
       if (!map[cat]) map[cat] = {};
       const level = req.jurisdiction_level || 'unknown';
