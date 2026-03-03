@@ -3678,9 +3678,11 @@ async def get_employee_impact_for_location(
                       -- Office employees whose address contains the city (no work_state set)
                       OR (work_state IS NULL AND work_city IS NULL
                           AND address IS NOT NULL AND address ILIKE '%' || $2 || '%')
+                      -- Employees assigned directly to this location
+                      OR work_location_id = $4
                   )
                 """,
-                company_id, loc_city, loc_state,
+                company_id, loc_city, loc_state, location_id,
             )
         else:
             # State-level only location: match state-level remote employees
@@ -3692,10 +3694,12 @@ async def get_employee_impact_for_location(
                 FROM employees
                 WHERE org_id = $1
                   AND termination_date IS NULL
-                  AND UPPER(work_state) = UPPER($2)
-                  AND (work_city IS NULL OR work_city = '')
+                  AND (
+                      (UPPER(work_state) = UPPER($2) AND (work_city IS NULL OR work_city = ''))
+                      OR work_location_id = $3
+                  )
                 """,
-                company_id, loc_state,
+                company_id, loc_state, location_id,
             )
 
         total_affected = len(employees)
@@ -3724,6 +3728,50 @@ async def get_employee_impact_for_location(
             rt = wr["rate_type"] or "general"
             if rt not in thresholds:
                 thresholds[rt] = float(wr["numeric_value"])
+
+        # Fallback: check jurisdiction_requirements for missing rate types
+        missing_types = {"general", "exempt_salary"} - set(thresholds.keys())
+        if missing_types:
+            # Try via business_locations.jurisdiction_id first (city-level)
+            jr_rows = await conn.fetch(
+                """
+                SELECT jr.rate_type, jr.numeric_value
+                FROM business_locations bl
+                JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = bl.jurisdiction_id
+                WHERE bl.id = $1
+                  AND jr.category = 'minimum_wage'
+                  AND jr.numeric_value IS NOT NULL
+                  AND jr.rate_type = ANY($2::text[])
+                ORDER BY jr.rate_type
+                """,
+                location_id, list(missing_types),
+            )
+            for jr in jr_rows:
+                rt = jr["rate_type"] or "general"
+                if rt not in thresholds:
+                    thresholds[rt] = float(jr["numeric_value"])
+
+            # State-level fallback for still-missing types (exempt salary is often state-level)
+            still_missing = {"general", "exempt_salary"} - set(thresholds.keys())
+            if still_missing and loc_state:
+                state_rows = await conn.fetch(
+                    """
+                    SELECT jr.rate_type, jr.numeric_value
+                    FROM jurisdictions j
+                    JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = j.id
+                    WHERE UPPER(j.state) = UPPER($1)
+                      AND (j.city IS NULL OR j.city = '' OR LOWER(j.city) = LOWER(j.state))
+                      AND jr.category = 'minimum_wage'
+                      AND jr.numeric_value IS NOT NULL
+                      AND jr.rate_type = ANY($2::text[])
+                    ORDER BY jr.numeric_value DESC
+                    """,
+                    loc_state, list(still_missing),
+                )
+                for sr in state_rows:
+                    rt = sr["rate_type"] or "general"
+                    if rt not in thresholds:
+                        thresholds[rt] = float(sr["numeric_value"])
 
         # Check each employee for wage violations, bucketed by rate_type
         violations_by_rate_type: Dict[str, list] = {}
