@@ -19,14 +19,15 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
 import { useCompliance, useComplianceRequirements, useJurisdictionSearch, useComplianceCheck } from '../hooks/compliance';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 
-function linkifyText(text: string) {
+function linkifyText(text: string, linkClass: string) {
     const splitRegex = /(https?:\/\/[^\s,)]+)/g;
     const parts = text.split(splitRegex);
     if (parts.length === 1) return text;
     return parts.map((part, i) =>
         /^https?:\/\//.test(part) ? (
-            <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 underline decoration-emerald-500/20 underline-offset-2">{part}</a>
+            <a key={i} href={part} target="_blank" rel="noopener noreferrer" className={`${linkClass} decoration-current/20 underline-offset-2`}>{part}</a>
         ) : part
     );
 }
@@ -163,7 +164,63 @@ const COMPLIANCE_CYCLE_STEPS = [
   },
 ];
 
+// ─── theme ────────────────────────────────────────────────────────────────────
+
+const LT = {
+  pageBg: 'bg-stone-300',
+  card: 'bg-stone-100 rounded-2xl',
+  cardBg: 'bg-stone-100',
+  innerEl: 'bg-stone-200 rounded-xl',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  textDim: 'text-stone-600',
+  border: 'border-stone-200',
+  divide: 'divide-stone-200',
+  rowHover: 'hover:bg-stone-50',
+  label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
+  input: 'bg-white border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:border-stone-400',
+  select: 'bg-white border border-stone-300 rounded-xl text-zinc-900 focus:border-stone-400',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  btnGhost: 'text-stone-500 hover:text-zinc-900',
+  modalBg: 'bg-stone-100 rounded-2xl',
+  modalHeader: 'border-b border-stone-200',
+  spinner: 'border-stone-300 border-t-zinc-900',
+  statusOk: 'text-emerald-600',
+  statusWarn: 'text-amber-600',
+  statusErr: 'text-red-600',
+  linkify: 'text-emerald-600 hover:text-emerald-700 underline',
+};
+
+const DK = {
+  pageBg: 'bg-zinc-950',
+  card: 'bg-zinc-900 rounded-2xl',
+  cardBg: 'bg-zinc-900',
+  innerEl: 'bg-zinc-800 rounded-xl',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  textDim: 'text-zinc-400',
+  border: 'border-white/10',
+  divide: 'divide-white/10',
+  rowHover: 'hover:bg-white/5',
+  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  input: 'bg-zinc-900 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:border-white/20',
+  select: 'bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
+  btnPrimary: 'bg-white text-black hover:bg-zinc-100',
+  btnGhost: 'text-zinc-500 hover:text-zinc-100',
+  modalBg: 'bg-zinc-900 border border-white/10 rounded-2xl',
+  modalHeader: 'border-b border-white/10',
+  spinner: 'border-zinc-700 border-t-zinc-300',
+  statusOk: 'text-emerald-400',
+  statusWarn: 'text-amber-400',
+  statusErr: 'text-red-400',
+  linkify: 'text-emerald-400 hover:text-emerald-300 underline',
+};
+
 export function Compliance() {
+    const isLight = useIsLightMode();
+    const t = isLight ? LT : DK;
     const { user } = useAuth();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -423,28 +480,28 @@ export function Compliance() {
 
     return (
         <div className="max-w-7xl mx-auto space-y-10 pb-24">
-            <div className="flex items-center justify-between border-b border-white/5 pb-8">
+            <div className={`flex items-center justify-between border-b ${t.border} pb-8`}>
                 <div className="flex items-center gap-8">
                     <div>
                         <div className="flex items-center gap-3">
-                            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Compliance</h1>
+                            <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>Compliance</h1>
                             <FeatureGuideTrigger guideId="compliance" />
                         </div>
                         <div className="flex items-center gap-2 mt-2">
                             <ShieldCheck size={12} className="text-matcha-500" />
-                            <p className="text-[10px] text-zinc-500 font-mono tracking-widest uppercase">
+                            <p className={`text-[10px] ${t.textMuted} font-mono tracking-widest uppercase`}>
                                 Algorithmic Enforcement Node
                             </p>
                         </div>
                     </div>
                     {isAdmin && companies?.companies && companies.companies.length > 0 && (
-                        <div className="flex flex-col gap-1.5 pl-8 border-l border-white/5">
-                            <span className="text-[8px] font-bold uppercase tracking-widest text-zinc-600">Company Context</span>
+                        <div className={`flex flex-col gap-1.5 pl-8 border-l ${t.border}`}>
+                            <span className={`text-[8px] font-bold uppercase tracking-widest ${t.textFaint}`}>Company Context</span>
                             <select
                                 data-tour="compliance-company-select"
                                 value={selectedCompanyId || ''}
                                 onChange={e => setSelectedCompanyId(e.target.value)}
-                                className="bg-zinc-950 border border-white/5 text-white text-[10px] font-mono uppercase tracking-[0.2em] focus:outline-none focus:border-white/20 transition-all px-3 py-1.5 rounded-sm min-w-[220px]"
+                                className={`${t.select} text-[10px] font-mono uppercase tracking-[0.2em] focus:outline-none transition-all px-3 py-1.5 rounded-sm min-w-[220px]`}
                             >
                                 {companies.companies.map(c => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
@@ -457,7 +514,7 @@ export function Compliance() {
                     {wizardReturnPath && (
                         <button
                             onClick={() => navigate(wizardReturnPath)}
-                            className="px-5 py-2.5 border border-white/5 text-zinc-400 hover:text-white hover:bg-white/5 text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm"
+                            className={`px-5 py-2.5 border ${t.border} ${t.textDim} hover:${t.textMain} text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm`}
                         >
                             Return To Handbook
                         </button>
@@ -470,7 +527,7 @@ export function Compliance() {
                             setJurisdictionSearch('');
                             setShowAddModal(true);
                         }}
-                        className="flex items-center gap-2 px-6 py-2.5 bg-white text-black hover:bg-[#4ADE80] text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm shadow-xl"
+                        className={`flex items-center gap-2 px-6 py-2.5 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm shadow-xl`}
                     >
                         <Plus size={14} />
                         Add Location
@@ -492,11 +549,11 @@ export function Compliance() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
                 <div data-tour="compliance-locations" className="lg:col-span-1 space-y-6">
-                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                        <h2 className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.25em]">
+                    <div className={`flex items-center justify-between border-b ${t.border} pb-2`}>
+                        <h2 className={`text-[10px] font-bold ${t.textMuted} uppercase tracking-[0.25em]`}>
                             Endpoints
                         </h2>
-                        <span className="text-[9px] font-mono text-zinc-700">[{locations?.length || 0}]</span>
+                        <span className={`text-[9px] font-mono ${t.textFaint}`}>[{locations?.length || 0}]</span>
                     </div>
 
                     {syncStates.size > 0 && (
@@ -532,21 +589,21 @@ export function Compliance() {
                     {loadingLocations ? (
                         <div className="space-y-2">
                             {[1, 2, 3].map(i => (
-                                <div key={i} className="bg-zinc-900/40 border border-white/5 rounded-sm p-4 animate-pulse h-20" />
+                                <div key={i} className={`${t.cardBg} border ${t.border} rounded-sm p-4 animate-pulse h-20`} />
                             ))}
                         </div>
                     ) : locations?.length === 0 ? (
-                        <div className="bg-zinc-900/20 border border-dashed border-white/5 rounded-sm py-16 px-8 text-center">
-                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center opacity-40">
-                                <MapPin size={20} className="text-zinc-500" />
+                        <div className={`${t.cardBg} border border-dashed ${t.border} rounded-sm py-16 px-8 text-center`}>
+                            <div className={`w-12 h-12 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center opacity-40`}>
+                                <MapPin size={20} className={t.textMuted} />
                             </div>
-                            <h3 className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-2">Zero Endpoints</h3>
-                            <p className="text-zinc-600 text-[10px] mb-6 leading-relaxed uppercase tracking-tighter">
+                            <h3 className={`${t.textDim} text-[10px] font-bold uppercase tracking-widest mb-2`}>Zero Endpoints</h3>
+                            <p className={`${t.textFaint} text-[10px] mb-6 leading-relaxed uppercase tracking-tighter`}>
                                 Register business locations to initialize monitoring.
                             </p>
                             <button
                                 onClick={() => setShowAddModal(true)}
-                                className="text-white text-[10px] font-bold hover:text-[#4ADE80] uppercase tracking-[0.2em] underline underline-offset-8 decoration-white/10"
+                                className={`${t.textMain} text-[10px] font-bold uppercase tracking-[0.2em] underline underline-offset-8 ${t.border}`}
                             >
                                 Register First Node
                             </button>
@@ -565,7 +622,7 @@ export function Compliance() {
                                         ? 'border-matcha-500/40 bg-matcha-500/[0.03] shadow-[0_0_20px_rgba(0,0,0,0.4)]'
                                         : syncStates.has((location.state || '').toUpperCase())
                                             ? 'border-amber-500/40 bg-amber-500/[0.04] hover:border-amber-500/60'
-                                            : 'border-white/5 bg-zinc-900/40 hover:border-white/10 hover:bg-zinc-900/60'
+                                            : `${t.border} ${t.cardBg} ${t.rowHover}`
                                 }`}
                             >
                                 {selectedLocationId === location.id && (
@@ -578,19 +635,19 @@ export function Compliance() {
                                     <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2">
                                             <h3 className={`font-bold text-xs truncate uppercase tracking-widest ${
-                                                selectedLocationId === location.id ? 'text-white' : 'text-zinc-400'
+                                                selectedLocationId === location.id ? t.textMain : t.textDim
                                             }`}>
                                                 {location.name || `${location.city}, ${location.state}`}
                                             </h3>
                                             {location.has_local_ordinance && (
-                                                <span className="text-[7px] px-1 py-0.5 bg-white/5 text-zinc-500 border border-white/10 rounded-xs uppercase tracking-widest">Local</span>
+                                                <span className={`text-[7px] px-1 py-0.5 ${isLight ? 'bg-stone-200 text-stone-500 border border-stone-300' : 'bg-white/5 text-zinc-500 border border-white/10'} rounded-xs uppercase tracking-widest`}>Local</span>
                                             )}
                                         </div>
-                                        <p className="text-zinc-600 text-[10px] truncate mt-1 font-mono uppercase tracking-tighter">
+                                        <p className={`${t.textFaint} text-[10px] truncate mt-1 font-mono uppercase tracking-tighter`}>
                                             {location.city}, {location.state} {location.zipcode}
                                         </p>
                                         <div className="flex items-center gap-4 mt-3">
-                                            <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-zinc-500/80">
+                                            <span className={`text-[9px] font-bold uppercase tracking-[0.15em] ${t.textMuted}`}>
                                                 {location.requirements_count} Nodes
                                             </span>
                                             {location.unread_alerts_count > 0 && (
@@ -619,7 +676,7 @@ export function Compliance() {
                                                         e.stopPropagation();
                                                         setConfirmDeleteId(null);
                                                     }}
-                                                    className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-zinc-500 border border-white/10 rounded hover:bg-white/5 transition-colors"
+                                                    className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ${t.textMuted} border ${t.border} rounded transition-colors`}
                                                 >
                                                     Cancel
                                                 </button>
@@ -632,7 +689,7 @@ export function Compliance() {
                                                         openEditModal(location);
                                                         setShowAddModal(true);
                                                     }}
-                                                    className="p-1.5 text-zinc-600 hover:text-white rounded transition-colors"
+                                                    className={`p-1.5 ${t.textFaint} ${t.btnGhost} rounded transition-colors`}
                                                     title="Edit"
                                                 >
                                                     <Edit2 size={11} />
@@ -642,7 +699,7 @@ export function Compliance() {
                                                         e.stopPropagation();
                                                         setConfirmDeleteId(location.id);
                                                     }}
-                                                    className="p-1.5 text-zinc-600 hover:text-red-500 rounded transition-colors"
+                                                    className={`p-1.5 ${t.textFaint} hover:text-red-500 rounded transition-colors`}
                                                     title="Delete"
                                                 >
                                                     <Trash2 size={11} />
@@ -659,33 +716,33 @@ export function Compliance() {
 
                 <div data-tour="compliance-content" className="lg:col-span-2">
                     {mutationError && (
-                        <div className="mb-4 flex items-center justify-between gap-4 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-sm text-[10px] text-red-400 font-mono uppercase tracking-widest">
+                        <div className={`mb-4 flex items-center justify-between gap-4 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-sm text-[10px] ${t.statusErr} font-mono uppercase tracking-widest`}>
                             <span>{mutationError}</span>
-                            <button onClick={() => setMutationError(null)} className="text-red-400 hover:text-red-300 transition-colors">
+                            <button onClick={() => setMutationError(null)} className={`${t.statusErr} hover:text-red-300 transition-colors`}>
                                 <X size={12} />
                             </button>
                         </div>
                     )}
                     {selectedLocationId && selectedLocation ? (
-                        <div className="bg-zinc-900/20 border border-white/5 rounded-sm overflow-hidden min-h-[600px] flex flex-col shadow-2xl">
-                            <div className="p-6 md:p-8 border-b border-white/5 bg-zinc-900/40">
+                        <div className={`${t.cardBg} border ${t.border} rounded-sm overflow-hidden min-h-[600px] flex flex-col shadow-2xl`}>
+                            <div className={`p-6 md:p-8 ${t.modalHeader} ${t.cardBg}`}>
                                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                                     <div className="flex items-center gap-5">
-                                        <div className="w-12 h-12 rounded-sm bg-white/5 border border-white/10 flex items-center justify-center shadow-inner">
-                                            <Building2 size={24} className="text-zinc-400" />
+                                        <div className={`w-12 h-12 rounded-sm ${t.innerEl} border ${t.border} flex items-center justify-center shadow-inner`}>
+                                            <Building2 size={24} className={t.textDim} />
                                         </div>
                                         <div>
-                                            <h2 className="text-xl font-bold text-white uppercase tracking-tighter">
+                                            <h2 className={`text-xl font-bold ${t.textMain} uppercase tracking-tighter`}>
                                                 {selectedLocation.name || `${selectedLocation.city}, ${selectedLocation.state}`}
                                             </h2>
                                             <div className="flex items-center gap-3 mt-1.5">
-                                                <span className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">
+                                                <span className={`text-[10px] ${t.textMuted} font-mono uppercase tracking-widest`}>
                                                     {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zipcode}
                                                 </span>
                                                 {selectedLocation.last_compliance_check && (
                                                     <>
-                                                        <div className="w-1 h-1 rounded-full bg-white/10" />
-                                                        <span className="text-[9px] text-zinc-600 font-mono uppercase tracking-widest">
+                                                        <div className={`w-1 h-1 rounded-full ${isLight ? 'bg-stone-300' : 'bg-white/10'}`} />
+                                                        <span className={`text-[9px] ${t.textFaint} font-mono uppercase tracking-widest`}>
                                                             Last Sync: {new Date(selectedLocation.last_compliance_check).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                                         </span>
                                                     </>
@@ -699,7 +756,7 @@ export function Compliance() {
                                             if (!selectedLocationId || checkInProgress) return;
                                             await runComplianceCheck();
                                         }}
-                                        className="relative group px-6 py-3 bg-white text-black text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-500 hover:bg-[#4ADE80] disabled:opacity-50 overflow-hidden rounded-sm"
+                                        className={`relative group px-6 py-3 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-500 disabled:opacity-50 overflow-hidden rounded-sm`}
                                     >
                                         <div className="relative z-10 flex items-center gap-2">
                                             {checkInProgress ? (
@@ -713,15 +770,15 @@ export function Compliance() {
                             </div>
 
                             {checkMessages.length > 0 && (
-                                <motion.div 
+                                <motion.div
                                     initial={{ height: 0, opacity: 0 }}
                                     animate={{ height: 'auto', opacity: 1 }}
-                                    className="border-b border-white/5 bg-black/40 overflow-hidden"
+                                    className={`${t.modalHeader} ${isLight ? 'bg-stone-200/60' : 'bg-black/40'} overflow-hidden`}
                                 >
-                                    <div className="flex items-center gap-4 px-8 py-3 border-b border-white/5 text-[8px] uppercase tracking-[0.3em] font-bold text-zinc-600">
+                                    <div className={`flex items-center gap-4 px-8 py-3 ${t.modalHeader} text-[8px] uppercase tracking-[0.3em] font-bold ${t.textFaint}`}>
                                         <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" /> New</div>
                                         <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Delta</div>
-                                        <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-zinc-700" /> Nominal</div>
+                                        <div className="flex items-center gap-1.5"><div className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-stone-400' : 'bg-zinc-700'}`} /> Nominal</div>
                                     </div>
                                     <div className="px-8 py-4 space-y-2 max-h-48 overflow-y-auto font-mono">
                                         {checkMessages.map((msg, i) => (
@@ -730,17 +787,17 @@ export function Compliance() {
                                                     <span className={`flex-shrink-0 mt-0.5 px-1.5 py-0.5 rounded-xs font-bold border ${
                                                         msg.status === 'new' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
                                                         msg.status === 'updated' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                                                        'bg-white/5 text-zinc-600 border-white/5'
+                                                        `${isLight ? 'bg-stone-200 text-stone-500 border-stone-300' : 'bg-white/5 text-zinc-600 border-white/5'}`
                                                     }`}>
                                                         {msg.status?.toUpperCase()}
                                                     </span>
                                                 ) : (
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-800 mt-1.5 flex-shrink-0" />
+                                                    <div className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-stone-300' : 'bg-zinc-800'} mt-1.5 flex-shrink-0`} />
                                                 )}
                                                 <span className={
-                                                    msg.type === 'error' ? 'text-red-400' :
-                                                    msg.type === 'completed' ? 'text-white font-bold' :
-                                                    'text-zinc-500'
+                                                    msg.type === 'error' ? t.statusErr :
+                                                    msg.type === 'completed' ? `${t.textMain} font-bold` :
+                                                    t.textMuted
                                                 }>
                                                     {msg.type === 'completed'
                                                         ? `SYNC COMPLETE // ${msg.new} NEW // ${msg.updated} UPDATED`
@@ -752,7 +809,7 @@ export function Compliance() {
                                 </motion.div>
                             )}
 
-                            <div data-tour="compliance-tabs" className="flex border-b border-white/5 bg-zinc-900/20 px-4">
+                            <div data-tour="compliance-tabs" className={`flex ${t.modalHeader} ${t.cardBg} px-4`}>
                                 {[
                                     { id: 'requirements', label: 'Matrix', count: requirements?.length },
                                     { id: 'alerts', label: 'Alerts', count: locationAlerts.length, badge: unreadAlertsCount },
@@ -765,8 +822,8 @@ export function Compliance() {
                                         onClick={() => setActiveTab(tab.id as any)}
                                         className={`px-6 py-4 text-[10px] font-bold uppercase tracking-[0.2em] transition-all relative ${
                                             activeTab === tab.id
-                                                ? 'text-white'
-                                                : 'text-zinc-600 hover:text-zinc-400'
+                                                ? t.textMain
+                                                : `${t.textFaint} hover:${t.textDim}`
                                         }`}
                                     >
                                         <span className="flex items-center gap-2">
@@ -779,9 +836,9 @@ export function Compliance() {
                                             ) : null}
                                         </span>
                                         {activeTab === tab.id && (
-                                            <motion.div 
+                                            <motion.div
                                                 layoutId="active-tab-indicator"
-                                                className="absolute bottom-0 left-6 right-6 h-0.5 bg-white" 
+                                                className={`absolute bottom-0 left-6 right-6 h-0.5 ${isLight ? 'bg-zinc-900' : 'bg-white'}`}
                                             />
                                         )}
                                     </button>
@@ -798,34 +855,34 @@ export function Compliance() {
                                 </div>
                             )}
 
-                            <div className="p-6 flex-1 bg-zinc-950 overflow-y-auto">
+                            <div className={`p-6 flex-1 ${isLight ? 'bg-stone-50' : 'bg-zinc-950'} overflow-y-auto`}>
                                 {activeTab === 'posters' ? (
                                     postersLoading ? (
                                         <div className="space-y-4">
                                             {[1, 2, 3].map(i => (
-                                                <div key={i} className="h-16 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
+                                                <div key={i} className={`h-16 ${t.cardBg} border ${t.border} rounded animate-pulse`} />
                                             ))}
                                         </div>
                                     ) : (
                                         <div className="space-y-6">
                                             {/* Available posters by location */}
                                             <div>
-                                                <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4 pb-2 border-b border-white/5">Available Posters</h3>
+                                                <h3 className={`text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-4 pb-2 ${t.modalHeader}`}>Available Posters</h3>
                                                 {availablePosters.length === 0 ? (
-                                                    <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-widest">No templates generated for this endpoint context.</p>
+                                                    <p className={`${t.textFaint} text-[10px] font-mono uppercase tracking-widest`}>No templates generated for this endpoint context.</p>
                                                 ) : (
                                                     <div className="space-y-2">
                                                         {availablePosters.map(poster => (
-                                                            <div key={poster.location_id} className="bg-zinc-900/40 border border-white/5 rounded-sm p-5 flex items-center justify-between group hover:bg-zinc-900/60 transition-colors">
+                                                            <div key={poster.location_id} className={`${t.cardBg} border ${t.border} rounded-sm p-5 flex items-center justify-between group ${t.rowHover} transition-colors`}>
                                                                 <div>
-                                                                    <div className="text-xs font-bold text-white uppercase tracking-widest">
+                                                                    <div className={`text-xs font-bold ${t.textMain} uppercase tracking-widest`}>
                                                                         {poster.location_city}, {poster.location_state}
-                                                                        {poster.location_name && <span className="text-zinc-500 ml-2 font-light">({poster.location_name})</span>}
+                                                                        {poster.location_name && <span className={`${t.textMuted} ml-2 font-light`}>({poster.location_name})</span>}
                                                                     </div>
                                                                     {poster.template_title && (
-                                                                        <div className="text-[9px] text-zinc-500 mt-1.5 font-mono uppercase tracking-tighter">
+                                                                        <div className={`text-[9px] ${t.textMuted} mt-1.5 font-mono uppercase tracking-tighter`}>
                                                                             {poster.template_title}
-                                                                            {poster.template_version && <span className="text-zinc-600 ml-2 font-bold">v{poster.template_version}</span>}
+                                                                            {poster.template_version && <span className={`${t.textFaint} ml-2 font-bold`}>v{poster.template_version}</span>}
                                                                         </div>
                                                                     )}
                                                                 </div>
@@ -841,7 +898,7 @@ export function Compliance() {
                                                                                         console.error('Preview failed:', err);
                                                                                     }
                                                                                 }}
-                                                                                className="px-4 py-2 text-[9px] font-bold uppercase tracking-widest bg-zinc-800 hover:bg-white hover:text-black text-zinc-300 rounded-xs transition-all"
+                                                                                className={`px-4 py-2 text-[9px] font-bold uppercase tracking-widest ${t.innerEl} ${t.textDim} rounded-xs transition-all`}
                                                                             >
                                                                                 Preview PDF
                                                                             </button>
@@ -898,17 +955,17 @@ export function Compliance() {
                                             {/* Order history */}
                                             {posterOrders.length > 0 && (
                                                 <div>
-                                                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4 pb-2 border-b border-white/5">Vault History</h3>
+                                                    <h3 className={`text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-4 pb-2 ${t.modalHeader}`}>Vault History</h3>
                                                     <div className="space-y-2">
                                                         {posterOrders.map(order => (
-                                                            <div key={order.id} className="bg-zinc-900/20 border border-white/5 rounded-sm p-5 hover:bg-zinc-900/40 transition-colors">
+                                                            <div key={order.id} className={`${t.cardBg} border ${t.border} rounded-sm p-5 ${t.rowHover} transition-colors`}>
                                                                 <div className="flex items-center justify-between">
                                                                     <div>
-                                                                        <div className="text-xs font-bold text-zinc-300 uppercase tracking-widest">
+                                                                        <div className={`text-xs font-bold ${t.textDim} uppercase tracking-widest`}>
                                                                             {order.location_city}, {order.location_state}
-                                                                            {order.location_name && <span className="text-zinc-600 ml-2">({order.location_name})</span>}
+                                                                            {order.location_name && <span className={`${t.textFaint} ml-2`}>({order.location_name})</span>}
                                                                         </div>
-                                                                        <div className="text-[9px] text-zinc-600 mt-1.5 font-mono uppercase tracking-tighter">
+                                                                        <div className={`text-[9px] ${t.textFaint} mt-1.5 font-mono uppercase tracking-tighter`}>
                                                                             {order.items.map(i => i.template_title || i.jurisdiction_name).join(' // ')}
                                                                             {' \u00b7 '}{order.created_at ? new Date(order.created_at).toLocaleDateString() : ''}
                                                                         </div>
@@ -923,15 +980,15 @@ export function Compliance() {
                                                                             {order.status}
                                                                         </span>
                                                                         {order.tracking_number && (
-                                                                            <span className="text-[9px] text-zinc-600 font-mono tracking-tighter">#{order.tracking_number}</span>
+                                                                            <span className={`text-[9px] ${t.textFaint} font-mono tracking-tighter`}>#{order.tracking_number}</span>
                                                                         )}
                                                                     </div>
                                                                 </div>
                                                                 {order.quote_amount != null && (
-                                                                    <div className="text-[9px] text-zinc-600 mt-3 font-mono uppercase tracking-widest">Settlement: ${order.quote_amount.toFixed(2)}</div>
+                                                                    <div className={`text-[9px] ${t.textFaint} mt-3 font-mono uppercase tracking-widest`}>Settlement: ${order.quote_amount.toFixed(2)}</div>
                                                                 )}
                                                                 {order.admin_notes && (
-                                                                    <div className="text-[9px] text-zinc-700 mt-1.5 italic font-serif">Note: {order.admin_notes}</div>
+                                                                    <div className={`text-[9px] ${t.textFaint} mt-1.5 italic font-serif`}>Note: {order.admin_notes}</div>
                                                                 )}
                                                             </div>
                                                         ))}
@@ -942,11 +999,11 @@ export function Compliance() {
                                     )
                                 ) : activeTab === 'upcoming' ? (
                                     !upcomingLegislation || upcomingLegislation.length === 0 ? (
-                                        <div className="text-center py-24 border border-dashed border-white/5 bg-white/[0.01]">
-                                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center opacity-40">
-                                                <Calendar size={20} className="text-zinc-500" />
+                                        <div className={`text-center py-24 border border-dashed ${t.border} ${isLight ? 'bg-stone-100/50' : 'bg-white/[0.01]'}`}>
+                                            <div className={`w-12 h-12 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center opacity-40`}>
+                                                <Calendar size={20} className={t.textMuted} />
                                             </div>
-                                            <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">Zero Future Deltas Detected</p>
+                                            <p className={`${t.textFaint} text-[10px] font-mono uppercase tracking-[0.2em]`}>Zero Future Deltas Detected</p>
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
@@ -962,22 +1019,22 @@ export function Compliance() {
                                                 const isEffectiveNow = leg.days_until_effective !== null && leg.days_until_effective <= 0;
                                                 const displayStatus = isEffectiveNow ? 'effective' : leg.current_status;
                                                 return (
-                                                    <div key={leg.id} id={`legislation-${leg.id}`} className="border border-white/5 rounded-sm p-6 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors">
+                                                    <div key={leg.id} id={`legislation-${leg.id}`} className={`border ${t.border} rounded-sm p-6 ${t.cardBg} ${t.rowHover} transition-colors`}>
                                                         <div className="flex items-start justify-between gap-6">
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-3 flex-wrap mb-2">
-                                                                    <h4 className="text-sm font-bold text-white uppercase tracking-tight truncate">{leg.title}</h4>
+                                                                    <h4 className={`text-sm font-bold ${t.textMain} uppercase tracking-tight truncate`}>{leg.title}</h4>
                                                                     <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${statusColors[displayStatus] || 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}>
                                                                         {displayStatus.replace('_', ' ')}
                                                                     </span>
                                                                     {leg.category && (
-                                                                        <span className="text-[8px] px-1.5 py-0.5 bg-white/5 text-zinc-500 border border-white/10 rounded-xs uppercase tracking-widest">
+                                                                        <span className={`text-[8px] px-1.5 py-0.5 ${isLight ? 'bg-stone-200 text-stone-500 border border-stone-300' : 'bg-white/5 text-zinc-500 border border-white/10'} rounded-xs uppercase tracking-widest`}>
                                                                             {COMPLIANCE_CATEGORY_LABELS[leg.category] || leg.category}
                                                                         </span>
                                                                     )}
                                                                 </div>
                                                                 {leg.description && (
-                                                                    <p className="text-[11px] text-zinc-500 leading-relaxed mb-4 font-light">{leg.description}</p>
+                                                                    <p className={`text-[11px] ${t.textMuted} leading-relaxed mb-4 font-light`}>{leg.description}</p>
                                                                 )}
                                                                 {leg.impact_summary && (
                                                                     <div className="p-3 bg-amber-500/[0.03] border-l-2 border-amber-500/20 mb-4">
@@ -986,7 +1043,7 @@ export function Compliance() {
                                                                         </p>
                                                                     </div>
                                                                 )}
-                                                                <div className="flex items-center gap-6 text-[9px] font-mono text-zinc-600 uppercase tracking-widest">
+                                                                <div className={`flex items-center gap-6 text-[9px] font-mono ${t.textFaint} uppercase tracking-widest`}>
                                                                     {leg.expected_effective_date && (
                                                                         <span className="flex items-center gap-2">
                                                                             <Calendar size={10} className="opacity-40" />
@@ -1006,7 +1063,7 @@ export function Compliance() {
                                                                         <span>Confidence: {Math.round(leg.confidence * 100)}%</span>
                                                                     )}
                                                                     {leg.source_url && (
-                                                                        <a href={leg.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-white flex items-center gap-1.5 transition-colors">
+                                                                        <a href={leg.source_url} target="_blank" rel="noopener noreferrer" className={`${isLight ? 'text-blue-600 hover:text-blue-800' : 'text-blue-400 hover:text-white'} flex items-center gap-1.5 transition-colors`}>
                                                                             Authority <ExternalLink size={10} />
                                                                         </a>
                                                                     )}
@@ -1034,16 +1091,16 @@ export function Compliance() {
                                     )
                                 ) : activeTab === 'history' ? (
                                     !checkLog || checkLog.length === 0 ? (
-                                        <div className="text-center py-24 border border-dashed border-white/5 bg-white/[0.01]">
-                                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center opacity-40">
-                                                <History size={20} className="text-zinc-500" />
+                                        <div className={`text-center py-24 border border-dashed ${t.border} ${isLight ? 'bg-stone-100/50' : 'bg-white/[0.01]'}`}>
+                                            <div className={`w-12 h-12 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center opacity-40`}>
+                                                <History size={20} className={t.textMuted} />
                                             </div>
-                                            <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">Zero Sync Events</p>
+                                            <p className={`${t.textFaint} text-[10px] font-mono uppercase tracking-[0.2em]`}>Zero Sync Events</p>
                                         </div>
                                     ) : (
                                         <div className="space-y-1.5">
                                             {checkLog.map(entry => (
-                                                <div key={entry.id} className="flex items-center gap-6 p-4 border border-white/5 rounded-sm bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors group">
+                                                <div key={entry.id} className={`flex items-center gap-6 p-4 border ${t.border} rounded-sm ${t.cardBg} ${t.rowHover} transition-colors group`}>
                                                     <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 shadow-sm ${
                                                         entry.status === 'completed' ? 'bg-emerald-500 shadow-emerald-500/20' :
                                                         entry.status === 'failed' ? 'bg-red-500 shadow-red-500/20' :
@@ -1058,14 +1115,14 @@ export function Compliance() {
                                                             }`}>
                                                                 {entry.check_type}
                                                             </span>
-                                                            <span className="text-[10px] text-zinc-500 font-mono uppercase tracking-tighter">
+                                                            <span className={`text-[10px] ${t.textMuted} font-mono uppercase tracking-tighter`}>
                                                                 {new Date(entry.started_at).toLocaleString(undefined, {
                                                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                                                                 })}
                                                             </span>
                                                         </div>
                                                         {entry.status === 'completed' && (
-                                                            <p className="text-[9px] text-zinc-600 mt-1.5 font-mono uppercase tracking-tighter">
+                                                            <p className={`text-[9px] ${t.textFaint} mt-1.5 font-mono uppercase tracking-tighter`}>
                                                                 {entry.new_count} New Nodes // {entry.updated_count} Delta Updates // {entry.alert_count} Protocol Alerts
                                                             </p>
                                                         )}
@@ -1099,27 +1156,27 @@ export function Compliance() {
                                     {loadingRequirements ? (
                                         <div className="space-y-4">
                                             {[1, 2, 3].map(i => (
-                                                <div key={i} className="h-16 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
+                                                <div key={i} className={`h-16 ${t.cardBg} border ${t.border} rounded animate-pulse`} />
                                             ))}
                                         </div>
                                     ) : orderedRequirementCategories.length === 0 ? (
-                                        <div className="text-center py-24 text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em] border border-dashed border-white/5 bg-white/[0.01]">
+                                        <div className={`text-center py-24 ${t.textFaint} text-[10px] font-mono uppercase tracking-[0.2em] border border-dashed ${t.border} ${isLight ? 'bg-stone-100/50' : 'bg-white/[0.01]'}`}>
                                             Zero Nodes Detected
                                         </div>
                                     ) : (
-                                        <div className="space-y-px bg-white/5 border border-white/5">
+                                        <div className={`space-y-px ${isLight ? 'bg-stone-200' : 'bg-white/5'} border ${t.border}`}>
                                             {orderedRequirementCategories.map(([category, reqs]) => (
-                                                <div key={category} className="bg-zinc-950/20">
+                                                <div key={category} className={isLight ? 'bg-stone-50/80' : 'bg-zinc-950/20'}>
                                                     <button
                                                         onClick={() => toggleCategory(category)}
-                                                        className="w-full flex items-center justify-between p-5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors border-b border-white/[0.02]"
+                                                        className={`w-full flex items-center justify-between p-5 ${t.cardBg} ${t.rowHover} transition-colors ${t.modalHeader}`}
                                                     >
                                                         <div className="flex items-center gap-4">
                                                             <div className="flex flex-col items-start">
-                                                                <span className="text-white text-[11px] font-bold uppercase tracking-widest">
+                                                                <span className={`${t.textMain} text-[11px] font-bold uppercase tracking-widest`}>
                                                                     {COMPLIANCE_CATEGORY_LABELS[category] || category}
                                                                 </span>
-                                                                <span className="text-[8px] text-zinc-600 font-mono uppercase tracking-[0.2em] mt-0.5">
+                                                                <span className={`text-[8px] ${t.textFaint} font-mono uppercase tracking-[0.2em] mt-0.5`}>
                                                                     {reqs.length} Active Node{reqs.length !== 1 ? 's' : ''}
                                                                 </span>
                                                             </div>
@@ -1140,7 +1197,7 @@ export function Compliance() {
                                                                 <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
                                                                     missingCoverageCategorySet.has(category)
                                                                         ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                                                        : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                                                                        : `${t.cardBg} ${t.textMuted} border-${isLight ? 'stone-300' : 'zinc-800'}`
                                                                 }`}>
                                                                     {missingCoverageCategorySet.has(category) ? 'Missing Source Coverage' : 'Coverage Pending'}
                                                                 </span>
@@ -1150,7 +1207,7 @@ export function Compliance() {
                                                             animate={{ rotate: expandedCategories.has(category) ? 180 : 0 }}
                                                             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                                                         >
-                                                            <ChevronDown size={14} className="text-zinc-600" />
+                                                            <ChevronDown size={14} className={t.textFaint} />
                                                         </motion.div>
                                                     </button>
 
@@ -1161,27 +1218,27 @@ export function Compliance() {
                                                                 animate={{ height: 'auto', opacity: 1 }}
                                                                 exit={{ height: 0, opacity: 0 }}
                                                                 transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                                                                className="overflow-hidden bg-zinc-950/40"
+                                                                className={`overflow-hidden ${isLight ? 'bg-stone-100/60' : 'bg-zinc-950/40'}`}
                                                             >
-                                                                <div className="divide-y divide-white/5 px-2">
+                                                                <div className={`divide-y ${t.divide} px-2`}>
                                                                     {reqs.length === 0 ? (
-                                                                        <div className="p-6 text-zinc-500 text-xs leading-relaxed font-light">
+                                                                        <div className={`p-6 ${t.textMuted} text-xs leading-relaxed font-light`}>
                                                                             {getRequirementEmptyStateCopy(category, missingCoverageCategorySet.has(category))}
                                                                         </div>
                                                                     ) : (
                                                                         reqs.map(req => (
-                                                                            <div key={req.id} className="p-6 hover:bg-white/[0.02] transition-colors rounded-sm">
+                                                                            <div key={req.id} className={`p-6 ${t.rowHover} transition-colors rounded-sm`}>
                                                                                 <div className="flex items-start justify-between mb-4 gap-6">
                                                                                     <div className="flex-1">
-                                                                                        <h4 className="text-white text-xs font-bold uppercase tracking-wide mb-2">
+                                                                                        <h4 className={`${t.textMain} text-xs font-bold uppercase tracking-wide mb-2`}>
                                                                                             {req.title}
                                                                                         </h4>
                                                                                         <div className="flex items-center gap-3">
-                                                                                            <span className="px-1.5 py-0.5 bg-zinc-900 border border-white/5 text-[8px] uppercase tracking-widest text-zinc-500 font-bold rounded-xs">
+                                                                                            <span className={`px-1.5 py-0.5 ${t.cardBg} border ${t.border} text-[8px] uppercase tracking-widest ${t.textMuted} font-bold rounded-xs`}>
                                                                                                 {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
                                                                                             </span>
                                                                                             {req.category === 'minimum_wage' && req.rate_type && (
-                                                                                                <span className="px-1.5 py-0.5 bg-zinc-900 border border-white/5 text-[8px] uppercase tracking-widest text-zinc-400 font-bold rounded-xs">
+                                                                                                <span className={`px-1.5 py-0.5 ${t.cardBg} border ${t.border} text-[8px] uppercase tracking-widest ${t.textDim} font-bold rounded-xs`}>
                                                                                                     {RATE_TYPE_LABELS[req.rate_type] || req.rate_type.replace(/_/g, ' ')}
                                                                                                 </span>
                                                                                             )}
@@ -1195,26 +1252,26 @@ export function Compliance() {
                                                                                                     {req.min_wage_violation_count} below threshold
                                                                                                 </span>
                                                                                             )}
-                                                                                            <span className="text-zinc-600 text-[9px] font-mono uppercase tracking-tighter">
+                                                                                            <span className={`${t.textFaint} text-[9px] font-mono uppercase tracking-tighter`}>
                                                                                                 Node: {req.jurisdiction_name}
                                                                                             </span>
                                                                                         </div>
                                                                                     </div>
                                                                                     {req.current_value && (
-                                                                                        <span className="text-emerald-400 font-mono text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-sm shadow-inner">
+                                                                                        <span className={`${t.statusOk} font-mono text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-sm shadow-inner`}>
                                                                                             {req.current_value}
                                                                                         </span>
                                                                                     )}
                                                                                 </div>
                                                                                 {req.description && (
-                                                                                    <p className="text-zinc-500 text-xs leading-relaxed mb-6 max-w-2xl font-light">
+                                                                                    <p className={`${t.textMuted} text-xs leading-relaxed mb-6 max-w-2xl font-light`}>
                                                                                         {req.description}
                                                                                     </p>
                                                                                 )}
-                                                                                <div className="flex items-center justify-between pt-4 border-t border-white/[0.03]">
+                                                                                <div className={`flex items-center justify-between pt-4 border-t ${isLight ? 'border-stone-200' : 'border-white/[0.03]'}`}>
                                                                                     <div className="flex items-center gap-4">
                                                                                         {req.effective_date && (
-                                                                                            <div className="flex items-center gap-2 text-[8px] text-zinc-600 uppercase tracking-widest font-mono">
+                                                                                            <div className={`flex items-center gap-2 text-[8px] ${t.textFaint} uppercase tracking-widest font-mono`}>
                                                                                                 <Calendar size={10} className="opacity-40" />
                                                                                                 Enforced: {new Date(req.effective_date).toLocaleDateString()}
                                                                                             </div>
@@ -1225,7 +1282,7 @@ export function Compliance() {
                                                                                             href={req.source_url}
                                                                                             target="_blank"
                                                                                             rel="noopener noreferrer"
-                                                                                            className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 hover:text-white flex items-center gap-1.5 transition-colors"
+                                                                                            className={`text-[9px] font-bold uppercase tracking-widest ${t.textMuted} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} flex items-center gap-1.5 transition-colors`}
                                                                                         >
                                                                                             Authority <ExternalLink size={10} />
                                                                                         </a>
@@ -1247,15 +1304,15 @@ export function Compliance() {
                                     loadingAlerts ? (
                                         <div className="space-y-3">
                                             {[1, 2, 3].map(i => (
-                                                <div key={i} className="h-20 bg-zinc-900 border border-zinc-800 rounded animate-pulse" />
+                                                <div key={i} className={`h-20 ${t.cardBg} border ${t.border} rounded animate-pulse`} />
                                             ))}
                                         </div>
                                     ) : locationAlerts.length === 0 ? (
-                                        <div className="text-center py-24 border border-dashed border-white/5 bg-white/[0.01]">
-                                            <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center">
-                                                <CheckCircle size={20} className="text-zinc-700" />
+                                        <div className={`text-center py-24 border border-dashed ${t.border} ${isLight ? 'bg-stone-100/50' : 'bg-white/[0.01]'}`}>
+                                            <div className={`w-12 h-12 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center`}>
+                                                <CheckCircle size={20} className={t.textFaint} />
                                             </div>
-                                            <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">All Systems Nominal</p>
+                                            <p className={`${t.textFaint} text-[10px] font-mono uppercase tracking-[0.2em]`}>All Systems Nominal</p>
                                         </div>
                                     ) : (
                                         <div className="space-y-2">
@@ -1278,9 +1335,9 @@ export function Compliance() {
                                                             </div>
                                                             <div className="min-w-0">
                                                                 <div className="flex items-center gap-3 flex-wrap mb-2">
-                                                                    <h4 className="text-xs font-bold uppercase tracking-widest text-white">{alert.title}</h4>
+                                                                    <h4 className={`text-xs font-bold uppercase tracking-widest ${t.textMain}`}>{alert.title}</h4>
                                                                     {alert.alert_type && alert.alert_type !== 'change' && (
-                                                                        <span className="text-[8px] px-1.5 py-0.5 bg-white/5 border border-white/10 rounded-xs uppercase tracking-widest font-bold text-zinc-400">
+                                                                        <span className={`text-[8px] px-1.5 py-0.5 ${isLight ? 'bg-stone-200 border border-stone-300 text-stone-600' : 'bg-white/5 border border-white/10 text-zinc-400'} rounded-xs uppercase tracking-widest font-bold`}>
                                                                             {alert.alert_type.replace('_', ' ')}
                                                                         </span>
                                                                     )}
@@ -1295,12 +1352,12 @@ export function Compliance() {
                                                                         </span>
                                                                     )}
                                                                     {alert.created_at && (
-                                                                        <span className="text-[9px] text-zinc-600 font-mono uppercase tracking-tighter">
+                                                                        <span className={`text-[9px] ${t.textFaint} font-mono uppercase tracking-tighter`}>
                                                                             {new Date(alert.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                                                         </span>
                                                                     )}
                                                                 </div>
-                                                                <p className="text-xs text-zinc-400 leading-relaxed font-light">{linkifyText(alert.message)}</p>
+                                                                <p className={`text-xs ${t.textDim} leading-relaxed font-light`}>{linkifyText(alert.message, t.linkify)}</p>
                                                                 
                                                                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-4">
                                                                     {alert.effective_date && (
@@ -1309,10 +1366,10 @@ export function Compliance() {
                                                                         </div>
                                                                     )}
                                                                     {(alert.source_url || alert.source_name) && (
-                                                                        <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-2">
+                                                                        <div className={`text-[9px] ${t.textMuted} uppercase tracking-widest font-bold flex items-center gap-2`}>
                                                                             <span className="opacity-40">Source:</span>
                                                                             {alert.source_url ? (
-                                                                                <a href={alert.source_url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-white underline decoration-white/10 underline-offset-2 transition-colors">
+                                                                                <a href={alert.source_url} target="_blank" rel="noopener noreferrer" className={`${t.textDim} ${isLight ? 'hover:text-zinc-900 decoration-stone-400/30' : 'hover:text-white decoration-white/10'} underline underline-offset-2 transition-colors`}>
                                                                                     {alert.source_name || 'Authority'}
                                                                                 </a>
                                                                             ) : (
@@ -1326,33 +1383,33 @@ export function Compliance() {
                                                                     <div className="mt-4">
                                                                         <button
                                                                             onClick={() => toggleAlertSources(alert.id)}
-                                                                            className="text-[8px] uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 flex items-center gap-2 transition-colors"
+                                                                            className={`text-[8px] uppercase tracking-[0.2em] ${t.textFaint} ${isLight ? 'hover:text-stone-700' : 'hover:text-zinc-400'} flex items-center gap-2 transition-colors`}
                                                                         >
                                                                             <Eye size={10} />
                                                                             {expandedAlertSources.has(alert.id) ? 'Hide' : 'Resolve'} {alert.verification_sources.length} Evidence Node(s)
                                                                         </button>
                                                                         {expandedAlertSources.has(alert.id) && (
-                                                                            <div className="mt-3 space-y-2 pl-4 border-l border-white/5">
+                                                                            <div className={`mt-3 space-y-2 pl-4 border-l ${t.border}`}>
                                                                                 {alert.verification_sources.map((src, idx) => (
                                                                                     <div key={idx} className="text-[9px]">
                                                                                         <div className="flex items-center gap-2 mb-1">
                                                                                             <span className={`px-1 py-0.5 rounded-xs uppercase tracking-widest font-bold text-[7px] ${
-                                                                                                src.type === 'official' ? 'bg-emerald-500/10 text-emerald-400' :
+                                                                                                src.type === 'official' ? `bg-emerald-500/10 ${t.statusOk}` :
                                                                                                 src.type === 'news' ? 'bg-blue-500/10 text-blue-400' :
-                                                                                                'bg-zinc-800 text-zinc-500'
+                                                                                                `${t.innerEl} ${t.textMuted}`
                                                                                             }`}>
                                                                                                 {src.type}
                                                                                             </span>
                                                                                             {src.url ? (
-                                                                                                <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-white truncate max-w-xs transition-colors">
+                                                                                                <a href={src.url} target="_blank" rel="noopener noreferrer" className={`${t.textDim} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} truncate max-w-xs transition-colors`}>
                                                                                                     {src.name || src.url}
                                                                                                 </a>
                                                                                             ) : (
-                                                                                                <span className="text-zinc-500">{src.name}</span>
+                                                                                                <span className={t.textMuted}>{src.name}</span>
                                                                                             )}
                                                                                         </div>
                                                                                         {src.snippet && (
-                                                                                            <p className="text-zinc-600 italic leading-relaxed pl-2 border-l border-white/[0.02]">{src.snippet}</p>
+                                                                                            <p className={`${t.textFaint} italic leading-relaxed pl-2 border-l ${t.border}`}>{src.snippet}</p>
                                                                                         )}
                                                                                     </div>
                                                                                 ))}
@@ -1361,9 +1418,9 @@ export function Compliance() {
                                                                     </div>
                                                                 )}
                                                                 {alert.action_required && (
-                                                                    <div className="mt-4 p-3 bg-white/5 border border-white/5 rounded-sm">
-                                                                        <span className="text-[8px] font-bold uppercase tracking-[0.3em] text-zinc-500 block mb-1">Mandatory Action</span>
-                                                                        <span className="text-[10px] text-white font-bold uppercase tracking-wide">{alert.action_required}</span>
+                                                                    <div className={`mt-4 p-3 ${isLight ? 'bg-stone-200 border border-stone-300' : 'bg-white/5 border border-white/5'} rounded-sm`}>
+                                                                        <span className={`text-[8px] font-bold uppercase tracking-[0.3em] ${t.textMuted} block mb-1`}>Mandatory Action</span>
+                                                                        <span className={`text-[10px] ${t.textMain} font-bold uppercase tracking-wide`}>{alert.action_required}</span>
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -1372,7 +1429,7 @@ export function Compliance() {
                                                             {alert.status === 'unread' && (
                                                                 <button
                                                                     onClick={() => markAlertReadMutation.mutate(alert.id)}
-                                                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-emerald-500"
+                                                                    className={`p-2 ${isLight ? 'hover:bg-stone-200' : 'hover:bg-white/5'} rounded-full transition-colors ${t.textDim} hover:text-emerald-500`}
                                                                     title="Acknowledge"
                                                                 >
                                                                     <CheckCircle size={14} />
@@ -1381,7 +1438,7 @@ export function Compliance() {
                                                             {alert.status !== 'dismissed' && (
                                                                 <button
                                                                     onClick={() => dismissAlertMutation.mutate(alert.id)}
-                                                                    className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-red-500"
+                                                                    className={`p-2 ${isLight ? 'hover:bg-stone-200' : 'hover:bg-white/5'} rounded-full transition-colors ${t.textDim} hover:text-red-500`}
                                                                     title="Dismiss"
                                                                 >
                                                                     <X size={14} />
@@ -1398,12 +1455,12 @@ export function Compliance() {
                             </div>
                         </div>
                     ) : (
-                        <div className="bg-zinc-900/30 border border-white/5 rounded-sm p-12 text-center h-full flex flex-col items-center justify-center min-h-[400px]">
-                            <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center opacity-40">
-                                <MapPin size={24} className="text-zinc-600" />
+                        <div className={`${t.cardBg} border ${t.border} rounded-sm p-12 text-center h-full flex flex-col items-center justify-center min-h-[400px]`}>
+                            <div className={`w-16 h-16 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center opacity-40`}>
+                                <MapPin size={24} className={t.textFaint} />
                             </div>
-                            <h3 className="text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-2">Select Global Endpoint</h3>
-                            <p className="text-zinc-600 text-[10px] max-w-sm font-mono uppercase tracking-tight">
+                            <h3 className={`${t.textMain} font-bold uppercase tracking-[0.2em] text-[10px] mb-2`}>Select Global Endpoint</h3>
+                            <p className={`${t.textFaint} text-[10px] max-w-sm font-mono uppercase tracking-tight`}>
                                 Choose a location from the matrix to initialize compliance telemetry and alert protocols.
                             </p>
                         </div>
@@ -1431,16 +1488,16 @@ export function Compliance() {
                             animate={{ scale: 1, opacity: 1, y: 0 }}
                             exit={{ scale: 0.98, opacity: 0, y: 10 }}
                             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                            className="bg-zinc-950 border border-white/10 shadow-2xl rounded-sm p-10 w-full max-w-md relative overflow-hidden"
+                            className={`${t.modalBg} shadow-2xl p-10 w-full max-w-md relative overflow-hidden`}
                             onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         >
-                            <div className="absolute top-0 left-0 w-full h-0.5 bg-white/5" />
+                            <div className={`absolute top-0 left-0 w-full h-0.5 ${isLight ? 'bg-stone-300' : 'bg-white/5'}`} />
                             <div className="flex items-center justify-between mb-10">
                                 <div className="space-y-1">
-                                    <h2 className="text-2xl font-bold text-white uppercase tracking-tighter">
+                                    <h2 className={`text-2xl font-bold ${t.textMain} uppercase tracking-tighter`}>
                                         {editingLocation ? 'Edit Endpoint' : 'Register Node'}
                                     </h2>
-                                    <p className="text-[9px] text-zinc-500 font-mono uppercase tracking-[0.2em]">Location Configuration</p>
+                                    <p className={`text-[9px] ${t.textMuted} font-mono uppercase tracking-[0.2em]`}>Location Configuration</p>
                                 </div>
                                 <button
                                     onClick={() => {
@@ -1450,7 +1507,7 @@ export function Compliance() {
                                         setJurisdictionSearch('');
                                         setUseManualEntry(false);
                                     }}
-                                    className="p-2 text-zinc-600 hover:text-white transition-colors"
+                                    className={`p-2 ${t.textFaint} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} transition-colors`}
                                 >
                                     <X size={20} />
                                 </button>
@@ -1458,7 +1515,7 @@ export function Compliance() {
 
                             <form onSubmit={handleSubmitLocation} className="space-y-6">
                                 <div>
-                                    <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                    <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
                                         Logical Identifier (optional)
                                     </label>
                                     <input
@@ -1466,20 +1523,20 @@ export function Compliance() {
                                         value={formData.name}
                                         onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
                                         placeholder="e.g. SF HEADQUARTERS"
-                                        className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm placeholder-zinc-800 font-mono uppercase tracking-tight"
+                                        className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                     />
                                 </div>
 
                                 {showJurisdictionPicker ? (
                                     <div className="space-y-4">
                                         <div className="flex items-center justify-between">
-                                            <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold font-mono">
+                                            <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} font-bold font-mono`}>
                                                 Jurisdiction Scan
                                             </label>
                                             <button
                                                 type="button"
                                                 onClick={() => { setUseManualEntry(true); setFormData(prev => ({ ...prev, jurisdictionKey: '' })); }}
-                                                className="text-[8px] text-zinc-600 hover:text-zinc-400 uppercase tracking-widest transition-colors font-bold"
+                                                className={`text-[8px] ${t.textFaint} ${isLight ? 'hover:text-stone-700' : 'hover:text-zinc-400'} uppercase tracking-widest transition-colors font-bold`}
                                             >
                                                 Manual Override
                                             </button>
@@ -1490,12 +1547,12 @@ export function Compliance() {
                                                 value={jurisdictionSearch}
                                                 onChange={e => setJurisdictionSearch(e.target.value)}
                                                 placeholder="SEARCH CITIES..."
-                                                className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm placeholder-zinc-800 font-mono uppercase tracking-widest"
+                                                className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-widest`}
                                             />
                                         </div>
-                                        <div className="max-h-40 overflow-y-auto border border-white/5 rounded-sm bg-black/40 no-scrollbar">
+                                        <div className={`max-h-40 overflow-y-auto border ${t.border} rounded-sm ${isLight ? 'bg-stone-50' : 'bg-black/40'} no-scrollbar`}>
                                             {Object.keys(filteredJurisdictions).length === 0 ? (
-                                                <div className="px-4 py-8 text-center text-zinc-700 text-[9px] font-mono uppercase tracking-widest">
+                                                <div className={`px-4 py-8 text-center ${t.textFaint} text-[9px] font-mono uppercase tracking-widest`}>
                                                     {jurisdictionSearch ? 'Zero Matches' : 'Initializing Matrix...'}
                                                 </div>
                                             ) : (
@@ -1503,7 +1560,7 @@ export function Compliance() {
                                                     const stateLabel = US_STATES.find(s => s.value === state)?.label || state;
                                                     return (
                                                         <div key={state}>
-                                                            <div className="px-4 py-2 bg-zinc-950 text-[8px] text-zinc-600 font-bold uppercase tracking-[0.3em] sticky top-0 border-b border-white/5">
+                                                            <div className={`px-4 py-2 ${isLight ? 'bg-stone-100' : 'bg-zinc-950'} text-[8px] ${t.textFaint} font-bold uppercase tracking-[0.3em] sticky top-0 ${t.modalHeader}`}>
                                                                 {stateLabel}
                                                             </div>
                                                             {items.map(j => {
@@ -1522,15 +1579,15 @@ export function Compliance() {
                                                                                 jurisdictionKey: key,
                                                                             }));
                                                                         }}
-                                                                        className={`w-full text-left px-4 py-2.5 text-[11px] transition-all flex items-center justify-between border-b border-white/[0.02] last:border-0 ${
+                                                                        className={`w-full text-left px-4 py-2.5 text-[11px] transition-all flex items-center justify-between border-b ${t.border} last:border-0 ${
                                                                             isSelected
-                                                                                ? 'bg-white/10 text-white font-bold'
-                                                                                : 'text-zinc-500 hover:bg-white/5 hover:text-zinc-300'
+                                                                                ? `${isLight ? 'bg-stone-200 text-zinc-900' : 'bg-white/10 text-white'} font-bold`
+                                                                                : `${t.textMuted} ${t.rowHover} ${isLight ? 'hover:text-zinc-900' : 'hover:text-zinc-300'}`
                                                                         }`}
                                                                     >
                                                                         <span className="uppercase tracking-tight">{j.city}, {j.state}</span>
                                                                         {j.has_local_ordinance && (
-                                                                            <span className="text-[7px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-xs uppercase tracking-widest font-bold">
+                                                                            <span className={`text-[7px] px-1.5 py-0.5 bg-emerald-500/10 ${t.statusOk} border border-emerald-500/20 rounded-xs uppercase tracking-widest font-bold`}>
                                                                                 Ordinance
                                                                             </span>
                                                                         )}
@@ -1544,10 +1601,10 @@ export function Compliance() {
                                         </div>
                                         {formData.jurisdictionKey && (
                                             <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-sm">
-                                                <div className="text-[8px] text-emerald-500 font-bold uppercase tracking-widest mb-1">Matrix Resolution</div>
-                                                <div className="text-xs text-zinc-300 font-mono uppercase tracking-tighter">
+                                                <div className={`text-[8px] ${t.statusOk} font-bold uppercase tracking-widest mb-1`}>Matrix Resolution</div>
+                                                <div className={`text-xs ${t.textDim} font-mono uppercase tracking-tighter`}>
                                                     {formData.city}, {formData.state}
-                                                    {formData.county && <span className="text-zinc-600 ml-2 font-light">[{formData.county} County]</span>}
+                                                    {formData.county && <span className={`${t.textFaint} ml-2 font-light`}>[{formData.county} County]</span>}
                                                 </div>
                                             </div>
                                         )}
@@ -1558,13 +1615,13 @@ export function Compliance() {
                                             <button
                                                 type="button"
                                                 onClick={() => { setUseManualEntry(false); setFormData(emptyFormData); }}
-                                                className="text-[8px] text-zinc-600 hover:text-zinc-400 uppercase tracking-widest transition-colors font-bold"
+                                                className={`text-[8px] ${t.textFaint} ${isLight ? 'hover:text-stone-700' : 'hover:text-zinc-400'} uppercase tracking-widest transition-colors font-bold`}
                                             >
                                                 Revert to Matrix Search
                                             </button>
                                         )}
                                         <div>
-                                            <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                            <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
                                                 Street Address
                                             </label>
                                             <input
@@ -1572,13 +1629,13 @@ export function Compliance() {
                                                 value={formData.address}
                                                 onChange={e => setFormData(prev => ({ ...prev, address: e.target.value }))}
                                                 placeholder="PHYSICAL LOCATION"
-                                                className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm placeholder-zinc-800 font-mono uppercase tracking-tight"
+                                                className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                             />
                                         </div>
 
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
                                                     City
                                                 </label>
                                                 <input
@@ -1586,18 +1643,18 @@ export function Compliance() {
                                                     value={formData.city}
                                                     onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))}
                                                     required
-                                                    className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm font-mono uppercase tracking-tight"
+                                                    className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                                 />
                                             </div>
                                             <div>
-                                                <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
                                                     State
                                                 </label>
                                                 <select
                                                     value={formData.state}
                                                     onChange={e => setFormData(prev => ({ ...prev, state: e.target.value }))}
                                                     required
-                                                    className="w-full px-4 py-3 bg-zinc-900 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm font-mono uppercase tracking-tight"
+                                                    className={`w-full px-4 py-3 ${t.select} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                                 >
                                                     <option value="">--</option>
                                                     {US_STATES.map(state => (
@@ -1611,18 +1668,18 @@ export function Compliance() {
 
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
                                                     County
                                                 </label>
                                                 <input
                                                     type="text"
                                                     value={formData.county}
                                                     onChange={e => setFormData(prev => ({ ...prev, county: e.target.value }))}
-                                                    className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm font-mono uppercase tracking-tight"
+                                                    className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                                 />
                                             </div>
                                             <div>
-                                                <label className="block text-[9px] tracking-[0.2em] uppercase text-zinc-500 mb-2 font-bold font-mono">
+                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
                                                     ZIP Code
                                                 </label>
                                                 <input
@@ -1631,7 +1688,7 @@ export function Compliance() {
                                                     onChange={e => setFormData(prev => ({ ...prev, zipcode: e.target.value }))}
                                                     required={!isClient && !isAdmin}
                                                     maxLength={10}
-                                                    className="w-full px-4 py-3 bg-white/5 border border-white/5 text-white text-sm focus:outline-none focus:border-white/20 transition-all rounded-sm font-mono uppercase tracking-tight"
+                                                    className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                                 />
                                             </div>
                                         </div>
@@ -1648,14 +1705,14 @@ export function Compliance() {
                                             setJurisdictionSearch('');
                                             setUseManualEntry(false);
                                         }}
-                                        className="flex-1 px-6 py-3.5 bg-transparent border border-white/5 text-zinc-500 hover:text-white hover:bg-white/5 rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all"
+                                        className={`flex-1 px-6 py-3.5 bg-transparent border ${t.border} ${t.textMuted} ${isLight ? 'hover:text-zinc-900 hover:bg-stone-200' : 'hover:text-white hover:bg-white/5'} rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all`}
                                     >
                                         Abort
                                     </button>
                                     <button
                                         type="submit"
                                         disabled={createLocationMutation.isPending || updateLocationMutation.isPending || (showJurisdictionPicker && !formData.jurisdictionKey)}
-                                        className="flex-1 px-6 py-3.5 bg-white hover:bg-[#4ADE80] text-black rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 shadow-lg"
+                                        className={`flex-1 px-6 py-3.5 ${t.btnPrimary} rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 shadow-lg`}
                                     >
                                         {createLocationMutation.isPending || updateLocationMutation.isPending
                                             ? 'Syncing...'

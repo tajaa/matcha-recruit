@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink, Sparkles } from 'lucide-react';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 import { getAccessToken } from '../api/client';
 import { OnboardingWizard } from '../components/OnboardingWizard';
 import { Collapsible } from '../components/Collapsible';
@@ -14,17 +15,6 @@ import type { ClientProfile } from '../types';
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 // ─── theme ────────────────────────────────────────────────────────────────────
-
-function useIsLightMode(): boolean {
-  const check = () => !document.documentElement.classList.contains('theme-dark');
-  const [isLight, setIsLight] = useState(check);
-  useEffect(() => {
-    const observer = new MutationObserver(() => setIsLight(check()));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
-  return isLight;
-}
 
 const LT = {
   pageBg: 'bg-stone-300',
