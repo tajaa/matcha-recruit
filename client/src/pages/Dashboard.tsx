@@ -167,6 +167,12 @@ interface IncidentSummary {
   recent_7_days: number;
 }
 
+interface WageAlertSummary {
+  hourly_violations: number;
+  salary_violations: number;
+  locations_affected: number;
+}
+
 interface DashboardStats {
   active_policies: number;
   pending_signatures: number;
@@ -175,6 +181,7 @@ interface DashboardStats {
   pending_incidents: PendingIncident[];
   recent_activity: ActivityItem[];
   incident_summary?: IncidentSummary;
+  wage_alerts?: WageAlertSummary;
 }
 
 type HorizonDays = 30 | 60 | 90;
@@ -1085,9 +1092,29 @@ export function Dashboard() {
                                   </div>
                                 );
                               })}
+                              {dashStats?.wage_alerts && (
+                                <div
+                                  onClick={() => navigate('/app/risk-assessment')}
+                                  className={`${t.innerHover} p-4 flex items-start gap-3 cursor-pointer transition-colors group`}
+                                >
+                                    <div className={`mt-1.5 w-1.5 h-1.5 rounded-full ${t.activityDot.warning} animate-pulse flex-shrink-0`} />
+                                    <div className="flex-1">
+                                      <div className={`text-sm ${t.textMain} font-medium mb-0.5`}>Employee Wage Compliance Alerts</div>
+                                      <div className={`text-xs ${t.textMuted}`}>
+                                        {[
+                                          dashStats.wage_alerts.hourly_violations > 0 && `${dashStats.wage_alerts.hourly_violations} below min wage`,
+                                          dashStats.wage_alerts.salary_violations > 0 && `${dashStats.wage_alerts.salary_violations} below exempt salary threshold`,
+                                        ].filter(Boolean).join(' · ')}
+                                        {' · '}{dashStats.wage_alerts.locations_affected} location{dashStats.wage_alerts.locations_affected !== 1 ? 's' : ''}
+                                      </div>
+                                    </div>
+                                    <ArrowUpRight className={`w-3.5 h-3.5 ${t.arrow} ml-auto transition-colors`} />
+                                </div>
+                              )}
                               {(!ptoSummary || ptoSummary.pending_count === 0)
                                 && (!dashStats || dashStats.pending_incidents.length === 0)
-                                && (!showComplianceImpact || compliancePendingActions.length === 0) && (
+                                && (!showComplianceImpact || compliancePendingActions.length === 0)
+                                && !dashStats?.wage_alerts && (
                                 <div className="p-4 text-center">
                                   <CheckCircle2 className={`w-5 h-5 ${t.icon} mx-auto mb-1.5`} />
                                   <p className={`text-sm ${t.textFaint}`}>All caught up</p>

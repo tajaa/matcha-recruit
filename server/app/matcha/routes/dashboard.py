@@ -39,6 +39,12 @@ class IncidentSummary(BaseModel):
     recent_7_days: int
 
 
+class WageAlertSummary(BaseModel):
+    hourly_violations: int
+    salary_violations: int
+    locations_affected: int
+
+
 class DashboardStats(BaseModel):
     active_policies: int
     pending_signatures: int
@@ -47,6 +53,7 @@ class DashboardStats(BaseModel):
     pending_incidents: List[PendingIncident]
     recent_activity: List[ActivityItem]
     incident_summary: Optional[IncidentSummary] = None
+    wage_alerts: Optional[WageAlertSummary] = None
 
 
 @router.get("/stats", response_model=DashboardStats)
@@ -174,6 +181,37 @@ async def get_dashboard_stats(
                 )
             )
 
+    # Employee wage violation alerts across all locations
+    wage_alerts = None
+    try:
+        from ...core.services.compliance_service import get_employee_impact_for_location
+
+        async with get_connection() as conn2:
+            location_ids = await conn2.fetch(
+                "SELECT id FROM business_locations WHERE company_id = $1 AND is_active = true",
+                company_id,
+            )
+        hourly_violations = 0
+        salary_violations = 0
+        locations_affected = 0
+        for loc_row in location_ids:
+            impact = await get_employee_impact_for_location(loc_row["id"], company_id)
+            vbt = impact.get("violations_by_rate_type", {})
+            h = len(vbt.get("general", []))
+            s = len(vbt.get("exempt_salary", []))
+            hourly_violations += h
+            salary_violations += s
+            if h or s:
+                locations_affected += 1
+        if hourly_violations or salary_violations:
+            wage_alerts = WageAlertSummary(
+                hourly_violations=hourly_violations,
+                salary_violations=salary_violations,
+                locations_affected=locations_affected,
+            )
+    except Exception:
+        logger.exception("Failed to compute wage alerts for dashboard")
+
     return DashboardStats(
         active_policies=active_policies,
         pending_signatures=pending_signatures,
@@ -182,6 +220,7 @@ async def get_dashboard_stats(
         pending_incidents=pending_incidents,
         recent_activity=recent_activity,
         incident_summary=incident_summary,
+        wage_alerts=wage_alerts,
     )
 
 
