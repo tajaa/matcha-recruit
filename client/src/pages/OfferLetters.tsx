@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import type { OfferLetter } from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 import { useOfferLetters, useOfferForm, useOfferGuidance, useRangeNegotiation, OFFER_GUIDANCE_CITY_OPTIONS } from '../hooks/offer-letters';
 
 const LT = {
@@ -40,6 +41,40 @@ const LT = {
   reviewBlock: 'bg-stone-200/60 rounded-xl border border-stone-200 p-4 text-sm space-y-3',
   reviewDivide: 'border-b border-stone-200 pb-2',
   statusBadgeBg: 'bg-stone-200 border border-stone-200',
+} as const;
+
+const DK = {
+  pageBg: 'bg-zinc-950',
+  card: 'bg-zinc-900/50 rounded-2xl border border-white/10',
+  innerEl: 'bg-zinc-800/60 rounded-xl border border-white/10',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  textDim: 'text-zinc-400',
+  border: 'border-white/10',
+  divide: 'divide-white/10',
+  btnPrimary: 'bg-zinc-100 text-zinc-900 hover:bg-white',
+  btnSecondary: 'border border-white/10 text-zinc-500 hover:text-zinc-100 hover:border-white/20',
+  btnSecondaryActive: 'border-white/20 text-zinc-100 bg-zinc-800',
+  modalBg: 'bg-zinc-900 border border-white/10 shadow-2xl rounded-2xl',
+  modalHeader: 'border-b border-white/10',
+  modalFooter: 'border-t border-white/10',
+  inputCls: 'bg-zinc-800 border border-white/10 text-zinc-100 text-sm rounded-xl focus:outline-none focus:border-white/20 placeholder:text-zinc-600 transition-colors',
+  dropdownBg: 'bg-zinc-900 border border-white/10 shadow-xl',
+  dropdownItem: 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100',
+  rowHover: 'hover:bg-white/5',
+  emptyBorder: 'border border-dashed border-white/10 bg-zinc-900/30 rounded-2xl',
+  wizardActive: 'border-zinc-100 text-zinc-900 bg-zinc-100',
+  wizardInactive: 'border-zinc-700 text-zinc-600',
+  separator: 'bg-zinc-700',
+  closeBtnCls: 'text-zinc-500 hover:text-zinc-100 transition-colors',
+  cancelBtn: 'text-zinc-500 hover:text-zinc-100',
+  chevron: 'text-zinc-600 group-hover:text-zinc-400',
+  tableHeader: 'bg-zinc-800 text-zinc-500',
+  checkboxCls: 'w-4 h-4 rounded border-white/10 bg-zinc-800 checked:bg-zinc-100 checked:border-zinc-100',
+  reviewBlock: 'bg-zinc-800/60 rounded-xl border border-white/10 p-4 text-sm space-y-3',
+  reviewDivide: 'border-b border-white/10 pb-2',
+  statusBadgeBg: 'bg-zinc-800 border border-white/10',
 } as const;
 
 const EMPLOYMENT_TYPES = [
@@ -167,7 +202,8 @@ function RangeNegotiationFlowchart() {
 
 export function OfferLetters() {
   const { hasFeature } = useAuth();
-  const t = LT;
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
   const offerLettersPlusEnabled = hasFeature('offer_letters_plus');
   const [salaryType, setSalaryType] = useState<'fixed' | 'range'>('fixed');
 
@@ -251,21 +287,13 @@ export function OfferLetters() {
     return `${base} This offer is also contingent upon the successful completion of the following: ${list}.`;
   };
 
-  const statusColors: Record<string, string> = {
-    draft: 'text-stone-500',
-    sent: 'text-blue-700',
-    accepted: 'text-matcha-700',
-    rejected: 'text-red-700',
-    expired: 'text-stone-400',
-  };
+  const statusColors: Record<string, string> = isLight
+    ? { draft: 'text-stone-500', sent: 'text-blue-700', accepted: 'text-matcha-700', rejected: 'text-red-700', expired: 'text-stone-400' }
+    : { draft: 'text-zinc-500', sent: 'text-blue-400', accepted: 'text-matcha-400', rejected: 'text-red-400', expired: 'text-zinc-600' };
 
-  const statusDotColors: Record<string, string> = {
-    draft: 'bg-stone-400',
-    sent: 'bg-blue-500',
-    accepted: 'bg-matcha-500',
-    rejected: 'bg-red-500',
-    expired: 'bg-stone-300',
-  };
+  const statusDotColors: Record<string, string> = isLight
+    ? { draft: 'bg-stone-400', sent: 'bg-blue-500', accepted: 'bg-matcha-500', rejected: 'bg-red-500', expired: 'bg-stone-300' }
+    : { draft: 'bg-zinc-600', sent: 'bg-blue-500', accepted: 'bg-matcha-500', rejected: 'bg-red-500', expired: 'bg-zinc-700' };
 
   // Wizard Steps Components
   const renderWizardStep = () => {
