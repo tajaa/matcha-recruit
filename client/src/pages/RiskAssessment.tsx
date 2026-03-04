@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Sparkles, HelpCircle, Plus, Check, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, Sparkles, HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser } from '../types';
 import { riskAssessment, erCopilot } from '../api/client';
@@ -407,60 +407,98 @@ function ActionItems({ data }: { data: RiskAssessmentResult }) {
 
         {/* Tracked (persisted) items */}
         {hasItems && (
-          <div className="bg-zinc-900 border border-white/10 rounded-2xl divide-y divide-white/10 overflow-hidden">
-            <div className="p-5">
-              <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Tracked Items</div>
-              <div className="flex flex-col gap-3">
-                {items.map((item) => (
-                  <div key={item.id} className="flex items-start gap-3 text-[11px]">
-                    <div className="flex shrink-0 gap-1 mt-0.5">
-                      <button
-                        onClick={() => updateItem(item.id, { status: 'completed' })}
-                        className="w-5 h-5 flex items-center justify-center rounded bg-white/5 hover:bg-emerald-500/20 text-zinc-600 hover:text-emerald-400 transition-colors"
-                        title="Complete"
-                      >
-                        <Check size={12} />
-                      </button>
-                      <button
-                        onClick={() => updateItem(item.id, { status: 'dismissed' })}
-                        className="w-5 h-5 flex items-center justify-center rounded bg-white/5 hover:bg-red-500/20 text-zinc-600 hover:text-red-400 transition-colors"
-                        title="Dismiss"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-zinc-200">{item.title}</div>
-                      {item.description && <div className="text-zinc-500 mt-0.5">{item.description}</div>}
-                      <div className="flex items-center gap-3 mt-2">
-                        <select
-                          value={item.assigned_to ?? ''}
-                          onChange={(e) => updateItem(item.id, { assigned_to: e.target.value || null })}
-                          className="bg-zinc-800 border border-white/10 rounded px-2 py-1 text-[10px] text-zinc-300 outline-none"
+          <div>
+            <div className="text-[9px] text-stone-400 uppercase tracking-widest font-bold mb-3">Tracked ({items.length})</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {items.map((item) => {
+                const isOverdue = item.due_date && new Date(item.due_date) < new Date(new Date().toDateString());
+                return (
+                  <div key={item.id} className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden group">
+                    {/* Top: type badge stripe */}
+                    <div className={`h-0.5 ${item.source_type === 'wage_violation' ? 'bg-red-500' : 'bg-amber-500'}`} />
+
+                    <div className="p-5 flex flex-col gap-4">
+                      {/* Title + description */}
+                      <div>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="text-[12px] text-zinc-200 font-medium leading-snug">{item.title}</div>
+                          <span className={`shrink-0 text-[8px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded ${
+                            item.source_type === 'wage_violation'
+                              ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          }`}>
+                            {item.source_type === 'wage_violation' ? 'Wage' : 'ER'}
+                          </span>
+                        </div>
+                        {item.description && (
+                          <div className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{item.description}</div>
+                        )}
+                      </div>
+
+                      {/* Controls row */}
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1 min-w-0">
+                          <User size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                          <select
+                            value={item.assigned_to ?? ''}
+                            onChange={(e) => updateItem(item.id, { assigned_to: e.target.value || null })}
+                            className="w-full bg-zinc-800/80 border border-white/5 rounded-lg pl-6 pr-2 py-1.5 text-[10px] text-zinc-300 outline-none hover:border-white/10 transition-colors appearance-none cursor-pointer truncate"
+                          >
+                            <option value="">Unassigned</option>
+                            {users.map(u => (
+                              <option key={u.id} value={u.id}>{u.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="relative shrink-0">
+                          <Calendar size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                          <input
+                            type="date"
+                            value={item.due_date ?? ''}
+                            onChange={(e) => updateItem(item.id, { due_date: e.target.value || null })}
+                            className={`bg-zinc-800/80 border rounded-lg pl-6 pr-2 py-1.5 text-[10px] outline-none hover:border-white/10 transition-colors w-[120px] cursor-pointer ${
+                              isOverdue
+                                ? 'border-red-500/30 text-red-400'
+                                : 'border-white/5 text-zinc-300'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Overdue warning */}
+                      {isOverdue && (
+                        <div className="flex items-center gap-1.5 text-[9px] text-red-400 font-mono">
+                          <Clock size={10} />
+                          Overdue
+                        </div>
+                      )}
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-white/5">
+                        <button
+                          onClick={() => updateItem(item.id, { status: 'completed' })}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold uppercase tracking-widest hover:bg-emerald-500/20 transition-colors"
                         >
-                          <option value="">Unassigned</option>
-                          {users.map(u => (
-                            <option key={u.id} value={u.id}>{u.name}</option>
-                          ))}
-                        </select>
-                        <input
-                          type="date"
-                          value={item.due_date ?? ''}
-                          onChange={(e) => updateItem(item.id, { due_date: e.target.value || null })}
-                          className="bg-zinc-800 border border-white/10 rounded px-2 py-1 text-[10px] text-zinc-300 outline-none"
-                        />
-                        <span className={`text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded ${
-                          item.source_type === 'wage_violation'
-                            ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                        }`}>
-                          {item.source_type === 'wage_violation' ? 'Wage' : 'ER Case'}
-                        </span>
+                          <Check size={11} />
+                          Resolve
+                        </button>
+                        <button
+                          onClick={() => updateItem(item.id, { status: 'dismissed' })}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-zinc-500 border border-white/5 text-[10px] font-bold uppercase tracking-widest hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 transition-colors"
+                        >
+                          <X size={11} />
+                          Dismiss
+                        </button>
+                        {item.assigned_to_name && (
+                          <span className="ml-auto text-[9px] text-zinc-600 font-mono truncate">
+                            {item.assigned_to_name}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -470,30 +508,35 @@ function ActionItems({ data }: { data: RiskAssessmentResult }) {
           <div>
             <button
               onClick={() => setShowHistory(!showHistory)}
-              className="flex items-center gap-1.5 text-[10px] text-stone-500 uppercase tracking-widest font-bold hover:text-zinc-900 transition-colors mb-2"
+              className="flex items-center gap-1.5 text-[10px] text-stone-400 uppercase tracking-widest font-bold hover:text-zinc-900 transition-colors mb-3"
             >
               {showHistory ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-              Completed & Dismissed ({closedItems.length})
+              History ({closedItems.length})
             </button>
             {showHistory && (
-              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5">
-                <div className="flex flex-col gap-2">
-                  {closedItems.map((item) => (
-                    <div key={item.id} className="flex items-start gap-3 text-[11px] opacity-60">
-                      <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${
-                        item.status === 'completed' ? 'bg-emerald-500' : 'bg-zinc-600'
-                      }`} />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {closedItems.map((item) => (
+                  <div key={item.id} className="bg-zinc-900/60 border border-white/5 rounded-2xl overflow-hidden opacity-50 hover:opacity-75 transition-opacity">
+                    <div className={`h-0.5 ${item.status === 'completed' ? 'bg-emerald-500/40' : 'bg-zinc-600/40'}`} />
+                    <div className="p-4 flex items-start gap-3">
+                      <span className={`mt-0.5 shrink-0 w-4 h-4 rounded-full flex items-center justify-center ${
+                        item.status === 'completed'
+                          ? 'bg-emerald-500/20 text-emerald-500'
+                          : 'bg-zinc-700/50 text-zinc-500'
+                      }`}>
+                        {item.status === 'completed' ? <Check size={10} /> : <X size={10} />}
+                      </span>
                       <div className="flex-1 min-w-0">
-                        <span className="text-zinc-400 line-through">{item.title}</span>
-                        <div className="flex items-center gap-2 mt-0.5 text-[9px] text-zinc-600">
+                        <div className="text-[11px] text-zinc-400 line-through">{item.title}</div>
+                        <div className="flex items-center gap-2 mt-1 text-[9px] text-zinc-600 font-mono">
                           <span className="uppercase tracking-widest font-bold">{item.status}</span>
                           {item.assigned_to_name && <span>· {item.assigned_to_name}</span>}
                           {item.closed_at && <span>· {new Date(item.closed_at).toLocaleDateString()}</span>}
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
