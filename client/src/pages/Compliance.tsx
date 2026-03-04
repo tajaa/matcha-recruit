@@ -167,36 +167,25 @@ const COMPLIANCE_CYCLE_STEPS = [
 // ─── theme ────────────────────────────────────────────────────────────────────
 
 const LT = {
+  // ── page surface (light bg) ─────────────────────────────────────────────────
   pageBg: 'bg-stone-300',
-  card: 'bg-stone-100 rounded-2xl',
-  cardBg: 'bg-stone-100',
-  innerEl: 'bg-stone-200 rounded-xl',
-  textMain: 'text-zinc-900',
-  textMuted: 'text-stone-500',
-  textFaint: 'text-stone-400',
-  textDim: 'text-stone-600',
-  border: 'border-stone-200',
-  divide: 'divide-stone-200',
-  rowHover: 'hover:bg-stone-50',
-  label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
-  input: 'bg-white border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:border-stone-400',
-  select: 'bg-white border border-stone-300 rounded-xl text-zinc-900 focus:border-stone-400',
-  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
-  btnGhost: 'text-stone-500 hover:text-zinc-900',
-  modalBg: 'bg-stone-100 rounded-2xl',
-  modalHeader: 'border-b border-stone-200',
-  spinner: 'border-stone-300 border-t-zinc-900',
-  statusOk: 'text-emerald-600',
-  statusWarn: 'text-amber-600',
-  statusErr: 'text-red-600',
-  linkify: 'text-emerald-600 hover:text-emerald-700 underline',
-};
-
-const DK = {
-  pageBg: 'bg-zinc-950',
-  card: 'bg-zinc-900 rounded-2xl',
+  pageText: 'text-zinc-900',
+  pageMuted: 'text-stone-500',
+  pageFaint: 'text-stone-400',
+  pageDim: 'text-stone-600',
+  pageBorder: 'border-stone-200',
+  pageBtnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  pageLinkHover: 'hover:text-zinc-900',
+  // page-surface banners
+  alertSync: 'border border-amber-300 bg-amber-50 text-amber-700',
+  alertSyncError: 'border border-red-300 bg-red-50 text-red-700',
+  alertSyncLink: 'decoration-red-400/50 hover:text-red-800',
+  // ── card interiors (dark — mirrors DK for contrast) ─────────────────────────
+  card: 'bg-zinc-900 rounded-2xl border border-white/10',
   cardBg: 'bg-zinc-900',
+  cardHeader: 'border-b border-white/10',
   innerEl: 'bg-zinc-800 rounded-xl',
+  innerElAlt: 'bg-black/40',
   textMain: 'text-zinc-100',
   textMuted: 'text-zinc-500',
   textFaint: 'text-zinc-600',
@@ -209,14 +198,152 @@ const DK = {
   select: 'bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
   btnPrimary: 'bg-white text-black hover:bg-zinc-100',
   btnGhost: 'text-zinc-500 hover:text-zinc-100',
-  modalBg: 'bg-zinc-900 border border-white/10 rounded-2xl',
-  modalHeader: 'border-b border-white/10',
   spinner: 'border-zinc-700 border-t-zinc-300',
   statusOk: 'text-emerald-400',
   statusWarn: 'text-amber-400',
   statusErr: 'text-red-400',
   linkify: 'text-emerald-400 hover:text-emerald-300 underline',
-};
+  linkHover: 'hover:text-white',
+  tabActive: 'text-zinc-100',
+  tabInactive: 'text-zinc-600 hover:text-zinc-400',
+  tabIndicator: 'bg-white',
+  dot: 'bg-white/10',
+  checkBg: 'bg-black/40',
+  dotNominal: 'bg-zinc-700',
+  dotNominalSmall: 'bg-zinc-800',
+  badgeNew: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+  badgeUpdated: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  badgeNominal: 'bg-white/5 text-zinc-600 border-white/5',
+  emptyBg: 'bg-white/[0.01]',
+  contentBg: 'bg-zinc-950',
+  expandedBg: 'bg-zinc-950/40',
+  requirementDivider: 'bg-white/5',
+  requirementItemBg: 'bg-zinc-950/20',
+  alertDismissed: 'opacity-50 bg-zinc-900/40 border-white/5',
+  alertActionBg: 'bg-white/5 border border-white/5',
+  alertBtnHover: 'hover:bg-white/5',
+  neutralBadge: 'bg-white/5 text-zinc-500 border border-white/10',
+  legDismissed: 'bg-zinc-800 text-zinc-500 border-zinc-700',
+  posterCancelled: 'bg-zinc-800 text-zinc-500 border-zinc-700',
+  authorityLink: 'text-blue-400 hover:text-white',
+  impactBg: 'bg-amber-500/[0.03] border-l-2 border-amber-500/20',
+  impactText: 'text-amber-200/70',
+  coverageMissingBorder: 'border-amber-500/30',
+  coverageMissingBg: 'bg-amber-500/10',
+  coverageMissingTitle: 'text-amber-300',
+  coverageMissingText: 'text-amber-100',
+  localInfoBg: 'bg-blue-500/10 border border-blue-500/20',
+  localInfoIcon: 'text-blue-400',
+  localInfoText: 'text-blue-300',
+  checkManual: 'bg-white/5 text-zinc-500 border-white/10',
+  sourceTypeFallback: 'bg-zinc-800 text-zinc-500',
+  borderInline: 'border-white/[0.03]',
+  sourceLinkDecor: 'decoration-white/10',
+  coveragePendingBorder: 'border-zinc-800',
+  // ── modal (light bg) ───────────────────────────────────────────────────────
+  modalBg: 'bg-stone-100 rounded-2xl',
+  modalHeader: 'border-b border-stone-200',
+  modalFooter: 'border-t border-stone-200',
+  modalAccent: 'bg-stone-300',
+  closeBtnCls: 'text-stone-400 hover:text-zinc-900 transition-colors',
+  cancelBtn: 'bg-transparent border border-stone-300 text-stone-500 hover:text-zinc-900 hover:bg-stone-200',
+  pageInput: 'bg-white border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:border-stone-400',
+  pageSelect: 'bg-white border border-stone-300 rounded-xl text-zinc-900 focus:border-stone-400',
+  dropdownBg: 'bg-stone-50',
+  dropdownHeader: 'bg-stone-100',
+  listItemSelected: 'bg-stone-200 text-zinc-900',
+  listItemHoverText: 'hover:text-zinc-900',
+  pageRowHover: 'hover:bg-stone-50',
+} as const;
+
+const DK = {
+  // ── page surface ────────────────────────────────────────────────────────────
+  pageBg: 'bg-zinc-950',
+  pageText: 'text-zinc-100',
+  pageMuted: 'text-zinc-500',
+  pageFaint: 'text-zinc-600',
+  pageDim: 'text-zinc-400',
+  pageBorder: 'border-white/10',
+  pageBtnPrimary: 'bg-white text-black hover:bg-zinc-100',
+  pageLinkHover: 'hover:text-white',
+  alertSync: 'border border-amber-500/30 bg-amber-500/10 text-amber-200',
+  alertSyncError: 'border border-red-500/30 bg-red-500/10 text-red-200',
+  alertSyncLink: 'decoration-red-400/50 hover:text-red-100',
+  // ── card interiors ──────────────────────────────────────────────────────────
+  card: 'bg-zinc-900 rounded-2xl border border-white/10',
+  cardBg: 'bg-zinc-900',
+  cardHeader: 'border-b border-white/10',
+  innerEl: 'bg-zinc-800 rounded-xl',
+  innerElAlt: 'bg-black/40',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  textDim: 'text-zinc-400',
+  border: 'border-white/10',
+  divide: 'divide-white/10',
+  rowHover: 'hover:bg-white/5',
+  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  input: 'bg-zinc-900 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:border-white/20',
+  select: 'bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
+  btnPrimary: 'bg-white text-black hover:bg-zinc-100',
+  btnGhost: 'text-zinc-500 hover:text-zinc-100',
+  spinner: 'border-zinc-700 border-t-zinc-300',
+  statusOk: 'text-emerald-400',
+  statusWarn: 'text-amber-400',
+  statusErr: 'text-red-400',
+  linkify: 'text-emerald-400 hover:text-emerald-300 underline',
+  linkHover: 'hover:text-white',
+  tabActive: 'text-zinc-100',
+  tabInactive: 'text-zinc-600 hover:text-zinc-400',
+  tabIndicator: 'bg-white',
+  dot: 'bg-white/10',
+  checkBg: 'bg-black/40',
+  dotNominal: 'bg-zinc-700',
+  dotNominalSmall: 'bg-zinc-800',
+  badgeNew: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+  badgeUpdated: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  badgeNominal: 'bg-white/5 text-zinc-600 border-white/5',
+  emptyBg: 'bg-white/[0.01]',
+  contentBg: 'bg-zinc-950',
+  expandedBg: 'bg-zinc-950/40',
+  requirementDivider: 'bg-white/5',
+  requirementItemBg: 'bg-zinc-950/20',
+  alertDismissed: 'opacity-50 bg-zinc-900/40 border-white/5',
+  alertActionBg: 'bg-white/5 border border-white/5',
+  alertBtnHover: 'hover:bg-white/5',
+  neutralBadge: 'bg-white/5 text-zinc-500 border border-white/10',
+  legDismissed: 'bg-zinc-800 text-zinc-500 border-zinc-700',
+  posterCancelled: 'bg-zinc-800 text-zinc-500 border-zinc-700',
+  authorityLink: 'text-blue-400 hover:text-white',
+  impactBg: 'bg-amber-500/[0.03] border-l-2 border-amber-500/20',
+  impactText: 'text-amber-200/70',
+  coverageMissingBorder: 'border-amber-500/30',
+  coverageMissingBg: 'bg-amber-500/10',
+  coverageMissingTitle: 'text-amber-300',
+  coverageMissingText: 'text-amber-100',
+  localInfoBg: 'bg-blue-500/10 border border-blue-500/20',
+  localInfoIcon: 'text-blue-400',
+  localInfoText: 'text-blue-300',
+  checkManual: 'bg-white/5 text-zinc-500 border-white/10',
+  sourceTypeFallback: 'bg-zinc-800 text-zinc-500',
+  borderInline: 'border-white/[0.03]',
+  sourceLinkDecor: 'decoration-white/10',
+  coveragePendingBorder: 'border-zinc-800',
+  // ── modal ───────────────────────────────────────────────────────────────────
+  modalBg: 'bg-zinc-900 border border-white/10 rounded-2xl',
+  modalHeader: 'border-b border-white/10',
+  modalFooter: 'border-t border-white/10',
+  modalAccent: 'bg-white/5',
+  closeBtnCls: 'text-zinc-500 hover:text-zinc-100 transition-colors',
+  cancelBtn: 'bg-transparent border border-white/10 text-zinc-500 hover:text-white hover:bg-white/5',
+  pageInput: 'bg-zinc-900 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:border-white/20',
+  pageSelect: 'bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
+  dropdownBg: 'bg-black/40',
+  dropdownHeader: 'bg-zinc-950',
+  listItemSelected: 'bg-white/10 text-white',
+  listItemHoverText: 'hover:text-zinc-300',
+  pageRowHover: 'hover:bg-white/5',
+} as const;
 
 export function Compliance() {
     const isLight = useIsLightMode();
@@ -479,29 +606,30 @@ export function Compliance() {
     const unreadAlertsCount = locationAlerts.filter(a => a.status === 'unread').length;
 
     return (
+        <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-6 sm:px-8 lg:px-10 py-10 min-h-screen ${t.pageBg}`}>
         <div className="max-w-7xl mx-auto space-y-10 pb-24">
-            <div className={`flex items-center justify-between border-b ${t.border} pb-8`}>
+            <div className={`flex items-center justify-between border-b ${t.pageBorder} pb-8`}>
                 <div className="flex items-center gap-8">
                     <div>
                         <div className="flex items-center gap-3">
-                            <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>Compliance</h1>
+                            <h1 className={`text-4xl font-bold tracking-tighter ${t.pageText} uppercase`}>Compliance</h1>
                             <FeatureGuideTrigger guideId="compliance" />
                         </div>
                         <div className="flex items-center gap-2 mt-2">
                             <ShieldCheck size={12} className="text-matcha-500" />
-                            <p className={`text-[10px] ${t.textMuted} font-mono tracking-widest uppercase`}>
+                            <p className={`text-[10px] ${t.pageMuted} font-mono tracking-widest uppercase`}>
                                 Algorithmic Enforcement Node
                             </p>
                         </div>
                     </div>
                     {isAdmin && companies?.companies && companies.companies.length > 0 && (
-                        <div className={`flex flex-col gap-1.5 pl-8 border-l ${t.border}`}>
-                            <span className={`text-[8px] font-bold uppercase tracking-widest ${t.textFaint}`}>Company Context</span>
+                        <div className={`flex flex-col gap-1.5 pl-8 border-l ${t.pageBorder}`}>
+                            <span className={`text-[8px] font-bold uppercase tracking-widest ${t.pageFaint}`}>Company Context</span>
                             <select
                                 data-tour="compliance-company-select"
                                 value={selectedCompanyId || ''}
                                 onChange={e => setSelectedCompanyId(e.target.value)}
-                                className={`${t.select} text-[10px] font-mono uppercase tracking-[0.2em] focus:outline-none transition-all px-3 py-1.5 rounded-sm min-w-[220px]`}
+                                className={`${t.pageSelect} text-[10px] font-mono uppercase tracking-[0.2em] focus:outline-none transition-all px-3 py-1.5 min-w-[220px]`}
                             >
                                 {companies.companies.map(c => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
@@ -514,7 +642,7 @@ export function Compliance() {
                     {wizardReturnPath && (
                         <button
                             onClick={() => navigate(wizardReturnPath)}
-                            className={`px-5 py-2.5 border ${t.border} ${t.textDim} hover:${t.textMain} text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm`}
+                            className={`px-5 py-2.5 ${t.cancelBtn} text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm`}
                         >
                             Return To Handbook
                         </button>
@@ -527,7 +655,7 @@ export function Compliance() {
                             setJurisdictionSearch('');
                             setShowAddModal(true);
                         }}
-                        className={`flex items-center gap-2 px-6 py-2.5 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm shadow-xl`}
+                        className={`flex items-center gap-2 px-6 py-2.5 ${t.pageBtnPrimary} text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm shadow-xl`}
                     >
                         <Plus size={14} />
                         Add Location
@@ -549,15 +677,15 @@ export function Compliance() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
                 <div data-tour="compliance-locations" className="lg:col-span-1 space-y-6">
-                    <div className={`flex items-center justify-between border-b ${t.border} pb-2`}>
-                        <h2 className={`text-[10px] font-bold ${t.textMuted} uppercase tracking-[0.25em]`}>
+                    <div className={`flex items-center justify-between border-b ${t.pageBorder} pb-2`}>
+                        <h2 className={`text-[10px] font-bold ${t.pageMuted} uppercase tracking-[0.25em]`}>
                             Endpoints
                         </h2>
-                        <span className={`text-[9px] font-mono ${t.textFaint}`}>[{locations?.length || 0}]</span>
+                        <span className={`text-[9px] font-mono ${t.pageFaint}`}>[{locations?.length || 0}]</span>
                     </div>
 
                     {syncStates.size > 0 && (
-                        <div className="border border-amber-500/30 bg-amber-500/10 px-4 py-3 rounded-sm text-xs text-amber-200 space-y-1">
+                        <div className={`${t.alertSync} px-4 py-3 rounded-sm text-xs space-y-1`}>
                             <p className="font-medium uppercase tracking-wider">Handbook requires compliance sync</p>
                             <p>
                                 Run <strong>Sync Compliance</strong> for each highlighted location below, then return to your handbook.
@@ -570,14 +698,14 @@ export function Compliance() {
                         const missingStates = [...syncStates].filter(s => !coveredStates.has(s));
                         if (missingStates.length === 0) return null;
                         return (
-                            <div className="border border-red-500/30 bg-red-500/10 px-4 py-3 rounded-sm text-xs text-red-200 space-y-1 mt-2">
+                            <div className={`${t.alertSyncError} px-4 py-3 rounded-sm text-xs space-y-1 mt-2`}>
                                 <p className="font-medium uppercase tracking-wider">Location required for compliance sync</p>
                                 <p>
                                     Add a location in <strong>{missingStates.join(', ')}</strong> to your compliance dashboard,
                                     then run <strong>Sync Compliance</strong> to populate handbook coverage data.{' '}
                                     <button
                                         onClick={() => setShowAddModal(true)}
-                                        className="underline underline-offset-2 decoration-red-400/50 hover:text-red-100 transition-colors"
+                                        className={`underline underline-offset-2 ${t.alertSyncLink} transition-colors`}
                                     >
                                         Add Location
                                     </button>
@@ -640,7 +768,7 @@ export function Compliance() {
                                                 {location.name || `${location.city}, ${location.state}`}
                                             </h3>
                                             {location.has_local_ordinance && (
-                                                <span className={`text-[7px] px-1 py-0.5 ${isLight ? 'bg-stone-200 text-stone-500 border border-stone-300' : 'bg-white/5 text-zinc-500 border border-white/10'} rounded-xs uppercase tracking-widest`}>Local</span>
+                                                <span className={`text-[7px] px-1 py-0.5 ${t.neutralBadge} rounded-xs uppercase tracking-widest`}>Local</span>
                                             )}
                                         </div>
                                         <p className={`${t.textFaint} text-[10px] truncate mt-1 font-mono uppercase tracking-tighter`}>
@@ -725,7 +853,7 @@ export function Compliance() {
                     )}
                     {selectedLocationId && selectedLocation ? (
                         <div className={`${t.cardBg} border ${t.border} rounded-sm overflow-hidden min-h-[600px] flex flex-col shadow-2xl`}>
-                            <div className={`p-6 md:p-8 ${t.modalHeader} ${t.cardBg}`}>
+                            <div className={`p-6 md:p-8 ${t.cardHeader} ${t.cardBg}`}>
                                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                                     <div className="flex items-center gap-5">
                                         <div className={`w-12 h-12 rounded-sm ${t.innerEl} border ${t.border} flex items-center justify-center shadow-inner`}>
@@ -741,7 +869,7 @@ export function Compliance() {
                                                 </span>
                                                 {selectedLocation.last_compliance_check && (
                                                     <>
-                                                        <div className={`w-1 h-1 rounded-full ${isLight ? 'bg-stone-300' : 'bg-white/10'}`} />
+                                                        <div className={`w-1 h-1 rounded-full ${t.dot}`} />
                                                         <span className={`text-[9px] ${t.textFaint} font-mono uppercase tracking-widest`}>
                                                             Last Sync: {new Date(selectedLocation.last_compliance_check).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                                         </span>
@@ -773,26 +901,26 @@ export function Compliance() {
                                 <motion.div
                                     initial={{ height: 0, opacity: 0 }}
                                     animate={{ height: 'auto', opacity: 1 }}
-                                    className={`${t.modalHeader} ${isLight ? 'bg-stone-200/60' : 'bg-black/40'} overflow-hidden`}
+                                    className={`${t.cardHeader} ${t.checkBg} overflow-hidden`}
                                 >
-                                    <div className={`flex items-center gap-4 px-8 py-3 ${t.modalHeader} text-[8px] uppercase tracking-[0.3em] font-bold ${t.textFaint}`}>
+                                    <div className={`flex items-center gap-4 px-8 py-3 ${t.cardHeader} text-[8px] uppercase tracking-[0.3em] font-bold ${t.textFaint}`}>
                                         <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" /> New</div>
                                         <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Delta</div>
-                                        <div className="flex items-center gap-1.5"><div className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-stone-400' : 'bg-zinc-700'}`} /> Nominal</div>
+                                        <div className="flex items-center gap-1.5"><div className={`w-1.5 h-1.5 rounded-full ${t.dotNominal}`} /> Nominal</div>
                                     </div>
                                     <div className="px-8 py-4 space-y-2 max-h-48 overflow-y-auto font-mono">
                                         {checkMessages.map((msg, i) => (
                                             <div key={i} className="flex items-start gap-3 text-[10px] leading-relaxed">
                                                 {msg.type === 'result' ? (
                                                     <span className={`flex-shrink-0 mt-0.5 px-1.5 py-0.5 rounded-xs font-bold border ${
-                                                        msg.status === 'new' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
-                                                        msg.status === 'updated' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                                                        `${isLight ? 'bg-stone-200 text-stone-500 border-stone-300' : 'bg-white/5 text-zinc-600 border-white/5'}`
+                                                        msg.status === 'new' ? t.badgeNew :
+                                                        msg.status === 'updated' ? t.badgeUpdated :
+                                                        t.badgeNominal
                                                     }`}>
                                                         {msg.status?.toUpperCase()}
                                                     </span>
                                                 ) : (
-                                                    <div className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-stone-300' : 'bg-zinc-800'} mt-1.5 flex-shrink-0`} />
+                                                    <div className={`w-1.5 h-1.5 rounded-full ${t.dotNominalSmall} mt-1.5 flex-shrink-0`} />
                                                 )}
                                                 <span className={
                                                     msg.type === 'error' ? t.statusErr :
@@ -809,7 +937,7 @@ export function Compliance() {
                                 </motion.div>
                             )}
 
-                            <div data-tour="compliance-tabs" className={`flex ${t.modalHeader} ${t.cardBg} px-4`}>
+                            <div data-tour="compliance-tabs" className={`flex ${t.cardHeader} ${t.cardBg} px-4`}>
                                 {[
                                     { id: 'requirements', label: 'Matrix', count: requirements?.length },
                                     { id: 'alerts', label: 'Alerts', count: locationAlerts.length, badge: unreadAlertsCount },
@@ -822,8 +950,8 @@ export function Compliance() {
                                         onClick={() => setActiveTab(tab.id as any)}
                                         className={`px-6 py-4 text-[10px] font-bold uppercase tracking-[0.2em] transition-all relative ${
                                             activeTab === tab.id
-                                                ? t.textMain
-                                                : `${t.textFaint} hover:${t.textDim}`
+                                                ? t.tabActive
+                                                : t.tabInactive
                                         }`}
                                     >
                                         <span className="flex items-center gap-2">
@@ -838,7 +966,7 @@ export function Compliance() {
                                         {activeTab === tab.id && (
                                             <motion.div
                                                 layoutId="active-tab-indicator"
-                                                className={`absolute bottom-0 left-6 right-6 h-0.5 ${isLight ? 'bg-zinc-900' : 'bg-white'}`}
+                                                className={`absolute bottom-0 left-6 right-6 h-0.5 ${t.tabIndicator}`}
                                             />
                                         )}
                                     </button>
@@ -846,16 +974,16 @@ export function Compliance() {
                             </div>
 
                             {selectedLocation?.has_local_ordinance === false && (
-                                <div className="mx-6 mt-4 px-4 py-3 bg-blue-500/10 border border-blue-500/20 rounded-sm flex items-start gap-3">
-                                    <Info size={14} className="text-blue-400 mt-0.5 flex-shrink-0" />
-                                    <p className="text-[10px] text-blue-300 leading-relaxed uppercase tracking-tight">
+                                <div className={`mx-6 mt-4 px-4 py-3 ${t.localInfoBg} rounded-sm flex items-start gap-3`}>
+                                    <Info size={14} className={`${t.localInfoIcon} mt-0.5 flex-shrink-0`} />
+                                    <p className={`text-[10px] ${t.localInfoText} leading-relaxed uppercase tracking-tight`}>
                                         <span className="font-bold">{selectedLocation.city}</span> does not have local labor ordinances.
                                         Requirements inherited from {selectedLocation.county ? `${selectedLocation.county} County / ` : ''}{selectedLocation.state} State law.
                                     </p>
                                 </div>
                             )}
 
-                            <div className={`p-6 flex-1 ${isLight ? 'bg-stone-50' : 'bg-zinc-950'} overflow-y-auto`}>
+                            <div className={`p-6 flex-1 ${t.contentBg} overflow-y-auto`}>
                                 {activeTab === 'posters' ? (
                                     postersLoading ? (
                                         <div className="space-y-4">
@@ -867,7 +995,7 @@ export function Compliance() {
                                         <div className="space-y-6">
                                             {/* Available posters by location */}
                                             <div>
-                                                <h3 className={`text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-4 pb-2 ${t.modalHeader}`}>Available Posters</h3>
+                                                <h3 className={`text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-4 pb-2 ${t.cardHeader}`}>Available Posters</h3>
                                                 {availablePosters.length === 0 ? (
                                                     <p className={`${t.textFaint} text-[10px] font-mono uppercase tracking-widest`}>No templates generated for this endpoint context.</p>
                                                 ) : (
@@ -955,7 +1083,7 @@ export function Compliance() {
                                             {/* Order history */}
                                             {posterOrders.length > 0 && (
                                                 <div>
-                                                    <h3 className={`text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-4 pb-2 ${t.modalHeader}`}>Vault History</h3>
+                                                    <h3 className={`text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-4 pb-2 ${t.cardHeader}`}>Vault History</h3>
                                                     <div className="space-y-2">
                                                         {posterOrders.map(order => (
                                                             <div key={order.id} className={`${t.cardBg} border ${t.border} rounded-sm p-5 ${t.rowHover} transition-colors`}>
@@ -974,7 +1102,7 @@ export function Compliance() {
                                                                         <span className={`px-2 py-1 text-[8px] font-bold uppercase tracking-widest rounded-xs border ${
                                                                             order.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
                                                                             order.status === 'shipped' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
-                                                                            order.status === 'cancelled' ? (isLight ? 'bg-stone-200 text-stone-500 border-stone-300' : 'bg-zinc-800 text-zinc-500 border-zinc-700') :
+                                                                            order.status === 'cancelled' ? t.posterCancelled :
                                                                             'bg-blue-500/10 text-blue-400 border-blue-500/20'
                                                                         }`}>
                                                                             {order.status}
@@ -999,7 +1127,7 @@ export function Compliance() {
                                     )
                                 ) : activeTab === 'upcoming' ? (
                                     !upcomingLegislation || upcomingLegislation.length === 0 ? (
-                                        <div className={`text-center py-24 border border-dashed ${t.border} ${isLight ? 'bg-stone-100/50' : 'bg-white/[0.01]'}`}>
+                                        <div className={`text-center py-24 border border-dashed ${t.border} ${t.emptyBg}`}>
                                             <div className={`w-12 h-12 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center opacity-40`}>
                                                 <Calendar size={20} className={t.textMuted} />
                                             </div>
@@ -1014,7 +1142,7 @@ export function Compliance() {
                                                     signed: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
                                                     effective_soon: 'bg-red-500/10 text-red-400 border-red-500/20',
                                                     effective: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-                                                    dismissed: isLight ? 'bg-stone-200 text-stone-500 border-stone-300' : 'bg-zinc-800 text-zinc-500 border-zinc-700',
+                                                    dismissed: t.legDismissed,
                                                 };
                                                 const isEffectiveNow = leg.days_until_effective !== null && leg.days_until_effective <= 0;
                                                 const displayStatus = isEffectiveNow ? 'effective' : leg.current_status;
@@ -1024,11 +1152,11 @@ export function Compliance() {
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-3 flex-wrap mb-2">
                                                                     <h4 className={`text-sm font-bold ${t.textMain} uppercase tracking-tight truncate`}>{leg.title}</h4>
-                                                                    <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${statusColors[displayStatus] || (isLight ? 'bg-stone-200 text-stone-500 border-stone-300' : 'bg-zinc-800 text-zinc-500 border-zinc-700')}`}>
+                                                                    <span className={`text-[8px] px-1.5 py-0.5 border rounded-xs font-bold uppercase tracking-widest ${statusColors[displayStatus] || t.legDismissed}`}>
                                                                         {displayStatus.replace('_', ' ')}
                                                                     </span>
                                                                     {leg.category && (
-                                                                        <span className={`text-[8px] px-1.5 py-0.5 ${isLight ? 'bg-stone-200 text-stone-500 border border-stone-300' : 'bg-white/5 text-zinc-500 border border-white/10'} rounded-xs uppercase tracking-widest`}>
+                                                                        <span className={`text-[8px] px-1.5 py-0.5 ${t.neutralBadge} rounded-xs uppercase tracking-widest`}>
                                                                             {COMPLIANCE_CATEGORY_LABELS[leg.category] || leg.category}
                                                                         </span>
                                                                     )}
@@ -1037,8 +1165,8 @@ export function Compliance() {
                                                                     <p className={`text-[11px] ${t.textMuted} leading-relaxed mb-4 font-light`}>{leg.description}</p>
                                                                 )}
                                                                 {leg.impact_summary && (
-                                                                    <div className="p-3 bg-amber-500/[0.03] border-l-2 border-amber-500/20 mb-4">
-                                                                        <p className="text-[10px] text-amber-200/70 leading-relaxed">
+                                                                    <div className={`p-3 ${t.impactBg} mb-4`}>
+                                                                        <p className={`text-[10px] ${t.impactText} leading-relaxed`}>
                                                                             <span className="font-bold uppercase tracking-wider text-[8px] mr-2">Impact Analysis:</span> {leg.impact_summary}
                                                                         </p>
                                                                     </div>
@@ -1052,7 +1180,7 @@ export function Compliance() {
                                                                                 <span className={`ml-1 font-bold ${
                                                                                     leg.days_until_effective <= 30 ? 'text-red-500' :
                                                                                     leg.days_until_effective <= 90 ? 'text-amber-500' :
-                                                                                    'text-zinc-500'
+                                                                                    t.textMuted
                                                                                 }`}>
                                                                                     ({leg.days_until_effective <= 0 ? 'ENFORCED' : `${leg.days_until_effective}D REMAINING`})
                                                                                 </span>
@@ -1063,7 +1191,7 @@ export function Compliance() {
                                                                         <span>Confidence: {Math.round(leg.confidence * 100)}%</span>
                                                                     )}
                                                                     {leg.source_url && (
-                                                                        <a href={leg.source_url} target="_blank" rel="noopener noreferrer" className={`${isLight ? 'text-blue-600 hover:text-blue-800' : 'text-blue-400 hover:text-white'} flex items-center gap-1.5 transition-colors`}>
+                                                                        <a href={leg.source_url} target="_blank" rel="noopener noreferrer" className={`${t.authorityLink} flex items-center gap-1.5 transition-colors`}>
                                                                             Authority <ExternalLink size={10} />
                                                                         </a>
                                                                     )}
@@ -1091,7 +1219,7 @@ export function Compliance() {
                                     )
                                 ) : activeTab === 'history' ? (
                                     !checkLog || checkLog.length === 0 ? (
-                                        <div className={`text-center py-24 border border-dashed ${t.border} ${isLight ? 'bg-stone-100/50' : 'bg-white/[0.01]'}`}>
+                                        <div className={`text-center py-24 border border-dashed ${t.border} ${t.emptyBg}`}>
                                             <div className={`w-12 h-12 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center opacity-40`}>
                                                 <History size={20} className={t.textMuted} />
                                             </div>
@@ -1111,7 +1239,7 @@ export function Compliance() {
                                                             <span className={`text-[8px] px-1.5 py-0.5 rounded-xs border font-bold uppercase tracking-widest ${
                                                                 entry.check_type === 'scheduled' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
                                                                 entry.check_type === 'proactive' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
-                                                                'bg-white/5 text-zinc-500 border-white/10'
+                                                                t.checkManual
                                                             }`}>
                                                                 {entry.check_type}
                                                             </span>
@@ -1144,11 +1272,11 @@ export function Compliance() {
                                 ) : activeTab === 'requirements' ? (
                                     <>
                                     {latestMissingCoverageCategories.length > 0 && (
-                                        <div className="mb-4 p-4 border border-amber-500/30 bg-amber-500/10 rounded-sm">
-                                            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300">
+                                        <div className={`mb-4 p-4 border ${t.coverageMissingBorder} ${t.coverageMissingBg} rounded-sm`}>
+                                            <p className={`text-[10px] font-bold uppercase tracking-[0.2em] ${t.coverageMissingTitle}`}>
                                                 Source Coverage Missing
                                             </p>
-                                            <p className="mt-2 text-[11px] text-amber-100 leading-relaxed">
+                                            <p className={`mt-2 text-[11px] ${t.coverageMissingText} leading-relaxed`}>
                                                 This jurisdiction is still missing verified source-of-truth coverage for: <span className="font-semibold">{latestMissingCoverageLabel}</span>. Run Admin &gt; Jurisdictions research refresh, then sync this location again.
                                             </p>
                                         </div>
@@ -1160,16 +1288,16 @@ export function Compliance() {
                                             ))}
                                         </div>
                                     ) : orderedRequirementCategories.length === 0 ? (
-                                        <div className={`text-center py-24 ${t.textFaint} text-[10px] font-mono uppercase tracking-[0.2em] border border-dashed ${t.border} ${isLight ? 'bg-stone-100/50' : 'bg-white/[0.01]'}`}>
+                                        <div className={`text-center py-24 ${t.textFaint} text-[10px] font-mono uppercase tracking-[0.2em] border border-dashed ${t.border} ${t.emptyBg}`}>
                                             Zero Nodes Detected
                                         </div>
                                     ) : (
-                                        <div className={`space-y-px ${isLight ? 'bg-stone-200' : 'bg-white/5'} border ${t.border}`}>
+                                        <div className={`space-y-px ${t.requirementDivider} border ${t.border}`}>
                                             {orderedRequirementCategories.map(([category, reqs]) => (
-                                                <div key={category} className={isLight ? 'bg-stone-50/80' : 'bg-zinc-950/20'}>
+                                                <div key={category} className={t.requirementItemBg}>
                                                     <button
                                                         onClick={() => toggleCategory(category)}
-                                                        className={`w-full flex items-center justify-between p-5 ${t.cardBg} ${t.rowHover} transition-colors ${t.modalHeader}`}
+                                                        className={`w-full flex items-center justify-between p-5 ${t.cardBg} ${t.rowHover} transition-colors ${t.cardHeader}`}
                                                     >
                                                         <div className="flex items-center gap-4">
                                                             <div className="flex flex-col items-start">
@@ -1197,7 +1325,7 @@ export function Compliance() {
                                                                 <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
                                                                     missingCoverageCategorySet.has(category)
                                                                         ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                                                        : `${t.cardBg} ${t.textMuted} border-${isLight ? 'stone-300' : 'zinc-800'}`
+                                                                        : `${t.cardBg} ${t.textMuted} ${t.coveragePendingBorder}`
                                                                 }`}>
                                                                     {missingCoverageCategorySet.has(category) ? 'Missing Source Coverage' : 'Coverage Pending'}
                                                                 </span>
@@ -1218,7 +1346,7 @@ export function Compliance() {
                                                                 animate={{ height: 'auto', opacity: 1 }}
                                                                 exit={{ height: 0, opacity: 0 }}
                                                                 transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                                                                className={`overflow-hidden ${isLight ? 'bg-stone-100/60' : 'bg-zinc-950/40'}`}
+                                                                className={`overflow-hidden ${t.expandedBg}`}
                                                             >
                                                                 <div className={`divide-y ${t.divide} px-2`}>
                                                                     {reqs.length === 0 ? (
@@ -1268,7 +1396,7 @@ export function Compliance() {
                                                                                         {req.description}
                                                                                     </p>
                                                                                 )}
-                                                                                <div className={`flex items-center justify-between pt-4 border-t ${isLight ? 'border-stone-200' : 'border-white/[0.03]'}`}>
+                                                                                <div className={`flex items-center justify-between pt-4 border-t ${t.borderInline}`}>
                                                                                     <div className="flex items-center gap-4">
                                                                                         {req.effective_date && (
                                                                                             <div className={`flex items-center gap-2 text-[8px] ${t.textFaint} uppercase tracking-widest font-mono`}>
@@ -1282,7 +1410,7 @@ export function Compliance() {
                                                                                             href={req.source_url}
                                                                                             target="_blank"
                                                                                             rel="noopener noreferrer"
-                                                                                            className={`text-[9px] font-bold uppercase tracking-widest ${t.textMuted} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} flex items-center gap-1.5 transition-colors`}
+                                                                                            className={`text-[9px] font-bold uppercase tracking-widest ${t.textMuted} ${t.linkHover} flex items-center gap-1.5 transition-colors`}
                                                                                         >
                                                                                             Authority <ExternalLink size={10} />
                                                                                         </a>
@@ -1308,7 +1436,7 @@ export function Compliance() {
                                             ))}
                                         </div>
                                     ) : locationAlerts.length === 0 ? (
-                                        <div className={`text-center py-24 border border-dashed ${t.border} ${isLight ? 'bg-stone-100/50' : 'bg-white/[0.01]'}`}>
+                                        <div className={`text-center py-24 border border-dashed ${t.border} ${t.emptyBg}`}>
                                             <div className={`w-12 h-12 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center`}>
                                                 <CheckCircle size={20} className={t.textFaint} />
                                             </div>
@@ -1325,7 +1453,7 @@ export function Compliance() {
                                                     animate={{ opacity: 1, y: 0 }}
                                                     key={alert.id}
                                                     className={`border rounded-sm p-5 transition-all ${getSeverityStyles(alert.severity)} ${
-                                                        alert.status === 'unread' ? 'bg-opacity-10 border-opacity-30' : (isLight ? 'opacity-50 bg-stone-200/60 border-stone-300' : 'opacity-50 bg-zinc-900/40 border-white/5')
+                                                        alert.status === 'unread' ? 'bg-opacity-10 border-opacity-30' : t.alertDismissed
                                                     }`}
                                                 >
                                                     <div className="flex items-start justify-between gap-6">
@@ -1337,7 +1465,7 @@ export function Compliance() {
                                                                 <div className="flex items-center gap-3 flex-wrap mb-2">
                                                                     <h4 className={`text-xs font-bold uppercase tracking-widest ${t.textMain}`}>{alert.title}</h4>
                                                                     {alert.alert_type && alert.alert_type !== 'change' && (
-                                                                        <span className={`text-[8px] px-1.5 py-0.5 ${isLight ? 'bg-stone-200 border border-stone-300 text-stone-600' : 'bg-white/5 border border-white/10 text-zinc-400'} rounded-xs uppercase tracking-widest font-bold`}>
+                                                                        <span className={`text-[8px] px-1.5 py-0.5 ${t.neutralBadge} rounded-xs uppercase tracking-widest font-bold`}>
                                                                             {alert.alert_type.replace('_', ' ')}
                                                                         </span>
                                                                     )}
@@ -1369,7 +1497,7 @@ export function Compliance() {
                                                                         <div className={`text-[9px] ${t.textMuted} uppercase tracking-widest font-bold flex items-center gap-2`}>
                                                                             <span className="opacity-40">Source:</span>
                                                                             {alert.source_url ? (
-                                                                                <a href={alert.source_url} target="_blank" rel="noopener noreferrer" className={`${t.textDim} ${isLight ? 'hover:text-zinc-900 decoration-stone-400/30' : 'hover:text-white decoration-white/10'} underline underline-offset-2 transition-colors`}>
+                                                                                <a href={alert.source_url} target="_blank" rel="noopener noreferrer" className={`${t.textDim} ${t.linkHover} ${t.sourceLinkDecor} underline underline-offset-2 transition-colors`}>
                                                                                     {alert.source_name || 'Authority'}
                                                                                 </a>
                                                                             ) : (
@@ -1383,7 +1511,7 @@ export function Compliance() {
                                                                     <div className="mt-4">
                                                                         <button
                                                                             onClick={() => toggleAlertSources(alert.id)}
-                                                                            className={`text-[8px] uppercase tracking-[0.2em] ${t.textFaint} ${isLight ? 'hover:text-stone-700' : 'hover:text-zinc-400'} flex items-center gap-2 transition-colors`}
+                                                                            className={`text-[8px] uppercase tracking-[0.2em] ${t.textFaint} ${t.linkHover} flex items-center gap-2 transition-colors`}
                                                                         >
                                                                             <Eye size={10} />
                                                                             {expandedAlertSources.has(alert.id) ? 'Hide' : 'Resolve'} {alert.verification_sources.length} Evidence Node(s)
@@ -1396,12 +1524,12 @@ export function Compliance() {
                                                                                             <span className={`px-1 py-0.5 rounded-xs uppercase tracking-widest font-bold text-[7px] ${
                                                                                                 src.type === 'official' ? `bg-emerald-500/10 ${t.statusOk}` :
                                                                                                 src.type === 'news' ? 'bg-blue-500/10 text-blue-400' :
-                                                                                                `${t.innerEl} ${t.textMuted}`
+                                                                                                t.sourceTypeFallback
                                                                                             }`}>
                                                                                                 {src.type}
                                                                                             </span>
                                                                                             {src.url ? (
-                                                                                                <a href={src.url} target="_blank" rel="noopener noreferrer" className={`${t.textDim} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} truncate max-w-xs transition-colors`}>
+                                                                                                <a href={src.url} target="_blank" rel="noopener noreferrer" className={`${t.textDim} ${t.linkHover} truncate max-w-xs transition-colors`}>
                                                                                                     {src.name || src.url}
                                                                                                 </a>
                                                                                             ) : (
@@ -1418,7 +1546,7 @@ export function Compliance() {
                                                                     </div>
                                                                 )}
                                                                 {alert.action_required && (
-                                                                    <div className={`mt-4 p-3 ${isLight ? 'bg-stone-200 border border-stone-300' : 'bg-white/5 border border-white/5'} rounded-sm`}>
+                                                                    <div className={`mt-4 p-3 ${t.alertActionBg} rounded-sm`}>
                                                                         <span className={`text-[8px] font-bold uppercase tracking-[0.3em] ${t.textMuted} block mb-1`}>Mandatory Action</span>
                                                                         <span className={`text-[10px] ${t.textMain} font-bold uppercase tracking-wide`}>{alert.action_required}</span>
                                                                     </div>
@@ -1429,7 +1557,7 @@ export function Compliance() {
                                                             {alert.status === 'unread' && (
                                                                 <button
                                                                     onClick={() => markAlertReadMutation.mutate(alert.id)}
-                                                                    className={`p-2 ${isLight ? 'hover:bg-stone-200' : 'hover:bg-white/5'} rounded-full transition-colors ${t.textDim} hover:text-emerald-500`}
+                                                                    className={`p-2 ${t.alertBtnHover} rounded-full transition-colors ${t.textDim} hover:text-emerald-500`}
                                                                     title="Acknowledge"
                                                                 >
                                                                     <CheckCircle size={14} />
@@ -1438,7 +1566,7 @@ export function Compliance() {
                                                             {alert.status !== 'dismissed' && (
                                                                 <button
                                                                     onClick={() => dismissAlertMutation.mutate(alert.id)}
-                                                                    className={`p-2 ${isLight ? 'hover:bg-stone-200' : 'hover:bg-white/5'} rounded-full transition-colors ${t.textDim} hover:text-red-500`}
+                                                                    className={`p-2 ${t.alertBtnHover} rounded-full transition-colors ${t.textDim} hover:text-red-500`}
                                                                     title="Dismiss"
                                                                 >
                                                                     <X size={14} />
@@ -1491,13 +1619,13 @@ export function Compliance() {
                             className={`${t.modalBg} shadow-2xl p-10 w-full max-w-md relative overflow-hidden`}
                             onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         >
-                            <div className={`absolute top-0 left-0 w-full h-0.5 ${isLight ? 'bg-stone-300' : 'bg-white/5'}`} />
+                            <div className={`absolute top-0 left-0 w-full h-0.5 ${t.modalAccent}`} />
                             <div className="flex items-center justify-between mb-10">
                                 <div className="space-y-1">
-                                    <h2 className={`text-2xl font-bold ${t.textMain} uppercase tracking-tighter`}>
+                                    <h2 className={`text-2xl font-bold ${t.pageText} uppercase tracking-tighter`}>
                                         {editingLocation ? 'Edit Endpoint' : 'Register Node'}
                                     </h2>
-                                    <p className={`text-[9px] ${t.textMuted} font-mono uppercase tracking-[0.2em]`}>Location Configuration</p>
+                                    <p className={`text-[9px] ${t.pageMuted} font-mono uppercase tracking-[0.2em]`}>Location Configuration</p>
                                 </div>
                                 <button
                                     onClick={() => {
@@ -1507,7 +1635,7 @@ export function Compliance() {
                                         setJurisdictionSearch('');
                                         setUseManualEntry(false);
                                     }}
-                                    className={`p-2 ${t.textFaint} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} transition-colors`}
+                                    className={`p-2 ${t.closeBtnCls}`}
                                 >
                                     <X size={20} />
                                 </button>
@@ -1515,7 +1643,7 @@ export function Compliance() {
 
                             <form onSubmit={handleSubmitLocation} className="space-y-6">
                                 <div>
-                                    <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
+                                    <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.pageMuted} mb-2 font-bold font-mono`}>
                                         Logical Identifier (optional)
                                     </label>
                                     <input
@@ -1523,20 +1651,20 @@ export function Compliance() {
                                         value={formData.name}
                                         onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
                                         placeholder="e.g. SF HEADQUARTERS"
-                                        className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                        className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                     />
                                 </div>
 
                                 {showJurisdictionPicker ? (
                                     <div className="space-y-4">
                                         <div className="flex items-center justify-between">
-                                            <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} font-bold font-mono`}>
+                                            <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.pageMuted} font-bold font-mono`}>
                                                 Jurisdiction Scan
                                             </label>
                                             <button
                                                 type="button"
                                                 onClick={() => { setUseManualEntry(true); setFormData(prev => ({ ...prev, jurisdictionKey: '' })); }}
-                                                className={`text-[8px] ${t.textFaint} ${isLight ? 'hover:text-stone-700' : 'hover:text-zinc-400'} uppercase tracking-widest transition-colors font-bold`}
+                                                className={`text-[8px] ${t.pageFaint} ${t.pageLinkHover} uppercase tracking-widest transition-colors font-bold`}
                                             >
                                                 Manual Override
                                             </button>
@@ -1547,12 +1675,12 @@ export function Compliance() {
                                                 value={jurisdictionSearch}
                                                 onChange={e => setJurisdictionSearch(e.target.value)}
                                                 placeholder="SEARCH CITIES..."
-                                                className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-widest`}
+                                                className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-widest`}
                                             />
                                         </div>
-                                        <div className={`max-h-40 overflow-y-auto border ${t.border} rounded-sm ${isLight ? 'bg-stone-50' : 'bg-black/40'} no-scrollbar`}>
+                                        <div className={`max-h-40 overflow-y-auto border ${t.pageBorder} rounded-sm ${t.dropdownBg} no-scrollbar`}>
                                             {Object.keys(filteredJurisdictions).length === 0 ? (
-                                                <div className={`px-4 py-8 text-center ${t.textFaint} text-[9px] font-mono uppercase tracking-widest`}>
+                                                <div className={`px-4 py-8 text-center ${t.pageFaint} text-[9px] font-mono uppercase tracking-widest`}>
                                                     {jurisdictionSearch ? 'Zero Matches' : 'Initializing Matrix...'}
                                                 </div>
                                             ) : (
@@ -1560,7 +1688,7 @@ export function Compliance() {
                                                     const stateLabel = US_STATES.find(s => s.value === state)?.label || state;
                                                     return (
                                                         <div key={state}>
-                                                            <div className={`px-4 py-2 ${isLight ? 'bg-stone-100' : 'bg-zinc-950'} text-[8px] ${t.textFaint} font-bold uppercase tracking-[0.3em] sticky top-0 ${t.modalHeader}`}>
+                                                            <div className={`px-4 py-2 ${t.dropdownHeader} text-[8px] ${t.pageFaint} font-bold uppercase tracking-[0.3em] sticky top-0 ${t.modalHeader}`}>
                                                                 {stateLabel}
                                                             </div>
                                                             {items.map(j => {
@@ -1579,10 +1707,10 @@ export function Compliance() {
                                                                                 jurisdictionKey: key,
                                                                             }));
                                                                         }}
-                                                                        className={`w-full text-left px-4 py-2.5 text-[11px] transition-all flex items-center justify-between border-b ${t.border} last:border-0 ${
+                                                                        className={`w-full text-left px-4 py-2.5 text-[11px] transition-all flex items-center justify-between border-b ${t.pageBorder} last:border-0 ${
                                                                             isSelected
-                                                                                ? `${isLight ? 'bg-stone-200 text-zinc-900' : 'bg-white/10 text-white'} font-bold`
-                                                                                : `${t.textMuted} ${t.rowHover} ${isLight ? 'hover:text-zinc-900' : 'hover:text-zinc-300'}`
+                                                                                ? `${t.listItemSelected} font-bold`
+                                                                                : `${t.pageMuted} ${t.pageRowHover} ${t.listItemHoverText}`
                                                                         }`}
                                                                     >
                                                                         <span className="uppercase tracking-tight">{j.city}, {j.state}</span>
@@ -1602,9 +1730,9 @@ export function Compliance() {
                                         {formData.jurisdictionKey && (
                                             <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-sm">
                                                 <div className={`text-[8px] ${t.statusOk} font-bold uppercase tracking-widest mb-1`}>Matrix Resolution</div>
-                                                <div className={`text-xs ${t.textDim} font-mono uppercase tracking-tighter`}>
+                                                <div className={`text-xs ${t.pageDim} font-mono uppercase tracking-tighter`}>
                                                     {formData.city}, {formData.state}
-                                                    {formData.county && <span className={`${t.textFaint} ml-2 font-light`}>[{formData.county} County]</span>}
+                                                    {formData.county && <span className={`${t.pageFaint} ml-2 font-light`}>[{formData.county} County]</span>}
                                                 </div>
                                             </div>
                                         )}
@@ -1615,13 +1743,13 @@ export function Compliance() {
                                             <button
                                                 type="button"
                                                 onClick={() => { setUseManualEntry(false); setFormData(emptyFormData); }}
-                                                className={`text-[8px] ${t.textFaint} ${isLight ? 'hover:text-stone-700' : 'hover:text-zinc-400'} uppercase tracking-widest transition-colors font-bold`}
+                                                className={`text-[8px] ${t.pageFaint} ${t.pageLinkHover} uppercase tracking-widest transition-colors font-bold`}
                                             >
                                                 Revert to Matrix Search
                                             </button>
                                         )}
                                         <div>
-                                            <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
+                                            <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.pageMuted} mb-2 font-bold font-mono`}>
                                                 Street Address
                                             </label>
                                             <input
@@ -1629,13 +1757,13 @@ export function Compliance() {
                                                 value={formData.address}
                                                 onChange={e => setFormData(prev => ({ ...prev, address: e.target.value }))}
                                                 placeholder="PHYSICAL LOCATION"
-                                                className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                             />
                                         </div>
 
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
-                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
+                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.pageMuted} mb-2 font-bold font-mono`}>
                                                     City
                                                 </label>
                                                 <input
@@ -1643,18 +1771,18 @@ export function Compliance() {
                                                     value={formData.city}
                                                     onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))}
                                                     required
-                                                    className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                    className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                                 />
                                             </div>
                                             <div>
-                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
+                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.pageMuted} mb-2 font-bold font-mono`}>
                                                     State
                                                 </label>
                                                 <select
                                                     value={formData.state}
                                                     onChange={e => setFormData(prev => ({ ...prev, state: e.target.value }))}
                                                     required
-                                                    className={`w-full px-4 py-3 ${t.select} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                    className={`w-full px-4 py-3 ${t.pageSelect} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                                 >
                                                     <option value="">--</option>
                                                     {US_STATES.map(state => (
@@ -1668,18 +1796,18 @@ export function Compliance() {
 
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
-                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
+                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.pageMuted} mb-2 font-bold font-mono`}>
                                                     County
                                                 </label>
                                                 <input
                                                     type="text"
                                                     value={formData.county}
                                                     onChange={e => setFormData(prev => ({ ...prev, county: e.target.value }))}
-                                                    className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                    className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                                 />
                                             </div>
                                             <div>
-                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.textMuted} mb-2 font-bold font-mono`}>
+                                                <label className={`block text-[9px] tracking-[0.2em] uppercase ${t.pageMuted} mb-2 font-bold font-mono`}>
                                                     ZIP Code
                                                 </label>
                                                 <input
@@ -1688,7 +1816,7 @@ export function Compliance() {
                                                     onChange={e => setFormData(prev => ({ ...prev, zipcode: e.target.value }))}
                                                     required={!isClient && !isAdmin}
                                                     maxLength={10}
-                                                    className={`w-full px-4 py-3 ${t.input} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                    className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
                                                 />
                                             </div>
                                         </div>
@@ -1705,14 +1833,14 @@ export function Compliance() {
                                             setJurisdictionSearch('');
                                             setUseManualEntry(false);
                                         }}
-                                        className={`flex-1 px-6 py-3.5 bg-transparent border ${t.border} ${t.textMuted} ${isLight ? 'hover:text-zinc-900 hover:bg-stone-200' : 'hover:text-white hover:bg-white/5'} rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all`}
+                                        className={`flex-1 px-6 py-3.5 ${t.cancelBtn} rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all`}
                                     >
                                         Abort
                                     </button>
                                     <button
                                         type="submit"
                                         disabled={createLocationMutation.isPending || updateLocationMutation.isPending || (showJurisdictionPicker && !formData.jurisdictionKey)}
-                                        className={`flex-1 px-6 py-3.5 ${t.btnPrimary} rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 shadow-lg`}
+                                        className={`flex-1 px-6 py-3.5 ${t.pageBtnPrimary} rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 shadow-lg`}
                                     >
                                         {createLocationMutation.isPending || updateLocationMutation.isPending
                                             ? 'Syncing...'
@@ -1726,6 +1854,7 @@ export function Compliance() {
                     </motion.div>
                 )}
             </AnimatePresence>
+        </div>
         </div>
     );
 }
