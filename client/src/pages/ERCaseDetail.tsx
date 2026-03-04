@@ -6,6 +6,7 @@ import { erCopilot } from '../api/client';
 import { useIsLightMode } from '../hooks/useIsLightMode';
 import type {
   ERCase,
+  ERCaseCategory,
   ERCaseStatus,
   ERCaseNote,
   ERDocument,
@@ -413,6 +414,28 @@ const STATUS_OPTIONS: { value: ERCaseStatus; label: string }[] = [
   { value: 'pending_determination', label: 'Pending Determination' },
   { value: 'closed', label: 'Closed' },
 ];
+
+const CATEGORY_OPTIONS: { value: ERCaseCategory; label: string }[] = [
+  { value: 'harassment', label: 'Harassment' },
+  { value: 'discrimination', label: 'Discrimination' },
+  { value: 'safety', label: 'Safety' },
+  { value: 'retaliation', label: 'Retaliation' },
+  { value: 'policy_violation', label: 'Policy Violation' },
+  { value: 'misconduct', label: 'Misconduct' },
+  { value: 'wage_hour', label: 'Wage & Hour' },
+  { value: 'other', label: 'Other' },
+];
+
+const CATEGORY_LABELS: Record<ERCaseCategory, string> = {
+  harassment: 'Harassment',
+  discrimination: 'Discrimination',
+  safety: 'Safety',
+  retaliation: 'Retaliation',
+  policy_violation: 'Policy Violation',
+  misconduct: 'Misconduct',
+  wage_hour: 'Wage & Hour',
+  other: 'Other',
+};
 
 const DOC_TYPE_OPTIONS: { value: ERDocumentType; label: string }[] = [
   { value: 'transcript', label: 'Interview Transcript' },
@@ -1020,6 +1043,18 @@ export function ERCaseDetail() {
     }
   };
 
+  const handleCategoryChange = async (newCategory: ERCaseCategory | '') => {
+    if (!id || !erCase) return;
+
+    try {
+      await erCopilot.updateCase(id, { category: newCategory || undefined });
+      await fetchCase();
+    } catch (err) {
+      console.error('Failed to update category:', err);
+      await fetchCase();
+    }
+  };
+
   const updateGuidanceCardState = useCallback(async (cardId: string, status: GuidanceCardState) => {
     if (!id || !erCase) return;
 
@@ -1379,6 +1414,11 @@ export function ERCaseDetail() {
             <span className={`text-xs uppercase tracking-wide font-medium ${t.statusColors[erCase.status]}`}>
               {erCase.status.replace('_', ' ')}
             </span>
+            {erCase.category && (
+              <span className={`text-[10px] uppercase tracking-wider font-bold ${t.textMuted} px-2 py-0.5 border ${t.border} rounded`}>
+                {CATEGORY_LABELS[erCase.category]}
+              </span>
+            )}
           </div>
           <h1 className={`text-3xl font-light ${t.textMain} tracking-tight`}>{erCase.title}</h1>
         </div>
@@ -1400,6 +1440,18 @@ export function ERCaseDetail() {
               }`}
             >
               {STATUS_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="w-40">
+            <select
+              value={erCase.category || ''}
+              onChange={(e) => handleCategoryChange(e.target.value as ERCaseCategory | '')}
+              className={`w-full px-2 py-1.5 bg-transparent border-b ${t.border} text-xs ${t.textDim} focus:outline-none cursor-pointer`}
+            >
+              <option value="">Uncategorized</option>
+              {CATEGORY_OPTIONS.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>

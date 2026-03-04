@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { erCopilot } from '../api/client';
 import type {
   ERCase,
+  ERCaseCategory,
   ERCaseCreate,
   ERCaseIntakeContext,
   ERCaseStatus,
@@ -109,6 +110,17 @@ const DOC_TYPE_OPTIONS: { value: ERDocumentType; label: string }[] = [
   { value: 'policy', label: 'Policy Document' },
   { value: 'email', label: 'Email/Communication' },
   { value: 'other', label: 'Other Evidence' },
+];
+
+const CATEGORY_OPTIONS: { value: ERCaseCategory; label: string }[] = [
+  { value: 'harassment', label: 'Harassment' },
+  { value: 'discrimination', label: 'Discrimination' },
+  { value: 'safety', label: 'Safety' },
+  { value: 'retaliation', label: 'Retaliation' },
+  { value: 'policy_violation', label: 'Policy Violation' },
+  { value: 'misconduct', label: 'Misconduct' },
+  { value: 'wage_hour', label: 'Wage & Hour' },
+  { value: 'other', label: 'Other' },
 ];
 
 type CreateStep = 'details' | 'documents_prompt' | 'documents_upload' | 'assistance_prompt' | 'assistance_questions';
@@ -276,6 +288,7 @@ export function ERCopilot() {
       const created = await erCopilot.createCase({
         title: formData.title.trim(),
         description: formData.description.trim(),
+        category: formData.category || undefined,
       });
       setCreatedCaseId(created.id);
       setCreateStep('documents_prompt');
@@ -606,6 +619,20 @@ export function ERCopilot() {
                       rows={4}
                       className={`w-full ${t.input} text-sm px-3.5 py-2.5 focus:outline-none resize-none transition-colors`}
                     />
+                  </div>
+
+                  <div>
+                    <label className={`block ${t.label} mb-2`}>Category</label>
+                    <select
+                      value={formData.category || ''}
+                      onChange={(e) => setFormData({ ...formData, category: (e.target.value || undefined) as ERCaseCategory | undefined })}
+                      className={`w-full ${t.select} text-sm px-3 py-2.5 focus:outline-none`}
+                    >
+                      <option value="">Select category...</option>
+                      {CATEGORY_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
                   </div>
                 </>
               )}
