@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { irIncidents } from '../api/client';
 import type { IRIncident, IRIncidentType, IRSeverity, IRStatus, IRAnalyticsSummary } from '../types';
-import { Plus, Trash2, BarChart3 } from 'lucide-react';
+import { Plus, Trash2, BarChart3, Shield, Copy, RefreshCw, X } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
 
@@ -91,6 +91,12 @@ export function IRList() {
   const [severityFilter, setSeverityFilter] = useState<IRSeverity | ''>('');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Anonymous reporting
+  const [anonLink, setAnonLink] = useState<string | null>(null);
+  const [anonEnabled, setAnonEnabled] = useState(false);
+  const [anonLoading, setAnonLoading] = useState(false);
+  const [anonCopied, setAnonCopied] = useState(false);
+
   const fetchIncidents = useCallback(async () => {
     try {
       setLoading(true);
@@ -127,6 +133,54 @@ export function IRList() {
   useEffect(() => {
     fetchIncidents();
   }, [fetchIncidents]);
+
+  // Load anonymous reporting status
+  useEffect(() => {
+    irIncidents.getAnonymousReportingStatus().then((res) => {
+      setAnonLink(res.token ? `${window.location.origin}/report/${res.token}` : null);
+      setAnonEnabled(res.enabled);
+    }).catch(() => {});
+  }, []);
+
+  const handleEnableAnon = async () => {
+    setAnonLoading(true);
+    try {
+      const res = await irIncidents.generateAnonymousReportingToken();
+      setAnonLink(`${window.location.origin}/report/${res.token}`);
+      setAnonEnabled(true);
+    } catch { /* ignore */ }
+    setAnonLoading(false);
+  };
+
+  const handleRegenerateAnon = async () => {
+    if (!confirm('Regenerate link? The old link will stop working.')) return;
+    setAnonLoading(true);
+    try {
+      const res = await irIncidents.generateAnonymousReportingToken();
+      setAnonLink(`${window.location.origin}/report/${res.token}`);
+      setAnonEnabled(true);
+    } catch { /* ignore */ }
+    setAnonLoading(false);
+  };
+
+  const handleDisableAnon = async () => {
+    if (!confirm('Disable anonymous reporting? The current link will stop working.')) return;
+    setAnonLoading(true);
+    try {
+      await irIncidents.disableAnonymousReporting();
+      setAnonLink(null);
+      setAnonEnabled(false);
+    } catch { /* ignore */ }
+    setAnonLoading(false);
+  };
+
+  const handleCopyAnon = () => {
+    if (anonLink) {
+      navigator.clipboard.writeText(anonLink);
+      setAnonCopied(true);
+      setTimeout(() => setAnonCopied(false), 2000);
+    }
+  };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -205,6 +259,62 @@ export function IRList() {
         title="Incident Cycle"
         storageKey="ir-wizard-collapsed-v1"
       />
+
+      {/* Anonymous Reporting */}
+      <div className="border border-white/10 bg-zinc-950 p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Shield size={14} className="text-zinc-500" />
+            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Anonymous Reporting</span>
+          </div>
+          {!anonEnabled ? (
+            <button
+              onClick={handleEnableAnon}
+              disabled={anonLoading}
+              className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider bg-white text-black hover:bg-zinc-200 transition-colors disabled:opacity-50"
+            >
+              Enable
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRegenerateAnon}
+                disabled={anonLoading}
+                className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50"
+                title="Regenerate link"
+              >
+                <RefreshCw size={12} />
+              </button>
+              <button
+                onClick={handleDisableAnon}
+                disabled={anonLoading}
+                className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-900/20 transition-colors disabled:opacity-50"
+                title="Disable"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
+        </div>
+        {anonEnabled && anonLink && (
+          <div className="mt-3 flex items-center gap-2">
+            <code className="flex-1 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 font-mono truncate">
+              {anonLink}
+            </code>
+            <button
+              onClick={handleCopyAnon}
+              className="px-3 py-1.5 border border-zinc-800 text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-white hover:border-zinc-600 transition-colors"
+            >
+              {anonCopied ? 'Copied' : <Copy size={12} />}
+            </button>
+          </div>
+        )}
+        <p className="text-[10px] text-zinc-600 mt-2 font-mono">
+          {anonEnabled
+            ? 'Share this link with employees. Reporter identity is never stored.'
+            : 'Allow employees to report incidents anonymously via a shareable link.'}
+        </p>
+      </div>
 
       {/* Summary */}
       <div data-tour="ir-list-stats" className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10">

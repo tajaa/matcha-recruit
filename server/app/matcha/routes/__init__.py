@@ -28,6 +28,7 @@ from .internal_mobility import router as internal_mobility_router
 from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router
 from .billing import router as matcha_work_billing_router, admin_router as matcha_work_billing_admin_router
 from .risk_assessment import router as risk_assessment_router
+from .inbound_email import router as anonymous_report_router
 from ..dependencies import require_feature
 
 # Create main Matcha router
@@ -101,6 +102,8 @@ matcha_router.include_router(
     tags=["risk-assessment"],
     dependencies=[Depends(require_feature("risk_assessment"))],
 )
+# Public anonymous incident reporting — no auth, no feature gate (token-validated internally)
+matcha_router.include_router(anonymous_report_router, tags=["anonymous-reporting"])
 
 # Export individual routers for backwards compatibility
 __all__ = [

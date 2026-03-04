@@ -478,6 +478,62 @@ async def list_incidents(
         )
 
 
+# ===========================================
+# Anonymous Reporting Token Management
+# ===========================================
+
+@router.get("/anonymous-reporting/status")
+async def get_anonymous_reporting_status(
+    current_user=Depends(require_admin_or_client),
+):
+    """Get the company's anonymous reporting token (or null if disabled)."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    async with get_connection() as conn:
+        token = await conn.fetchval(
+            "SELECT report_email_token FROM companies WHERE id = $1",
+            company_id,
+        )
+    if not token:
+        return {"token": None, "enabled": False}
+    return {"token": token, "enabled": True}
+
+
+@router.post("/anonymous-reporting/generate")
+async def generate_anonymous_reporting_token(
+    current_user=Depends(require_admin_or_client),
+):
+    """Generate or regenerate the anonymous reporting token."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    token = secrets.token_hex(6)
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE companies SET report_email_token = $1 WHERE id = $2",
+            token,
+            company_id,
+        )
+    return {"token": token, "enabled": True}
+
+
+@router.delete("/anonymous-reporting/disable")
+async def disable_anonymous_reporting(
+    current_user=Depends(require_admin_or_client),
+):
+    """Disable anonymous reporting by clearing the token."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE companies SET report_email_token = NULL WHERE id = $1",
+            company_id,
+        )
+    return {"token": None, "enabled": False}
+
+
 @router.get("/{incident_id}", response_model=IRIncidentResponse)
 async def get_incident(
     incident_id: UUID,

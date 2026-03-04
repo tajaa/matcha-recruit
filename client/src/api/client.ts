@@ -1960,6 +1960,20 @@ export const irIncidents = {
   // Audit Log
   getAuditLog: (incidentId: string, limit: number = 50, offset: number = 0): Promise<IRAuditLogResponse> =>
     request<IRAuditLogResponse>(`/ir/incidents/${incidentId}/audit-log?limit=${limit}&offset=${offset}`),
+
+  // Anonymous Reporting
+  getAnonymousReportingStatus: (): Promise<{ token: string | null; enabled: boolean }> =>
+    request<{ token: string | null; enabled: boolean }>('/ir/incidents/anonymous-reporting/status'),
+
+  generateAnonymousReportingToken: (): Promise<{ token: string; enabled: boolean }> =>
+    request<{ token: string; enabled: boolean }>('/ir/incidents/anonymous-reporting/generate', {
+      method: 'POST',
+    }),
+
+  disableAnonymousReporting: (): Promise<{ token: null; enabled: false }> =>
+    request<{ token: null; enabled: false }>('/ir/incidents/anonymous-reporting/disable', {
+      method: 'DELETE',
+    }),
 };
 
 // Admin Handbook References API
