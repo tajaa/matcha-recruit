@@ -6,7 +6,6 @@ import { useAuth } from '../context/AuthContext';
 import type { OfferLetter } from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
-import { useIsLightMode } from '../hooks/useIsLightMode';
 import { useOfferLetters, useOfferForm, useOfferGuidance, useRangeNegotiation, OFFER_GUIDANCE_CITY_OPTIONS } from '../hooks/offer-letters';
 
 const LT = {
@@ -40,49 +39,7 @@ const LT = {
   checkboxCls: 'w-4 h-4 rounded border-stone-300 bg-white checked:bg-zinc-900 checked:border-zinc-900',
   reviewBlock: 'bg-stone-200/60 rounded-xl border border-stone-200 p-4 text-sm space-y-3',
   reviewDivide: 'border-b border-stone-200 pb-2',
-  confidenceBar: 'bg-stone-300',
-  guidanceResult: 'border border-stone-200 bg-stone-200/60 p-4',
-  flowStepNormal: 'border-stone-400 bg-stone-200/60 text-stone-600',
-  flowConnector: 'bg-stone-300',
   statusBadgeBg: 'bg-stone-200 border border-stone-200',
-} as const;
-
-const DK = {
-  pageBg: 'bg-zinc-950',
-  card: 'bg-zinc-900/50 rounded-2xl border border-white/10',
-  innerEl: 'bg-zinc-800/60 rounded-xl border border-white/10',
-  textMain: 'text-zinc-100',
-  textMuted: 'text-zinc-500',
-  textFaint: 'text-zinc-600',
-  textDim: 'text-zinc-400',
-  border: 'border-white/10',
-  divide: 'divide-white/10',
-  btnPrimary: 'bg-zinc-100 text-zinc-900 hover:bg-white',
-  btnSecondary: 'border border-white/10 text-zinc-500 hover:text-zinc-100 hover:border-white/20',
-  btnSecondaryActive: 'border-white/20 text-zinc-100 bg-zinc-800',
-  modalBg: 'bg-zinc-900 border border-white/10 shadow-2xl rounded-2xl',
-  modalHeader: 'border-b border-white/10',
-  modalFooter: 'border-t border-white/10',
-  inputCls: 'bg-zinc-800 border border-white/10 text-zinc-100 text-sm rounded-xl focus:outline-none focus:border-white/20 placeholder:text-zinc-600 transition-colors',
-  dropdownBg: 'bg-zinc-900 border border-white/10 shadow-xl',
-  dropdownItem: 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100',
-  rowHover: 'hover:bg-white/5',
-  emptyBorder: 'border border-dashed border-white/10 bg-zinc-900/30 rounded-2xl',
-  wizardActive: 'border-zinc-100 text-zinc-900 bg-zinc-100',
-  wizardInactive: 'border-zinc-700 text-zinc-600',
-  separator: 'bg-zinc-700',
-  closeBtnCls: 'text-zinc-500 hover:text-zinc-100 transition-colors',
-  cancelBtn: 'text-zinc-500 hover:text-zinc-100',
-  chevron: 'text-zinc-600 group-hover:text-zinc-400',
-  tableHeader: 'bg-zinc-800 text-zinc-500',
-  checkboxCls: 'w-4 h-4 rounded border-zinc-600 bg-zinc-800 checked:bg-white checked:border-white',
-  reviewBlock: 'bg-zinc-900 border border-zinc-800 rounded p-4 text-sm space-y-3',
-  reviewDivide: 'border-b border-zinc-800 pb-2',
-  confidenceBar: 'bg-zinc-800',
-  guidanceResult: 'border border-white/10 bg-zinc-900/50 p-4',
-  flowStepNormal: 'border-zinc-600 bg-zinc-900 text-zinc-400',
-  flowConnector: 'bg-zinc-800',
-  statusBadgeBg: 'bg-zinc-950 border border-white/5',
 } as const;
 
 const EMPLOYMENT_TYPES = [
@@ -151,23 +108,23 @@ const RANGE_FLOW_STEPS: RangeFlowStep[] = [
   { id: 5, label: 'Resolution',      sublabel: 'Accepted at midpoint — or re-negotiate' },
 ];
 
-function RangeNegotiationFlowchart({ t }: { t: typeof LT }) {
+function RangeNegotiationFlowchart() {
   const [collapsed, setCollapsed] = useState(true);
   return (
-    <div className={`${t.card} mb-6`}>
+    <div className="bg-zinc-900 rounded-2xl mb-6">
       <button
         onClick={() => setCollapsed(c => !c)}
-        className={`w-full flex items-center justify-between px-5 py-3 text-left ${t.rowHover} transition-colors`}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.03] transition-colors rounded-2xl"
       >
         <div className="flex items-center gap-3">
-          <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${t.textMuted}`}>Blind Range Negotiation</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Blind Range Negotiation</span>
           <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-amber-400/10 border border-amber-400/20 text-amber-400">How It Works</span>
         </div>
-        <ChevronDown size={14} className={`${t.textFaint} transition-transform duration-200 shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
+        <ChevronDown size={14} className={`text-zinc-600 transition-transform duration-200 shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
       </button>
 
       {!collapsed && (
-        <div className={`border-t ${t.border} px-5 pt-5 pb-5`}>
+        <div className="border-t border-zinc-800 px-5 pt-5 pb-5">
           {/* Flow steps */}
           <div className="relative overflow-x-auto no-scrollbar">
             <div className="flex items-start gap-0 min-w-max mb-5">
@@ -175,13 +132,13 @@ function RangeNegotiationFlowchart({ t }: { t: typeof LT }) {
                 <div key={step.id} className="flex items-start">
                   <div className="flex flex-col items-center w-32">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-bold ${
-                      step.branch ? 'border-amber-400/50 bg-amber-400/10 text-amber-400' : t.flowStepNormal
+                      step.branch ? 'border-amber-400/50 bg-amber-400/10 text-amber-400' : 'border-zinc-600 bg-zinc-800 text-zinc-400'
                     }`}>{step.id}</div>
-                    <div className={`mt-2 text-center text-[10px] font-bold uppercase tracking-wider ${t.textDim} leading-tight px-1`}>{step.label}</div>
-                    <div className={`mt-1 text-center text-[9px] ${t.textFaint} leading-tight px-1`}>{step.sublabel}</div>
+                    <div className="mt-2 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-300 leading-tight px-1">{step.label}</div>
+                    <div className="mt-1 text-center text-[9px] text-zinc-500 leading-tight px-1">{step.sublabel}</div>
                   </div>
                   {idx < RANGE_FLOW_STEPS.length - 1 && (
-                    <div className={`w-8 h-0.5 mt-4 flex-shrink-0 ${t.flowConnector}`} />
+                    <div className="w-8 h-0.5 mt-4 flex-shrink-0 bg-zinc-700" />
                   )}
                 </div>
               ))}
@@ -189,16 +146,16 @@ function RangeNegotiationFlowchart({ t }: { t: typeof LT }) {
           </div>
           {/* Branch explanation */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
-            <div className="bg-matcha-400/5 border border-matcha-400/20 p-3 rounded-xl">
+            <div className="bg-matcha-500/10 border border-matcha-500/20 p-3 rounded-xl">
               <div className="font-bold uppercase tracking-wider text-matcha-400 mb-1">✓ Overlap Found</div>
-              <div className={t.textDim}>Offer accepted automatically at the midpoint of the overlapping range. Both parties are notified.</div>
+              <div className="text-zinc-400">Offer accepted automatically at the midpoint of the overlapping range. Both parties are notified.</div>
             </div>
-            <div className="bg-amber-400/5 border border-amber-400/20 p-3 rounded-xl">
+            <div className="bg-amber-400/10 border border-amber-400/20 p-3 rounded-xl">
               <div className="font-bold uppercase tracking-wider text-amber-400 mb-1">↻ No Overlap</div>
-              <div className={t.textDim}>Direction is shared (too low / too high) but exact numbers stay private. Employer can revise and re-send up to the round limit.</div>
+              <div className="text-zinc-400">Direction is shared (too low / too high) but exact numbers stay private. Employer can revise and re-send up to the round limit.</div>
             </div>
           </div>
-          <p className={`mt-3 text-[9px] ${t.textFaint} leading-relaxed`}>
+          <p className="mt-3 text-[9px] text-zinc-500 leading-relaxed">
             Neither party sees the other's exact numbers until after a match. The system only reveals the direction of a miss, preserving negotiating privacy on both sides.
           </p>
         </div>
@@ -210,8 +167,7 @@ function RangeNegotiationFlowchart({ t }: { t: typeof LT }) {
 
 export function OfferLetters() {
   const { hasFeature } = useAuth();
-  const isLight = useIsLightMode();
-  const t = isLight ? LT : DK;
+  const t = LT;
   const offerLettersPlusEnabled = hasFeature('offer_letters_plus');
   const [salaryType, setSalaryType] = useState<'fixed' | 'range'>('fixed');
 
@@ -295,32 +251,20 @@ export function OfferLetters() {
     return `${base} This offer is also contingent upon the successful completion of the following: ${list}.`;
   };
 
-  const statusColors: Record<string, string> = isLight ? {
+  const statusColors: Record<string, string> = {
     draft: 'text-stone-500',
     sent: 'text-blue-700',
     accepted: 'text-matcha-700',
     rejected: 'text-red-700',
     expired: 'text-stone-400',
-  } : {
-    draft: 'text-zinc-500',
-    sent: 'text-blue-400',
-    accepted: 'text-matcha-400',
-    rejected: 'text-red-400',
-    expired: 'text-zinc-600',
   };
 
-  const statusDotColors: Record<string, string> = isLight ? {
+  const statusDotColors: Record<string, string> = {
     draft: 'bg-stone-400',
     sent: 'bg-blue-500',
     accepted: 'bg-matcha-500',
     rejected: 'bg-red-500',
     expired: 'bg-stone-300',
-  } : {
-    draft: 'bg-zinc-600',
-    sent: 'bg-blue-500',
-    accepted: 'bg-matcha-500',
-    rejected: 'bg-red-500',
-    expired: 'bg-zinc-700',
   };
 
   // Wizard Steps Components
@@ -805,18 +749,18 @@ export function OfferLetters() {
         storageKey="offer-wizard-collapsed-v1"
         title="Offer Lifecycle"
       />
-      <RangeNegotiationFlowchart t={t} />
+      <RangeNegotiationFlowchart />
 
       {offerLettersPlusEnabled && (
-        <section className={`mb-8 ${t.card}`}>
-          <div className={`border-b ${t.border} px-4 py-3 sm:px-5`}>
+        <section className="mb-8 bg-zinc-900 rounded-2xl">
+          <div className="border-b border-zinc-800 px-4 py-3 sm:px-5">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className={`text-xs font-bold ${t.textMain} uppercase tracking-widest`}>Offer Guidance Plus</h2>
-              <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-matcha-500/10 text-matcha-500 border border-matcha-500/20">
+              <h2 className="text-xs font-bold text-zinc-50 uppercase tracking-widest">Offer Guidance Plus</h2>
+              <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-matcha-500/10 text-matcha-400 border border-matcha-500/20">
                 Plus Feature
               </span>
             </div>
-            <p className={`mt-1 text-[11px] ${t.textMuted}`}>
+            <p className="mt-1 text-[11px] text-zinc-500">
               Generate compensation guidance by role, city, and experience before drafting the offer.
             </p>
           </div>
@@ -824,21 +768,21 @@ export function OfferLetters() {
           <form className="px-4 py-4 sm:px-5 sm:py-5" onSubmit={handleGenerateGuidance}>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
               <div className="lg:col-span-2">
-                <label className="block text-[10px] tracking-wider uppercase ${t.textMuted} mb-1.5">Role Title</label>
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Role Title</label>
                 <input
                   type="text"
                   value={guidanceHook.guidanceRoleTitle}
                   onChange={(e) => guidanceHook.setGuidanceRoleTitle(e.target.value)}
                   placeholder="e.g. Senior Product Manager"
-                  className={`w-full px-3 py-2 ${t.inputCls}`}
+                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm rounded-xl focus:outline-none focus:border-zinc-600 placeholder:text-zinc-600 transition-colors"
                 />
               </div>
               <div>
-                <label className="block text-[10px] tracking-wider uppercase ${t.textMuted} mb-1.5">City</label>
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">City</label>
                 <select
                   value={guidanceHook.guidanceCity}
                   onChange={(e) => handleGuidanceCityChange(e.target.value)}
-                  className={`w-full px-3 py-2 ${t.inputCls}`}
+                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm rounded-xl focus:outline-none focus:border-zinc-600 transition-colors"
                 >
                   {OFFER_GUIDANCE_CITY_OPTIONS.map((city) => (
                     <option key={city} value={city}>{city}</option>
@@ -846,35 +790,35 @@ export function OfferLetters() {
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] tracking-wider uppercase ${t.textMuted} mb-1.5">State</label>
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">State</label>
                 <input
                   type="text"
                   value={guidanceHook.guidanceState}
                   onChange={(e) => guidanceHook.setGuidanceState(e.target.value)}
                   maxLength={3}
-                  className={`w-full px-3 py-2 ${t.inputCls}`}
+                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm rounded-xl focus:outline-none focus:border-zinc-600 transition-colors"
                 />
               </div>
               <div>
-                <label className="block text-[10px] tracking-wider uppercase ${t.textMuted} mb-1.5">Experience (Years)</label>
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Experience (Years)</label>
                 <input
                   type="number"
                   min={0}
                   max={40}
                   value={guidanceHook.guidanceYearsExperience}
                   onChange={(e) => guidanceHook.setGuidanceYearsExperience(Math.max(0, Math.min(40, Number(e.target.value) || 0)))}
-                  className={`w-full px-3 py-2 ${t.inputCls}`}
+                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm rounded-xl focus:outline-none focus:border-zinc-600 transition-colors"
                 />
               </div>
             </div>
 
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="w-full sm:w-64">
-                <label className="block text-[10px] tracking-wider uppercase ${t.textMuted} mb-1.5">Employment Type</label>
+                <label className="block text-[10px] tracking-wider uppercase text-zinc-500 mb-1.5">Employment Type</label>
                 <select
                   value={guidanceHook.guidanceEmploymentType}
                   onChange={(e) => guidanceHook.setGuidanceEmploymentType(e.target.value)}
-                  className={`w-full px-3 py-2 ${t.inputCls}`}
+                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm rounded-xl focus:outline-none focus:border-zinc-600 transition-colors"
                 >
                   {EMPLOYMENT_TYPES.map((type) => (
                     <option key={type} value={type}>{type}</option>
@@ -884,60 +828,60 @@ export function OfferLetters() {
               <button
                 type="submit"
                 disabled={guidanceHook.guidanceLoading}
-                className={`inline-flex items-center justify-center px-5 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider disabled:opacity-60 disabled:cursor-not-allowed transition-colors rounded-xl`}
+                className="inline-flex items-center justify-center px-5 py-2 bg-zinc-50 text-zinc-900 hover:bg-white text-xs font-bold uppercase tracking-wider disabled:opacity-60 disabled:cursor-not-allowed transition-colors rounded-xl"
               >
                 {guidanceHook.guidanceLoading ? 'Generating...' : 'Generate Guidance'}
               </button>
             </div>
 
             {guidanceHook.guidanceError && (
-              <p className="mt-3 text-xs text-red-500">{guidanceHook.guidanceError}</p>
+              <p className="mt-3 text-xs text-red-400">{guidanceHook.guidanceError}</p>
             )}
 
             {guidanceHook.guidanceResult && (
-              <div className={`mt-5 ${t.guidanceResult} rounded-xl`}>
+              <div className="mt-5 bg-zinc-800 border border-zinc-700 p-4 rounded-xl">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                   <div>
-                    <p className={`text-[10px] uppercase tracking-wider ${t.textMuted}`}>Base Salary Range</p>
-                    <p className={`mt-1 text-sm font-bold ${t.textMain}`}>
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-500">Base Salary Range</p>
+                    <p className="mt-1 text-sm font-bold text-zinc-50">
                       {formatUsd(guidanceHook.guidanceResult.salary_low)} - {formatUsd(guidanceHook.guidanceResult.salary_high)}
                     </p>
-                    <p className={`text-[11px] ${t.textMuted}`}>Midpoint: {formatUsd(guidanceHook.guidanceResult.salary_mid)}</p>
+                    <p className="text-[11px] text-zinc-500">Midpoint: {formatUsd(guidanceHook.guidanceResult.salary_mid)}</p>
                   </div>
                   <div>
-                    <p className={`text-[10px] uppercase tracking-wider ${t.textMuted}`}>Bonus Target</p>
-                    <p className={`mt-1 text-sm font-bold ${t.textMain}`}>
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-500">Bonus Target</p>
+                    <p className="mt-1 text-sm font-bold text-zinc-50">
                       {guidanceHook.guidanceResult.bonus_target_pct_low}% - {guidanceHook.guidanceResult.bonus_target_pct_high}%
                     </p>
                   </div>
                   <div>
-                    <p className={`text-[10px] uppercase tracking-wider ${t.textMuted}`}>Role Family</p>
-                    <p className={`mt-1 text-sm font-bold ${t.textMain} capitalize`}>
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-500">Role Family</p>
+                    <p className="mt-1 text-sm font-bold text-zinc-50 capitalize">
                       {guidanceHook.guidanceResult.role_family.replace(/_/g, ' ')}
                     </p>
-                    <p className={`text-[11px] ${t.textMuted}`}>
+                    <p className="text-[11px] text-zinc-500">
                       {guidanceHook.guidanceResult.normalized_city}
                       {guidanceHook.guidanceResult.normalized_state ? `, ${guidanceHook.guidanceResult.normalized_state}` : ''}
                     </p>
                   </div>
                   <div>
-                    <p className={`text-[10px] uppercase tracking-wider ${t.textMuted}`}>Confidence</p>
-                    <p className={`mt-1 text-sm font-bold ${t.textMain}`}>{Math.round(guidanceHook.guidanceResult.confidence * 100)}%</p>
-                    <div className={`mt-2 h-1.5 w-full ${t.confidenceBar} rounded-full`}>
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-500">Confidence</p>
+                    <p className="mt-1 text-sm font-bold text-zinc-50">{Math.round(guidanceHook.guidanceResult.confidence * 100)}%</p>
+                    <div className="mt-2 h-1.5 w-full bg-zinc-700 rounded-full">
                       <div
-                        className="h-full bg-matcha-500 transition-all"
+                        className="h-full bg-matcha-500 transition-all rounded-full"
                         style={{ width: `${Math.round(guidanceHook.guidanceResult.confidence * 100)}%` }}
                       />
                     </div>
                   </div>
                 </div>
                 <div className="mt-4">
-                  <p className={`text-[10px] uppercase tracking-wider ${t.textMuted}`}>Equity Guidance</p>
-                  <p className={`mt-1 text-xs ${t.textDim}`}>{guidanceHook.guidanceResult.equity_guidance}</p>
+                  <p className="text-[10px] uppercase tracking-wider text-zinc-500">Equity Guidance</p>
+                  <p className="mt-1 text-xs text-zinc-300">{guidanceHook.guidanceResult.equity_guidance}</p>
                 </div>
                 <div className="mt-4">
-                  <p className={`text-[10px] uppercase tracking-wider ${t.textMuted} mb-2`}>Rationale</p>
-                  <ul className={`space-y-1.5 text-xs ${t.textDim}`}>
+                  <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Rationale</p>
+                  <ul className="space-y-1.5 text-xs text-zinc-400">
                     {guidanceHook.guidanceResult.rationale.map((line) => (
                       <li key={line}>• {line}</li>
                     ))}
