@@ -159,7 +159,7 @@ function DimensionCard({ dimensionKey, dim }: { dimensionKey: string; dim: Dimen
   const complianceMetrics = dimensionKey === 'compliance' ? getComplianceAlertMetrics(dim) : null;
 
   return (
-    <div className="bg-zinc-900 border border-white/10 p-6 flex flex-col gap-5">
+    <div className="bg-zinc-900 border border-white/10 p-6 flex flex-col gap-5 rounded-2xl">
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div>
@@ -188,10 +188,10 @@ function DimensionCard({ dimensionKey, dim }: { dimensionKey: string; dim: Dimen
       </div>
 
       {complianceMetrics && (
-        <div className="border border-white/10 bg-black/20 p-3 flex flex-col gap-3">
+        <div className="border border-white/10 bg-black/20 p-3 flex flex-col gap-3 rounded-xl">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Employee Compliance Alerts</div>
 
-          <div className="grid grid-cols-2 gap-px bg-white/10">
+          <div className="grid grid-cols-2 gap-px bg-white/10 rounded-lg overflow-hidden">
             {[
               { label: 'Below Min Wage', value: complianceMetrics.total, tone: complianceMetrics.total > 0 ? 'text-red-400' : 'text-zinc-300' },
               { label: 'Hourly', value: complianceMetrics.hourly, tone: complianceMetrics.hourly > 0 ? 'text-red-400' : 'text-zinc-300' },
@@ -271,10 +271,10 @@ function ActionItems({ data }: { data: RiskAssessmentResult }) {
 
   return (
     <div>
-      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Action Items</div>
-      <div className="border border-white/10 divide-y divide-white/10">
+      <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold mb-4">Action Items</div>
+      <div className="bg-zinc-900 border border-white/10 rounded-2xl divide-y divide-white/10 overflow-hidden">
         {violations.length > 0 && (
-          <div className="bg-zinc-900 p-5">
+          <div className="p-5">
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Wage Compliance</div>
             <div className="flex flex-col gap-2">
               {violations.map((v, i) => {
@@ -306,7 +306,7 @@ function ActionItems({ data }: { data: RiskAssessmentResult }) {
           </div>
         )}
         {cases.length > 0 && (
-          <div className="bg-zinc-900 p-5">
+          <div className="p-5">
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Open ER Cases</div>
             <div className="flex flex-col gap-2">
               {cases.map((c) => {
@@ -394,24 +394,25 @@ export default function RiskAssessment() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Computing risk assessment…</div>
+        <div className="text-xs text-stone-500 uppercase tracking-wider animate-pulse">Computing risk assessment…</div>
       </div>
     );
   }
 
   return (
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-6 sm:px-8 lg:px-10 py-10 min-h-screen bg-stone-300">
     <div className="max-w-5xl mx-auto space-y-12">
 
       {/* Header */}
-      <div className="flex justify-between items-start border-b border-white/10 pb-8">
+      <div className="flex justify-between items-start border-b border-stone-200 pb-8">
         <div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Risk Assessment</h1>
-          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Live exposure analysis across all platform data</p>
+          <h1 className="text-4xl font-bold tracking-tighter text-zinc-900 uppercase">Risk Assessment</h1>
+          <p className="text-xs text-stone-500 mt-2 font-mono tracking-wide uppercase">Live exposure analysis across all platform data</p>
         </div>
         <button
           onClick={() => fetchData(true)}
           disabled={refreshing}
-          className="flex items-center gap-2 px-4 py-2 text-xs text-zinc-500 hover:text-white uppercase tracking-wider transition-colors border border-white/10 disabled:opacity-40"
+          className="flex items-center gap-2 px-4 py-2 text-xs text-stone-500 hover:text-zinc-900 uppercase tracking-wider transition-colors border border-stone-300 bg-stone-200 rounded-xl disabled:opacity-40"
         >
           <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
           Refresh
@@ -419,24 +420,24 @@ export default function RiskAssessment() {
       </div>
 
       {error && (
-        <div className="border border-red-500/20 bg-red-500/5 px-4 py-3 text-xs text-red-400 uppercase tracking-wider">
+        <div className="border border-red-300 bg-red-50 px-4 py-3 text-xs text-red-700 uppercase tracking-wider rounded-xl">
           {error}
         </div>
       )}
 
       {!error && data && isEmptyResult(data) && (
-        <div className="border border-white/10 p-12 text-center">
-          <div className="text-xs text-zinc-500 uppercase tracking-wider">No risk data yet</div>
-          <div className="text-[10px] text-zinc-600 mt-2 font-mono">Add locations, employees, or run a compliance check to see your risk profile.</div>
+        <div className="bg-stone-200 rounded-2xl p-12 text-center">
+          <div className="text-xs text-stone-500 uppercase tracking-wider">No risk data yet</div>
+          <div className="text-[10px] text-stone-400 mt-2 font-mono">Add locations, employees, or run a compliance check to see your risk profile.</div>
         </div>
       )}
 
       {!error && data && !isEmptyResult(data) && (
         <>
           {/* Overall score */}
-          <div className="grid grid-cols-5 gap-px bg-white/10 border border-white/10">
+          <div className="grid grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
             {/* Big number */}
-            <div className="col-span-2 bg-zinc-950 p-8 flex flex-col justify-between group">
+            <div className="col-span-2 bg-zinc-900 p-8 flex flex-col justify-between group">
               <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-1.5">
                 Overall Risk Score
                 <HelpTooltip text={DIMENSION_HELP.overall} />
@@ -461,7 +462,7 @@ export default function RiskAssessment() {
               const meta = DIMENSION_META[key];
               const c = BAND_COLOR[dim.band];
               return (
-                <div key={key} className="bg-zinc-950 p-6 flex flex-col justify-between group">
+                <div key={key} className="bg-zinc-900 p-6 flex flex-col justify-between group">
                   <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
                     {meta.label}
                     <HelpTooltip text={DIMENSION_HELP[key]} />
@@ -477,14 +478,14 @@ export default function RiskAssessment() {
           </div>
 
           {/* Timestamp */}
-          <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-wider -mt-8">
+          <div className="text-[10px] text-stone-400 font-mono uppercase tracking-wider -mt-8">
             Computed {new Date(data.computed_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
           </div>
 
           {/* Dimension detail cards */}
           <div>
-            <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Dimension Breakdown</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-px bg-white/10 border border-white/10">
+            <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold mb-4">Dimension Breakdown</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {DIMENSION_ORDER.map(key => (
                 <DimensionCard key={key} dimensionKey={key} dim={data.dimensions[key]} />
               ))}
@@ -497,16 +498,16 @@ export default function RiskAssessment() {
           {/* ER Case Metrics */}
           <div>
             <div className="flex items-center justify-between mb-4">
-              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">ER Case Metrics</div>
-              <div className="flex gap-0 border border-white/10">
+              <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">ER Case Metrics</div>
+              <div className="flex gap-0 border border-stone-300 rounded-lg overflow-hidden">
                 {([30, 60, 90] as const).map(d => (
                   <button
                     key={d}
                     onClick={() => setMetricsDays(d)}
                     className={`px-3 py-1.5 text-[10px] uppercase tracking-widest font-mono transition-colors ${
                       metricsDays === d
-                        ? 'bg-white/10 text-white'
-                        : 'text-zinc-500 hover:text-zinc-300'
+                        ? 'bg-zinc-900 text-zinc-50'
+                        : 'bg-stone-200 text-stone-500 hover:text-zinc-900'
                     }`}
                   >
                     {d}d
@@ -516,22 +517,22 @@ export default function RiskAssessment() {
             </div>
 
             {metricsLoading && (
-              <div className="border border-white/10 p-8 text-center">
-                <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading metrics…</div>
+              <div className="bg-stone-200 rounded-2xl p-8 text-center">
+                <div className="text-xs text-stone-500 uppercase tracking-wider animate-pulse">Loading metrics…</div>
               </div>
             )}
 
             {!metricsLoading && metrics && (
               <div className="space-y-4">
                 {/* Stat cards */}
-                <div className="grid grid-cols-4 gap-px bg-white/10 border border-white/10">
+                <div className="grid grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
                   {[
                     { label: 'Total Cases', value: metrics.total_cases },
                     { label: 'Open', value: metrics.by_status['open'] || 0 },
                     { label: 'In Review', value: metrics.by_status['in_review'] || 0 },
                     { label: 'Closed', value: metrics.by_status['closed'] || 0 },
                   ].map(s => (
-                    <div key={s.label} className="bg-zinc-950 p-5 flex flex-col">
+                    <div key={s.label} className="bg-zinc-900 p-5 flex flex-col">
                       <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{s.label}</div>
                       <div className="text-3xl font-light font-mono text-zinc-200 mt-2">{s.value}</div>
                     </div>
@@ -539,9 +540,9 @@ export default function RiskAssessment() {
                 </div>
 
                 {/* Charts row */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-white/10 border border-white/10">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Category breakdown */}
-                  <div className="bg-zinc-950 p-5">
+                  <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5">
                     <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-4">By Category</div>
                     {Object.keys(metrics.by_category).length === 0 ? (
                       <div className="text-[10px] text-zinc-600 font-mono">No categorized cases yet</div>
@@ -569,7 +570,7 @@ export default function RiskAssessment() {
                   </div>
 
                   {/* Outcome breakdown */}
-                  <div className="bg-zinc-950 p-5">
+                  <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5">
                     <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-4">By Outcome</div>
                     {Object.keys(metrics.by_outcome).length === 0 ? (
                       <div className="text-[10px] text-zinc-600 font-mono">No outcomes recorded yet</div>
@@ -600,8 +601,8 @@ export default function RiskAssessment() {
             )}
 
             {!metricsLoading && metrics && metrics.total_cases === 0 && (
-              <div className="border border-white/10 p-8 text-center">
-                <div className="text-xs text-zinc-500 uppercase tracking-wider">No cases in the last {metricsDays} days</div>
+              <div className="bg-stone-200 rounded-2xl p-8 text-center">
+                <div className="text-xs text-stone-500 uppercase tracking-wider">No cases in the last {metricsDays} days</div>
               </div>
             )}
           </div>
@@ -610,12 +611,12 @@ export default function RiskAssessment() {
           {user?.role === 'admin' && (
             <div>
               <div className="flex items-center justify-between mb-4">
-                <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Consultation Analysis</div>
+                <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">Consultation Analysis</div>
                 {!data.recommendations && (
                   <button
                     onClick={runConsultation}
                     disabled={analyzing}
-                    className="flex items-center gap-2 px-4 py-2 text-xs text-zinc-300 hover:text-white uppercase tracking-wider transition-colors border border-white/20 hover:border-white/40 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex items-center gap-2 px-4 py-2 text-xs uppercase tracking-wider transition-colors bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Sparkles size={12} className={analyzing ? 'animate-pulse' : ''} />
                     {analyzing ? 'Analyzing…' : 'Run Consultation'}
@@ -624,28 +625,28 @@ export default function RiskAssessment() {
               </div>
 
               {analyzing && (
-                <div className="border border-white/10 p-8 text-center">
-                  <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Generating HR consulting recommendations…</div>
+                <div className="bg-stone-200 rounded-2xl p-8 text-center">
+                  <div className="text-xs text-stone-500 uppercase tracking-wider animate-pulse">Generating HR consulting recommendations…</div>
                 </div>
               )}
 
               {!analyzing && !data.recommendations && (
-                <div className="border border-white/10 p-8 text-center">
-                  <div className="text-xs text-zinc-500 uppercase tracking-wider">No analysis yet</div>
-                  <div className="text-[10px] text-zinc-600 mt-2 font-mono">Run a consultation to get AI-powered HR guidance based on your risk profile.</div>
+                <div className="bg-stone-200 rounded-2xl p-8 text-center">
+                  <div className="text-xs text-stone-500 uppercase tracking-wider">No analysis yet</div>
+                  <div className="text-[10px] text-stone-400 mt-2 font-mono">Run a consultation to get AI-powered HR guidance based on your risk profile.</div>
                 </div>
               )}
 
               {!analyzing && data.report && (
-                <div className="bg-zinc-950 border border-white/10 p-6 mb-4">
+                <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 mb-4">
                   <div className="text-sm text-zinc-300 leading-relaxed whitespace-pre-line">{data.report}</div>
                 </div>
               )}
 
               {!analyzing && data.recommendations && data.recommendations.length > 0 && (
-                <div className="border border-white/10 divide-y divide-white/10">
+                <div className="bg-zinc-900 border border-white/10 rounded-2xl divide-y divide-white/10 overflow-hidden">
                   {data.recommendations.map((rec, i) => (
-                    <div key={i} className="bg-zinc-950 px-6 py-5 flex items-start gap-4">
+                    <div key={i} className="px-6 py-5 flex items-start gap-4">
                       <span className={`shrink-0 inline-flex items-center px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${PRIORITY_COLOR[rec.priority]?.badge ?? ''}`}>
                         {rec.priority}
                       </span>
@@ -664,11 +665,11 @@ export default function RiskAssessment() {
           )}
 
           {/* Score bands legend */}
-          <div className="border border-white/10 p-6">
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6">
             <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Score Bands</div>
-            <div className="grid grid-cols-4 gap-px bg-white/10">
+            <div className="grid grid-cols-4 gap-px bg-white/10 rounded-lg overflow-hidden">
               {(['low', 'moderate', 'high', 'critical'] as Band[]).map(band => (
-                <div key={band} className="bg-zinc-950 px-4 py-3">
+                <div key={band} className="bg-zinc-800 px-4 py-3">
                   <div className={`text-[10px] font-bold uppercase tracking-widest ${BAND_COLOR[band].text}`}>{BAND_LABEL[band]}</div>
                   <div className="text-[9px] text-zinc-600 mt-1 font-mono">
                     {band === 'low' ? '0 – 25' : band === 'moderate' ? '26 – 50' : band === 'high' ? '51 – 75' : '76 – 100'}
@@ -679,6 +680,7 @@ export default function RiskAssessment() {
           </div>
         </>
       )}
+    </div>
     </div>
   );
 }
